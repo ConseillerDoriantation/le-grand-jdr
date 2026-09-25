@@ -23,12 +23,21 @@ export function resolveCharacterControlToken(charId, entries, uid, characters = 
   const delegatedByCharacter = Array.isArray(character?.controlDelegates)
     && character.controlDelegates.includes(uid);
   return Object.values(entries || {})
-    .map(entry => entry?.data)
+    .map(entry => entry?.data || entry)
     .find(token => token?.characterId === charId
       && (token.ownerId === uid
         || delegatedByCharacter
         || (Array.isArray(token.controlDelegates) && token.controlDelegates.includes(uid))))
     || null;
+}
+
+/** Propriété ou délégation d'un personnage pour un UID donné, sans dépendre du
+ * rôle du spectateur courant (utile au MJ qui consulte le roster d'un joueur). */
+export function isCharacterGrantedToUid(character, entries, uid, characters = null) {
+  if (!character || !uid) return false;
+  return character.uid === uid
+    || (Array.isArray(character.controlDelegates) && character.controlDelegates.includes(uid))
+    || !!resolveCharacterControlToken(character.id, entries, uid, characters);
 }
 
 /** Tokens de personnages contrôlés, sans inclure PNJ, ennemis ou invocations. */

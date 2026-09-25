@@ -28,7 +28,7 @@ import { bumpSkill } from '../../shared/stats.js';
 import { _chrRef, _logCol } from './vtt-refs.js'; // refs Firestore perso + log VTT (leaf)
 import { _STAT_COLOR, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js'; // constantes pures (leaf)
 import { _vttPanelError } from './vtt-utils.js'; // frontière d'erreur (leaf)
-import { resolveCharacterControlToken } from './vtt-token-control.js';
+import { isCharacterGrantedToUid, resolveCharacterControlToken } from './vtt-token-control.js';
 import { _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes,
          } from './vtt-spell-display.js'; // formules de sorts (leaf — mini-fiche découplée de vtt.js)
@@ -38,7 +38,6 @@ import {
   equipmentSlotAcceptsItem, getEquipmentSlot, getEquipmentSlots,
   getPrimaryWeaponSlotId,
 } from '../../shared/equipment-slots.js';
-import { canControlCharacter, getControlledCharacters } from '../../shared/character-state.js';
 import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell } from '../../shared/spell-deck.js';
 import { lsJson } from '../../shared/local-storage.js';
 
@@ -46,6 +45,7 @@ let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)
 let _msSac   = 'obj';    // sous-onglet du Sac : 'obj' | 'craft' | 'bourse'
 let _msAttackSlot = null; // arme affichée dans Combat (principale / secondaire)
 let _miniCollapsed = false; // rail compact de la mini-fiche
+let _miniRosterUid = null; // joueur dont on affiche personnages possédés + délégués
 
 // ── Constantes & état local ─────────────────────────────────────────
 const _MS_STATS   = [
@@ -156,20 +156,27 @@ function _msBuildEquipItem(slot, item, invIndex) {
     slotArmure: item.slotArmure||'', slotBijou: item.slotBijou||'' };
 }
 
+function _msCharacterGrantedToUid(character, uid) {
+  return isCharacterGrantedToUid(character, VS.tokens, uid, VS.characters);
+}
+
+function _msControlsCharacter(character, uid = STATE.user?.uid) {
+  return !!STATE.isAdmin || _msCharacterGrantedToUid(character, uid);
+}
+
 function _msCanEdit(uid, charId = VS.miniCharId) {
   if (STATE.isAdmin) return true;
   const character = charId ? VS.characters[charId] : null;
-  if (character) return canControlCharacter(character, STATE.user?.uid);
+  if (character) return _msControlsCharacter(character);
   return !!uid && STATE.user?.uid === uid;
 }
 
 function _msAvailableCharacters(uid) {
   const all = Object.values(VS.characters || {});
-  // Le MJ conserve le contexte du joueur ouvert. Pour un joueur, la source de
-  // vérité est le contrôle canonique : personnages possédés + tous les délégués.
-  const available = STATE.isAdmin
-    ? all.filter(character => character.uid === uid)
-    : getControlledCharacters(all, STATE.user?.uid, { sorted: false });
+  // Le menu représente le roster du joueur ouvert, pas les droits globaux du
+  // spectateur MJ. Il réunit propriété, délégation canonique et anciens tokens.
+  const controllerUid = STATE.isAdmin ? uid : (STATE.user?.uid || uid);
+  const available = all.filter(character => _msCharacterGrantedToUid(character, controllerUid));
   return favoriteFirst(available);
 }
 
@@ -447,7 +454,7 @@ function _msPopHtml(c, uid) {
   const p = _msPop; if (!p) return '';
   let h = '';
   if (p.v === 'char') {
-    const chars = _msAvailableCharacters(uid);
+    const chars = _msAvailableCharacters(_miniRosterUid || uid);
     h = `<div class="vtt-ms-pop-lbl">${STATE.isAdmin ? 'Personnages' : 'Personnages contrôlés'}</div>`
       + chars.map(x => {
           const photo = x?.photoURL || x?.photo || x?.avatar || '';
@@ -484,20 +491,20 @@ function _msPopHtml(c, uid) {
         : `<div class="vtt-ms-pop-empty">${xp} / ${palier} XP</div>`);
   } else if (p.v === 'gold') {
     const solde = calcOr(c);
-    const targets = _msPresentTargets(uid);
+    const targets = _msPresentTargets(c.id);
     h = `<div class="vtt-ms-pop-lbl">Donner de l'or</div>`
       + (targets.length
         ? `<div class="vtt-ms-pop-form"><label>Montant (solde ${solde})<input class="vtt-ms-pop-inp" id="vtt-ms-gold-amt" type="number" min="1" max="${solde}" value="${Math.min(10, solde) || 1}"></label></div>`
-          + targets.map(t => `<button class="vtt-ms-pop-it" data-vtt-fn="_vttMsConfirmSendGold" data-vtt-args="${c.id}|${uid}|${t.charId}"><span class="vtt-ms-pop-av">${_esc((t.charNom || '?')[0].toUpperCase())}</span><span>${_esc(t.charNom)}</span><em>${_esc(t.pseudo)}</em></button>`).join('')
-        : '<div class="vtt-ms-pop-empty">Aucun joueur présent.</div>');
+          + targets.map(t => `<button class="vtt-ms-pop-it" data-vtt-fn="_vttMsConfirmSendGold" data-vtt-args="${_esc(c.id)}|${_esc(uid)}|${_esc(t.charId)}">${_msTargetAvatar(t)}<span>${_esc(t.charNom)}</span><em>${_esc(t.pseudo)}</em></button>`).join('')
+        : '<div class="vtt-ms-pop-empty">Aucun autre personnage sur la scène.</div>');
   } else if (p.v === 'send') {
     const inv = c?.inventaire || [];
     const item = inv[parseInt(p.arg)];
-    const targets = _msPresentTargets(uid);
+    const targets = _msPresentTargets(c.id);
     h = `<div class="vtt-ms-pop-lbl">Donner ${_esc(item?.nom || 'l\'objet')}</div>`
       + (targets.length
-        ? targets.map(t => `<button class="vtt-ms-pop-it" data-vtt-fn="_vttMsConfirmSend" data-vtt-args="${c.id}|${uid}|${p.arg}|${t.charId}"><span class="vtt-ms-pop-av">${_esc((t.charNom || '?')[0].toUpperCase())}</span><span>${_esc(t.charNom)}</span><em>${_esc(t.pseudo)}</em></button>`).join('')
-        : '<div class="vtt-ms-pop-empty">Aucun joueur présent.</div>');
+        ? targets.map(t => `<button class="vtt-ms-pop-it" data-vtt-fn="_vttMsConfirmSend" data-vtt-args="${_esc(c.id)}|${_esc(uid)}|${_esc(p.arg)}|${_esc(t.charId)}">${_msTargetAvatar(t)}<span>${_esc(t.charNom)}</span><em>${_esc(t.pseudo)}</em></button>`).join('')
+        : '<div class="vtt-ms-pop-empty">Aucun autre personnage sur la scène.</div>');
   }
   return `<div class="vtt-ms-pop" id="vtt-ms-pop">${h}</div>`;
 }
@@ -644,20 +651,14 @@ function _vttMsSendPicker(charId, uid, invIndex) {
   invIndex = parseInt(invIndex);
   const c = VS.characters[charId]; if (!c) return;
   const item = (c.inventaire||[])[invIndex]; if (!item) return;
-  const targets = Object.entries(VS.presence)
-    .filter(([pUid]) => pUid !== uid)
-    .flatMap(([pUid, p]) =>
-      Object.values(VS.characters)
-        .filter(ch => ch.uid === pUid)
-        .map(ch => ({ pUid, charId: ch.id, charNom: ch.nom||p.pseudo, pseudo: p.pseudo }))
-    );
-  if (!targets.length) { showNotif('Aucun joueur présent à qui envoyer l\'objet', 'info'); return; }
+  const targets = _msPresentTargets(charId);
+  if (!targets.length) { showNotif('Aucun autre personnage sur la scène', 'info'); return; }
   openModal(`📦 Envoyer "${item.nom||'objet'}"`, `
     <div style="display:flex;flex-direction:column;gap:.5rem">
       <p style="margin:0;font-size:.85rem;color:var(--text-dim)">Destinataire :</p>
-      ${targets.map(t => `<button class="btn btn-outline" style="text-align:left"
-        data-vtt-fn="_vttCloseAnd" data-vtt-args="_vttMsConfirmSend|${charId}|${uid}|${invIndex}|${t.charId}">
-        ${t.pseudo} → ${t.charNom}</button>`).join('')}
+      ${targets.map(t => `<button class="btn btn-outline vtt-ms-transfer-target"
+        data-vtt-fn="_vttCloseAnd" data-vtt-args="_vttMsConfirmSend|${_esc(charId)}|${_esc(uid)}|${invIndex}|${_esc(t.charId)}">
+        ${_msTargetAvatar(t)}<span><b>${_esc(t.charNom)}</b><small>${_esc(t.pseudo)}</small></span></button>`).join('')}
       <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
     </div>`);
 }
@@ -1126,13 +1127,39 @@ function _msTabSorts(c, uid, canEdit) {
 
 // ─── Onglet Compte (or : recettes / dépenses) ─────────────────────
 // Réutilise la couche economy.js (useGold) + le modèle c.compte de la fiche.
-// Destinataires d'un don (joueurs présents autres que soi) → { charId, charNom, pseudo }.
-function _msPresentTargets(uid) {
-  return Object.entries(VS.presence || {})
-    .filter(([pUid]) => pUid !== uid)
-    .flatMap(([pUid, p]) => Object.values(VS.characters)
-      .filter(ch => ch.uid === pUid)
-      .map(ch => ({ charId: ch.id, charNom: ch.nom || p.pseudo, pseudo: p.pseudo })));
+// Destinataires d'un don : tous les tokens de personnages réellement placés
+// sur la scène, même si leur joueur n'est pas connecté au VTT.
+function _msPresentTargets(senderCharId) {
+  const pageId = VS.activePage?.id;
+  if (!pageId) return [];
+  const seen = new Set();
+  return Object.values(VS.tokens || {})
+    .map(entry => entry?.data || entry)
+    .filter(token => token?.pageId === pageId
+      && token.characterId
+      && token.characterId !== senderCharId)
+    .map(token => {
+      if (seen.has(token.characterId)) return null;
+      const character = VS.characters[token.characterId];
+      if (!character) return null;
+      seen.add(token.characterId);
+      const presence = VS.presence?.[character.uid];
+      return {
+        charId: character.id,
+        charNom: character.nom || token.name || 'Personnage',
+        pseudo: presence?.pseudo || character.ownerPseudo || 'Présent sur la scène',
+        image: character.photoURL || character.photo || character.avatar || token.imageUrl || '',
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.charNom.localeCompare(b.charNom, 'fr', { sensitivity: 'base' }));
+}
+
+function _msTargetAvatar(target) {
+  const initial = _esc((target.charNom || '?').trim()[0]?.toUpperCase() || '?');
+  return `<span class="vtt-ms-pop-av vtt-ms-target-av">${target.image
+    ? `<img src="${_esc(target.image)}" alt="">`
+    : initial}</span>`;
 }
 const _msParseDate = (d) => { const m = String(d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); return m ? new Date(+m[3] < 100 ? 2000 + +m[3] : +m[3], +m[2] - 1, +m[1]).getTime() : 0; };
 
@@ -1224,12 +1251,8 @@ function _vttMsSendGoldPicker(charId, uid) {
   const c = VS.characters[charId]; if (!c) return;
   const solde = calcOr(c);
   if (solde <= 0) { showNotif('Solde vide', 'info'); return; }
-  const targets = Object.entries(VS.presence)
-    .filter(([pUid]) => pUid !== uid)
-    .flatMap(([pUid, p]) => Object.values(VS.characters)
-      .filter(ch => ch.uid === pUid)
-      .map(ch => ({ charId: ch.id, charNom: ch.nom || p.pseudo, pseudo: p.pseudo })));
-  if (!targets.length) { showNotif('Aucun joueur présent à qui envoyer de l\'or', 'info'); return; }
+  const targets = _msPresentTargets(charId);
+  if (!targets.length) { showNotif('Aucun autre personnage sur la scène', 'info'); return; }
   openModal('💰 Envoyer de l\'or', `
     <div style="display:flex;flex-direction:column;gap:.55rem">
       <div style="font-size:.8rem;color:var(--text-dim)">Solde : <strong style="color:var(--gold)">${solde} or</strong></div>
@@ -1238,9 +1261,9 @@ function _vttMsSendGoldPicker(charId, uid) {
         <input type="number" id="vtt-ms-gold-amt" class="input-field" min="1" max="${solde}" value="1" style="max-width:140px">
       </div>
       <p style="margin:.2rem 0 0;font-size:.85rem;color:var(--text-dim)">Destinataire :</p>
-      ${targets.map(t => `<button class="btn btn-outline" style="text-align:left"
-        data-vtt-fn="_vttMsConfirmSendGold" data-vtt-args="${charId}|${uid}|${t.charId}">
-        ${_esc(t.pseudo)} → ${_esc(t.charNom)}</button>`).join('')}
+      ${targets.map(t => `<button class="btn btn-outline vtt-ms-transfer-target"
+        data-vtt-fn="_vttMsConfirmSendGold" data-vtt-args="${_esc(charId)}|${_esc(uid)}|${_esc(t.charId)}">
+        ${_msTargetAvatar(t)}<span><b>${_esc(t.charNom)}</b><small>${_esc(t.pseudo)}</small></span></button>`).join('')}
       <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
     </div>`);
 }
@@ -1724,14 +1747,15 @@ function _renderMiniSheetImpl(uid) {
   const panel = document.getElementById('vtt-mini-panel');
   if (!panel) return;
 
-  if (!uid) { panel.classList.remove('open'); panel.innerHTML = ''; return; }
+  if (!uid) { _miniRosterUid = null; panel.classList.remove('open'); panel.innerHTML = ''; return; }
   let pres = VS.presence[uid];
   const playerLabel = pres?.pseudo
     || (uid === STATE.user?.uid ? (STATE.user?.displayName || STATE.user?.email?.split('@')[0]) : '')
     || 'Joueur hors ligne';
 
   // Favori en tête → sélection d'office du perso favori si aucun choix explicite.
-  const chars = _msAvailableCharacters(uid);
+  const rosterUid = _miniRosterUid || (STATE.isAdmin ? uid : (STATE.user?.uid || uid));
+  const chars = _msAvailableCharacters(rosterUid);
   if (!chars.length) {
     panel.classList.add('open');
     panel.innerHTML = `<div class="vtt-ms-empty">Aucun personnage lié pour ${_esc(playerLabel)}.</div>`;
@@ -1806,7 +1830,7 @@ function _renderMiniSheetImpl(uid) {
   const xpMax = calcPalier(niv);
   panel.classList.add('open');
   panel.innerHTML = `
-    <div class="vtt-ms-resize" title="Glisser pour redimensionner"></div>
+    <div class="vtt-ms-resize" role="separator" aria-orientation="vertical" tabindex="0" title="Glisser pour redimensionner la mini-fiche" aria-label="Redimensionner la mini-fiche"></div>
     <div class="vtt-ms-header">
       <button class="vtt-ms-portrait${up ? ' up' : ''}" data-vtt-fn="_vttMsPop" data-vtt-args="xp|xp" data-pid="xp" title="XP ${parseInt(c?.exp) || 0} / ${calcPalier(niv)} — gérer">
         ${_msRingHtml(c)}
@@ -1854,12 +1878,14 @@ function _vttToggleMiniSheet(uid, charId = null) {
   const sameCharacter = VS.miniUid === uid && (!charId || VS.miniCharId === charId);
   if (sameCharacter) {
     _miniCollapsed = false;
+    _miniRosterUid = null;
     VS.miniUid = null; VS.miniCharId = null;
     const panel = document.getElementById('vtt-mini-panel');
     if (panel) { panel.classList.remove('open'); panel.innerHTML = ''; }
   } else {
     // Sécurité : refuser l'ouverture de la fiche d'un autre joueur (contenu privé).
     if (!_msCanView(uid, charId)) { showNotif('Fiche réservée à son propriétaire.', 'info'); return; }
+    _miniRosterUid = STATE.isAdmin ? uid : (STATE.user?.uid || uid);
     VS.miniUid = uid; VS.miniCharId = charId || null;
     _miniCollapsed = false;
     _renderMiniSheet(uid);
@@ -1889,8 +1915,8 @@ function _vttMsKeyToggle() {
     const sUid = selT.ownerId || VS.characters[selT.characterId]?.uid || uid;
     if (_msCanView(sUid, selT.characterId)) { _vttToggleMiniSheet(sUid, selT.characterId); return; }
   }
-  const own = favoriteFirst(Object.values(VS.characters).filter(ch => ch.uid === uid));
-  if (own.length) { _vttToggleMiniSheet(uid, own[0].id); return; }
+  const controlled = _msAvailableCharacters(uid);
+  if (controlled.length) { _vttToggleMiniSheet(controlled[0].uid || uid, controlled[0].id); return; }
   showNotif('Aucune fiche à afficher', 'info');
 }
 
@@ -1898,32 +1924,46 @@ function _vttMsKeyToggle() {
 const _MS_W_MIN = 340, _MS_W_MAX = 560;
 function _msApplyStoredWidth() {
   const panel = document.getElementById('vtt-mini-panel'); if (!panel) return;
+  const root = panel.closest('.vtt-root'); if (!root) return;
   const w = parseInt(lsJson.get('vtt-ms-width', 0));
-  if (w >= _MS_W_MIN && w <= _MS_W_MAX) panel.style.setProperty('--vtt-ms-w', w + 'px');
+  if (w >= _MS_W_MIN && w <= _MS_W_MAX) root.style.setProperty('--vtt-mini-w', w + 'px');
 }
 let _msResizeInit = false;
 function _msInitResize() {
   if (_msResizeInit) return; _msResizeInit = true;
-  let dragging = false;
+  let dragging = false, activePanel = null, activeRoot = null;
+  const applyWidth = (panel, root, width) => {
+    const w = Math.max(_MS_W_MIN, Math.min(_MS_W_MAX, Math.round(width)));
+    root.style.setProperty('--vtt-mini-w', w + 'px');
+    return w;
+  };
   document.addEventListener('pointerdown', e => {
-    if (!e.target.closest('.vtt-ms-resize')) return;
+    const handle = e.target.closest('.vtt-ms-resize');
+    if (!handle || window.matchMedia('(max-width: 900px)').matches) return;
     const panel = document.getElementById('vtt-mini-panel'); if (!panel) return;
-    e.preventDefault(); dragging = true; panel.classList.add('resizing');
-    try { e.target.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    const root = panel.closest('.vtt-root'); if (!root) return;
+    e.preventDefault(); dragging = true; activePanel = panel; activeRoot = root; panel.classList.add('resizing');
+    try { handle.setPointerCapture(e.pointerId); } catch { /* noop */ }
   });
   document.addEventListener('pointermove', e => {
-    if (!dragging) return;
-    const panel = document.getElementById('vtt-mini-panel'); if (!panel) return;
-    const left = panel.getBoundingClientRect().left;
-    const w = Math.max(_MS_W_MIN, Math.min(_MS_W_MAX, Math.round(e.clientX - left)));
-    panel.style.setProperty('--vtt-ms-w', w + 'px');
+    if (!dragging || !activePanel || !activeRoot) return;
+    applyWidth(activePanel, activeRoot, e.clientX - activePanel.getBoundingClientRect().left);
   });
   document.addEventListener('pointerup', () => {
     if (!dragging) return; dragging = false;
-    const panel = document.getElementById('vtt-mini-panel');
-    panel?.classList.remove('resizing');
-    const w = parseInt((panel?.style.getPropertyValue('--vtt-ms-w') || '').replace('px', ''));
+    activePanel?.classList.remove('resizing');
+    const w = parseInt((activeRoot?.style.getPropertyValue('--vtt-mini-w') || '').replace('px', ''));
     if (w >= _MS_W_MIN && w <= _MS_W_MAX) lsJson.set('vtt-ms-width', w);
+    activePanel = null; activeRoot = null;
+  });
+  document.addEventListener('keydown', e => {
+    if (!e.target.closest('.vtt-ms-resize') || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    const panel = document.getElementById('vtt-mini-panel');
+    const root = panel?.closest('.vtt-root'); if (!panel || !root) return;
+    e.preventDefault();
+    const current = panel.getBoundingClientRect().width;
+    const w = applyWidth(panel, root, current + (e.key === 'ArrowRight' ? 16 : -16));
+    lsJson.set('vtt-ms-width', w);
   });
 }
 

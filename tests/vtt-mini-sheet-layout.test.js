@@ -30,9 +30,14 @@ test('le sélecteur du nom propose les personnages avec leur portrait', () => {
 });
 
 test('le sélecteur inclut tous les personnages possédés ou délégués', () => {
-  assert.match(miniSheet, /import \{ canControlCharacter, getControlledCharacters \}/);
+  assert.match(miniSheet, /let _miniRosterUid = null/);
+  assert.match(miniSheet, /function _msCharacterGrantedToUid\(character, uid\)/);
+  assert.match(miniSheet, /isCharacterGrantedToUid\(character, VS\.tokens, uid, VS\.characters\)/);
+  assert.match(miniSheet, /function _msControlsCharacter\(character/);
   assert.match(miniSheet, /function _msAvailableCharacters\(uid\)/);
-  assert.match(miniSheet, /getControlledCharacters\(all, STATE\.user\?\.uid, \{ sorted: false \}\)/);
+  assert.match(miniSheet, /const controllerUid = STATE\.isAdmin \? uid : \(STATE\.user\?\.uid \|\| uid\)/);
+  assert.match(miniSheet, /all\.filter\(character => _msCharacterGrantedToUid\(character, controllerUid\)\)/);
+  assert.match(miniSheet, /_msAvailableCharacters\(_miniRosterUid \|\| uid\)/);
   assert.match(miniSheet, /Personnages contrôlés/);
   assert.match(miniSheet, /class="vtt-ms-pop-delegated">Délégué/);
   assert.match(css, /\.vtt-ms-pop-delegated\s*\{/);
@@ -40,9 +45,28 @@ test('le sélecteur inclut tous les personnages possédés ou délégués', () =
 
 test('les droits complets suivent le personnage sélectionné et non le compte ouvreur', () => {
   const permission = miniSheet.match(/function _msCanEdit\(uid,[\s\S]*?\n\}/)?.[0] || '';
-  assert.match(permission, /canControlCharacter\(character, STATE\.user\?\.uid\)/);
+  assert.match(permission, /_msControlsCharacter\(character\)/);
   assert.doesNotMatch(permission, /STATE\.user\?\.uid === uid\) return true/);
   assert.match(miniSheet, /VS\.miniUid = VS\.characters\[charId\]\?\.uid \|\| uid/);
+});
+
+test('les dons ciblent les personnages de la scène et affichent leur portrait', () => {
+  const targets = miniSheet.match(/function _msPresentTargets\(senderCharId\)[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(targets, /VS\.activePage\?\.id/);
+  assert.match(targets, /token\?\.pageId === pageId/);
+  assert.match(targets, /token\.characterId !== senderCharId/);
+  assert.match(targets, /character\.photoURL \|\| character\.photo \|\| character\.avatar \|\| token\.imageUrl/);
+  assert.doesNotMatch(targets, /Object\.entries\(VS\.presence/);
+  assert.match(miniSheet, /function _msTargetAvatar\(target\)/);
+  assert.match(css, /\.vtt-ms-target-av img\s*\{/);
+});
+
+test('la poignée redimensionne la variable réellement utilisée par la mini-fiche', () => {
+  assert.match(miniSheet, /aria-label="Redimensionner la mini-fiche"/);
+  assert.match(miniSheet, /root\.style\.setProperty\('--vtt-mini-w'/);
+  assert.doesNotMatch(miniSheet, /style\.setProperty\('--vtt-ms-w'/);
+  assert.match(css, /\.vtt-ms-resize\s*\{[^}]*width:\s*16px;[^}]*cursor:\s*ew-resize;/s);
+  assert.match(css, /\.vtt-ms-resize::after\s*\{[^}]*content:'⋮'/s);
 });
 
 test('le pupitre compact affiche ses ressources éditables et un vrai bouton Fiche', () => {
