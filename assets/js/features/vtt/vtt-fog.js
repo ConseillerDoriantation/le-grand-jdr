@@ -8,14 +8,20 @@
 //    visibles via globalCompositeOperation = 'destination-out'.
 //  • Algorithme de visibilité : Radial Sweep (polygone de visibilité).
 //  • Brouillard partagé : chaque client calcule le même masque (union des
-//    tokens joueurs de la page).
-//  • En obscurité (token hors rayon de toute source) : vision 1 case.
+//    personnages de la page et des sources lumineuses).
+//  • La vision de chaque personnage est bornée en cases, même sans lumière.
 //  • Fenêtres : transparentes à la LOS, bloquent le déplacement.
 // ══════════════════════════════════════════════════════════════════════════════
 import { updateDoc } from '../../config/firebase.js';
 import { showNotif }  from '../../shared/notifications.js';
 import { VTT_WALL_TYPES, vttWallState } from './vtt-wall-utils.js';
-import { fogGeometrySignature, fogRasterCellSize } from './vtt-fog-performance.js';
+import {
+  fogGeometrySignature,
+  fogRasterCellSize,
+  fogSharedVisionTokens,
+  fogVisionFeatherCells,
+  fogVisionRadiusCells,
+} from './vtt-fog-performance.js';
 
 // ── État module ───────────────────────────────────────────────────────────────
 let _CELL       = 70;
@@ -46,9 +52,10 @@ let _fogGeometryKey = '';    // évite de recalculer la LOS pour un simple chang
 let _pgRefFn = null;      // (pageId) → Firestore DocumentReference
 
 // ── Constantes ────────────────────────────────────────────────────────────────
-const FOG_ALPHA       = 1;    // noir total pour les joueurs
-const FOG_ALPHA_ADMIN = 0.40; // semi-transparent pour le MJ (voit la carte en dessous)
-const DARK_CELLS  = 1;              // rayon de vision en obscurité (en cases)
+const FOG_RGB         = '3,8,18'; // bleu-noir, cohérent avec le fond du VTT
+const FOG_ALPHA       = 0.985;    // opaque sans produire un aplat noir brutal
+const FOG_ALPHA_ADMIN = 0.48;     // le MJ distingue le fog tout en gardant la carte lisible
+const FOG_TOKEN_VISIBLE_ALPHA = 210; // évite de révéler un token dans l'extrême bord sombre du fondu
 const LIGHT_DEF_R = 5;              // rayon par défaut des sources (cases)
 
 const EDIT_COLOR  = { wall:'#ef4444', door:'#fb923c', window:'#67e8f9', light:'#fbbf24', hide:'#1e293b', reveal:'#fde047' };
@@ -175,7 +182,7 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
   // Si l'éclairage dynamique est activé : masque noir partout puis cutout LOS.
   // Sinon : canvas transparent — seul le brouillard manuel s'y dépose.
   if (fogEnabled) {
-    ctx.fillStyle = `rgba(0,0,0,${isAdmin ? FOG_ALPHA_ADMIN : FOG_ALPHA})`;
+    ctx.fillStyle = `rgba(${FOG_RGB},${isAdmin ? FOG_ALPHA_ADMIN : FOG_ALPHA})`;
     ctx.fillRect(0, 0, W, H);
   }
 
@@ -198,30 +205,38 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
       ctx.closePath();
       ctx.fill();
     };
-    const fillPolyClipped = (poly, cx, cy, r) => {
+    const fillPolyClipped = (poly, cx, cy, r, feather = 0) => {
       if (poly.length < 3) return;
       ctx.save();
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.clip();
+      if (feather > 0) {
+        const innerRadius = Math.max(0, r - Math.min(feather, r));
+        const gradient = ctx.createRadialGradient(cx, cy, innerRadius, cx, cy, r);
+        gradient.addColorStop(0, 'rgba(0,0,0,1)');
+        gradient.addColorStop(0.45, 'rgba(0,0,0,.82)');
+        gradient.addColorStop(0.78, 'rgba(0,0,0,.34)');
+        gradient.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = gradient;
+      }
       fillPoly(poly);
       ctx.restore();
     };
 
     const lights = page.lightSources || [];
 
-    // Le MJ conserve l'ancien aperçu des halos lumineux. Côté joueur, une source
-    // ne révèle jamais une pièce à elle seule : elle doit être dans la LOS d'un
-    // personnage, sinon elle créerait une fenêtre indiscrète dans le brouillard.
-    if (isAdmin) {
-      for (const ls of lights) {
-        const lx = ls.x * C, ly = ls.y * C;
-        const r  = (ls.radius ?? LIGHT_DEF_R) * C;
-        fillPolyClipped(_visPoly(lx, ly, blockers, W, H, C / 20), lx, ly, r);
-      }
+    // Les sources posées éclairent réellement leur halo pour tous les joueurs.
+    // Leur LOS propre respecte les murs et rejoint la vision partagée du groupe.
+    for (const ls of lights) {
+      const lx = ls.x * C, ly = ls.y * C;
+      const radiusCells = Math.max(1, Number(ls.radius) || LIGHT_DEF_R);
+      const r = radiusCells * C;
+      fillPolyClipped(
+        _visPoly(lx, ly, blockers, W, H, C / 20),
+        lx, ly, r, fogVisionFeatherCells(radiusCells) * C,
+      );
     }
 
-    const playerToks = Object.values(tokens || {})
-      .map(e => e.data)
-      .filter(t => t && t.type === 'player' && t.pageId === page.id);
+    const playerToks = fogSharedVisionTokens(page, tokens);
 
     for (const tok of playerToks) {
       const tw = tok.tokenW ?? tok.tokenSize ?? 1;
@@ -229,33 +244,8 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
       const ox = (tok.col + tw * 0.5) * C;
       const oy = (tok.row + th * 0.5) * C;
       const poly = _visPoly(ox, oy, blockers, W, H, C / 20);
-      if (lights.length === 0) {
-        fillPoly(poly);
-        continue;
-      }
-
-      const containingLights = lights.filter(ls => {
-        const r = (ls.radius ?? LIGHT_DEF_R) * C;
-        return Math.hypot(ox - ls.x*C, oy - ls.y*C) <= r;
-      });
-
-      if (isAdmin) {
-        if (containingLights.length) fillPoly(poly);
-        else fillPolyClipped(poly, ox, oy, DARK_CELLS * C);
-      } else if (containingLights.length) {
-        // Intersection LOS × halo : aucune visibilité au-delà de la lumière,
-        // même si le polygone géométrique continue derrière.
-        for (const ls of containingLights) {
-          fillPolyClipped(
-            poly,
-            ls.x * C,
-            ls.y * C,
-            (ls.radius ?? LIGHT_DEF_R) * C,
-          );
-        }
-      } else {
-        fillPolyClipped(poly, ox, oy, DARK_CELLS * C);
-      }
+      const radiusCells = fogVisionRadiusCells(page, tok);
+      fillPolyClipped(poly, ox, oy, radiusCells * C, fogVisionFeatherCells(radiusCells) * C);
     }
   }
 
@@ -292,7 +282,7 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
     // 2) Hide : on vide le LOS dans les zones de hide, puis on repeint à alpha exact
     ctx.drawImage(hide.cnv, 0, 0);
     const paint = mkMask();
-    paint.c.fillStyle = `rgba(0,0,0,${isAdmin ? FOG_ALPHA_ADMIN : FOG_ALPHA})`;
+    paint.c.fillStyle = `rgba(${FOG_RGB},${isAdmin ? FOG_ALPHA_ADMIN : FOG_ALPHA})`;
     paint.c.fillRect(0, 0, W, H);
     paint.c.globalCompositeOperation = 'destination-in';
     paint.c.drawImage(hide.cnv, 0, 0);
@@ -346,7 +336,7 @@ function _playerPointIsVisible(x, y, page = _page) {
   const px = Math.max(0, Math.min(_playerFogCanvas.width - 1, Math.round(x * _playerFogCanvas.width / worldW)));
   const py = Math.max(0, Math.min(_playerFogCanvas.height - 1, Math.round(y * _playerFogCanvas.height / worldH)));
   _playerFogContext ||= _playerFogCanvas.getContext('2d', { willReadFrequently: true });
-  return _playerFogContext.getImageData(px, py, 1, 1).data[3] < 250;
+  return _playerFogContext.getImageData(px, py, 1, 1).data[3] < FOG_TOKEN_VISIBLE_ALPHA;
 }
 
 function _applyTokenVisibility(page, tokens, isAdmin) {
@@ -625,19 +615,23 @@ export function fogRenderWalls(page, isAdmin) {
   }
 
   // ── Rectangles de brouillard manuel en mode édition ──────────────────────
-  // Contours subtils (le remplissage visible vient du canvas fog unifié).
-  // Le rect sélectionné est mis en évidence avec un fill plus prononcé.
+  // Les zones révélées restent volontairement très lisibles : en mode
+  // Structure, leur contour pointillé ne doit pas se confondre avec la carte.
   if (_editMode && isAdmin) {
     for (const op of (page.fogOps || [])) {
       const sel = _selectedId === op.id;
+      const revealed = op.type === 'reveal';
       const stroke = sel ? '#fff' : EDIT_COLOR[op.type];
       const rect = new K.Rect({
         x: op.x * C, y: op.y * C,
         width: op.w * C, height: op.h * C,
-        fill: sel ? (op.type === 'hide' ? 'rgba(15,23,42,0.4)' : 'rgba(253,224,71,0.2)') : 'transparent',
-        stroke, strokeWidth: sel ? 2.5 : 1,
-        dash: sel ? [6, 4] : [3, 4],
-        opacity: sel ? 1 : 0.55,
+        fill: revealed
+          ? (sel ? 'rgba(253,224,71,0.22)' : 'rgba(253,224,71,0.08)')
+          : (sel ? 'rgba(15,23,42,0.4)' : 'transparent'),
+        stroke,
+        strokeWidth: sel ? 3 : (revealed ? 2.25 : 1.25),
+        dash: revealed ? [10, 6] : [4, 5],
+        opacity: sel ? 1 : (revealed ? 0.95 : 0.65),
         listening: true,
       });
       rect.on('click tap', e => { e.cancelBubble = true; _selectItem(op.id); });
@@ -745,6 +739,8 @@ function _toggleDoor(wall, _isAdmin) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export function fogIsEditMode() { return _editMode; }
+export function fogCanUndo() { return _placeHistory.length > 0; }
+export function fogCanRedo() { return _redoHistory.length > 0; }
 
 export function fogSetEditTool(tool, page) {
   _editTool   = tool;
@@ -863,8 +859,9 @@ export function fogToggleEditMode(enabled, page) {
       const fill = _editTool === 'hide' ? 'rgba(15,23,42,0.55)' : 'rgba(253,224,71,0.22)';
       _preview = new K.Rect({
         x: col*_CELL, y: row*_CELL, width: 0, height: 0,
-        fill, stroke: EDIT_COLOR[_editTool], strokeWidth: 1.5,
-        dash: [6, 4], listening: false,
+        fill, stroke: EDIT_COLOR[_editTool],
+        strokeWidth: _editTool === 'reveal' ? 2.5 : 1.5,
+        dash: _editTool === 'reveal' ? [10, 6] : [6, 4], listening: false,
       });
     } else { return; }
     _wallsLayer?.add(_preview);
@@ -1254,9 +1251,19 @@ function _refreshWallsBar(page) {
   });
   const fogBtn = bar.querySelector('#vtt-fog-toggle');
   if (fogBtn) {
-    fogBtn.textContent = fogOn ? '👁 Éclairage ON' : '👁 Éclairage OFF';
-    fogBtn.style.color = fogOn ? '#4ade80' : '#9ca3af';
+    fogBtn.classList.toggle('active', fogOn);
+    fogBtn.setAttribute('aria-checked', String(fogOn));
   }
+  const status = bar.querySelector('[data-fog-status]');
+  if (status) status.textContent = fogOn
+    ? `Actif · vision partagée ${fogVisionRadiusCells(page)} cases`
+    : 'Coupé — carte entièrement visible';
+  const undoBtn = bar.querySelector('#vtt-fog-undo-btn');
+  const redoBtn = bar.querySelector('#vtt-fog-redo-btn');
+  const clearBtn = bar.querySelector('#vtt-fog-clear-btn');
+  if (undoBtn) undoBtn.disabled = !_placeHistory.length;
+  if (redoBtn) redoBtn.disabled = !_redoHistory.length;
+  if (clearBtn) clearBtn.disabled = !(page?.fogOps || []).length;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

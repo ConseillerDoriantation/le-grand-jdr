@@ -5,6 +5,7 @@
 const DEFAULT_MAX_RASTER_CELL = 24;
 const DEFAULT_MAX_DIMENSION = 3072;
 const DEFAULT_MAX_PIXELS = 4_000_000;
+export const VTT_DEFAULT_VISION_CELLS = 3;
 
 export function vttCanvasPixelRatio(devicePixelRatio = 1, deviceMemory = null, hardwareConcurrency = null) {
   const dpr = Math.max(1, Number(devicePixelRatio) || 1);
@@ -79,6 +80,45 @@ function _tokenData(entry) {
   return entry?.data || entry || null;
 }
 
+/** Rayon de vision d'un personnage, en cases. Une valeur portée par le token
+ * reste prioritaire pour permettre les sens particuliers ; la scène fournit
+ * ensuite un réglage commun, avec 3 cases comme valeur sûre pour le legacy. */
+export function fogVisionRadiusCells(page = {}, token = {}) {
+  const raw = token.visionRadius ?? token.visionCells
+    ?? page.visionRadius ?? page.visionCells
+    ?? VTT_DEFAULT_VISION_CELLS;
+  const value = Number(raw);
+  return Math.max(1, Math.min(40, Number.isFinite(value) ? value : VTT_DEFAULT_VISION_CELLS));
+}
+
+/** Largeur du fondu périphérique. Elle reste proportionnée sur les petits
+ * rayons sans devenir coûteuse ou trop floue sur les grandes lumières. */
+export function fogVisionFeatherCells(radiusCells) {
+  const radius = Math.max(1, Number(radiusCells) || VTT_DEFAULT_VISION_CELLS);
+  return Math.min(1.35, Math.max(0.5, radius * 0.45));
+}
+
+/** Personnages qui contribuent à la vision partagée de la scène. */
+export function fogSharedVisionTokens(page, tokens) {
+  if (!page) return [];
+  const cols = Math.max(1, Number(page.cols) || 24);
+  const rows = Math.max(1, Number(page.rows) || 18);
+  return Object.values(tokens || {})
+    .map(_tokenData)
+    .filter(token => {
+      if (!token || token.pageId !== page.id || token.visible === false) return false;
+      // Les anciens tokens de personnage n'avaient pas toujours `type`.
+      const isCharacter = token.type === 'player' || (!token.type && !!token.characterId);
+      if (!isCharacter) return false;
+      const col = Number(token.col);
+      const row = Number(token.row);
+      const width = Math.max(1, Number(token.tokenW ?? token.tokenSize) || 1);
+      const height = Math.max(1, Number(token.tokenH ?? token.tokenSize) || 1);
+      return Number.isFinite(col) && Number.isFinite(row)
+        && col < cols && row < rows && col + width > 0 && row + height > 0;
+    });
+}
+
 /**
  * Signature limitée aux données qui modifient réellement la géométrie de la
  * vision. Les PV, PM, états et animations d'attaque n'en font volontairement
@@ -86,15 +126,14 @@ function _tokenData(entry) {
  */
 export function fogGeometrySignature(page, tokens, isAdmin = false) {
   if (!page) return '';
-  const players = Object.values(tokens || {})
-    .map(_tokenData)
-    .filter(token => token?.type === 'player' && token.pageId === page.id)
+  const players = fogSharedVisionTokens(page, tokens)
     .map(token => [
       String(token.id || token.characterId || token.ownerId || ''),
       Number(token.col) || 0,
       Number(token.row) || 0,
       Number(token.tokenW ?? token.tokenSize) || 1,
       Number(token.tokenH ?? token.tokenSize) || 1,
+      fogVisionRadiusCells(page, token),
     ])
     .sort((a, b) => a[0].localeCompare(b[0]));
 
@@ -117,6 +156,7 @@ export function fogGeometrySignature(page, tokens, isAdmin = false) {
 
   return JSON.stringify([
     String(page.id || ''), Number(page.cols) || 24, Number(page.rows) || 18,
-    page.fogEnabled === true, isAdmin === true, walls, lights, fogOps, players,
+    page.fogEnabled === true, fogVisionRadiusCells(page), isAdmin === true,
+    walls, lights, fogOps, players,
   ]);
 }

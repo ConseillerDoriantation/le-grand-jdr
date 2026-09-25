@@ -4,12 +4,45 @@ import assert from 'node:assert/strict';
 import {
   fogGeometrySignature,
   fogRasterCellSize,
+  fogSharedVisionTokens,
+  fogVisionFeatherCells,
+  fogVisionRadiusCells,
   vttCanvasPixelRatio,
   vttDefaultLowFx,
   vttIsPhoneViewport,
   vttPinchCameraTransform,
   vttShouldReduceEffects,
 } from '../assets/js/features/vtt/vtt-fog-performance.js';
+
+test('la vision dynamique est bornée à trois cases par défaut et reste configurable', () => {
+  assert.equal(fogVisionRadiusCells({}, {}), 3);
+  assert.equal(fogVisionRadiusCells({ visionRadius:8 }, {}), 8);
+  assert.equal(fogVisionRadiusCells({ visionRadius:8 }, { visionRadius:3 }), 3);
+  assert.equal(fogVisionRadiusCells({}, { visionRadius:999 }), 40);
+  assert.equal(fogVisionRadiusCells({}, { visionRadius:0 }), 1);
+});
+
+test('le bord de vision conserve un fondu progressif proportionné', () => {
+  assert.equal(fogVisionFeatherCells(1), 0.5);
+  assert.equal(fogVisionFeatherCells(3), 1.35);
+  assert.equal(fogVisionFeatherCells(8), 1.35);
+});
+
+test('la vision partagée réunit uniquement les personnages visibles présents sur la page', () => {
+  const page = { id:'p1', cols:20, rows:15 };
+  const hero = { id:'hero', type:'player', pageId:'p1', col:2, row:3 };
+  const delegatedLegacy = { id:'ally', characterId:'c2', pageId:'p1', col:6, row:7 };
+  const visible = fogSharedVisionTokens(page, {
+    hero:{ data:hero },
+    ally:{ data:delegatedLegacy },
+    hidden:{ data:{ id:'hidden', type:'player', pageId:'p1', col:4, row:4, visible:false } },
+    enemy:{ data:{ id:'enemy', type:'enemy', pageId:'p1', col:8, row:8 } },
+    elsewhere:{ data:{ id:'elsewhere', type:'player', pageId:'p2', col:1, row:1 } },
+    reserve:{ data:{ id:'reserve', type:'player', pageId:'p1', col:-10, row:-10 } },
+  });
+
+  assert.deepEqual(visible, [hero, delegatedLegacy]);
+});
 
 test('fogRasterCellSize borne fortement les grandes scènes', () => {
   const cell = fogRasterCellSize(200, 200, 70);
