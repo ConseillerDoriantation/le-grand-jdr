@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   controlledCharacterTokens,
+  isCharacterGrantedToUid,
   invocableCharacterTokens,
   resolveCharacterControlToken,
   resolveControlledTokenId,
@@ -51,6 +52,20 @@ test('la délégation canonique du personnage contrôle aussi un ancien token no
   const token = { data: { id: 'legacy', characterId: 'char-owner', ownerId: 'owner' } };
   const characters = { 'char-owner': { id: 'char-owner', controlDelegates: ['player'] } };
   assert.equal(resolveCharacterControlToken('char-owner', { token }, 'player', characters)?.id, 'legacy');
+});
+
+test('le roster contrôlé réunit propriété et délégations de fiche ou de token', () => {
+  const owned = { id: 'owned', uid: 'player' };
+  const canonical = { id: 'canonical', uid: 'owner', controlDelegates: ['player'] };
+  const legacy = { id: 'legacy-char', uid: 'owner' };
+  const tokens = {
+    legacy: { data: { id: 'legacy-token', characterId: 'legacy-char', ownerId: 'owner', controlDelegates: ['player'] } },
+  };
+  const characters = { owned, canonical, 'legacy-char': legacy };
+  assert.equal(isCharacterGrantedToUid(owned, tokens, 'player', characters), true);
+  assert.equal(isCharacterGrantedToUid(canonical, tokens, 'player', characters), true);
+  assert.equal(isCharacterGrantedToUid(legacy, tokens, 'player', characters), true);
+  assert.equal(isCharacterGrantedToUid(legacy, tokens, 'stranger', characters), false);
 });
 
 test('le personnage reste identifiable même lorsque son token est en réserve', () => {
