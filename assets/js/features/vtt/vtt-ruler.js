@@ -60,6 +60,10 @@ let _rulerHoverDot = null;  // aperçu de la case de départ avant le 1er clic
 // Getters d'état lus par les handlers canvas de vtt.js.
 export const rulerActive = () => _rulerActive;
 export const rulerBusy   = () => _rulerActive || !!_rulerNodes;
+export const rulerCells  = () => {
+  if (!_rulerOrigin || !_rulerLastCell) return null;
+  return Math.abs(_rulerLastCell.c - _rulerOrigin.c) + Math.abs(_rulerLastCell.r - _rulerOrigin.r);
+};
 
 export function _showRulerHover(wp) {
   if (!VS.layers.ping || _rulerNodes) { _hideRulerHover(); return; } // pas d'aperçu si une règle est déjà visible

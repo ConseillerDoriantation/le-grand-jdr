@@ -50,7 +50,7 @@ import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
-  fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo, fogRedo,
+  fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo, fogRedo, fogCanUndo, fogCanRedo,
 } from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal, setModalCloseGuard } from '../../shared/modal.js';
 import { _esc, _norm, _searchIncludes, appSplashHtml, loadingHtml, normalizeImageUrl } from '../../shared/html.js';
@@ -79,7 +79,7 @@ import { canControlCharacter, getCharacterDelegates } from '../../shared/charact
 import { _calcAfflictionDD, splitSpellDiceFormula } from '../../shared/spell-math.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
-  _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy,
+  _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy, rulerCells,
 } from './vtt-ruler.js';
 import {
   _initChatLogSubs, _vttToggleLogDetail, _vttSendChat, _vttChatReply, _vttChatReplyCancel, _chatMsgs,
@@ -507,6 +507,36 @@ let _drawColor    = '#ef4444';
 let _drawWidth    = 2;
 let _drawShape    = 'pencil'; // 'pencil'|'line'|'rect'|'circle'|'poly'|'eraser'
 let _drawFill     = false;
+const _VTT_TOOL_PANEL_STORAGE = 'vtt-tool-panels-v1';
+let _vttToolPanel = null;
+let _vttToolPanelCollapsed = lsJson.get(_VTT_TOOL_PANEL_STORAGE, {});
+let _vttStructureHelp = false;
+let _vttFogActiveTool = 'wall';
+
+const _VTT_TOOL_ICON_PATHS = {
+  select:'<path d="M5 3l13 7.5-5.6 1.6L10 18z"/><path d="M12.6 12.2l4.4 5.3"/>',
+  ruler:'<path d="M3.5 16.5L16.5 3.5l4 4-13 13z"/><path d="M7.5 12.5l2 2M10.5 9.5l1.5 1.5M13.5 6.5l2 2"/>',
+  draw:'<path d="M4 20h4L19.5 8.5a2.1 2.1 0 00-4-4L4 16z"/><path d="M14 6l4 4"/>',
+  walls:'<rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M3 12h18M9 5v7M15 12v7"/>',
+  center:'<circle cx="12" cy="12" r="7"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/>',
+  keys:'<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7.5 14h9"/>',
+  perf:'<path d="M13 2.5L4.5 13.5h6.5l-1 8 8.5-11h-6.5z"/>',
+  pencil:'<path d="M4 20l1-4L16 5l3 3L8 19z"/>',
+  line:'<path d="M5 19L19 5"/>', rect:'<rect x="4" y="6" width="16" height="12" rx="1"/>',
+  circle:'<circle cx="12" cy="12" r="8"/>', poly:'<path d="M12 4l9 15H3z"/>',
+  eraser:'<path d="M7.5 20H20M4.6 14.6l8.8-8.8a2 2 0 012.8 0l2.9 2.9a2 2 0 010 2.8L12 18.6 8.6 20 4.6 16a1 1 0 010-1.4z"/><path d="M9 10l5 5"/>',
+  fill:'<rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor" fill-opacity=".35"/>',
+  undo:'<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/>',
+  redo:'<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/>',
+  trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  light:'<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 00-3.6 10.8c.7.6 1.1 1.4 1.1 2.2h5c0-.8.4-1.6 1.1-2.2A6 6 0 0012 3z"/>',
+  hide:'<path d="M20 14.5A8 8 0 119.5 4a6.5 6.5 0 0010.5 10.5z"/>',
+  reveal:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  min:'<path d="M6 12h12"/>', max:'<path d="M6 9l6 6 6-6"/>',
+  x:'<path d="M6 6l12 12M18 6L6 18"/>',
+  help:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 114 2c-.9.6-1.5 1.1-1.5 2.2M12 17h.01"/>',
+};
+const _vttToolIcon = name => `<svg class="vtt-tool-icon" viewBox="0 0 24 24" aria-hidden="true">${_VTT_TOOL_ICON_PATHS[name] || ''}</svg>`;
 // Polygone (tracé sommet par sommet) : clic = pose un sommet, double-clic / clic sur
 // le 1er point = ferme. État séparé du drag (pas de _drawing : multi-clics).
 let _polyPts      = [];      // sommets posés [x,y,…] (world coords)
@@ -1262,7 +1292,7 @@ function _initCanvas(container) {
       : null;
 
     // Règle (free-hover, reste dans le canvas)
-    if (wp && VS.tool === 'ruler' && rulerActive()) _updateRuler(wp);
+    if (wp && VS.tool === 'ruler' && rulerActive()) { _updateRuler(wp); _vttRefreshRulerMeasure(); }
     else if (!wp) _hideRulerHover();
 
     // Marquee : suivi pendant le drag (peut sortir légèrement du canvas)
@@ -1358,6 +1388,7 @@ function _initCanvas(container) {
       // Règle : clic droit = annulation immédiate (en cours ou figée), sans changer d'outil.
       if (VS.tool === 'ruler' && rulerBusy()) {
         _clearRuler();
+        _vttRefreshRulerMeasure();
         _rightStageDown = null;
         return;
       }
@@ -1377,6 +1408,7 @@ function _initCanvas(container) {
         const wp = _stageToWorld(np);
         if (!rulerActive()) _startRuler(wp);
         else                _endRuler();
+        _vttRefreshRulerMeasure();
         return;
       }
       // Dessin : cliquer-glisser. Gomme : supprime au survol pressé.
@@ -1410,7 +1442,7 @@ function _initCanvas(container) {
       if (dx*dx + dy*dy > 64) { clearTimeout(_pingTimer); _pingTimer = null; }
     }
     const wp = _stageToWorld(stagePtr);
-    if (VS.tool === 'ruler' && rulerActive())     _updateRuler(wp);
+    if (VS.tool === 'ruler' && rulerActive())     { _updateRuler(wp); _vttRefreshRulerMeasure(); }
     else if (VS.tool === 'ruler')                 _showRulerHover(wp);
     if (VS.tool === 'draw'  && _drawShape === 'eraser' && _erasing && !_pan) _eraseAtPointer();
     else if (VS.tool === 'draw' && _drawShape === 'poly' && _polyActive && !_pan) _polyHover(wp);
@@ -3366,7 +3398,9 @@ function _vttCenterOnMyToken() {
   VS.stage.to({
     x: VS.stage.width() / 2 - worldX * scale,
     y: VS.stage.height() / 2 - worldY * scale,
-    duration: 0.2,
+    duration: 0.55,
+    easing: window.Konva?.Easings?.EaseOut,
+    onFinish: () => { void _emitPing(worldX, worldY); },
   });
 }
 // Distance d'attaque entre bounding boxes WxH (0 = adjacent / chevauchement de côté).
@@ -11546,7 +11580,131 @@ function _vttTool(t) {
     _vttPremiumInfo();
     return _setTool('select');
   }
-  return _setTool(VS.tool === t ? 'select' : t);
+  if (VS.tool === t && t !== 'select') {
+    if (_vttToolPanel !== t) _vttToolPanel = t;
+    else {
+      _vttToolPanelCollapsed[t] = !_vttToolPanelCollapsed[t];
+      lsJson.set(_VTT_TOOL_PANEL_STORAGE, _vttToolPanelCollapsed);
+    }
+    return _vttRefreshToolPanels();
+  }
+  return _setTool(t);
+}
+
+function _vttOpenKeyboardHelp() {
+  _vttToolPanel = _vttToolPanel === 'keys'
+    ? (['ruler','draw','walls'].includes(VS.tool) ? VS.tool : null)
+    : 'keys';
+  _vttRefreshToolPanels();
+}
+
+function _vttToolPanelToggle(panel) {
+  if (!panel || panel === 'keys') return;
+  _vttToolPanelCollapsed[panel] = !_vttToolPanelCollapsed[panel];
+  lsJson.set(_VTT_TOOL_PANEL_STORAGE, _vttToolPanelCollapsed);
+  _vttRefreshToolPanels();
+}
+
+function _vttToolPanelClose(panel) {
+  if (panel === 'keys') {
+    _vttToolPanel = ['ruler','draw','walls'].includes(VS.tool) ? VS.tool : null;
+    return _vttRefreshToolPanels();
+  }
+  _setTool('select');
+}
+
+function _vttStructureHelpToggle() {
+  _vttStructureHelp = !_vttStructureHelp;
+  _vttRefreshToolPanels();
+}
+
+function _vttToolHint() {
+  if (_vttToolPanel === 'draw') return {
+    pencil:'Glisse pour tracer à main levée.', line:'Glisse d’un point à l’autre.',
+    rect:'Glisse pour tracer le rectangle.', circle:'Glisse depuis le centre.',
+    poly:'Clic par sommet · double-clic ou Entrée ferme · clic droit retire un sommet.',
+    eraser:'Passe sur un tracé pour l’effacer.',
+  }[_drawShape];
+  if (_vttToolPanel === 'walls') return {
+    wall:'Glisse du début à la fin pour tracer un mur.', door:'Glisse pour poser une porte fermée.',
+    window:'Glisse pour poser une vitre laissant passer la vision.', light:'Clic pour poser une source de lumière.',
+    hide:'Glisse un rectangle à masquer aux joueurs.', reveal:'Glisse un rectangle à révéler.',
+    eraser:'Clic sur un mur, une lumière ou une zone pour l’effacer.',
+  }[_vttFogActiveTool];
+  return '';
+}
+
+function _vttPositionToolPanel() {
+  const host = document.querySelector('.vtt-tool-float');
+  const panel = document.querySelector('.vtt-tool-panel:not([hidden])');
+  const rail = host?.querySelector('.vtt-tool-float-tools');
+  const btn = rail?.querySelector(`[data-tool-panel="${_vttToolPanel}"]`);
+  if (!host || !panel || !rail || !btn) return;
+  const hostRect = host.getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
+  const maxTop = Math.max(0, window.innerHeight - hostRect.top - panel.offsetHeight - 12);
+  panel.style.top = `${Math.max(0, Math.min(btnRect.top - hostRect.top - 5, maxTop))}px`;
+}
+
+function _vttRefreshRulerMeasure() {
+  const rulerValue = document.getElementById('vtt-ruler-value');
+  if (!rulerValue) return;
+  const cells = rulerCells();
+  const signature = cells == null ? 'none' : String(cells);
+  if (rulerValue.dataset.value === signature) return;
+  rulerValue.dataset.value = signature;
+  rulerValue.innerHTML = cells == null
+    ? '<b>—</b><span>Aucune mesure</span>'
+    : `<b>${cells}</b><span>case${cells > 1 ? 's' : ''} · ${(cells * CELL_M).toLocaleString('fr-FR')} m</span>`;
+}
+
+function _vttRefreshToolPanels() {
+  document.querySelectorAll('.vtt-tool-panel').forEach(panel => {
+    const open = panel.dataset.panel === _vttToolPanel;
+    panel.hidden = !open;
+    panel.classList.toggle('is-collapsed', open && !!_vttToolPanelCollapsed[panel.dataset.panel]);
+  });
+  document.querySelectorAll('.vtt-tool[data-tool-panel]').forEach(btn => {
+    btn.classList.toggle('has-panel-dot', !!_vttToolPanelCollapsed[btn.dataset.toolPanel]);
+    btn.classList.toggle('panel-open', btn.dataset.toolPanel === _vttToolPanel);
+  });
+  document.querySelectorAll('.vtt-draw-color').forEach(btn => btn.classList.toggle('active', btn.dataset.color === _drawColor));
+  document.querySelectorAll('.vtt-draw-wbtn').forEach(btn => {
+    btn.classList.toggle('active', +btn.dataset.w === _drawWidth);
+    btn.style.color = _drawColor === '#1a1a2e' ? 'var(--text-muted)' : _drawColor;
+  });
+  document.querySelectorAll('[data-fog-tool]').forEach(btn => btn.classList.toggle('active', btn.dataset.fogTool === _vttFogActiveTool));
+  const fill = document.getElementById('vtt-draw-fill-btn');
+  if (fill) { fill.classList.toggle('active', _drawFill); fill.setAttribute('aria-pressed', String(_drawFill)); }
+  const drawUndo = document.getElementById('vtt-draw-undo-btn');
+  const drawRedo = document.getElementById('vtt-draw-redo-btn');
+  if (drawUndo) drawUndo.disabled = !_drawHistory.length;
+  if (drawRedo) drawRedo.disabled = !_drawRedo.length;
+  const fogUndoBtn = document.getElementById('vtt-fog-undo-btn');
+  const fogRedoBtn = document.getElementById('vtt-fog-redo-btn');
+  if (fogUndoBtn) fogUndoBtn.disabled = !fogCanUndo();
+  if (fogRedoBtn) fogRedoBtn.disabled = !fogCanRedo();
+  const fogClear = document.getElementById('vtt-fog-clear-btn');
+  if (fogClear) fogClear.disabled = !(VS.activePage?.fogOps || []).length;
+  const fogToggle = document.getElementById('vtt-fog-toggle');
+  if (fogToggle) {
+    const on = !!VS.activePage?.fogEnabled;
+    fogToggle.classList.toggle('active', on);
+    fogToggle.setAttribute('aria-checked', String(on));
+    const status = fogToggle.querySelector('[data-fog-status]');
+    if (status) status.textContent = on ? 'Actif sur cette page' : 'Coupé — carte entièrement visible';
+  }
+  document.getElementById('vtt-structure-help')?.classList.toggle('open', _vttStructureHelp);
+  document.getElementById('vtt-structure-help-btn')?.classList.toggle('active', _vttStructureHelp);
+  document.querySelectorAll('[data-vtt-panel-collapse]').forEach(btn => {
+    const panel = btn.dataset.vttPanelCollapse;
+    btn.innerHTML = _vttToolIcon(_vttToolPanelCollapsed[panel] ? 'max' : 'min');
+    btn.title = _vttToolPanelCollapsed[panel] ? 'Déplier' : 'Replier';
+  });
+  _vttRefreshRulerMeasure();
+  const hint = document.querySelector('.vtt-tool-panel:not([hidden]) [data-vtt-tool-hint]');
+  if (hint) hint.textContent = _vttToolHint();
+  requestAnimationFrame(_vttPositionToolPanel);
 }
 // ── Courir : double le mouvement de base pour ce tour ───────────────
 async function _vttCourir(id) {
@@ -11771,14 +11929,25 @@ function _moveSelectedBy(dc, dr, selectionIds = null) {
   _scheduleKeyboardFlush();
 }
 
-function _vttFogTool(t) { if (!_vttAdvancedPremium()) return _vttPremiumInfo(); return fogSetEditTool(t, VS.activePage); }
-function _vttFogUndo() { if (!_vttAdvancedPremium()) return _vttPremiumInfo(); if (!fogUndo()) showNotif('Rien à annuler', 'info'); }
-function _vttFogRedo() { if (!_vttAdvancedPremium()) return _vttPremiumInfo(); if (!fogRedo()) showNotif('Rien à rétablir', 'info'); }
+function _vttFogTool(t) {
+  if (!_vttAdvancedPremium()) return _vttPremiumInfo();
+  _vttFogActiveTool = t;
+  fogSetEditTool(t, VS.activePage);
+  _vttRefreshToolPanels();
+}
+function _vttFogUndo() { if (!_vttAdvancedPremium()) return _vttPremiumInfo(); if (!fogUndo()) showNotif('Rien à annuler', 'info'); _vttRefreshToolPanels(); }
+function _vttFogRedo() { if (!_vttAdvancedPremium()) return _vttPremiumInfo(); if (!fogRedo()) showNotif('Rien à rétablir', 'info'); _vttRefreshToolPanels(); }
 async function _vttToggleFog() {
   if (!_vttAdvancedPremium()) return _vttPremiumInfo();
   if (!VS.activePage) return;
   const next = !VS.activePage.fogEnabled;
-  await updateDoc(_pgRef(VS.activePage.id), { fogEnabled: next }).catch(() => showNotif('Erreur fog','error'));
+  VS.activePage.fogEnabled = next;
+  _vttRefreshToolPanels();
+  await updateDoc(_pgRef(VS.activePage.id), { fogEnabled: next }).catch(() => {
+    VS.activePage.fogEnabled = !next;
+    _vttRefreshToolPanels();
+    showNotif('Erreur fog','error');
+  });
 }
 async function _vttFogClearOps() {
   if (!_vttAdvancedPremium()) return _vttPremiumInfo();
@@ -11787,6 +11956,7 @@ async function _vttFogClearOps() {
   if (!n) { showNotif('Aucune zone de brouillard sur cette page', 'info'); return; }
   if (!await confirmModal(`Supprimer ${n} zone(s) de brouillard manuel de cette page ?`, { title: 'Brouillard', confirmLabel: 'Supprimer' })) return;
   await updateDoc(_pgRef(VS.activePage.id), { fogOps: [] }).catch(() => showNotif('Erreur', 'error'));
+  _vttRefreshToolPanels();
 }
 function _vttSwitchPage(id) { return _switchPage(id); }
 
@@ -11826,10 +11996,11 @@ function _vttDrawShape(shape) {
   _updateAnnotDraggable();
   const wrap = document.getElementById('vtt-canvas-wrap');
   if (wrap) wrap.style.cursor = shape === 'eraser' ? 'cell' : 'crosshair';
+  _vttRefreshToolPanels();
 }
 
 // Empile un nouvel id de tracé et invalide la pile de rétablissement (nouvelle action).
-function _pushDrawHistory(id) { _drawHistory.push(id); _drawRedo = []; }
+function _pushDrawHistory(id) { _drawHistory.push(id); _drawRedo = []; _vttRefreshToolPanels(); }
 
 // Annule le dernier tracé de la session (bouton ↩ et Ctrl+Z). Mémorise la donnée
 // annulée pour permettre le rétablissement (Ctrl+Y).
@@ -11839,6 +12010,7 @@ function _vttUndoDraw() {
   const data = _annotations[lastId]?.data;
   if (data) _drawRedo.push({ id: lastId, data: { ...data } }); // capture avant suppression
   deleteDoc(_annotRef(lastId)).catch(() => {});
+  _vttRefreshToolPanels();
 }
 
 // Rétablit le dernier tracé annulé (bouton ↪ et Ctrl+Y). Recrée l'annotation avec
@@ -11851,6 +12023,7 @@ function _vttRedoDraw() {
     console.error('[VTT] redo annotation', err?.code, err?.message);
     showNotif('Erreur rétablissement', 'error');
   });
+  _vttRefreshToolPanels();
 }
 
 // Gomme : supprime l'annotation (éditable) sous le curseur. Utilise la détection de
@@ -11873,16 +12046,15 @@ function _eraseAtPointer() {
 }
 function _vttDrawColor(color) {
   _drawColor = color;
-  document.querySelectorAll('.vtt-draw-color').forEach(b => b.classList.toggle('active', b.dataset.color === color));
+  _vttRefreshToolPanels();
 }
 function _vttDrawWidth(w) {
-  _drawWidth = w;
-  document.querySelectorAll('.vtt-draw-wbtn').forEach(b => b.classList.toggle('active', +b.dataset.w === w));
+  _drawWidth = Number(w);
+  _vttRefreshToolPanels();
 }
 function _vttToggleDrawFill() {
   _drawFill = !_drawFill;
-  const btn = document.getElementById('vtt-draw-fill-btn');
-  if (btn) { btn.textContent = _drawFill ? '◼' : '◻'; btn.classList.toggle('active', _drawFill); }
+  _vttRefreshToolPanels();
 }
 async function _vttClearAnnots() {
   if (!VS.activePage) return;
@@ -13622,17 +13794,12 @@ async function _handleUpload(file) {
 // ── Outil + clavier ─────────────────────────────────────────────────
 function _setTool(tool) {
   VS.tool = tool;
+  _vttToolPanel = ['ruler','draw','walls'].includes(tool) ? tool : null;
   document.querySelectorAll('.vtt-tool[data-tool]').forEach((b) => {
     const active = b.dataset.tool === tool;
     b.classList.toggle('active', active);
     b.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
-  // Draw bar
-  const drawBar = document.getElementById('vtt-draw-bar');
-  if (drawBar) drawBar.style.display = tool === 'draw' ? 'flex' : 'none';
-  // Walls bar
-  const wallsBar = document.getElementById('vtt-walls-bar');
-  if (wallsBar) wallsBar.style.display = tool === 'walls' ? 'flex' : 'none';
   // Curseur
   const wrap = document.getElementById('vtt-canvas-wrap');
   if (wrap) wrap.style.cursor = (tool === 'ruler' || tool === 'draw' || tool === 'walls') ? 'crosshair' : '';
@@ -13649,6 +13816,7 @@ function _setTool(tool) {
   _updateTokenDraggable();
   // Draggability des annotations
   _updateAnnotDraggable();
+  _vttRefreshToolPanels();
 }
 // Directions : flèches (4 cardinales) + pavé numérique (8 dirs)
 const _MOVE_KEYS = {
@@ -13793,6 +13961,13 @@ function _keyHandler(e) {
   if (e.key === 'Escape') {
     // a) Modale ouverte → la modale gère sa propre fermeture (ne pas désélectionner derrière).
     if (document.getElementById('modal-overlay')?.classList.contains('show')) return;
+    // Le panneau des raccourcis est purement informatif : il se ferme avant
+    // toute annulation d'action sur la carte.
+    if (_vttToolPanel === 'keys') {
+      _vttOpenKeyboardHelp();
+      e.preventDefault();
+      return;
+    }
     // b) Visée en cours → écouteur dédié (_aimCancel) s'en charge.
     if (_aimOpt || _aimSrcId) return;
     // c) Fermer un panneau flottant / le HUD d'action (même si un de leurs champs a le focus).
@@ -13812,6 +13987,11 @@ function _keyHandler(e) {
 
   // Autres raccourcis : ignorés quand la frappe vise un champ de saisie.
   if (typingTarget) return;
+  if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    _vttOpenKeyboardHelp();
+    return;
+  }
   // Entrée : ferme le polygone en cours.
   if (e.key === 'Enter' && _polyActive) { e.preventDefault(); _polyFinish(); return; }
   // Ctrl+C / Ctrl+V : copier / coller la sélection (tokens + dessins)
@@ -13829,7 +14009,24 @@ function _keyHandler(e) {
   if ((e.key==='r' || e.key==='R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
     if (_zoneCtx) return;
     e.preventDefault();
-    _vttTool('ruler');
+    _setTool(VS.tool === 'ruler' ? 'select' : 'ruler');
+    return;
+  }
+  if ((e.key==='v' || e.key==='V') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    _setTool('select');
+    return;
+  }
+  if ((e.key==='d' || e.key==='D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    _setTool(VS.tool === 'draw' ? 'select' : 'draw');
+    return;
+  }
+  if ((e.key==='m' || e.key==='M') && !e.ctrlKey && !e.metaKey && !e.altKey && STATE.isAdmin) {
+    e.preventDefault();
+    if (!_vttAdvancedPremium()) _vttPremiumInfo();
+    else _setTool(VS.tool === 'walls' ? 'select' : 'walls');
+    return;
   }
   // Touche C : ouvre/ferme la mini-fiche du personnage contrôlé.
   if ((e.key==='c' || e.key==='C') && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -14152,153 +14349,119 @@ export function _vttLogSingleTargetFields(targetIds = []) {
 // ré-affiche plus de la session (persiste aux re-rendus et à la navigation SPA).
 let _vttRotateDismissed = (() => { try { return sessionStorage.getItem('vtt-rotate-dismissed') === '1'; } catch { return false; } })();
 
+function _vttRailButton(id, label, shortcut, description, { tool = '', panel = '', active = false, extra = '' } = {}) {
+  return `<button class="vtt-tool${active ? ' active' : ''}${extra ? ` ${extra}` : ''}"
+      ${tool ? `data-tool="${tool}" data-vtt-fn="_vttTool" data-vtt-args="${tool}" aria-pressed="${active}"` : ''}
+      ${panel ? `data-tool-panel="${panel}"` : ''}
+      ${!tool && id === 'center' ? 'data-vtt-fn="_vttCenterOnMyToken"' : ''}
+      ${!tool && id === 'perf' ? `data-vtt-fn="_vttToggleLowFx" aria-pressed="${vttLowFx()}"` : ''}
+      ${!tool && id === 'keys' ? 'data-vtt-fn="_vttOpenKeyboardHelp"' : ''}
+      aria-label="${label}">
+    ${_vttToolIcon(id)}${shortcut ? `<span class="vtt-tool-key">${shortcut}</span>` : ''}
+    <span class="vtt-tool-tooltip" role="tooltip"><span><strong>${label}</strong>${shortcut ? `<kbd>${shortcut}</kbd>` : ''}</span><small>${description}</small></span>
+  </button>`;
+}
+
+function _vttPanelHeader(panel, title, shortcut, collapsible = true) {
+  return `<header class="vtt-tool-panel-head"><h3>${title}</h3>${shortcut ? `<kbd>${shortcut}</kbd>` : ''}<span class="vtt-tool-panel-spacer"></span>
+    ${collapsible ? `<button class="vtt-tool-panel-icon" data-vtt-fn="_vttToolPanelToggle" data-vtt-args="${panel}" data-vtt-panel-collapse="${panel}" aria-label="Replier">${_vttToolIcon('min')}</button>` : ''}
+    <button class="vtt-tool-panel-icon" data-vtt-fn="_vttToolPanelClose" data-vtt-args="${panel}" aria-label="Fermer">${_vttToolIcon('x')}</button>
+  </header>`;
+}
+
+function _vttToolbarMarkup() {
+  const colors = ['#ef4444','#ff8c42','#f59e0b','#ffe600','#22c38e','#14b8a6','#4f8cff','#8b5cf6','#b47fff','#ec4899','#ffffff','#9ca3af','#1a1a2e'];
+  const shape = (id, label) => `<button class="vtt-draw-btn${_drawShape === id ? ' active' : ''}" id="vtt-ds-${id}" data-vtt-fn="_vttDrawShape" data-vtt-args="${id}" aria-label="${label}" title="${label}">${_vttToolIcon(id)}</button>`;
+  const fogChip = (id, label) => `<button class="vtt-tool-chip${_vttFogActiveTool === id ? ' active' : ''}" data-fog-tool="${id}" data-vtt-fn="_vttFogTool" data-vtt-args="${id}">${_vttToolIcon(id)}<span>${label}</span></button>`;
+  const shortcutRow = (label, keys) => `<li><span>${label}</span><span>${keys.map(key => `<kbd>${key}</kbd>`).join('<i>+</i>')}</span></li>`;
+  return `<div class="vtt-tool-shell">
+    <div class="vtt-tool-float-tools" role="toolbar" aria-label="Outils de la table virtuelle">
+      <div class="vtt-tool-group">
+        ${_vttRailButton('select','Sélection','V','Déplacer les tokens et naviguer sur la carte.',{tool:'select',active:true})}
+        ${_vttRailButton('ruler','Règle','R','Mesurer une distance en cases et en mètres.',{tool:'ruler',panel:'ruler'})}
+        ${_vttRailButton('draw','Dessin','D','Annoter la carte avec des formes et des couleurs.',{tool:'draw',panel:'draw'})}
+        ${STATE.isAdmin ? (_vttAdvancedPremium()
+          ? _vttRailButton('walls','Structure','M','Murs, portes, vitres, lumière et brouillard.',{tool:'walls',panel:'walls'})
+          : `<button class="vtt-tool vtt-tool-premium" data-vtt-fn="_vttPremiumInfo" aria-label="Structure Premium">${_vttToolIcon('walls')}<span class="vtt-tool-key">M</span><span class="vtt-tool-tooltip"><span><strong>Structure</strong><kbd>M</kbd></span><small>Disponible avec le VTT avancé Premium.</small></span></button>`) : ''}
+      </div>
+      <div class="vtt-tool-group">${_vttRailButton('center','Recentrer','','Ramène la vue sur ton personnage.')}</div>
+      <div class="vtt-tool-group">
+        ${_vttRailButton('perf','Mode performance','','Coupe les effets coûteux pour fluidifier la table.',{active:vttLowFx(),extra:'vtt-tool-performance'})}
+        ${_vttRailButton('keys','Raccourcis','?','Affiche toutes les commandes clavier.',{panel:'keys'})}
+      </div>
+    </div>
+
+    <section id="vtt-ruler-bar" class="vtt-tool-panel vtt-tool-panel--ruler" data-panel="ruler" hidden>
+      ${_vttPanelHeader('ruler','Règle','R')}
+      <div class="vtt-tool-panel-body"><div id="vtt-ruler-value" class="vtt-ruler-value"><b>—</b><span>Aucune mesure</span></div></div>
+      <footer class="vtt-tool-panel-foot"><b>Clic</b> pose un point · <b>clic droit</b> annule<br>1 case = ${CELL_M.toLocaleString('fr-FR')} m</footer>
+    </section>
+
+    <section id="vtt-draw-bar" class="vtt-tool-panel vtt-draw-bar" data-panel="draw" hidden>
+      ${_vttPanelHeader('draw','Dessin','D')}
+      <div class="vtt-tool-panel-body">
+        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Forme</span><div class="vtt-tool-segment vtt-draw-shapes">${shape('pencil','Crayon libre')}${shape('line','Ligne')}${shape('rect','Rectangle')}${shape('circle','Cercle')}${shape('poly','Polygone')}${shape('eraser','Gomme')}</div></div>
+        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Couleur</span><div class="vtt-draw-colors">${colors.map(color => `<button class="vtt-draw-color${color === _drawColor ? ' active' : ''}" data-color="${color}" data-vtt-fn="_vttDrawColor" data-vtt-args="${color}" style="--draw-color:${color}" aria-label="Couleur ${color}"></button>`).join('')}</div></div>
+        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Trait</span><div class="vtt-tool-segment vtt-draw-widths">${[2,4,6,10,16].map(width => `<button class="vtt-draw-wbtn${width === _drawWidth ? ' active' : ''}" data-w="${width}" data-vtt-fn="_vttDrawWidth" data-vtt-args="${width}" aria-label="Trait ${width} pixels"><span style="width:${Math.min(width + 2, 16)}px;height:${Math.min(width + 2, 16)}px"></span></button>`).join('')}</div></div>
+        <div class="vtt-tool-actions"><button class="vtt-tool-chip" id="vtt-draw-fill-btn" data-vtt-fn="_vttToggleDrawFill" aria-pressed="false">${_vttToolIcon('fill')}<span>Remplir</span></button><span></span><button class="vtt-tool-panel-icon" id="vtt-draw-undo-btn" data-vtt-fn="_vttUndoDraw" title="Annuler (Ctrl+Z)">${_vttToolIcon('undo')}</button><button class="vtt-tool-panel-icon" id="vtt-draw-redo-btn" data-vtt-fn="_vttRedoDraw" title="Rétablir (Ctrl+Y)">${_vttToolIcon('redo')}</button>${STATE.isAdmin ? `<button class="vtt-tool-panel-icon danger" data-vtt-fn="_vttClearAnnots" title="Effacer les annotations">${_vttToolIcon('trash')}</button>` : ''}</div>
+      </div>
+      <footer class="vtt-tool-panel-foot" data-vtt-tool-hint></footer>
+    </section>
+
+    ${STATE.isAdmin ? `<section id="vtt-walls-bar" class="vtt-tool-panel vtt-walls-bar" data-panel="walls" hidden>
+      ${_vttPanelHeader('walls','Structure','M')}
+      <div class="vtt-tool-panel-body">
+        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Tracer</span><div class="vtt-structure-kinds">
+          <button class="vtt-structure-kind active" data-fog-tool="wall" data-vtt-fn="_vttFogTool" data-vtt-args="wall"><i class="wall"></i><span><b>Mur</b><small>Bloque vue et passage</small></span></button>
+          <button class="vtt-structure-kind" data-fog-tool="door" data-vtt-fn="_vttFogTool" data-vtt-args="door"><i class="door"></i><span><b>Porte</b><small>Fermée puis ouvrable</small></span></button>
+          <button class="vtt-structure-kind" data-fog-tool="window" data-vtt-fn="_vttFogTool" data-vtt-args="window"><i class="window"></i><span><b>Vitre</b><small>Vision libre, passage bloqué</small></span></button>
+        </div></div>
+        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Lumière</span><div class="vtt-fog-toggle-row"><span><b>Éclairage dynamique</b><small data-fog-status>Coupé — carte entièrement visible</small></span><button id="vtt-fog-toggle" class="vtt-switch" data-vtt-fn="_vttToggleFog" role="switch" aria-checked="false"><i></i></button></div><div class="vtt-tool-chip-row">${fogChip('light','Source')}</div></div>
+        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Brouillard</span><div class="vtt-tool-chip-row">${fogChip('hide','Cacher')}${fogChip('reveal','Révéler')}<button id="vtt-fog-clear-btn" class="vtt-tool-chip danger" data-vtt-fn="_vttFogClearOps">Vider</button></div></div>
+        <div class="vtt-tool-actions vtt-structure-actions">${fogChip('eraser','Gomme')}<span></span><button id="vtt-fog-undo-btn" class="vtt-tool-panel-icon" data-vtt-fn="_vttFogUndo" title="Annuler">${_vttToolIcon('undo')}</button><button id="vtt-fog-redo-btn" class="vtt-tool-panel-icon" data-vtt-fn="_vttFogRedo" title="Rétablir">${_vttToolIcon('redo')}</button><button id="vtt-structure-help-btn" class="vtt-tool-panel-icon" data-vtt-fn="_vttStructureHelpToggle" title="Aide">${_vttToolIcon('help')}</button></div>
+        <div id="vtt-structure-help" class="vtt-structure-help"><p><kbd>Shift</kbd> tracé libre · <kbd>Alt</kbd> précision ×2</p><p>Hors édition, clique une porte ou une vitre pour l’ouvrir.</p><p><i class="ok"></i> raccordé <i class="bad"></i> isolé <i class="snap"></i> aimantation</p></div>
+      </div>
+      <footer class="vtt-tool-panel-foot" data-vtt-tool-hint></footer>
+    </section>` : ''}
+
+    <section id="vtt-keys-bar" class="vtt-tool-panel vtt-tool-panel--keys" data-panel="keys" hidden>
+      ${_vttPanelHeader('keys','Raccourcis','?',false)}
+      <div class="vtt-tool-panel-body vtt-shortcut-groups">
+        <div><span class="vtt-tool-section-label">Outils</span><ul>${shortcutRow('Sélection',['V'])}${shortcutRow('Règle',['R'])}${shortcutRow('Dessin',['D'])}${STATE.isAdmin ? shortcutRow('Structure',['M']) : ''}${shortcutRow('Revenir à la sélection',['Échap'])}</ul></div>
+        <div><span class="vtt-tool-section-label">Édition</span><ul>${shortcutRow('Annuler',['Ctrl','Z'])}${shortcutRow('Rétablir',['Ctrl','Y'])}${shortcutRow('Copier / coller',['Ctrl','C / V'])}${shortcutRow('Retirer',['Suppr'])}${shortcutRow('Fermer le polygone',['Entrée'])}</ul></div>
+        <div><span class="vtt-tool-section-label">Table</span><ul>${shortcutRow('Mini-fiche',['C'])}${shortcutRow('Roue d’émotes',['E'])}${shortcutRow('Émote rapide',['1 — 8'])}</ul></div>
+      </div>
+    </section>
+  </div>`;
+}
+
 async function _vttMountTable(content) {
   content.innerHTML = appSplashHtml('Chargement de la table…');
-  // Lancer en parallèle : téléchargement Konva + reads Firestore non critiques
-  const _konvaP   = _loadKonva();
-  const _emotesP  = _loadEmotes();
-  const _skillsP  = _loadDiceSkills();
-  const _formatsP = Promise.all([
-    loadWeaponFormats(),
-    loadDamageTypes(),
-    getDocData('world', 'combat_styles').catch(() => null),
-  ]);
+  const _konvaP = _loadKonva();
+  const _emotesP = _loadEmotes();
+  const _skillsP = _loadDiceSkills();
+  const _formatsP = Promise.all([loadWeaponFormats(), loadDamageTypes(), getDocData('world', 'combat_styles').catch(() => null)]);
   try { await _konvaP; }
-  catch {
-    content.innerHTML='<div style="padding:2rem;color:var(--text-dim)">Impossible de charger Konva.js.</div>';
-    content.style.overflow=''; return;
-  }
-  // Les options d'attaque sont interactives dès le premier rendu : les formats
-  // et types doivent donc être présents avant d'afficher la table. Les lectures
-  // ont déjà tourné en parallèle du chargement de Konva et viennent du cache live.
+  catch { content.innerHTML='<div style="padding:2rem;color:var(--text-dim)">Impossible de charger Konva.js.</div>'; content.style.overflow=''; return; }
   const [weaponFormats, damageTypes, combatStylesDoc] = await _formatsP;
   VS.weaponFormats = weaponFormats;
   VS.damageTypes = damageTypes;
   VS.combatStyles = normalizeCombatStyles(combatStylesDoc?.styles || defaultCombatStyles());
   content.innerHTML=_buildHtml();
-  // Overlay "tourne ton téléphone" — visible uniquement en portrait sur petit
-  // écran (piloté par media-query CSS). En paysage il disparaît et la table
-  // s'utilise nativement (tactile correct, pas de rotation CSS du canvas).
-  // Bouton d'échappatoire : si l'orientation ne bascule jamais (verrouillage
-  // d'écran, navigateur in-app, émulateur…), le joueur n'est jamais bloqué.
-  content.insertAdjacentHTML('beforeend', `
-    <div class="vtt-rotate-prompt${_vttRotateDismissed ? ' dismissed' : ''}" aria-hidden="true">
-      <div class="vtt-rotate-phone">📱</div>
-      <div class="vtt-rotate-title">Tourne ton téléphone</div>
-      <div class="vtt-rotate-text">La Table Virtuelle est plus confortable en mode paysage.</div>
-      <button class="vtt-rotate-dismiss" data-vtt-fn="_vttDismissRotate">Utiliser quand même</button>
-    </div>`);
+  content.insertAdjacentHTML('beforeend', `<div class="vtt-rotate-prompt${_vttRotateDismissed ? ' dismissed' : ''}" aria-hidden="true"><div class="vtt-rotate-phone">📱</div><div class="vtt-rotate-title">Tourne ton téléphone</div><div class="vtt-rotate-text">La Table Virtuelle est plus confortable en mode paysage.</div><button class="vtt-rotate-dismiss" data-vtt-fn="_vttDismissRotate">Utiliser quand même</button></div>`);
   const wrap=document.getElementById('vtt-canvas-wrap');
   if (!wrap) return;
   _initCanvas(wrap);
   _timerStartTick();
-  // Floats injectés APRÈS Konva pour être au-dessus des canvas layers
+  _vttToolPanel = null;
   const _tf = document.createElement('div');
   _tf.className = 'vtt-tool-float';
-  _tf.innerHTML = `
-    ${STATE.isAdmin ? `<div class="vtt-canvas-quickbar" role="toolbar" aria-label="Commandes de la session">
-      <button class="vtt-canvas-control vtt-map-lock" id="vtt-map-mode-btn" data-vtt-fn="_vttToggleMapMode" title="Images verrouillées — cliquer pour modifier leur placement" aria-label="Déverrouiller les images" aria-pressed="false" data-locked="true">
-        <span class="vtt-canvas-ctl-icon" aria-hidden="true">🔒</span><span class="vtt-canvas-ctl-copy"><strong>Images</strong><small>Verrouillées</small></span>
-      </button>
-    </div>` : ''}
-    <div class="vtt-tool-float-tools" role="toolbar" aria-label="Outils de la table virtuelle">
-      <button class="vtt-tool active" data-tool="select" data-vtt-fn="_vttTool" data-vtt-args="select" title="↖ Sélection (V)" aria-pressed="true">↖</button>
-      <button class="vtt-tool" data-tool="ruler"  data-vtt-fn="_vttTool" data-vtt-args="ruler"  title="📏 Règle (R) — clic gauche pour mesurer · clic droit pour annuler" aria-pressed="false">📏</button>
-      <button class="vtt-tool" data-tool="draw"   data-vtt-fn="_vttTool" data-vtt-args="draw"   title="✏️ Dessin (D)" aria-pressed="false">✏️</button>
-      ${STATE.isAdmin ? (_vttAdvancedPremium()
-        ? `<button class="vtt-tool" data-tool="walls" data-vtt-fn="_vttTool" data-vtt-args="walls" title="🧱 Murs / Éclairage dynamique (M)" aria-pressed="false">🧱</button>`
-        : `<button class="vtt-tool vtt-tool-premium" data-vtt-fn="_vttPremiumInfo" title="Premium : murs, brouillard et éclairage dynamique">🧱</button>`) : ''}
-      <span class="vtt-tool-sep" aria-hidden="true"></span>
-      <button class="vtt-tool" data-vtt-fn="_vttCenterOnMyToken" title="Recentrer sur mon personnage (⌖)" aria-label="Recentrer sur mon personnage">⌖</button>
-      <button class="vtt-tool" data-vtt-fn="_vttOpenKeyboardHelp" title="Raccourcis clavier (?)" aria-label="Afficher les raccourcis clavier">?</button>
-      <button class="vtt-tool${vttLowFx() ? ' active' : ''}" data-vtt-fn="_vttToggleLowFx" title="Mode performance — coupe les ombres et bride la résolution pour fluidifier le jeu sur les machines lentes" aria-pressed="${vttLowFx()}">⚡</button>
-    </div>
-    <div id="vtt-draw-bar" class="vtt-draw-bar" style="display:none">
-      <div class="vtt-draw-row">
-        <span class="vtt-draw-glabel">Forme</span>
-        <div class="vtt-draw-group">
-          <button class="vtt-draw-btn active" id="vtt-ds-pencil"  data-vtt-fn="_vttDrawShape" data-vtt-args="pencil"  title="Crayon libre">✏️</button>
-          <button class="vtt-draw-btn"        id="vtt-ds-line"    data-vtt-fn="_vttDrawShape" data-vtt-args="line"    title="Ligne">╱</button>
-          <button class="vtt-draw-btn"        id="vtt-ds-rect"    data-vtt-fn="_vttDrawShape" data-vtt-args="rect"    title="Rectangle">⬜</button>
-          <button class="vtt-draw-btn"        id="vtt-ds-circle"  data-vtt-fn="_vttDrawShape" data-vtt-args="circle"  title="Cercle">⬭</button>
-          <button class="vtt-draw-btn"        id="vtt-ds-poly"    data-vtt-fn="_vttDrawShape" data-vtt-args="poly"    title="Polygone (triangle, etc.) — un clic par sommet · double-clic ou clic sur le 1er point pour fermer · clic droit annule le dernier sommet · Échap annule">△</button>
-          <button class="vtt-draw-btn"        id="vtt-ds-eraser"  data-vtt-fn="_vttDrawShape" data-vtt-args="eraser"  title="Gomme — passe sur un tracé pour l'effacer">🧽</button>
-        </div>
-      </div>
-      <div class="vtt-draw-row">
-        <span class="vtt-draw-glabel">Couleur</span>
-        <div class="vtt-draw-group vtt-draw-colors">
-          ${['#ef4444','#ff8c42','#f59e0b','#ffe600','#22c38e','#14b8a6','#4f8cff','#8b5cf6','#b47fff','#ec4899','#ffffff','#9ca3af','#1a1a2e'].map((c,i)=>
-            `<button class="vtt-draw-color${i===0?' active':''}" data-color="${c}" data-vtt-fn="_vttDrawColor" data-vtt-args="${c}" style="background:${c}" title="${c}"></button>`
-          ).join('')}
-        </div>
-      </div>
-      <div class="vtt-draw-row">
-        <span class="vtt-draw-glabel">Trait</span>
-        <div class="vtt-draw-group">
-          ${[2,4,6,10,16].map((w,i)=>
-            `<button class="vtt-draw-wbtn${i===0?' active':''}" data-w="${w}" data-vtt-fn="_vttDrawWidth" data-vtt-args="${w}" title="${w}px"><span class="vtt-draw-wdot" style="width:${Math.min(w,14)}px;height:${Math.min(w,14)}px"></span></button>`
-          ).join('')}
-        </div>
-      </div>
-      <div class="vtt-draw-row">
-        <span class="vtt-draw-glabel">Actions</span>
-        <div class="vtt-draw-group">
-          <button class="vtt-draw-btn" id="vtt-draw-fill-btn" data-vtt-fn="_vttToggleDrawFill" title="Remplir les rectangles/cercles">◻</button>
-          <button class="vtt-draw-btn" id="vtt-draw-undo-btn" data-vtt-fn="_vttUndoDraw" title="Annuler le dernier tracé (Ctrl+Z)">↩</button>
-          <button class="vtt-draw-btn" id="vtt-draw-redo-btn" data-vtt-fn="_vttRedoDraw" title="Rétablir le dernier tracé annulé (Ctrl+Y)">↪</button>
-          ${STATE.isAdmin?`<button class="vtt-draw-btn vtt-draw-btn--danger" data-vtt-fn="_vttClearAnnots" title="Tout effacer les annotations de la page">🗑</button>`:''}
-        </div>
-      </div>
-    </div>
-    ${STATE.isAdmin?`
-    <div id="vtt-walls-bar" class="vtt-walls-bar" style="display:none">
-      <div class="vtt-walls-row">
-        <div class="vtt-walls-grp vtt-walls-grp--structures">
-          <span class="vtt-walls-grp-lbl">Structures</span>
-          <button class="vtt-btn-sm vtt-wall-kind active" data-fog-tool="wall" data-vtt-fn="_vttFogTool" data-vtt-args="wall" title="Tracer un mur : bloque la vision et le déplacement">
-            <span class="vtt-wall-kind-icon">🧱</span><span><strong>Mur</strong><small>Bloque vision + passage</small></span>
-          </button>
-          <button class="vtt-btn-sm vtt-wall-kind" data-fog-tool="door" data-vtt-fn="_vttFogTool" data-vtt-args="door" title="Tracer une porte fermée, ouvrable ensuite sur la carte">
-            <span class="vtt-wall-kind-icon">🚪</span><span><strong>Porte</strong><small>Créée fermée · ouvrable</small></span>
-          </button>
-          <button class="vtt-btn-sm vtt-wall-kind" data-fog-tool="window" data-vtt-fn="_vttFogTool" data-vtt-args="window" title="Tracer une vitre fermée : laisse voir mais bloque le passage">
-            <span class="vtt-wall-kind-icon">◇</span><span><strong>Vitre</strong><small>Laisse voir · bloque le passage</small></span>
-          </button>
-        </div>
-        <div class="vtt-walls-grp">
-          <span class="vtt-walls-grp-lbl">Lumière</span>
-          <button class="vtt-btn-sm"        data-fog-tool="light"  data-vtt-fn="_vttFogTool" data-vtt-args="light"  title="Placer une source lumineuse">💡 Source</button>
-          <button class="vtt-btn-sm" id="vtt-fog-toggle" data-vtt-fn="_vttToggleFog" title="Activer / désactiver l'éclairage dynamique sur cette page" style="color:#9ca3af">👁 Éclairage OFF</button>
-        </div>
-        <div class="vtt-walls-grp">
-          <span class="vtt-walls-grp-lbl">Brouillard</span>
-          <button class="vtt-btn-sm"        data-fog-tool="hide"   data-vtt-fn="_vttFogTool" data-vtt-args="hide"   title="Cacher une zone (drag rectangle)">🌑 Cacher</button>
-          <button class="vtt-btn-sm"        data-fog-tool="reveal" data-vtt-fn="_vttFogTool" data-vtt-args="reveal" title="Révéler une zone (drag rectangle, prioritaire sur le LOS)">🔦 Révéler</button>
-          <button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttFogClearOps" title="Supprimer toutes les zones de brouillard manuel de cette page">🧹 Vider</button>
-        </div>
-        <div class="vtt-walls-grp">
-          <span class="vtt-walls-grp-lbl">Édition</span>
-          <button class="vtt-btn-sm"        data-fog-tool="eraser" data-vtt-fn="_vttFogTool" data-vtt-args="eraser" title="Effacer (clic sur mur, lumière ou zone de brouillard)">🗑 Effacer</button>
-          <button class="vtt-btn-sm"        data-vtt-fn="_vttFogUndo" title="Annuler la dernière pose (Ctrl+Z)">↩ Annuler</button>
-          <button class="vtt-btn-sm"        data-vtt-fn="_vttFogRedo" title="Rétablir la dernière pose annulée (Ctrl+Y)">↪ Rétablir</button>
-        </div>
-      </div>
-      <div class="vtt-walls-bar-hint">
-        <div class="vtt-obstacle-legend">
-          <span><i class="is-wall"></i><b>Mur</b> : toujours bloquant</span>
-          <span><i class="is-closed"></i><b>Fermée</b> : passage bloqué</span>
-          <span><i class="is-open"></i><b>Ouverte</b> : passage libre</span>
-          <span><i class="is-window"></i><b>Vitre</b> : la vision passe toujours</span>
-        </div>
-        Hors édition, clique une porte ou une vitre pour l’ouvrir ou la fermer. En édition, un clic affiche directement ses réglages.<br>
-        Grille · Brouillard : demi-case · <kbd>Alt</kbd> = précision ×2 · <kbd>Shift</kbd> = libre · <kbd>Ctrl</kbd>+<kbd>Z</kbd> = annuler la pose<br>
-        <span class="vtt-fog-legend"><span class="vtt-fog-dot vtt-fog-dot--ok"></span>sommet raccordé ·
-        <span class="vtt-fog-dot vtt-fog-dot--bad"></span>sommet isolé (fuite possible) ·
-        <span class="vtt-fog-dot vtt-fog-dot--snap"></span>aimantation pendant tracé</span>
-      </div>
-    </div>`:''}`;
+  _tf.innerHTML = `${STATE.isAdmin ? `<div class="vtt-canvas-quickbar" role="toolbar" aria-label="Commandes de la session"><button class="vtt-canvas-control vtt-map-lock" id="vtt-map-mode-btn" data-vtt-fn="_vttToggleMapMode" title="Images verrouillées — cliquer pour modifier leur placement" aria-label="Déverrouiller les images" aria-pressed="false" data-locked="true"><span class="vtt-canvas-ctl-icon" aria-hidden="true">🔒</span><span class="vtt-canvas-ctl-copy"><strong>Images</strong><small>Verrouillées</small></span></button></div>` : ''}${_vttToolbarMarkup()}`;
   wrap.appendChild(_tf);
+  _vttRefreshToolPanels();
+  const repositionToolPanel = () => _vttPositionToolPanel();
+  window.addEventListener('resize', repositionToolPanel);
+  VS.unsubs.push(() => window.removeEventListener('resize', repositionToolPanel));
   if (STATE.isAdmin) {
     _renderSessionBtn();
     _setMapMode(false);
@@ -14400,7 +14563,10 @@ PAGES.vtt=renderVttPage;
 
 // Registre des actions pour le dispatcher data-vtt-fn
 export const VTT_ACTIONS = {
-  _vttOpenKeyboardHelp: () => document.dispatchEvent(new CustomEvent('app:open-keyboard-help')),
+  _vttOpenKeyboardHelp,
+  _vttToolPanelToggle,
+  _vttToolPanelClose,
+  _vttStructureHelpToggle,
   _vttDismissRotate: () => {
     _vttRotateDismissed = true;
     try { sessionStorage.setItem('vtt-rotate-dismissed', '1'); } catch {}
