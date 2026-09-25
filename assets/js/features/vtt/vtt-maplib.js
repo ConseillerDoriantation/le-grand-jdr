@@ -10,7 +10,6 @@ import { STATE } from '../../core/state.js';
 import { _esc, normalizeImageUrl } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { promptModal } from '../../shared/modal.js';
-import { CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import { db, doc, setDoc, updateDoc } from '../../config/firebase.js';
 import { _pgRef } from './vtt-refs.js';
 import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, githubPagesUrl } from '../../shared/github-folder.js';
@@ -69,8 +68,8 @@ export function _renderLibSection() {
     </div>`;
   }).join('');
   const rootCount = images.filter(i => !i.folderId).length;
-  const curLabel = _libFolder ? (curFolder?.name || 'Dossier') : 'Racine';
   const clearBtn = `<button class="vtt-tray-search-clr" data-vtt-fn="_vttLibSearchClear" title="Effacer"${_libSearch ? '' : ' hidden'}>✕</button>`;
+  const showTools = folders.length > 0 || images.length > 12 || !!_libSearch;
 
   const imgGrid = folderImages.length
     ? `<div class="vtt-lib-grid">${sorted.map(img => `
@@ -95,21 +94,13 @@ export function _renderLibSection() {
   el.innerHTML = `
     <div class="vtt-lib-command">
       <div class="vtt-lib-head">
-        <div>
-          <strong>${_esc(curLabel)}</strong>
-          <span><span data-lib-count>${folderImages.length}</span>/${folderImages.length} images · ${images.length} au total</span>
-        </div>
-        <div class="vtt-lib-actions">
-          <button class="vtt-lib-action" data-vtt-fn="_vttAddImageUrl" title="Ajouter une image par URL" aria-label="Ajouter une image par URL">🔗</button>
-          ${CLOUDINARY_ENABLED ? `<button class="vtt-lib-action" data-vtt-fn="_vttUploadClick" title="Importer une image" aria-label="Importer une image">⬆</button>
-          <button class="vtt-lib-action" data-vtt-fn="_vttSetImgbbKey" title="Configurer l'hébergement d'images" aria-label="Configurer l'hébergement d'images">🔑</button>` : ''}
-          <button class="vtt-lib-action" data-vtt-fn="_vttLibImportGithub" title="Importer un dossier GitHub" aria-label="Importer un dossier GitHub">📥</button>
-          <button class="vtt-lib-action" data-vtt-fn="_vttLibCleanDuplicates" title="Nettoyer les doublons" aria-label="Nettoyer les doublons">🧹</button>
-          <button class="vtt-lib-action" data-vtt-fn="_vttLibNewFolder" title="Nouveau dossier" aria-label="Nouveau dossier">📁</button>
-        </div>
+        <strong>Images</strong>
+        <span><span data-lib-count>${folderImages.length}</span></span>
+        <i></i>
+        <button type="button" class="vtt-lib-import" data-vtt-fn="_vttLibImportMenu" data-vtt-args="$event" aria-label="Importer ou gérer les images"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Importer</button>
       </div>
-      <div class="vtt-tray-search">
-        <span class="vtt-tray-search-ic">🔍</span>
+      ${showTools ? `<div class="vtt-tray-search">
+        <svg class="vtt-tray-search-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
         <input type="text" class="vtt-tray-search-input" data-search="maplib" placeholder="Rechercher une image…"
           value="${_esc(_libSearch)}" data-vtt-fn="_vttLibSearch" data-vtt-on="input" data-vtt-args="$value">
         ${clearBtn}
@@ -119,7 +110,7 @@ export function _renderLibSection() {
           <span>⌂</span><strong>Racine</strong><span class="vtt-lib-chip-cnt">${rootCount}</span>
         </div>
         ${folderChips}
-      </div>
+      </div>` : ''}
     </div>
     ${imgGrid}`;
   _applyLibSearch();

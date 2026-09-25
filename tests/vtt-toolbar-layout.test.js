@@ -37,10 +37,12 @@ test('les panneaux contextuels sont uniques, repliables et persistants', () => {
   assert.match(css, /\.vtt-tool-panel\.is-collapsed/);
 });
 
-test('les raccourcis V R D M et point interrogation pilotent le rail', () => {
-  for (const key of ['r','v','d','m']) assert.match(vtt, new RegExp(`e\\.key==='${key}'`));
+test('les raccourcis V R D M X et point interrogation pilotent le rail', () => {
+  for (const key of ['r','v','d','m','x']) assert.match(vtt, new RegExp(`e\\.key==='${key}'`));
   assert.match(vtt, /e\.key === '\?'/);
   assert.match(vtt, /if \(_vttToolPanel === 'keys'\)/);
+  assert.match(vtt, /_vttRailButton\('center','Recentrer','X'/);
+  assert.match(vtt, /shortcutRow\('Recentrer sur mon personnage',\['X'\]\)/);
 });
 
 test('le rail se compacte sur les écrans peu hauts et reste ancré à droite', () => {
