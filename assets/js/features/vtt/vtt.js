@@ -67,7 +67,8 @@ import {
 } from './vtt-refs.js';
 import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual, vttLowFx, setVttLowFx, _stripShadows } from './vtt-render.js';
-import { vttCanvasPixelRatio, vttPinchCameraTransform } from './vtt-fog-performance.js';
+import { fogHasUnlimitedVision, fogVisionRadiusCells, vttCanvasPixelRatio, vttPinchCameraTransform } from './vtt-fog-performance.js';
+import { vttStructureLegendSvg } from './vtt-wall-utils.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { attackRollHitsTarget, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
@@ -11691,9 +11692,26 @@ function _vttRefreshToolPanels() {
     const on = !!VS.activePage?.fogEnabled;
     fogToggle.classList.toggle('active', on);
     fogToggle.setAttribute('aria-checked', String(on));
-    const status = fogToggle.querySelector('[data-fog-status]');
-    if (status) status.textContent = on ? 'Actif sur cette page' : 'Coupé — carte entièrement visible';
+    const status = document.querySelector('[data-fog-status]');
+    if (status) status.textContent = on
+      ? (fogHasUnlimitedVision(VS.activePage) ? 'Actif · vision illimitée' : `Actif · vision partagée ${fogVisionRadiusCells(VS.activePage)} cases`)
+      : 'Coupé — carte entièrement visible';
   }
+  const visionToggle = document.getElementById('vtt-vision-unlimited-toggle');
+  if (visionToggle) {
+    const unlimited = fogHasUnlimitedVision(VS.activePage);
+    visionToggle.classList.toggle('active', unlimited);
+    visionToggle.setAttribute('aria-checked', String(unlimited));
+    visionToggle.disabled = !VS.activePage?.fogEnabled;
+  }
+  const visionStatus = document.querySelector('[data-vision-status]');
+  if (visionStatus) visionStatus.textContent = fogHasUnlimitedVision(VS.activePage)
+    ? 'Sans limite · murs respectés'
+    : `${fogVisionRadiusCells(VS.activePage)} cases autour du groupe`;
+  const lockVisibility = VS.activePage?.lockVisibility === 'discover' ? 'discover' : 'always';
+  document.querySelectorAll('[data-lock-visibility]').forEach(button => {
+    button.classList.toggle('active', button.dataset.lockVisibility === lockVisibility);
+  });
   document.getElementById('vtt-structure-help')?.classList.toggle('open', _vttStructureHelp);
   document.getElementById('vtt-structure-help-btn')?.classList.toggle('active', _vttStructureHelp);
   document.querySelectorAll('[data-vtt-panel-collapse]').forEach(btn => {
@@ -11949,6 +11967,40 @@ async function _vttToggleFog() {
     showNotif('Erreur fog','error');
   });
 }
+async function _vttToggleVisionUnlimited() {
+  if (!_vttAdvancedPremium()) return _vttPremiumInfo();
+  if (!VS.activePage?.fogEnabled) {
+    showNotif('Active d’abord l’éclairage dynamique sur cette scène.', 'info');
+    return;
+  }
+  const previous = fogHasUnlimitedVision(VS.activePage);
+  const next = !previous;
+  VS.activePage.visionUnlimited = next;
+  _vttRefreshToolPanels();
+  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+  await updateDoc(_pgRef(VS.activePage.id), { visionUnlimited: next }).catch(() => {
+    VS.activePage.visionUnlimited = previous;
+    _vttRefreshToolPanels();
+    fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+    showNotif('Impossible de modifier la portée de vision.', 'error');
+  });
+}
+async function _vttSetLockVisibility(mode) {
+  if (!_vttAdvancedPremium()) return _vttPremiumInfo();
+  if (!VS.activePage) return;
+  const next = mode === 'discover' ? 'discover' : 'always';
+  const previous = VS.activePage.lockVisibility || 'always';
+  if (next === previous) return;
+  VS.activePage.lockVisibility = next;
+  _vttRefreshToolPanels();
+  fogRenderWalls(VS.activePage, STATE.isAdmin);
+  await updateDoc(_pgRef(VS.activePage.id), { lockVisibility:next }).catch(() => {
+    VS.activePage.lockVisibility = previous;
+    _vttRefreshToolPanels();
+    fogRenderWalls(VS.activePage, STATE.isAdmin);
+    showNotif('Impossible de modifier la visibilité des verrous.', 'error');
+  });
+}
 async function _vttFogClearOps() {
   if (!_vttAdvancedPremium()) return _vttPremiumInfo();
   if (!VS.activePage) return;
@@ -12082,7 +12134,7 @@ function _pgPreviewImageUrl(image) {
   }
   return normalizeImageUrl(String(image?.url || source).trim());
 }
-function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, mapImages=[] } = {}) {
+function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, visionUnlimited=false, mapImages=[] } = {}) {
   const canUseAdvancedVtt = _vttAdvancedPremium();
   const placedImages = (Array.isArray(mapImages) ? mapImages : []).filter(image => _pgPreviewImageUrl(image));
   const previewLayers = placedImages.map(image => {
@@ -12153,10 +12205,16 @@ function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, map
           </div>
           ${canUseAdvancedVtt ? `
           <label class="vtt-pgm-switch-row">
-            <input type="checkbox" id="${pfx}fog" ${fog?'checked':''}>
+            <input type="checkbox" id="${pfx}fog" ${fog?'checked':''} data-vtt-fn="_vttPgFogMode" data-vtt-on="change" data-vtt-args="${pfx}">
             <span class="vtt-pgm-switch" aria-hidden="true"><span></span></span>
             <span class="vtt-pgm-switch-copy"><strong>Éclairage dynamique</strong><small>Brouillard de guerre, murs et lignes de vue.</small></span>
             <span class="vtt-pgm-switch-status"><span class="is-off">Désactivé</span><span class="is-on">Activé</span></span>
+          </label>
+          <label class="vtt-pgm-switch-row" id="${pfx}vision-row">
+            <input type="checkbox" id="${pfx}vision-unlimited" ${visionUnlimited?'checked':''}>
+            <span class="vtt-pgm-switch" aria-hidden="true"><span></span></span>
+            <span class="vtt-pgm-switch-copy"><strong>Vision illimitée</strong><small>Les murs bloquent toujours la vue, mais aucun rayon ne limite les personnages.</small></span>
+            <span class="vtt-pgm-switch-status"><span class="is-off">3 cases</span><span class="is-on">Illimitée</span></span>
           </label>` : `
           <div class="vtt-pgm-switch-row is-locked">
             <span class="vtt-pgm-switch" aria-hidden="true"><span></span></span>
@@ -12213,6 +12271,16 @@ function _vttPgToggleFit(pfx) {
 }
 function _vttPgInit(pfx) {
   _vttPgDimensions(pfx);
+  _vttPgFogMode(pfx);
+}
+function _vttPgFogMode(pfx) {
+  const fog = document.getElementById(pfx+'fog');
+  const vision = document.getElementById(pfx+'vision-unlimited');
+  const row = document.getElementById(pfx+'vision-row');
+  if (!vision || !row) return;
+  const available = !!fog?.checked;
+  vision.disabled = !available;
+  row.classList.toggle('is-disabled', !available);
 }
 function _vttPgDimensions(pfx, changedAxis = '') {
   const cEl = document.getElementById(pfx+'cols'), rEl = document.getElementById(pfx+'rows');
@@ -12282,13 +12350,16 @@ async function _vttConfirmAddPage(openAfter = true) {
   const fogEnabled = _vttAdvancedPremium()
     ? (document.getElementById('vpf-fog')?.checked ?? false)
     : false;
+  const visionUnlimited = _vttAdvancedPremium()
+    ? (document.getElementById('vpf-vision-unlimited')?.checked ?? false)
+    : false;
   const order = Object.keys(VS.pages).length;
   try {
     const pageRef = await addDoc(_pgsCol(),{
-      name,folder,cols,rows,fogEnabled,backgroundImages:[],order,createdAt:serverTimestamp(),
+      name,folder,cols,rows,fogEnabled,visionUnlimited,backgroundImages:[],order,createdAt:serverTimestamp(),
     });
     VS.pages[pageRef.id] = {
-      id:pageRef.id,name,folder,cols,rows,fogEnabled,backgroundImages:[],order,createdAt:new Date(),
+      id:pageRef.id,name,folder,cols,rows,fogEnabled,visionUnlimited,backgroundImages:[],order,createdAt:new Date(),
     };
     closeModalDirect();
     if (openAfter !== 'false' && openAfter !== false) await _switchPage(pageRef.id);
@@ -12316,7 +12387,7 @@ export async function _vttConditionsBeforeStateApplication(token, conditionLib) 
 function _vttEditPage(id) {
   const p=VS.pages[id]; if (!p) return;
   openModal('✏️ Modifier la scène', `
-    ${_pgModalBody('vpe-', { name:p.name, folder:p.folder||'', cols:p.cols||24, rows:p.rows||18, fog:!!p.fogEnabled, mapImages:p.backgroundImages||[] })}
+    ${_pgModalBody('vpe-', { name:p.name, folder:p.folder||'', cols:p.cols||24, rows:p.rows||18, fog:!!p.fogEnabled, visionUnlimited:!!p.visionUnlimited, mapImages:p.backgroundImages||[] })}
     <div class="vtt-pgm-actions">
       <button class="btn-secondary" data-action="close-modal">Annuler</button>
       <button class="btn-primary" data-vtt-fn="_vttConfirmEditPage" data-vtt-args="${id}">Enregistrer</button>
@@ -12332,8 +12403,11 @@ async function _vttConfirmEditPage(id) {
   const fogEnabled = _vttAdvancedPremium()
     ? (document.getElementById('vpe-fog')?.checked ?? false)
     : !!VS.pages[id]?.fogEnabled;
+  const visionUnlimited = _vttAdvancedPremium()
+    ? (document.getElementById('vpe-vision-unlimited')?.checked ?? false)
+    : !!VS.pages[id]?.visionUnlimited;
   closeModalDirect();
-  const patch = {name,folder,cols,rows,fogEnabled};
+  const patch = {name,folder,cols,rows,fogEnabled,visionUnlimited};
   await updateDoc(_pgRef(id),patch).catch(()=>showNotif('Erreur','error'));
   if (VS.activePage?.id===id) {
     VS.activePage={...VS.activePage,...patch};
@@ -14374,6 +14448,7 @@ function _vttToolbarMarkup() {
   const shape = (id, label) => `<button class="vtt-draw-btn${_drawShape === id ? ' active' : ''}" id="vtt-ds-${id}" data-vtt-fn="_vttDrawShape" data-vtt-args="${id}" aria-label="${label}" title="${label}">${_vttToolIcon(id)}</button>`;
   const fogChip = (id, label) => `<button class="vtt-tool-chip${_vttFogActiveTool === id ? ' active' : ''}" data-fog-tool="${id}" data-vtt-fn="_vttFogTool" data-vtt-args="${id}">${_vttToolIcon(id)}<span>${label}</span></button>`;
   const shortcutRow = (label, keys) => `<li><span>${label}</span><span>${keys.map(key => `<kbd>${key}</kbd>`).join('<i>+</i>')}</span></li>`;
+  const legendRow = (kind, label, detail) => `<li class="vtt-map-legend-row"><span class="vtt-map-legend-icon">${vttStructureLegendSvg(kind)}</span><span><b>${label}</b><small>${detail}</small></span></li>`;
   return `<div class="vtt-tool-shell">
     <div class="vtt-tool-float-tools" role="toolbar" aria-label="Outils de la table virtuelle">
       <div class="vtt-tool-group">
@@ -14416,7 +14491,8 @@ function _vttToolbarMarkup() {
           <button class="vtt-structure-kind" data-fog-tool="door" data-vtt-fn="_vttFogTool" data-vtt-args="door"><i class="door"></i><span><b>Porte</b><small>Fermée puis ouvrable</small></span></button>
           <button class="vtt-structure-kind" data-fog-tool="window" data-vtt-fn="_vttFogTool" data-vtt-args="window"><i class="window"></i><span><b>Vitre</b><small>Vision libre, passage bloqué</small></span></button>
         </div></div>
-        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Lumière</span><div class="vtt-fog-toggle-row"><span><b>Éclairage dynamique</b><small data-fog-status>Coupé — carte entièrement visible</small></span><button id="vtt-fog-toggle" class="vtt-switch" data-vtt-fn="_vttToggleFog" role="switch" aria-checked="false"><i></i></button></div><div class="vtt-tool-chip-row">${fogChip('light','Source')}</div></div>
+        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Lumière</span><div class="vtt-fog-toggle-row"><span><b>Éclairage dynamique</b><small data-fog-status>Coupé — carte entièrement visible</small></span><button id="vtt-fog-toggle" class="vtt-switch" data-vtt-fn="_vttToggleFog" role="switch" aria-checked="false"><i></i></button></div><div class="vtt-fog-toggle-row vtt-fog-toggle-row--sub"><span><b>Vision illimitée</b><small data-vision-status>3 cases autour du groupe</small></span><button id="vtt-vision-unlimited-toggle" class="vtt-switch" data-vtt-fn="_vttToggleVisionUnlimited" role="switch" aria-checked="false"><i></i></button></div><div class="vtt-tool-chip-row">${fogChip('light','Source')}</div></div>
+        <div class="vtt-tool-section"><span class="vtt-tool-section-label">Verrous côté joueurs</span><div class="vtt-tool-segment vtt-lock-visibility"><button data-lock-visibility="always" data-vtt-fn="_vttSetLockVisibility" data-vtt-args="always">Toujours visibles</button><button data-lock-visibility="discover" data-vtt-fn="_vttSetLockVisibility" data-vtt-args="discover">À découvrir</button></div></div>
         <div class="vtt-tool-section"><span class="vtt-tool-section-label">Brouillard</span><div class="vtt-tool-chip-row">${fogChip('hide','Cacher')}${fogChip('reveal','Révéler')}<button id="vtt-fog-clear-btn" class="vtt-tool-chip danger" data-vtt-fn="_vttFogClearOps">Vider</button></div></div>
         <div class="vtt-tool-actions vtt-structure-actions">${fogChip('eraser','Gomme')}<span></span><button id="vtt-fog-undo-btn" class="vtt-tool-panel-icon" data-vtt-fn="_vttFogUndo" title="Annuler">${_vttToolIcon('undo')}</button><button id="vtt-fog-redo-btn" class="vtt-tool-panel-icon" data-vtt-fn="_vttFogRedo" title="Rétablir">${_vttToolIcon('redo')}</button><button id="vtt-structure-help-btn" class="vtt-tool-panel-icon" data-vtt-fn="_vttStructureHelpToggle" title="Aide">${_vttToolIcon('help')}</button></div>
         <div id="vtt-structure-help" class="vtt-structure-help"><p><kbd>Shift</kbd> tracé libre · <kbd>Alt</kbd> précision ×2</p><p>Hors édition, clique une porte ou une vitre pour l’ouvrir.</p><p><i class="ok"></i> raccordé <i class="bad"></i> isolé <i class="snap"></i> aimantation</p></div>
@@ -14430,6 +14506,7 @@ function _vttToolbarMarkup() {
         <div><span class="vtt-tool-section-label">Outils</span><ul>${shortcutRow('Sélection',['V'])}${shortcutRow('Règle',['R'])}${shortcutRow('Dessin',['D'])}${STATE.isAdmin ? shortcutRow('Structure',['M']) : ''}${shortcutRow('Revenir à la sélection',['Échap'])}</ul></div>
         <div><span class="vtt-tool-section-label">Édition</span><ul>${shortcutRow('Annuler',['Ctrl','Z'])}${shortcutRow('Rétablir',['Ctrl','Y'])}${shortcutRow('Copier / coller',['Ctrl','C / V'])}${shortcutRow('Retirer',['Suppr'])}${shortcutRow('Fermer le polygone',['Entrée'])}</ul></div>
         <div><span class="vtt-tool-section-label">Table</span><ul>${shortcutRow('Mini-fiche',['C'])}${shortcutRow('Roue d’émotes',['E'])}${shortcutRow('Émote rapide',['1 — 8'])}</ul></div>
+        <div class="vtt-map-legend"><span class="vtt-tool-section-label">Lire la carte</span><ul>${legendRow('wall','Mur','Vue et passage bloqués')}${legendRow('door-closed','Porte fermée','Vue et passage bloqués')}${legendRow('door-open','Porte ouverte','Passage libre')}${legendRow('window-closed','Vitre fermée','Vue libre, passage bloqué')}${legendRow('window-open','Vitre ouverte','Vue et passage libres')}${legendRow('locked','Verrou','Interaction réservée au MJ')}</ul></div>
       </div>
     </section>
   </div>`;
@@ -14850,6 +14927,7 @@ export const VTT_ACTIONS = {
   _vttPageSearch,
   _vttPageSearchClear,
   _vttPgDimensions,
+  _vttPgFogMode,
   _vttPgPreset,
   _vttPgSwap,
   _vttPgToggleFit,
@@ -14911,6 +14989,8 @@ export const VTT_ACTIONS = {
   _vttToggleEmotePicker,
   _vttToggleFav,
   _vttToggleFog,
+  _vttToggleVisionUnlimited,
+  _vttSetLockVisibility,
   _vttToggleLogDetail,
   _vttToggleLoot,
   _vttToggleMapMode,

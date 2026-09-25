@@ -84,11 +84,17 @@ function _tokenData(entry) {
  * reste prioritaire pour permettre les sens particuliers ; la scène fournit
  * ensuite un réglage commun, avec 3 cases comme valeur sûre pour le legacy. */
 export function fogVisionRadiusCells(page = {}, token = {}) {
-  const raw = token.visionRadius ?? token.visionCells
-    ?? page.visionRadius ?? page.visionCells
+  const raw = token?.visionRadius ?? token?.visionCells
+    ?? page?.visionRadius ?? page?.visionCells
     ?? VTT_DEFAULT_VISION_CELLS;
   const value = Number(raw);
   return Math.max(1, Math.min(40, Number.isFinite(value) ? value : VTT_DEFAULT_VISION_CELLS));
+}
+
+/** Une scène peut conserver murs et brouillard dynamique sans imposer de
+ * rayon circulaire aux personnages. */
+export function fogHasUnlimitedVision(page = {}, token = {}) {
+  return page?.visionUnlimited === true || token?.visionUnlimited === true;
 }
 
 /** Largeur du fondu périphérique. Elle reste proportionnée sur les petits
@@ -133,6 +139,7 @@ export function fogGeometrySignature(page, tokens, isAdmin = false) {
       Number(token.row) || 0,
       Number(token.tokenW ?? token.tokenSize) || 1,
       Number(token.tokenH ?? token.tokenSize) || 1,
+      fogHasUnlimitedVision(page, token),
       fogVisionRadiusCells(page, token),
     ])
     .sort((a, b) => a[0].localeCompare(b[0]));
@@ -156,7 +163,7 @@ export function fogGeometrySignature(page, tokens, isAdmin = false) {
 
   return JSON.stringify([
     String(page.id || ''), Number(page.cols) || 24, Number(page.rows) || 18,
-    page.fogEnabled === true, fogVisionRadiusCells(page), isAdmin === true,
+    page.fogEnabled === true, fogHasUnlimitedVision(page), fogVisionRadiusCells(page), isAdmin === true,
     walls, lights, fogOps, players,
   ]);
 }

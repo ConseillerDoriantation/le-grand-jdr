@@ -11,7 +11,20 @@ test('le rail VTT utilise les icônes SVG et conserve les outils historiques', (
   assert.match(vtt, /id="vtt-draw-fill-btn"/);
   assert.match(vtt, /id="vtt-draw-undo-btn"/);
   assert.match(vtt, /id="vtt-fog-toggle"/);
+  assert.match(vtt, /id="vtt-vision-unlimited-toggle"/);
+  assert.match(vtt, /data-vtt-fn="_vttToggleVisionUnlimited"/);
   assert.match(vtt, /STATE\.isAdmin \? `<section id="vtt-walls-bar"/);
+  assert.match(vtt, /data-lock-visibility="always"/);
+  assert.match(vtt, /data-lock-visibility="discover"/);
+  assert.match(vtt, /Lire la carte/);
+  assert.match(vtt, /vttStructureLegendSvg/);
+});
+
+test('la portée illimitée est configurable par scène sans couper les murs', () => {
+  assert.match(vtt, /id="\$\{pfx\}vision-unlimited"/);
+  assert.match(vtt, /visionUnlimited:!!p\.visionUnlimited/);
+  assert.match(vtt, /const patch = \{name,folder,cols,rows,fogEnabled,visionUnlimited\}/);
+  assert.match(vtt, /Les murs bloquent toujours la vue/);
 });
 
 test('les panneaux contextuels sont uniques, repliables et persistants', () => {

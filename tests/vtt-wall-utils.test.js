@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { vttWallState } from '../assets/js/features/vtt/vtt-wall-utils.js';
+import { VTT_STRUCTURE_STYLE, vttStructureLegendSvg, vttWallState } from '../assets/js/features/vtt/vtt-wall-utils.js';
 
 test('un mur reste solide et ne peut pas être ouvert', () => {
   const state = vttWallState({ type: 'wall', open: true });
@@ -36,4 +36,16 @@ test('une vitre ouverte laisse aussi passer le déplacement', () => {
   const state = vttWallState({ type: 'window', open: true });
   assert.equal(state.blocksVision, false);
   assert.equal(state.blocksMovement, false);
+});
+
+test('les structures partagent une palette sobre et une légende géométrique', () => {
+  assert.deepEqual(VTT_STRUCTURE_STYLE, {
+    casing:'#05080f', wall:'#b9c3d3', wood:'#c98a3a', glass:'#8fdcff', lock:'#ff5a7e',
+  });
+  for (const kind of ['wall','door-closed','door-open','window-closed','window-open','locked']) {
+    const svg = vttStructureLegendSvg(kind);
+    assert.match(svg, /^<svg /);
+    assert.match(svg, /aria-hidden="true"/);
+  }
+  assert.match(vttStructureLegendSvg('locked'), /#ff5a7e/);
 });
