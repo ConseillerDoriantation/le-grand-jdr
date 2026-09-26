@@ -2,11 +2,12 @@
 // VTT-PRESENCE.JS — Présence des joueurs sur la Table de Jeu Virtuelle
 // ══════════════════════════════════════════════════════════════════════════════
 // Extrait de vtt.js (Phase 1 du découpage, voir docs/vtt-decomposition.md).
-// Heartbeat Firestore espacé (quota : suspendu onglet masqué, expire à 120s côté
-// lecture) + colonne des joueurs actifs. État partagé presence/miniUid via VS.
+// Colonne des joueurs actifs, alimentée par la présence app-wide. Le heartbeat
+// unique vit dans shared/presence.js : le VTT ne double plus ses écritures.
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { setDoc, deleteDoc, serverTimestamp } from '../../config/firebase.js';
+import { subscribeCollection } from '../../data/firestore.js';
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc } from '../../shared/html.js';
@@ -14,63 +15,50 @@ import { showNotif } from '../../shared/notifications.js';
 import { confirmModal } from '../../shared/modal.js';
 import { sortCharactersForDisplay } from '../../shared/char-stats.js';
 import { makeStatsSessionKey, registerStatsSession, setActiveStatsSession, statsDateKey } from '../../shared/stats.js';
-import { _sesRef, _pingRef } from './vtt-refs.js';   // refs Firestore (leaf)
+import { _sesRef, _presenceRef } from './vtt-refs.js';   // refs Firestore (leaf)
 import { _renderTraySoon } from './vtt-tray.js';
 import { _renderMiniSheet, _vttToggleMiniSheet } from './vtt-mini-fiche.js';
-
-// 90 s : aligné sur la présence app-wide, sous l'expiration lecture de 120 s.
-const VTT_PRESENCE_HEARTBEAT_MS = 90_000;
+import { _renderShortRest, _checkShortRestAutoApply } from './vtt-rest.js';
 
 // ── État local (intervalIds + listeners) ────────────────────────────
-let _presHeartbeat= null; // intervalId du heartbeat
-let _presLastWriteAt = 0;
-let _presVisibility = null; // listener visibilitychange (pause heartbeat onglet masqué)
-let _presUnload = null; // listener beforeunload VTT
+let _presUnsub = null;   // observer du listener session-live partagé
 let _presRefresh  = null; // intervalId du rafraîchissement présence
 let _sessionUpdating = false;
 
-// Démarre le heartbeat de présence (appelé au montage de la table).
+function _refreshPresenceConsumers() {
+  _renderPresenceCol();
+  if (STATE.isAdmin) _renderTraySoon();
+  _renderShortRest();
+  _checkShortRestAutoApply();
+}
+
+// Réutilise le listener session-live de la présence app-wide. Il n'y a donc
+// ni second heartbeat, ni seconde lecture Firestore pour le VTT.
 function _startPresence() {
-  const _presUid = STATE.user?.uid;
-  if (_presUid) {
-    const _presWrite = () => {
-      // Onglet en arrière-plan : on ne dépense pas de write (la présence expire
-      // à 120 s côté lecture, le joueur réapparaît dès qu'il revient sur l'onglet).
-      if (document.hidden) return;
-      const pseudo = STATE.profile?.pseudo || STATE.user?.email?.split('@')[0] || '?';
-      const now = Date.now();
-      if (now - _presLastWriteAt < 10_000) return;
-      _presLastWriteAt = now;
-      setDoc(_pingRef(_presUid), { pres: { pseudo, lastSeen: serverTimestamp() } }, { merge: true }).catch(() => {});
-    };
-    _presWrite();
-    _presHeartbeat = setInterval(_presWrite, VTT_PRESENCE_HEARTBEAT_MS);
-    // Retour au premier plan : ré-annoncer immédiatement sans attendre le prochain tick.
-    _presVisibility = () => { if (!document.hidden) _presWrite(); };
-    document.addEventListener('visibilitychange', _presVisibility);
-    // Fermeture navigateur : tentative de suppression (best-effort)
-    _presUnload = () => { deleteDoc(_pingRef(_presUid)).catch(()=>{}); };
-    window.addEventListener('beforeunload', _presUnload);
-  }
+  if (_presUnsub) return;
+  _presUnsub = subscribeCollection('presence', rows => {
+    const now = Date.now();
+    VS.presence = {};
+    rows.forEach(p => {
+      const ts = p.lastSeen?.toMillis?.() ?? (typeof p.lastSeen === 'number' ? p.lastSeen : 0);
+      if (ts > 0 && now - ts < 120_000) {
+        VS.presence[p.id] = { uid: p.id, pseudo: p.pseudo || '?', lastSeen: ts };
+      }
+    });
+    _refreshPresenceConsumers();
+  });
   // Filet de sécurité : re-rendre la présence toutes les 30s pour expirer les entrants inactifs
-  _presRefresh = setInterval(_renderPresenceCol, 30_000);
+  _presRefresh = setInterval(_refreshPresenceConsumers, 30_000);
 }
 
-// Arrête le heartbeat + nettoie les listeners (appelé au teardown).
+// Détache seulement cet observer : le listener session-live peut continuer à
+// servir le bandeau et le chat sans nouvelle lecture.
 function _resetPresence() {
-  if (_presHeartbeat) {
-    clearInterval(_presHeartbeat); _presHeartbeat = null;
-    // Supprimer le doc de présence immédiatement pour que les autres voient le départ
-    const _uid = STATE.user?.uid;
-    if (_uid) { try { deleteDoc(_pingRef(_uid)).catch(()=>{}); } catch(e){} }
-  }
-  if (_presVisibility)   { document.removeEventListener('visibilitychange', _presVisibility); _presVisibility = null; }
-  if (_presUnload)       { window.removeEventListener('beforeunload', _presUnload); _presUnload = null; }
+  if (_presUnsub)        { _presUnsub(); _presUnsub = null; }
   if (_presRefresh)      { clearInterval(_presRefresh);    _presRefresh   = null; }
-  _presLastWriteAt = 0;
 }
 
-// MJ : retire un joueur de la présence du VTT en supprimant son doc ping/présence.
+// MJ : retire un joueur de la présence du VTT en supprimant sa présence app-wide.
 // Effet : il disparaît de la colonne pour tout le monde, et son doc cesse d'être
 // relu à chaque ouverture du VTT (utile pour les entrées fantômes). Un joueur
 // encore actif se ré-annonce à son prochain heartbeat (≤90 s) — c'est voulu.
@@ -144,7 +132,7 @@ async function _vttKickPresence(uid) {
   const pseudo = VS.presence[uid]?.pseudo || 'ce joueur';
   if (!await confirmModal(`Retirer <b>${_esc(pseudo)}</b> de la présence du VTT ?<br><span style="opacity:.75;font-size:.85em">Réapparaîtra automatiquement s'il est toujours actif sur la table.</span>`, { title: 'Présence', confirmLabel: 'Retirer', icon: '👋' })) return;
   try {
-    await deleteDoc(_pingRef(uid));
+    await deleteDoc(_presenceRef(uid));
     // Optimiste : retire localement sans attendre le snapshot.
     delete VS.presence[uid];
     if (VS.miniUid === uid) { VS.miniUid = null; _renderMiniSheet(null); }

@@ -880,10 +880,13 @@ match /adventures/{adventureId} {
   }
   // Présence app-wide : heartbeat depuis le client (1 doc par joueur, id = uid).
   // Lecture : tous les membres (pour permettre au MJ d'afficher qui est connecté).
-  // Écriture : chacun écrit/supprime uniquement sa propre entrée.
+  // Écriture : chacun entretient sa propre entrée ; le MJ peut retirer une
+  // présence fantôme depuis la table sans pouvoir usurper son heartbeat.
   match /presence/{uid} {
     allow read:  if inAdventure(adventureId);
-    allow write: if inAdventure(adventureId) && uid == request.auth.uid;
+    allow create, update: if inAdventure(adventureId) && uid == request.auth.uid;
+    allow delete: if (inAdventure(adventureId) && uid == request.auth.uid)
+      || isAdvAdmin(adventureId);
   }
   // Réactions émotes : 1 doc par joueur (setDoc écrase). Le token affiché doit
   // appartenir à l'émetteur ou lui avoir été explicitement délégué : masquer le

@@ -113,6 +113,7 @@ export function _updateRuler(wp) {
 }
 export function _endRuler() {
   _rulerActive = false;
+  _flushMjRulerBroadcast();
   if (_rulerHideTimer) clearTimeout(_rulerHideTimer);
   _rulerHideTimer = setTimeout(_clearRuler, 5000);
 }
@@ -131,15 +132,26 @@ export function _resetRuler() {
   _rulerActive = false; _rulerOrigin = null; _rulerNodes = null;
   _rulerLastCell = null; _rulerHoverDot = null;
   if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
+  _mjRulerPendingPayload = null;
   _mjRulerLastWrite = 0; _mjRulerBroadcasting = false; _mjRulerRemote = null;
 }
 
 // Diffusion de la règle du MJ (visible par tous les joueurs via VS.session.mjRuler).
 // Throttle pour lisser les écritures Firestore.
-const MJ_RULER_THROTTLE = 120;
+const MJ_RULER_THROTTLE = 600;
 let _mjRulerLastWrite = 0;
 let _mjRulerPendingTimer = null;
+let _mjRulerPendingPayload = null;
 let _mjRulerBroadcasting = false; // évite un setDoc(null) inutile si jamais diffusé
+function _flushMjRulerBroadcast() {
+  if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
+  const payload = _mjRulerPendingPayload;
+  _mjRulerPendingPayload = null;
+  if (!payload) return;
+  _mjRulerLastWrite = Date.now();
+  _mjRulerBroadcasting = true;
+  setDoc(_sesRef(), { mjRuler: payload }, { merge: true }).catch(() => {});
+}
 function _broadcastMjRuler(x2, y2, cells) {
   if (!STATE.isAdmin || !VS.activePage || !_rulerOrigin) return;
   const payload = {
@@ -147,21 +159,17 @@ function _broadcastMjRuler(x2, y2, cells) {
     x1: _rulerOrigin.x, y1: _rulerOrigin.y,
     x2, y2, cells,
   };
+  _mjRulerPendingPayload = payload;
   const now = Date.now();
   const wait = Math.max(0, MJ_RULER_THROTTLE - (now - _mjRulerLastWrite));
   if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
-  const flush = () => {
-    _mjRulerPendingTimer = null;
-    _mjRulerLastWrite = Date.now();
-    _mjRulerBroadcasting = true;
-    setDoc(_sesRef(), { mjRuler: payload }, { merge: true }).catch(() => {});
-  };
-  if (wait === 0) flush();
-  else _mjRulerPendingTimer = setTimeout(flush, wait);
+  if (wait === 0) _flushMjRulerBroadcast();
+  else _mjRulerPendingTimer = setTimeout(_flushMjRulerBroadcast, wait);
 }
 function _clearMjRulerBroadcast() {
   if (!STATE.isAdmin) return;
   if (_mjRulerPendingTimer) { clearTimeout(_mjRulerPendingTimer); _mjRulerPendingTimer = null; }
+  _mjRulerPendingPayload = null;
   if (!_mjRulerBroadcasting) return; // rien n'a été diffusé → pas de write à effacer
   _mjRulerLastWrite = 0;
   _mjRulerBroadcasting = false;

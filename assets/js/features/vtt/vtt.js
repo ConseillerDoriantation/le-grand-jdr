@@ -188,7 +188,7 @@ import {
 } from './vtt-combat-tracker.js';
 import {
   _startPresence, _resetPresence, _renderSessionBtn, _vttToggleSessionLive,
-  _vttKickPresence, _renderPresenceCol,
+  _vttKickPresence,
 } from './vtt-presence.js';
 import {
   _renderMiniSheet, _vttToggleMiniSheet, _vttSelectMiniChar, _msCanEdit, _msCanEditVitals,
@@ -11763,27 +11763,10 @@ function _initListeners() {
     _castingPrimed = true;
   }, () => {}));
 
-  // 9. Pings + présence temps réel
+  // 9. Pings visuels temps réel. La présence utilise désormais la collection
+  // app-wide partagée via vtt-presence.js (un seul listener dans toute l'app).
   VS.unsubs.push(onSnapshot(_pingsCol(), snap => {
     const now = Date.now();
-
-    // Présence : actif si lastSeen < 2 min (double filtrage : ici + render)
-    VS.presence = {};
-    snap.docs.forEach(d => {
-      const pres = d.data().pres;
-      if (!pres?.lastSeen) return;
-      const ts = pres.lastSeen?.toMillis?.() ?? (typeof pres.lastSeen === 'number' ? pres.lastSeen : 0);
-      if (ts > 0 && now - ts < 120_000) VS.presence[d.id] = { uid: d.id, pseudo: pres.pseudo || '?', lastSeen: ts };
-    });
-    _renderPresenceCol();
-    // Le tray range les joueurs par statut online → faut re-render quand la
-    // présence change, sinon la section "En ligne" reste vide à l'arrivée
-    // jusqu'au prochain clic.
-    if (STATE.isAdmin) _renderTraySoon();
-    // Le quorum du court repos se base sur la présence : un joueur bloquant qui se
-    // déconnecte doit pouvoir débloquer le vote sans attendre une autre action.
-    _renderShortRest();
-    _checkShortRestAutoApply();
 
     // Pings visuels (< 5 s)
     const pings = snap.docs
@@ -12081,6 +12064,8 @@ async function _vttCourir(id) {
 // dans une seule écriture Firestore (avec un envoi intermédiaire lors d'un appui
 // prolongé), ce qui évite que la latence réseau ralentisse les déplacements.
 const _keyboardOptimisticMoves = new Map();
+const KEYBOARD_REMOTE_SYNC_MS = 600;
+const KEYBOARD_IDLE_COMMIT_MS = 85;
 let _keyboardFlushTimer = null;
 let _keyboardRangeTimer = null;
 let _keyboardFogTimer = null;
@@ -12140,9 +12125,13 @@ function _scheduleKeyboardFlush() {
   if (!_keyboardBurstStartedAt) _keyboardBurstStartedAt=now;
   const heldFor=now-_keyboardBurstStartedAt;
   if (_keyboardFlushTimer) clearTimeout(_keyboardFlushTimer);
-  // 85 ms après le dernier pas, ou au moins toutes les 220 ms si la touche
-  // reste maintenue : les autres participants voient un déplacement continu.
-  _keyboardFlushTimer=setTimeout(_flushKeyboardMoves, heldFor>=220 ? 0 : 85);
+  // Commit rapide à l'arrêt, mais seulement ~1,7 fois/s lors d'un appui long.
+  // Le canvas local reste fluide ; les écritures et lectures diffusées à tous
+  // les participants sont fortement réduites.
+  _keyboardFlushTimer=setTimeout(
+    _flushKeyboardMoves,
+    heldFor>=KEYBOARD_REMOTE_SYNC_MS ? 0 : KEYBOARD_IDLE_COMMIT_MS,
+  );
 }
 
 async function _flushKeyboardMoves() {
