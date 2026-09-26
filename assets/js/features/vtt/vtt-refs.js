@@ -26,6 +26,7 @@ export const _castingCol    = ()    => collection(db, `adventures/${aid()}/vttCa
 export const _castingRef    = (uid) => doc(db, `adventures/${aid()}/vttCasting/${uid}`);
 export const _pingsCol      = ()    => collection(db, `adventures/${aid()}/vttPings`);
 export const _pingRef       = (uid) => doc(db, `adventures/${aid()}/vttPings/${uid}`);
+export const _presenceRef   = (uid) => doc(db, `adventures/${aid()}/presence/${uid}`);
 export const _reactionsCol  = ()    => collection(db, `adventures/${aid()}/vttEmoteReactions`);
 export const _reactionRef   = (uid) => doc(db, `adventures/${aid()}/vttEmoteReactions/${uid}`);
 export const _annotCol      = ()    => collection(db, `adventures/${aid()}/vttAnnotations`);

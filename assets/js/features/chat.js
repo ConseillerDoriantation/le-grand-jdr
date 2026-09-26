@@ -24,7 +24,7 @@ import {
   db, collection, query, where, orderBy, limit, onSnapshot, addDoc, updateDoc,
   serverTimestamp, doc, getDoc, getDocFromCache, setDoc, deleteDoc, deleteField,
 } from '../config/firebase.js';
-import { getCurrentAdventureId, getDocData } from '../data/firestore.js';
+import { getCurrentAdventureId, getDocData, subscribeCollection } from '../data/firestore.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif } from '../shared/notifications.js';
@@ -178,17 +178,16 @@ function _teardownListeners() {
 const _isOnline = (uid) => _online.has(uid);
 function _subscribePresence() {
   if (_unsubPresence) return;
-  const a = _adv(); if (!a) return;
-  _unsubPresence = onSnapshot(collection(db, 'adventures', a, 'presence'), snap => {
+  if (!_adv()) return;
+  _unsubPresence = subscribeCollection('presence', rows => {
     const now = Date.now(); const on = new Set();
-    snap.docs.forEach(d => {
-      const ls = d.data({ serverTimestamps: 'estimate' }).lastSeen;
-      const ms = ls?.toMillis ? ls.toMillis() : 0;
-      if (d.id !== _uid && now - ms < 120000) on.add(d.id);   // expiration 120 s, hors moi
+    rows.forEach(p => {
+      const ms = p.lastSeen?.toMillis?.() ?? (typeof p.lastSeen === 'number' ? p.lastSeen : 0);
+      if (p.id !== _uid && now - ms < 120000) on.add(p.id);   // expiration 120 s, hors moi
     });
     _online = on;
     _updateOnlineDots();
-  }, err => console.warn('[chat] presence', err?.code || err));
+  });
 }
 function _teardownPresence() {
   if (_unsubPresence) { try { _unsubPresence(); } catch {} _unsubPresence = null; }

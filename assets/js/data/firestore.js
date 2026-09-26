@@ -385,6 +385,10 @@ const _SESSION_COLLECTIONS = [
   'characters',
 ];
 const _LAZY_SESSION_COLLECTIONS = new Set([
+  // Une seule écoute partagée pour le bandeau, le chat et le VTT. La présence
+  // reste écrite par shared/presence.js ; les consommateurs ne recréent plus
+  // chacun leur propre listener Firestore.
+  'presence',
   'shop', 'shopCategories',
   'npcs',
   'organizations', // utilisé par npcs.js + histoire.js, TTL 5 min insuffisant
@@ -536,6 +540,7 @@ function _isAuthTeardownPermissionError(error) {
 
 // silent=true : lecture optionnelle → log seulement, pas de notif « Accès refusé »
 // (ex. contenu MJ chargé au mieux dont l'échec ne casse rien).
+let _lastQuotaNoticeAt = 0;
 function _handleFirestoreError(e, ctx, { silent = false } = {}) {
   // Tester avant console.error : ce refus tardif est une conséquence normale de
   // la déconnexion, pas une erreur applicative à afficher ou journaliser.
@@ -550,6 +555,14 @@ function _handleFirestoreError(e, ctx, { silent = false } = {}) {
 
   if (code === 'permission-denied') {
     notify(`Accès refusé — ${ctx}`, 'error');
+  } else if (code === 'resource-exhausted') {
+    // Un quota épuisé fait échouer en cascade tous les listeners et écritures.
+    // Une seule notification explicite par minute évite d'engorger aussi l'UI.
+    const now = Date.now();
+    if (now - _lastQuotaNoticeAt > 60_000) {
+      _lastQuotaNoticeAt = now;
+      notify('Quota Firebase épuisé : la synchronisation est temporairement suspendue.', 'error');
+    }
   } else if (code === 'unavailable' || code === 'deadline-exceeded') {
     notify('Connexion perdue. Vérifie ta connexion internet.', 'error');
   } else if (code === 'not-found') {
