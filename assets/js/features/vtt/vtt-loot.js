@@ -25,6 +25,7 @@ import { useGold } from '../../shared/economy.js';
 import { _showCtxMenu } from './vtt-utils.js';
 import { _chrRef } from './vtt-refs.js';   // ref Firestore perso (leaf)
 import { _shortRestPresentUids, _shortRestPresentNames } from './vtt-rest.js'; // quorum présence (réutilisé)
+import { openVttSessionDockPanel, registerVttSessionDockPanel, syncVttSessionDock } from './vtt-session-dock.js';
 
 // Quantité « prenable » d'une entrée de butin : objets → qty, or → amount.
 const _lootCount = (item) => item?.kind === 'gold' ? (item.amount || 0) : (item.qty || 0);
@@ -79,6 +80,33 @@ let _lootLoading     = false;
 let _lootReady       = null;
 let _lootCloseOutside = null;
 const _lootRef  = () => doc(db, `adventures/${aid()}/vtt/loot`);
+
+const _lootSeenKey = () => `vtt:lootSeen:${aid() || '_'}:${STATE.user?.uid || 'anon'}`;
+const _lootEntryKey = (item, index) => String(item?.id || item?.itemId || `${item?.kind || 'item'}:${item?.nom || item?.name || index}`);
+function _lootVisibleKeys() {
+  return (_loot.loot || []).filter(item => item?.kind !== 'gold').map(_lootEntryKey);
+}
+function _lootSeenKeys() {
+  try {
+    const value = JSON.parse(localStorage.getItem(_lootSeenKey()) || '[]');
+    return new Set(Array.isArray(value) ? value.map(String) : []);
+  } catch { return new Set(); }
+}
+function _setLootSeen(keys = _lootVisibleKeys()) {
+  try { localStorage.setItem(_lootSeenKey(), JSON.stringify(keys)); } catch { /* stockage local indisponible */ }
+}
+function _refreshLootDockTrigger({ markSeen = false } = {}) {
+  const trigger = document.getElementById('vtt-loot-trigger');
+  if (!trigger) return;
+  const visible = _lootVisibleKeys();
+  if (markSeen || document.getElementById('vtt-loot-panel')?.dataset.open === '1') _setLootSeen(visible);
+  const seen = markSeen ? new Set(visible) : _lootSeenKeys();
+  const unseen = visible.filter(key => !seen.has(key)).length;
+  const badge = trigger.querySelector('.vtt-session-dock-badge');
+  if (badge) { badge.textContent = String(unseen); badge.hidden = unseen === 0; }
+  const detail = trigger.querySelector('.vtt-session-tooltip-detail');
+  if (detail) detail.textContent = unseen ? `${unseen} objet${unseen > 1 ? 's' : ''} à répartir` : 'Réserve du groupe';
+}
 
 // ── État UI (local, non persisté sauf mention) ──────────────────────
 let _lootView   = 'main';     // 'main' | 'cata'
@@ -174,6 +202,7 @@ function _ensureLootListener() {
     const finish = () => {
       _lootLoading = false;
       _renderLootPanel();
+      _refreshLootDockTrigger();
       if (!resolved) { resolved = true; resolve(_loot); }
     };
     _lootUnsub = onSnapshot(_lootRef(), snap => {
@@ -608,12 +637,14 @@ function _closeLootPanel() {
   if (_lootCloseOutside) { document.removeEventListener('mousedown', _lootCloseOutside, true); _lootCloseOutside = null; }
   _lootSortables.forEach(s => { try { s.destroy(); } catch { /* noop */ } });
   _lootSortables = [];
+  syncVttSessionDock();
 }
 
 function _vttToggleLoot() {
   const panel = document.getElementById('vtt-loot-panel');
   if (!panel) return;
   if (panel.dataset.open === '1') { _closeLootPanel(); return; }
+  openVttSessionDockPanel('loot');
   panel.dataset.open = '1';
   panel.style.display = 'flex';
   panel.setAttribute('aria-hidden', 'false');
@@ -621,10 +652,11 @@ function _vttToggleLoot() {
   trigger?.classList.add('active');
   trigger?.setAttribute('aria-expanded', 'true');
   _lootView = 'main';
-  void _ensureLootListener();
+  void _ensureLootListener().then(() => _refreshLootDockTrigger({ markSeen: true }));
   void _ensureRarities();
   if (STATE.isAdmin) void _ensureShopCache();
   _renderLootPanel();
+  syncVttSessionDock();
   _lootCloseOutside = (e) => {
     const float = document.querySelector('.vtt-loot-float');
     const ctx = document.getElementById('vtt-ctx-menu');
@@ -1321,7 +1353,10 @@ function _resetLootState() {
   _cSel = 'recent'; _cQ = ''; _cRar = ''; _basket = {}; _creatureDraws = {};
   _flash = null;
   _shopLoaded = false; _raritiesReady = false; _rarByVal = {};
+  _refreshLootDockTrigger();
 }
+
+registerVttSessionDockPanel('loot', 'vtt-loot-panel', '#vtt-loot-trigger', _closeLootPanel);
 
 export {
   _checkLootVoteAutoApply,
@@ -1331,6 +1366,7 @@ export {
   _normalizeLoot,
   _renderLootPanel,
   _renderLootTake,
+  _refreshLootDockTrigger,
   _resetLootState,
   _saveLoot,
   _vttLootClaimEdit,

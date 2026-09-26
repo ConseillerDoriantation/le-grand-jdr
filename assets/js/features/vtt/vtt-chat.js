@@ -108,11 +108,34 @@ export function _vttChatFilter(filter) {
   _chatStuck = true;
   _renderChatLog(_chatMsgs);
 }
-export function _vttChatShowNew() {
+
+function _jumpChatToBottom(el) {
+  if (!el) return;
+  el.classList.add('vtt-chat-log--instant-scroll');
+  el.scrollTop = el.scrollHeight;
+  if (el._vttBottomFrame) cancelAnimationFrame(el._vttBottomFrame);
+  el._vttBottomFrame = requestAnimationFrame(() => {
+    // Une seconde passe absorbe le recalcul flex et un éventuel second snapshot
+    // Firestore arrivé pendant l'ouverture du panneau.
+    el.scrollTop = el.scrollHeight;
+    el.classList.remove('vtt-chat-log--instant-scroll');
+    delete el._vttBottomFrame;
+  });
+}
+
+export function _vttChatShowNew(instant = false) {
   const el = document.getElementById('vtt-chat-log');
   if (!el) return;
+  _chatStuck = true;
   _chatNewBelow = 0;
-  el.scrollTo({ top:el.scrollHeight, behavior:'smooth' });
+  if (instant) {
+    _jumpChatToBottom(el);
+    // La glissière finit sa transition après 260 ms. Ce dernier contrôle ne
+    // déplace rien si l'utilisateur a déjà commencé à remonter l'historique.
+    setTimeout(() => { if (_chatStuck) _jumpChatToBottom(el); }, 300);
+  } else {
+    el.scrollTo({ top:el.scrollHeight, behavior:'smooth' });
+  }
   _updateNewButton();
 }
 function _updateNewButton() {
@@ -236,6 +259,10 @@ export async function _vttPublishOptimisticLog(payload, { errorMessage = 'L’ac
 // Souscriptions Firestore au log (publiques + jets cachés MJ). Appelé par vtt.js
 // dans la séquence de montage. Les unsubs sont poussés dans VS.unsubs.
 export function _initChatLogSubs() {
+  // Un nouveau montage du VTT commence toujours sur les messages récents, même
+  // si l'utilisateur avait quitté la table en consultant un ancien message.
+  _chatStuck = true;
+  _chatNewBelow = 0;
   VS.unsubs.push(_watchWhileActive(
     query(_logCol(), orderBy('createdAt', 'desc'), limit(80)),
     snap => {
@@ -1276,7 +1303,7 @@ export function _renderChatLogImpl(msgs) {
   if (wasAtBottom) {
     _chatStuck = true;
     _chatNewBelow = 0;
-    el.scrollTop = el.scrollHeight;
+    _jumpChatToBottom(el);
   } else {
     _chatStuck = false;
     el.scrollTop = previousScrollTop;

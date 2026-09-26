@@ -140,6 +140,7 @@ import { _getSortTypes, spellCostRes, _calcSortMana } from '../characters/spells
 import { spellSetCostDelta } from '../../shared/spell-system.js';
 import {
   _musicStateRef, _syncMusicPlayback, _resetMusicState, _closeMusicPanel,
+  _refreshMusicDockTrigger,
   _vttToggleMusic, _vttPlaySound,
   _vttPlayPlaylist, _vttMusicNext, _vttMusicPrev, _vttToggleLoop, _vttToggleMusicPause, _vttStopMusic,
   _vttSoundCtxMenu, _vttDeleteSound, _vttCreatePlaylist, _vttCreatePlaylistConfirm,
@@ -159,6 +160,7 @@ import {
   _vttLootAddItemToStash, _vttLootOpenShop, _vttLootToggleTake, _vttLootTakeSetChar,
   _vttLootTakeStep, _vttLootConfirmTake, _vttCreatSendLootToStash, _vttCreatSendGoldToStash,
   _resetLootState,
+  _ensureLootListener, _refreshLootDockTrigger,
   _closeLootPanel,
   _vttLootOpenVote, _vttLootCloseVote, _vttLootForceDistribute,
   _vttLootClaimSetChar, _vttLootClaimStep, _vttLootClaimEdit,
@@ -176,6 +178,7 @@ import {
   _vttDiceUseHistory, setJetsBuilder,
   _vttDiceCmdInput, _vttDiceSelectSkill, _vttDiceRerollHistory, _vttDiceRollTyped,
 } from './vtt-dice.js';
+import { initVttSessionDock, vttSessionDockButton, vttSessionDockIcon } from './vtt-session-dock.js';
 import {
   _renderTimer, _timerStartTick, _timerStopTick, _vttTimerToggle, _vttTimerReset, _vttTimerLabel,
 } from './vtt-timer.js';
@@ -11525,8 +11528,8 @@ function _initListeners() {
     }, () => {});
   }
 
-  // Butin d'aventure : listener lazy, démarré seulement à l'ouverture du panneau
-  // ou quand le MJ ajoute du butin depuis une créature.
+  // Butin d'aventure : le listener du document est démarré au montage du dock
+  // pour maintenir son badge « nouveaux objets » sans lecture supplémentaire.
 
   // 12. Sons/playlists VTT : listeners lazy, démarrés seulement par le panneau MJ
   // ou par une lecture musicale qui a besoin de résoudre l'URL du son courant.
@@ -14244,6 +14247,7 @@ function _vttRcolView(view) {
 let _slideOpen = false;
 let _slideUnread = 0;
 let _slidePeekTimer = null;
+let _slideInitialChatPending = true;
 // Épinglage : quand actif, le panneau reste ouvert et se range À CÔTÉ de la
 // toile (la toile rétrécit au lieu d'être recouverte). Préférence persistée.
 let _slidePinned = lsJson.get('vtt-slide-pinned', false);
@@ -14267,6 +14271,10 @@ function _vttSlide(arg) {
     _vttRcolView('chat');
     _slideUnread = 0;
     _vttRemoveChatPeek();
+    if (_slideInitialChatPending) {
+      _slideInitialChatPending = false;
+      requestAnimationFrame(() => _vttChatShowNew(true));
+    }
   }
   _vttRefreshSlideShell();
 }
@@ -14704,32 +14712,38 @@ async function _vttMountTable(content) {
   _rf.className = 'vtt-rest-float';
   _rf.innerHTML = `
     <div class="vtt-rest-panel" id="vtt-rest-panel" data-open="0" style="display:none" role="dialog" aria-label="Court repos du groupe" aria-hidden="true">
-      <div class="vtt-rest-header">💤 Court repos</div>
+      <div class="vtt-rest-header"><h2>Court repos<small>Rend ½ PV et ½ PM max (arrondi sup.) aux personnages présents</small></h2><button class="vtt-rest-close" data-vtt-fn="_vttToggleShortRest" aria-label="Fermer le panneau de repos">${vttSessionDockIcon('x')}</button></div>
       <div class="vtt-rest-body" id="vtt-rest-body"></div>
     </div>
-    <button class="vtt-rest-trigger" id="vtt-rest-trigger" data-vtt-fn="_vttToggleShortRest" title="Court repos du groupe" aria-label="Court repos du groupe" aria-expanded="false" aria-controls="vtt-rest-panel">💤 0/0</button>`;
+    <i class="vtt-session-pop-arrow" data-for="rest" hidden aria-hidden="true"></i>
+    ${vttSessionDockButton({ key: 'rest', id: 'vtt-rest-trigger', action: '_vttToggleShortRest', label: 'Repos', tipTitle: 'Court repos', tipDetail: 'Plus aucun disponible', iconExtra: '<b class="vtt-session-dock-badge out">0</b>' })}`;
   sessionTools.appendChild(_rf);
 
   const _mf = document.createElement('div');
   _mf.className = 'vtt-music-float';
   _mf.innerHTML = `
     <div class="vtt-music-panel" id="vtt-music-panel" data-open="0" style="display:none" role="dialog" aria-label="Sons et musique" aria-hidden="true"></div>
-    <button class="vtt-music-trigger" id="vtt-music-trigger" data-vtt-fn="_vttToggleMusic" title="Sons &amp; Musique" aria-label="Sons et musique" aria-expanded="false" aria-controls="vtt-music-panel">🎵</button>`;
+    <i class="vtt-session-pop-arrow" data-for="music" hidden aria-hidden="true"></i>
+    ${vttSessionDockButton({ key: 'music', id: 'vtt-music-trigger', action: '_vttToggleMusic', label: 'Musique', tipTitle: 'Sons & musique', tipDetail: 'Rien en lecture' })}`;
   sessionTools.appendChild(_mf);
 
   const _lf = document.createElement('div');
   _lf.className = 'vtt-loot-float';
   _lf.innerHTML = `
     <div class="vtt-loot-panel" id="vtt-loot-panel" data-open="0" style="display:none" role="dialog" aria-label="Butin d'aventure" aria-hidden="true"></div>
-    <button class="vtt-loot-trigger" id="vtt-loot-trigger" data-vtt-fn="_vttToggleLoot" title="Butin d'aventure" aria-label="Butin d'aventure" aria-expanded="false" aria-controls="vtt-loot-panel">💰</button>`;
+    <i class="vtt-session-pop-arrow" data-for="loot" hidden aria-hidden="true"></i>
+    ${vttSessionDockButton({ key: 'loot', id: 'vtt-loot-trigger', action: '_vttToggleLoot', label: 'Butin', tipTitle: 'Butin d’aventure', tipDetail: 'Réserve du groupe', iconExtra: '<b class="vtt-session-dock-badge hot" hidden>0</b>' })}`;
   sessionTools.appendChild(_lf);
 
   const _ef = document.createElement('div');
   _ef.className = 'vtt-emote-float';
   _ef.innerHTML = `<div class="vtt-emote-picker" id="vtt-emote-picker" role="dialog" aria-label="Choisir une émote" aria-hidden="true"></div>
-    <button class="vtt-emote-trigger" data-vtt-fn="_vttToggleEmotePicker" title="Émotes" aria-label="Émotes" aria-expanded="false" aria-controls="vtt-emote-picker">😄</button>`;
+    <i class="vtt-session-pop-arrow" data-for="emote" hidden aria-hidden="true"></i>
+    ${vttSessionDockButton({ key: 'emote', action: '_vttToggleEmotePicker', label: 'Émotes', tipTitle: 'Émotes', tipDetail: 'Maintiens E pour la roue' })}`;
   sessionTools.appendChild(_ef);
   _initEmoteGestures();     // gestes (maintien/glisser) + roue E + touches 1-8
+
+  sessionTools.insertAdjacentHTML('beforeend', '<span class="vtt-session-dock-separator" aria-hidden="true"></span>');
 
   // Lanceur de dés LIBRE dans le dock d'outils : accessible sans sélectionner de
   // token (le MJ notamment n'a pas de token). Réutilise _vttToggleDice/_renderDicePanel.
@@ -14737,8 +14751,14 @@ async function _vttMountTable(content) {
   _df.className = 'vtt-dice-float';
   _df.innerHTML = `
     <div class="vtt-dice-panel" id="vtt-dice-panel" data-open="0" style="display:none" role="dialog" aria-label="Lanceur de dés" aria-hidden="true"></div>
-    <button class="vtt-dice-trigger" id="vtt-dice-trigger" data-vtt-fn="_vttToggleDice" title="Lanceur de dés & compétences" aria-label="Lanceur de dés et compétences" aria-expanded="false" aria-controls="vtt-dice-panel">🎲</button>`;
+    <i class="vtt-session-pop-arrow" data-for="dice" hidden aria-hidden="true"></i>
+    ${vttSessionDockButton({ key: 'dice', id: 'vtt-dice-trigger', action: '_vttToggleDice', label: 'Dés', tipTitle: 'Lanceur de dés', tipDetail: 'Jets libres & compétences', primary: true })}`;
   sessionTools.appendChild(_df);
+  const destroySessionDock = initVttSessionDock();
+  VS.unsubs.push(destroySessionDock);
+  _renderShortRest();
+  _refreshMusicDockTrigger();
+  void _ensureLootListener().then(() => _refreshLootDockTrigger());
   // Le lanceur affiche aussi les compétences du token courant (fusion « Jets »).
   setJetsBuilder(_vttBuildJetsBody);
 
@@ -14747,6 +14767,7 @@ async function _vttMountTable(content) {
   // empêche la ré-ouverture) puis on ré-ouvre docké si la préférence est active.
   // Fiable sur rechargement complet ET sur simple re-navigation vers la table.
   _slideOpen = false;
+  _slideInitialChatPending = true;
   if (_slidePinned) _vttSlide('chat');
   _vttApplySlidePin();
   // NB : le lanceur de dés libre vit désormais dans le panneau « Jets » du

@@ -18,6 +18,7 @@ import { _esc } from '../../shared/html.js';
 import { VS } from './vtt-state.js';
 import { _vttPublishOptimisticLog } from './vtt-chat.js';
 import { _logGmCol } from './vtt-refs.js';
+import { openVttSessionDockPanel, registerVttSessionDockPanel, syncVttSessionDock } from './vtt-session-dock.js';
 
 // ── État local (partie « dés libres » + sélection) ──────────────────
 let _diceFormula = {};          // { faces→count } ex: { 20:2, 6:1 }
@@ -75,6 +76,7 @@ function _closeDicePanel() {
   btn?.classList.remove('active');
   btn?.setAttribute('aria-expanded', 'false');
   if (_diceCloseOut) { document.removeEventListener('mousedown', _diceCloseOut, true); _diceCloseOut = null; }
+  syncVttSessionDock();
 }
 
 function _vttToggleDice() {
@@ -101,14 +103,18 @@ function _vttToggleDice() {
     });
   }
   if (panel.dataset.open === '1') { _closeDicePanel(); return; }
+  openVttSessionDockPanel('dice');
   panel.dataset.open = '1'; panel.style.display = 'flex'; panel.setAttribute('aria-hidden', 'false');
   const trigger = document.getElementById('vtt-dice-trigger');
   trigger?.classList.add('active');
   trigger?.setAttribute('aria-expanded', 'true');
+  syncVttSessionDock();
   _renderDicePanel();
   _diceCloseOut = e => { const f = document.querySelector('.vtt-dice-float'); if (f && !f.contains(e.target)) _closeDicePanel(); };
   document.addEventListener('mousedown', _diceCloseOut, true);
 }
+
+registerVttSessionDockPanel('dice', 'vtt-dice-panel', '#vtt-dice-trigger', _closeDicePanel);
 
 // ── Handlers ────────────────────────────────────────────────────────
 function _vttDiceCmdInput(v) { _diceQuery = String(v || ''); if (_diceQuery) _diceSel = null; _renderDicePanel(); }

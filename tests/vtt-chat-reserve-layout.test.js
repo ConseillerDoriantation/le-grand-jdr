@@ -94,6 +94,10 @@ test('le journal filtre les familles et respecte le scroll du lecteur', () => {
   assert.match(chat, /'Messages récents'/);
   assert.match(chat, /if \(_chatStuck\) _chatNewBelow = 0;\s*_updateNewButton\(\);/);
   assert.match(vtt, /aria-label="Revenir aux messages récents"/);
+  assert.match(chat, /function _jumpChatToBottom\(el\)[\s\S]*?vtt-chat-log--instant-scroll[\s\S]*?requestAnimationFrame/);
+  assert.match(chat, /export function _vttChatShowNew\(instant = false\)[\s\S]*?_jumpChatToBottom\(el\)[\s\S]*?setTimeout/);
+  assert.match(css, /\.vtt-chat-log\.vtt-chat-log--instant-scroll\s*\{\s*scroll-behavior:\s*auto !important/);
+  assert.match(vtt, /_slideInitialChatPending[\s\S]*?requestAnimationFrame\(\(\) => _vttChatShowNew\(true\)\)/);
 });
 
 test('une attaque reprend la carte de résultat compacte de la maquette', () => {

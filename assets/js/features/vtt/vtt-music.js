@@ -15,6 +15,7 @@ import { _esc, _norm } from '../../shared/html.js';
 import { openModal, confirmModal, closeModalDirect, promptModal } from '../../shared/modal.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _showCtxMenu } from './vtt-utils.js';   // menu contextuel générique (leaf)
+import { openVttSessionDockPanel, registerVttSessionDockPanel, syncVttSessionDock } from './vtt-session-dock.js';
 
 // ── État local musique ──────────────────────────────────────────────
 // — Musique / sons
@@ -36,6 +37,22 @@ let _previewEl     = null;  // aperçu local MJ (non diffusé)
 let _ambienceEl    = null;  // 2ᵉ canal : ambiance en boucle, jouée EN PLUS de la musique
 let _lastAppliedSeek = 0;   // dernier seekVersion appliqué (évite de re-seeker à chaque resync)
 let _autoplayArmed = false; // reprise auto au 1er geste si l'autoplay est bloqué (refresh)
+let _autoplayResumeHandler = null;
+const _AUTOPLAY_RESUME_EVENTS = ['pointerdown', 'click', 'keydown', 'touchstart'];
+
+function _refreshMusicDockTrigger(ms = _musicState) {
+  const trigger = document.getElementById('vtt-music-trigger');
+  if (!trigger) return;
+  const live = !!((ms?.playing && ms?.currentSoundId && !ms?.paused) || ms?.ambienceSoundId);
+  trigger.classList.toggle('live', live);
+  const detail = trigger.querySelector('.vtt-session-tooltip-detail');
+  if (detail) {
+    const sound = _sounds.find(item => item.id === ms?.currentSoundId);
+    detail.textContent = live
+      ? (sound?.name ? `${sound.name}${ms?.ambienceSoundId ? ' · ambiance active' : ''}` : 'Lecture en cours')
+      : 'Rien en lecture';
+  }
+}
 
 // ── Refs Firestore (sons / playlists / état musique) ────────────────
 const _sonsCol       = ()  => collection(db, `adventures/${aid()}/vttSons`);
@@ -159,6 +176,7 @@ function _closeMusicPanel() {
   clearInterval(_musicProgTimer); _musicProgTimer=null;
   _musicSortables.forEach(s => s.destroy()); _musicSortables=[];
   _stopPreview();
+  syncVttSessionDock();
 }
 
 function _stopPreview() {
@@ -210,12 +228,14 @@ function _vttPreview(soundId, btn) {
 function _vttToggleMusic() {
   const panel = document.getElementById('vtt-music-panel'); if (!panel) return;
   if (panel.dataset.open==='1') { _closeMusicPanel(); return; }
+  openVttSessionDockPanel('music');
   panel.dataset.open='1'; panel.style.display='flex'; panel.setAttribute('aria-hidden', 'false');
   const trigger = document.getElementById('vtt-music-trigger');
   trigger?.classList.add('active');
   trigger?.setAttribute('aria-expanded', 'true');
   if (STATE.isAdmin) void _startMusicCatalogListeners();
   _renderMusicPanel();
+  syncVttSessionDock();
   _musicCloseOut = e => {
     const f = document.querySelector('.vtt-music-float');
     const ctx = document.getElementById('vtt-ctx-menu');
@@ -257,7 +277,8 @@ function _renderMusicPanel() {
       <footer class="ft"><span><kbd>Espace</kbd>pause</span><span><kbd>←</kbd><kbd>→</kbd>piste</span><span><kbd>/</kbd>chercher</span><span class="grow"></span><span>Glisser un son sur une playlist pour l'y ranger</span></footer>` : '');
 
   // Reflet « en cours » sur le bouton de la barre de session.
-  document.getElementById('vtt-music-trigger')?.classList.toggle('live', live);
+  // Centralisé pour conserver aussi l'état actif lorsqu'une ambiance seule joue.
+  _refreshMusicDockTrigger(ms);
 
   // Recherche : re-render complet (focus + caret restaurés ci-dessous).
   const sf = document.getElementById('vtt-music-search');
@@ -381,8 +402,14 @@ function _reflectPlaybackUi() {
     const existing = hd.querySelector('.pill.live');
     if (live && !existing) hd.querySelector('h2')?.insertAdjacentHTML('afterend', '<span class="pill live"><i></i>Diffusé à la table</span>');
     else if (!live && existing) existing.remove();
+    const hideTitleBtn = hd.querySelector('[data-vtt-fn="_vttMusicToggleHideTitle"]');
+    if (hideTitleBtn) {
+      hideTitleBtn.classList.toggle('on', !!ms.hideTitle);
+      hideTitleBtn.innerHTML = _mi(ms.hideTitle ? 'eyeoff' : 'eye');
+      hideTitleBtn.dataset.tip = ms.hideTitle ? 'Réafficher les titres' : 'Masquer tous les titres';
+    }
   }
-  document.getElementById('vtt-music-trigger')?.classList.toggle('live', live);
+  _refreshMusicDockTrigger(ms);
 
   // 3) Lignes de pistes : classes cur/isamb + icône lecture/pause (pas de rebuild).
   panel.querySelectorAll('.t[data-sound-id]').forEach(row => {
@@ -760,7 +787,6 @@ async function _vttToggleLoop() {
 
 async function _vttToggleMusicPause() {
   const paused = !_musicState.paused;
-  if (_audioEl) { paused ? _audioEl.pause() : _audioEl.play().catch(()=>{}); }
   await _setMusicState({ ..._musicState, paused });
 }
 
@@ -789,21 +815,30 @@ async function _vttMusicToggleHideTitle() {
 }
 
 // MJ : masque / affiche uniquement le titre de la piste choisie côté joueurs.
-async function _vttMusicToggleSoundTitle(soundId) {
+// L'UI et l'état partagé sont optimistes : la latence du document catalogue ne
+// doit jamais bloquer le bouton ni retarder son reflet dans le lecteur.
+function _vttMusicToggleSoundTitle(soundId) {
   if (!STATE.isAdmin) return;
   const sound = _sounds.find(s => s.id === soundId);
   if (!sound) return;
+  const previous = sound.hideTitle === true;
   const hideTitle = sound.hideTitle !== true;
-  try {
-    await updateDoc(_sonRef(soundId), { hideTitle });
-    if (_musicState.currentSoundId === soundId) {
-      await _setMusicState({ currentTitleHidden: hideTitle });
+  sound.hideTitle = hideTitle;
+  if (_musicState.currentSoundId === soundId) _setMusicState({ currentTitleHidden: hideTitle });
+  else if (document.getElementById('vtt-music-panel')?.dataset.open === '1') _renderMusicPanel();
+  showNotif(hideTitle ? 'Titre masqué aux joueurs' : 'Titre affiché aux joueurs', 'success');
+
+  updateDoc(_sonRef(soundId), { hideTitle }).catch(error => {
+    // Échec rare : remettre l'état visible en cohérence avec Firestore.
+    if (sound.hideTitle === hideTitle) sound.hideTitle = previous;
+    if (_musicState.currentSoundId === soundId && _musicState.currentTitleHidden === hideTitle) {
+      _setMusicState({ currentTitleHidden: previous });
+    } else if (document.getElementById('vtt-music-panel')?.dataset.open === '1') {
+      _renderMusicPanel();
     }
-    showNotif(hideTitle ? 'Titre masqué aux joueurs' : 'Titre affiché aux joueurs', 'success');
-  } catch (error) {
     console.error('[vtt music] title visibility:', error);
     showNotif('Impossible de modifier la visibilité du titre', 'error');
-  }
+  });
 }
 
 function _killAudio() {
@@ -824,23 +859,57 @@ function _killAmbience() {
   }
 }
 
+function _disarmAutoplayResume() {
+  if (_autoplayResumeHandler) {
+    _AUTOPLAY_RESUME_EVENTS.forEach(ev => document.removeEventListener(ev, _autoplayResumeHandler, true));
+  }
+  _autoplayResumeHandler = null;
+  _autoplayArmed = false;
+}
+
+function _autoplayStillBlocked() {
+  const musicBlocked = !!(_audioEl?.paused && _musicState?.playing && !_musicState?.paused);
+  const ambienceBlocked = !!(_ambienceEl?.paused && _musicState?.ambienceSoundId);
+  return musicBlocked || ambienceBlocked;
+}
+
+function _disarmAutoplayWhenReady() {
+  if (!_autoplayStillBlocked()) _disarmAutoplayResume();
+}
+
+function _playbackStartMillis(startedAt) {
+  if (typeof startedAt === 'number') return startedAt;
+  if (startedAt instanceof Date) return startedAt.getTime();
+  return startedAt?.toMillis?.() ?? null;
+}
+
+// Position à restaurer après un rechargement. Les pistes bouclées reprennent
+// dans leur boucle au lieu de repartir à zéro.
+function _musicResumePosition(ms, duration, now = Date.now()) {
+  const startedAt = _playbackStartMillis(ms?.startedAt);
+  if (!(startedAt >= 0) || !(duration > 0)) return 0;
+  const elapsed = Math.max(0, (now - startedAt) / 1000);
+  if (ms?.loop) return elapsed % duration;
+  return elapsed < duration - 0.3 ? elapsed : 0;
+}
+
 // Autoplay bloqué (ex. après un rafraîchissement de page : le navigateur exige
-// un geste utilisateur avant de jouer du son). On arme une reprise unique au
-// premier geste (clic/touche/toucher) qui relance la piste + l'ambiance en
-// attente — plus besoin de relancer la musique à la main.
+// un geste utilisateur avant de jouer du son). Le premier geste disponible
+// relance la piste + l'ambiance. Si le navigateur refuse encore, l'écoute reste
+// armée jusqu'à une reprise effective au lieu d'abandonner silencieusement.
 function _armAutoplayResume() {
   if (_autoplayArmed) return;
   _autoplayArmed = true;
-  const events = ['pointerdown', 'keydown', 'touchstart'];
-  const resume = () => {
-    _autoplayArmed = false;
-    events.forEach(ev => document.removeEventListener(ev, resume, true));
-    // Les éléments existent déjà (créés mais bloqués) : un simple play() suffit,
-    // le fondu d'entrée se déclenche sur l'évènement 'playing'.
-    if (_audioEl && _audioEl.paused && _musicState?.playing && !_musicState?.paused) _audioEl.play().catch(() => {});
-    if (_ambienceEl && _ambienceEl.paused) _ambienceEl.play().catch(() => {});
+  _autoplayResumeHandler = () => {
+    const attempts = [];
+    if (_audioEl && _audioEl.paused && _musicState?.playing && !_musicState?.paused) attempts.push(_audioEl.play());
+    if (_ambienceEl && _ambienceEl.paused && _musicState?.ambienceSoundId) attempts.push(_ambienceEl.play());
+    if (!attempts.length) { _disarmAutoplayResume(); return; }
+    Promise.all(attempts).then(_disarmAutoplayWhenReady).catch(err => {
+      if (err?.name !== 'NotAllowedError') console.debug('[vtt music] reprise différée:', err?.name || err);
+    });
   };
-  events.forEach(ev => document.addEventListener(ev, resume, true));
+  _AUTOPLAY_RESUME_EVENTS.forEach(ev => document.addEventListener(ev, _autoplayResumeHandler, true));
 }
 
 // ── Fondus (fade in/out + crossfade) ─────────────────────────────────
@@ -912,7 +981,7 @@ function _syncAmbience(ms) {
   el._errorHandler = onAmbErr;
   el.addEventListener('error', onAmbErr, { once: true });
   el.addEventListener('playing', () => _fade(el, _getAmbienceVolume(), _AMB_FADE_MS), { once:true });
-  el.play().catch(err => {
+  el.play().then(_disarmAutoplayWhenReady).catch(err => {
     if (err.name === 'NotAllowedError') _armAutoplayResume();   // reprise auto silencieuse
     else console.error('[vtt music] ambiance play():', err.name, err.message);
   });
@@ -929,6 +998,7 @@ function _syncAmbience(ms) {
 // proprement, puis la lecture est reconciliée sans redémarrage.
 function _resetMusicState(keepAudio = false) {
   if (!keepAudio) {
+    _disarmAutoplayResume();
     _killAudio();
     _killAmbience();
     _lastAppliedSeek = 0;
@@ -938,12 +1008,12 @@ function _resetMusicState(keepAudio = false) {
   _musicSoundLoads.clear();
 }
 
-// Écriture « fire-and-forget » : on N'ATTEND PAS l'accusé serveur. Le onSnapshot
-// local (_syncMusicPlayback) applique l'effet immédiatement ; attendre setDoc
-// bloquait les boutons (spinner infini) sur réseau lent. L'écriture part quand
-// même en arrière-plan et se propage aux autres clients.
+// Écriture optimiste : le lecteur et son panneau réagissent dans la même frame,
+// puis Firestore propage l'état à la table. S'appuyer seulement sur onSnapshot
+// introduisait plusieurs secondes de latence selon le réseau/cache local.
 function _setMusicState(patch) {
   if (!aid()) return Promise.resolve();
+  _syncMusicPlayback({ ..._musicState, ...patch });
   setDoc(_musicStateRef(), patch, { merge: true }).catch(() => {});
   return Promise.resolve();
 }
@@ -951,6 +1021,7 @@ function _setMusicState(patch) {
 // ── Sync lecture ────────────────────────────────────────────────────
 function _syncMusicPlayback(ms) {
   _musicState = ms;
+  _refreshMusicDockTrigger(ms);
   const panel = document.getElementById('vtt-music-panel');
 
   // Canal Ambiance : géré à chaque changement d'état, indépendamment de la
@@ -982,9 +1053,16 @@ function _syncMusicPlayback(ms) {
     return;
   }
 
-  // Même son déjà en lecture → pas de restart
-  if (_audioEl && _audioEl.dataset.soundId===ms.currentSoundId && !_audioEl.paused && !_audioEl.ended) {
+  // Même son déjà chargé → ne jamais le recréer. Après un refresh, il peut être
+  // seulement en attente d'autorisation autoplay : on réessaie avec ce lecteur.
+  if (_audioEl && _audioEl.dataset.soundId===ms.currentSoundId && !_audioEl.ended) {
     _audioEl.loop = ms.loop ?? false;
+    if (_audioEl.paused) {
+      _audioEl.play().then(_disarmAutoplayWhenReady).catch(err => {
+        if (err.name === 'NotAllowedError') _armAutoplayResume();
+        else console.error('[vtt music] reprise play():', err.name, err.message);
+      });
+    }
     // Seek diffusé par le MJ : on rejoue à la position partagée. Gate par
     // seekVersion → un seul saut par seek (pas de re-seek à chaque resync).
     const sv = ms.seekVersion || 0;
@@ -1008,11 +1086,11 @@ function _syncMusicPlayback(ms) {
   el.loop = ms.loop ?? false;
   _lastAppliedSeek = ms.seekVersion || 0; // la position initiale est déjà gérée via startedAt
 
-  // Sync temps (non-loop uniquement)
-  if (ms.startedAt && !ms.loop) {
+  // Reprend à la position partagée, y compris au milieu d'une piste bouclée.
+  if (ms.startedAt) {
     el.addEventListener('loadedmetadata', () => {
-      const elapsed = (Date.now() - (ms.startedAt?.toMillis?.() ?? Date.now())) / 1000;
-      if (elapsed < el.duration - 0.5) el.currentTime = elapsed;
+      const resumeAt = _musicResumePosition(ms, el.duration);
+      if (resumeAt > 0.05) el.currentTime = resumeAt;
     }, {once:true});
   }
 
@@ -1048,9 +1126,9 @@ function _syncMusicPlayback(ms) {
   // Fondu d'entrée au démarrage réel de la lecture.
   el.addEventListener('playing', () => _fade(el, _getUserVolume(), _FADE_MS), { once:true });
 
-  el.play().catch(err => {
+  el.play().then(_disarmAutoplayWhenReady).catch(err => {
     if (err.name === 'NotAllowedError')
-      _armAutoplayResume();   // reprise auto SILENCIEUSE au 1er geste (aucun message)
+      _armAutoplayResume();   // reprise silencieuse au premier geste autorisé
     else
       console.error('[vtt music] play() error:', err.name, err.message);
   });
@@ -1058,6 +1136,8 @@ function _syncMusicPlayback(ms) {
   if (_prevEl && _prevEl !== el) _fadeOutAndDispose(_prevEl, _FADE_MS);   // crossfade
   if (panel?.dataset.open==='1') _reflectPlaybackUi();
 }
+
+registerVttSessionDockPanel('music', 'vtt-music-panel', '#vtt-music-trigger', _closeMusicPanel);
 
 // Icône œil pour le menu contextuel : dimensionnée en inline car le menu est
 // monté sur <body>, hors `.vtt-music-panel` (où `svg.i` est stylé).
@@ -1365,10 +1445,12 @@ async function _vttRemoveSoundFromPlaylist(plId, soundId) {
 
 export {
   _closeMusicPanel,
+  _refreshMusicDockTrigger,
   _fmtTime,
   _getUserVolume,
   _initMusicSortable,
   _killAudio,
+  _musicResumePosition,
   _resetMusicState,
   _loadMusicSoundById,
   _musicStateRef,
