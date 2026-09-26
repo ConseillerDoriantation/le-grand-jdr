@@ -2408,7 +2408,24 @@ async function _statsReloadAfterMutation() {
   _statsData = (await loadStats()) || {};
   _statsVttDetailCache = new Map();
   _statsRowsCache = new Map();
-  _statsRefreshEnrichedView(_statsScope);
+  // Si le scope courant (séance / mission) a disparu avec la suppression, on
+  // retombe sur la campagne entière — sinon la vue resterait figée sur du vide.
+  if (_statsScope) {
+    const isMission = _statsScope.startsWith('mission:');
+    const isAct = _statsScope.startsWith('act:');
+    const stillExists = isAct
+      ? _statsActList().some(a => `act:${a.key}` === _statsScope)
+      : isMission
+        ? _statsMissionList().some(m => `mission:${m.id}` === _statsScope)
+        : _statsAllSessionKeys().includes(_statsScope);
+    if (!stillExists) { _statsScope = null; _statsGroupSel = null; _statsGroupMissionId = ''; }
+  }
+  // Rendu direct du contenu dans #stats-root (comme le 1er rendu de la page) :
+  // met à jour la vue de façon fiable, SANS reconstruire la page ni refetch.
+  // On préserve le défilement pour ne pas « sauter » en haut.
+  const y = window.scrollY;
+  _statsRender(_statsScope);
+  if (Math.abs(window.scrollY - y) > 1) window.scrollTo({ top: y, behavior: 'auto' });
 }
 
 
