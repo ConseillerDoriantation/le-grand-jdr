@@ -537,7 +537,10 @@ html:not([data-theme="light"]) .vtt-root {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
-@media (hover: none), (pointer: coarse) {
+/* Un PC tactile peut signaler `pointer: coarse` même quand une souris est
+   utilisée. Le JS ignore déjà les vrais événements tactiles : ne masquer le
+   panneau que sur les appareils qui n'ont réellement aucun survol. */
+@media (any-hover: none) and (any-pointer: coarse) {
   .vtt-token-tooltip { display: none !important; }
 }
 .vct-header {

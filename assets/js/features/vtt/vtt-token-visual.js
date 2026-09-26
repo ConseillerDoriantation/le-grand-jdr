@@ -42,11 +42,70 @@ export function tokenHealthMeta(hp, hpMax) {
   return { known: true, current, maximum, ratio, label: 'En forme', tone: 'healthy', color: '#22c38e', isDown: false };
 }
 
+/**
+ * Adapte l'état de santé au niveau d'information du spectateur.
+ *
+ * Une estimation joueur arrivée à 0 ne signifie jamais que la créature est
+ * réellement morte. Pour un ennemi masqué, seul `actualDown` peut donc afficher
+ * le crâne / le grisage. L'estimation reste bien à 0, mais son libellé demeure
+ * « Critique » tant que les vrais PV du token ne sont pas épuisés.
+ */
+export function tokenVisibleHealthMeta(hp, hpMax, { hidden = false, actualDown = false } = {}) {
+  const health = tokenHealthMeta(hp, hpMax);
+  const isDown = hidden ? !!actualDown : (health.isDown || !!actualDown);
+  if (hidden && health.isDown && !isDown) {
+    return { ...health, label:'Critique', tone:'critical', color:'#ef4444', isDown:false };
+  }
+  return { ...health, isDown };
+}
+
 export function tokenDetailLevel(scale = 1) {
   const value = Number(scale);
   if (!Number.isFinite(value) || value >= 0.82) return 'detailed';
   if (value >= 0.58) return 'standard';
   return 'compact';
+}
+
+const TOKEN_HIDDEN_HEALTH_RATIOS = Object.freeze({
+  critical: 0.18,
+  wounded: 0.42,
+  hurt: 0.66,
+  healthy: 1,
+  down: 0,
+  unknown: 0.5,
+});
+
+/** Les joueurs ne voient jamais la valeur exacte des PV ennemis : leur anneau
+ * utilise des paliers visuels stables, suffisamment précis pour lire l'état
+ * général sans permettre de déduire le total réel. */
+export function tokenHiddenHealthRatio(tone = 'unknown') {
+  return TOKEN_HIDDEN_HEALTH_RATIOS[tone] ?? TOKEN_HIDDEN_HEALTH_RATIOS.unknown;
+}
+
+/** Géométrie pure des arcs du médaillon. Les angles sont exprimés dans le même
+ * repère que la maquette (0° en haut, sens horaire) afin de garder le rendu et
+ * ses mises à jour temps réel parfaitement synchronisés. */
+export function tokenResourceArcs({ hasMana = false, hpRatio = 0, pmRatio = 0, down = false } = {}) {
+  const hp = clamp(Number(hpRatio) || 0, 0, 1);
+  const pm = clamp(Number(pmRatio) || 0, 0, 1);
+  if (!hasMana) {
+    const start = 198;
+    const span = 324;
+    return {
+      hpTrack: { start, span },
+      hpFill: { start, span: down ? 0 : span * hp },
+      pmTrack: null,
+      pmFill: null,
+    };
+  }
+  const span = 155;
+  return {
+    hpTrack: { start: 198, span },
+    hpFill: { start: 198, span: down ? 0 : span * hp },
+    pmTrack: { start: 7, span },
+    // Le mana se remplit depuis le bas de l'arc droit.
+    pmFill: { start: 162 - span * pm, span: span * pm },
+  };
 }
 
 export function tokenRelationTone(source, target, friendlyAction = false) {
