@@ -3099,7 +3099,7 @@ async function _openClassicSortModal(idx, s, allTypes) {
                 <label><span>Recharge</span><div class="classic-spell-unit"><input type="number" id="s-classic-cooldown" class="input-field" min="0" max="99" value="${s?.cooldownTurns ?? 0}"><span>tours</span></div></label>
               </div>
             </section>
-            ${!_itemEditCtx ? `<section class="classic-spell-section">${_consumableSectionHtml(s)}</section>` : ''}
+            ${_consumableSectionHtml(s)}
             <section class="classic-spell-section classic-spell-mj">
               <div class="classic-spell-section-head"><span>MJ</span><div><b>Validation</b><small>Équilibrage et exceptions.</small></div></div>
               ${STATE.isAdmin ? `
@@ -5296,10 +5296,10 @@ async function _ensureConsumableCatalog() {
   return _consumableCatalog;
 }
 
-// Bloc d'édition « objet consommé au lancement ». Masqué en contexte item
-// (les actions d'objet ont déjà leur propre flag `consommable`).
+// Bloc d'édition « objet consommé au lancement ». Présent pour les sorts de
+// personnage ET les actions d'objet (le sort d'un objet peut consommer d'autres
+// objets de l'inventaire). Compact : en-tête + une ligne (nom · qté · oblig.).
 function _consumableSectionHtml(s) {
-  if (_itemEditCtx) return '';
   const cons = s?.consumable && typeof s.consumable === 'object' ? s.consumable : null;
   const nom = cons?.nom || '';
   const qty = Math.max(1, parseInt(cons?.qty) || 1);
@@ -5307,23 +5307,23 @@ function _consumableSectionHtml(s) {
   const opts = _consumableCatalog.map(x => `<option value="${_esc(x.nom)}"></option>`).join('');
   return `
     <div class="cs-consumable" role="group" aria-label="Objet consommé au lancement">
-      <div class="cs-consumable-hd">🧪 <b>Objet consommé au lancement</b></div>
-      <input type="text" id="s-consumable-name" list="s-consumable-list" value="${_esc(nom)}"
-        placeholder="Aucun — le sort n'utilise pas d'objet" autocomplete="off">
+      <span class="cs-consumable-hd">🧪 Objet consommé au lancement</span>
+      <div class="cs-consumable-row">
+        <input type="text" id="s-consumable-name" list="s-consumable-list" value="${_esc(nom)}"
+          placeholder="Aucun objet requis" autocomplete="off"
+          title="Objet retiré de l'inventaire du lanceur à chaque lancement (VTT)">
+        <input type="number" id="s-consumable-qty" min="1" max="20" value="${qty}"
+          aria-label="Quantité par lancement" title="Quantité consommée par lancement">
+        <label class="cs-consumable-req" title="Bloque le lancement si l'objet manque">
+          <input type="checkbox" id="s-consumable-required" ${required ? 'checked' : ''}><span>Oblig.</span></label>
+      </div>
       <datalist id="s-consumable-list">${opts}</datalist>
       <input type="hidden" id="s-consumable-id" value="${_esc(cons?.itemId || '')}">
-      <div class="cs-consumable-row">
-        <label class="fld"><span class="fld-l">Quantité</span>
-          <input type="number" id="s-consumable-qty" min="1" max="20" value="${qty}"><span class="fld-u">/ lancer</span></label>
-        <label class="cs-consumable-req"><input type="checkbox" id="s-consumable-required" ${required ? 'checked' : ''}> <span>Obligatoire</span></label>
-      </div>
-      <small class="cs-consumable-hint">Le lanceur doit posséder l'objet dans son inventaire ; il est retiré à chaque lancement dans le VTT. « Obligatoire » bloque le lancement s'il manque.</small>
     </div>`;
 }
 
 // Lit le bloc consommable → null si aucun objet renseigné.
 function _readConsumableFromDOM() {
-  if (_itemEditCtx) return null;
   const nameEl = document.getElementById('s-consumable-name');
   if (!nameEl) return null;
   const nom = (nameEl.value || '').trim();
