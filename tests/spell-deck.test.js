@@ -4,6 +4,7 @@ import {
   deckHasRoomFor,
   getDeckUsage,
   isAlwaysPreparedSpell,
+  spellValidationState,
   spellUsesDeckSlot,
 } from '../assets/js/shared/spell-deck.js';
 
@@ -22,4 +23,12 @@ test('un sort toujours prêt peut entrer dans un Deck plein', () => {
   const deck = [{ actif: true }, { actif: true }, { actif: true }];
   assert.equal(deckHasRoomFor({ actif: false }, deck, 3), false);
   assert.equal(deckHasRoomFor({ actif: false, alwaysPrepared: true }, deck, 3), true);
+});
+
+test('la mini-fiche respecte la validation moderne et les sorts historiques', () => {
+  assert.equal(spellValidationState({ mjValidation:'ok' }), 'ok');
+  assert.equal(spellValidationState({ mjValidation:'no', mjValidated:true }), 'no');
+  assert.equal(spellValidationState({ mjValidated:true }), 'ok');
+  assert.equal(spellValidationState({ mjValidated:false }), 'pending');
+  assert.equal(spellValidationState({}), 'ok');
 });

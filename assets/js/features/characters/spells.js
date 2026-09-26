@@ -7,7 +7,7 @@ import { openModal, closeModal, pushModal, popModal, closeModalDirect, updateMod
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../../shared/html.js';
 import { calcDeckMax, calcPMMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
-import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell } from '../../shared/spell-deck.js';
+import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell, spellValidationState as _sortValidationState } from '../../shared/spell-deck.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, getMatrixSuggestions, getComboConfig } from '../../shared/spell-matrices.js';
@@ -264,14 +264,6 @@ function _renderSpellsTab(c = _getCurrentSpellChar()) {
   } else {
     charSession.renderSheet(c, 'sorts');
   }
-}
-
-function _sortValidationState(s) {
-  if (s?.mjValidation) return s.mjValidation;
-  if (typeof s?.mjValidated === 'boolean') return s.mjValidated ? 'ok' : 'pending';
-  // Sort créé AVANT la validation MJ (aucun champ) → considéré validé (rétro-compat) :
-  // sinon tous les sorts existants seraient bloqués hors du deck côté joueur.
-  return 'ok';
 }
 
 function _sortsHasActiveOrderFilter() {

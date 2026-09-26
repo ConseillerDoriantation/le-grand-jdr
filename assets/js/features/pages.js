@@ -2399,6 +2399,35 @@ function _statsRefreshEnrichedView(scope) {
   if (Math.abs(window.scrollY - pageScroll) > 1) window.scrollTo({ top: pageScroll, behavior: 'auto' });
 }
 
+// Après une mutation ciblée des stats (suppression, correction) : recharge le
+// document (le cache mémoire a pu être invalidé) puis rafraîchit la vue EN PLACE
+// via _statsRefreshEnrichedView — sans reconstruire toute la page, ni réinitialiser
+// les filtres, le défilement ou les tiroirs ouverts. Les handlers ajustent
+// `_statsScope` (séance/mission disparue) AVANT d'appeler cette fonction.
+async function _statsReloadAfterMutation() {
+  _statsData = (await loadStats()) || {};
+  _statsVttDetailCache = new Map();
+  _statsRowsCache = new Map();
+  // Si le scope courant (séance / mission) a disparu avec la suppression, on
+  // retombe sur la campagne entière — sinon la vue resterait figée sur du vide.
+  if (_statsScope) {
+    const isMission = _statsScope.startsWith('mission:');
+    const isAct = _statsScope.startsWith('act:');
+    const stillExists = isAct
+      ? _statsActList().some(a => `act:${a.key}` === _statsScope)
+      : isMission
+        ? _statsMissionList().some(m => `mission:${m.id}` === _statsScope)
+        : _statsAllSessionKeys().includes(_statsScope);
+    if (!stillExists) { _statsScope = null; _statsGroupSel = null; _statsGroupMissionId = ''; }
+  }
+  // Rendu direct du contenu dans #stats-root (comme le 1er rendu de la page) :
+  // met à jour la vue de façon fiable, SANS reconstruire la page ni refetch.
+  // On préserve le défilement pour ne pas « sauter » en haut.
+  const y = window.scrollY;
+  _statsRender(_statsScope);
+  if (Math.abs(window.scrollY - y) > 1) window.scrollTo({ top: y, behavior: 'auto' });
+}
+
 
 const PAGES = {
 
@@ -4475,7 +4504,7 @@ registerActions({
     closeModalDirect();
     if (_statsScope === d) _statsScope = null;
     _statsGroupSel = null;
-    await PAGES.statistiques();
+    await _statsReloadAfterMutation();
   },
   // Supprime les stats liées à une mission (toutes ses séances).
   _statsDelMission: async (btn) => {
@@ -4488,7 +4517,7 @@ registerActions({
     const done = await deleteMissionStats(mid);
     showNotif(done ? 'Stats de la mission supprimées.' : 'Échec de la suppression.', done ? 'success' : 'error');
     closeModalDirect();
-    if (done) { _statsScope = null; _statsGroupSel = null; _statsGroupMissionId = ''; PAGES.statistiques(); }
+    if (done) { _statsScope = null; _statsGroupSel = null; _statsGroupMissionId = ''; await _statsReloadAfterMutation(); }
   },
   // Suppression TOTALE — confirmation explicite par saisie (« EFFACER »).
   _statsResetAsk: async () => {
@@ -4510,7 +4539,7 @@ registerActions({
     const done = await resetStats();
     showNotif(done ? `Toutes les statistiques de ${STATE.adventure?.nom || 'l’aventure'} ont été effacées.` : 'Échec de la suppression des statistiques.', done ? 'success' : 'error');
     closeModalDirect();
-    if (done) { _statsScope = null; _statsPlayerSel = null; _statsGroupSel = null; _statsGroupMissionId = ''; PAGES.statistiques(); }
+    if (done) { _statsScope = null; _statsPlayerSel = null; _statsGroupSel = null; _statsGroupMissionId = ''; await _statsReloadAfterMutation(); }
   },
   _statsDelChar: async (btn) => {
     if (!STATE.isAdmin) return;
@@ -4532,8 +4561,8 @@ registerActions({
       : 'Échec de la suppression.', done ? 'success' : 'error');
     if (!done) return;
     if (btn.dataset.origin === 'dates-modal') closeModalDirect();
-    if (singleSession && _statsScope === date) requestStatsScope(date);
-    await PAGES.statistiques();
+    // La séance existe toujours (on n'a retiré que ce personnage) → le scope reste valide.
+    await _statsReloadAfterMutation();
   },
   // Stats d'un personnage séance par séance (date) — lit le doc déjà chargé.
   _statsCharDates: (btn) => {
@@ -4678,7 +4707,7 @@ registerActions({
     showNotif('Statistiques de la séance corrigées.', 'success');
     closeModalDirect();
     closeModalDirect();
-    await PAGES.statistiques();
+    await _statsReloadAfterMutation();
   },
   // Changement de scope (campagne entière ↔ une séance) — re-rend sans relecture.
   _statsScope: (el) => { _statsRender(el.value || null); },

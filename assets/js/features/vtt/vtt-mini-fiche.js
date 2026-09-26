@@ -38,7 +38,7 @@ import {
   equipmentSlotAcceptsItem, getEquipmentSlot, getEquipmentSlots,
   getPrimaryWeaponSlotId,
 } from '../../shared/equipment-slots.js';
-import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell } from '../../shared/spell-deck.js';
+import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell, spellValidationState } from '../../shared/spell-deck.js';
 import { lsJson } from '../../shared/local-storage.js';
 
 let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)
@@ -629,7 +629,7 @@ async function _vttToggleMsSort(charId, uid, idx) {
     return;
   }
   // Un joueur ne peut mettre dans son Deck qu'un sort VALIDÉ par le MJ (le MJ n'est pas limité).
-  const isValidated = (s.mjValidation || (s.mjValidated ? 'ok' : 'pending')) === 'ok';
+  const isValidated = spellValidationState(s) === 'ok';
   if (!s.actif && !isValidated && !STATE.isAdmin) {
     showNotif('Ce sort doit être validé par le MJ avant d\'entrer dans le Deck.', 'error');
     return;
@@ -1000,7 +1000,7 @@ function _vttSpellCardHtml(s, i, c, uid, canEdit, deckCount = 0, deckMax = Infin
   const noyauPills = nts.map(t =>
     `<span class="cs-spellcard-noyau" style="--c:${t.color||'#888'}" title="Noyau ${_esc(t.label)}">${t.icon||''}</span>`).join('');
   const typeCol = types.includes('offensif') ? '#ff6b6b' : types.includes('defensif') ? '#22c38e' : '#b47fff';
-  const vs = s.mjValidation || (s.mjValidated ? 'ok' : 'pending');
+  const vs = spellValidationState(s);
   const valBadge = vs === 'ok'
     ? `<span class="cs-spellcard-val ok" title="Sort validé par le MJ">✅ Validé</span>`
     : vs === 'no'
@@ -1061,7 +1061,7 @@ function _msSpellLine(s, i, c, uid, canEdit, deckCount, deckMax) {
   const action = _vttSpellActionMode(s);
   const ACT = { action: ['Act.', '#e8b84b'], action_bonus: ['Bonus', '#f97316'], reaction: ['Réac.', '#a78bfa'] };
   const acfg = ACT[action] || ACT.action;
-  const vs = s.mjValidation || (s.mjValidated ? 'ok' : 'pending');
+  const vs = spellValidationState(s);
   const typeCol = types.includes('offensif') ? '#ff6b6b' : types.includes('defensif') ? '#22c38e' : '#b47fff';
   const chips = _vttSpellChips(s, c);
   const fx = chips.slice(0, 2).map(ch => `<span class="vtt-ms-sp-fx" style="--fxc:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('');

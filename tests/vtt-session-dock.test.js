@@ -7,6 +7,7 @@ const dock = readFileSync(new URL('../assets/js/features/vtt/vtt-session-dock.js
 const rest = readFileSync(new URL('../assets/js/features/vtt/vtt-rest.js', import.meta.url), 'utf8');
 const loot = readFileSync(new URL('../assets/js/features/vtt/vtt-loot.js', import.meta.url), 'utf8');
 const music = readFileSync(new URL('../assets/js/features/vtt/vtt-music.js', import.meta.url), 'utf8');
+const emotes = readFileSync(new URL('../assets/js/features/vtt/vtt-emotes.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../assets/css/vtt.css', import.meta.url), 'utf8');
 
 test('le dock de session respecte l’ordre et les libellés du handoff', () => {
@@ -68,4 +69,12 @@ test('une musique active reprend après actualisation sans recréer son lecteur'
 test('les commandes musicales répondent avant le retour Firestore', () => {
   assert.match(music, /function _setMusicState\(patch\) \{[\s\S]*?_syncMusicPlayback\(\{ \.\.\._musicState, \.\.\.patch \}\);[\s\S]*?setDoc\(_musicStateRef\(\), patch/);
   assert.match(music, /sound\.hideTitle = hideTitle;[\s\S]*?_setMusicState\(\{ currentTitleHidden: hideTitle \}\);[\s\S]*?updateDoc\(_sonRef\(soundId\), \{ hideTitle \}\)\.catch/);
+});
+
+test('le sélecteur d’émetteur des émotes affiche les portraits avec repli sur l’initiale', () => {
+  assert.match(emotes, /const live = _live\(t\)/);
+  assert.match(emotes, /live\?\.displayImage \|\| t\?\.imageUrl/);
+  assert.match(emotes, /vtt-emote-av-initial/);
+  assert.match(emotes, /<img src=/);
+  assert.match(css, /\.vtt-emote-av img \{ width:100%; height:100%; object-fit:cover; \}/);
 });
