@@ -3699,7 +3699,7 @@ export async function openSortModal(idx, s) {
         <textarea class="note" id="s-effet" placeholder="Note narrative, conditions spéciales…">${s?.effet||''}</textarea>
       </div>
 
-      <details class="mj" open>
+      <details class="mj"${_sortValidationState(s) === 'no' ? ' open' : ''}>
         <summary>🔒 Validation MJ &amp; exceptions <span class="st pd" id="s-mj-badge">⏳ En attente</span></summary>
         <div class="mj-b">
     ${(() => {

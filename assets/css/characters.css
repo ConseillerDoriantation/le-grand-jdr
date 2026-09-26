@@ -22460,7 +22460,7 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-forge2 .fld{ display:flex; align-items:center; gap:5px; height:28px; padding:0 4px 0 9px; border-radius:var(--r-full); background:var(--surface-2); border:1px solid var(--border); font-size:11px; color:var(--text-muted); flex:1; min-width:0; }
 .cs-forge2 .fld input{ width:100%; min-width:0; background:none; border:0; outline:0; font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--text); text-align:right; padding-right:5px; }
 .cs-forge2 .fld input::placeholder{ font-family:var(--font-body); font-weight:400; color:var(--text-dim); }
-.cs-forge2 .note{ width:100%; min-height:52px; resize:vertical; padding:7px 9px; border-radius:var(--r-sm); background:var(--surface-2); border:1px solid var(--border); outline:0; font-size:12px; color:var(--text-soft); line-height:1.5; font-family:inherit; }
+.cs-forge2 .note{ width:100%; min-height:44px; resize:vertical; padding:7px 9px; border-radius:var(--r-sm); background:var(--surface-2); border:1px solid var(--border); outline:0; font-size:12px; color:var(--text-soft); line-height:1.5; font-family:inherit; }
 .cs-forge2 .note:focus{ border-color:var(--border-bright); }
 .cs-forge2 .mj{ border-top:1px solid var(--border); }
 .cs-forge2 .mj>summary{ list-style:none; cursor:pointer; padding:9px 12px; display:flex; align-items:center; gap:8px; font-size:11px; font-weight:600; color:var(--text-muted); }
@@ -22526,8 +22526,8 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-forge2 .mj-b .cs-mjval-readonly{ font-size:12px; padding:6px 9px; border-radius:var(--r-sm); background:var(--surface-2); border:1px solid var(--border); color:var(--text-soft); }
 
 /* ── Objet consommable requis par le sort (fiche → VTT) · compact ──────────── */
-.cs-consumable{ display:flex; flex-direction:column; gap:5px; margin:6px 0 2px; padding:7px 9px; border:1px solid var(--border); border-radius:9px; background:var(--surface-2); }
-.cs-consumable-hd{ font-size:11px; font-weight:600; color:var(--text-soft); }
+.cs-consumable{ display:flex; flex-direction:column; gap:4px; margin:3px 0 0; padding:6px 8px; border:1px solid var(--border); border-radius:9px; background:var(--surface-2); }
+.cs-consumable-hd{ font-size:10.5px; font-weight:600; color:var(--text-soft); }
 .cs-consumable-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .cs-consumable-row input[type="text"]{ flex:1 1 130px; min-width:0; box-sizing:border-box; background:var(--surface-3,var(--bg-elevated,#26262c)); border:1px solid var(--border); border-radius:7px; color:var(--text); font-size:12px; padding:6px 8px; outline:none; transition:border-color .15s; }
 .cs-consumable-row input[type="number"]{ flex:none; width:50px; box-sizing:border-box; background:var(--surface-3,var(--bg-elevated,#26262c)); border:1px solid var(--border); border-radius:7px; color:var(--text); font-size:12px; font-weight:700; padding:6px 5px; text-align:right; outline:none; transition:border-color .15s; }
