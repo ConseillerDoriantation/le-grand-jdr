@@ -3,6 +3,15 @@ export function isAlwaysPreparedSpell(spell) {
   return spell?.alwaysPrepared === true;
 }
 
+/** Statut de validation canonique, compatible avec les sorts historiques. */
+export function spellValidationState(spell) {
+  if (spell?.mjValidation) return spell.mjValidation;
+  if (typeof spell?.mjValidated === 'boolean') return spell.mjValidated ? 'ok' : 'pending';
+  // Les sorts créés avant l'ajout de la validation MJ étaient implicitement
+  // utilisables. Les bloquer aujourd'hui viderait artificiellement leur Deck.
+  return 'ok';
+}
+
 /** Indique si un sort actif consomme réellement un emplacement du Deck. */
 export function spellUsesDeckSlot(spell) {
   return !!spell?.actif && !isAlwaysPreparedSpell(spell);

@@ -8,7 +8,7 @@
 // ==============================================================================
 import { VS } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
-import { _esc, _norm, _searchIncludes } from '../../shared/html.js';
+import { _esc, _norm, _searchIncludes, normalizeImageUrl } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { showNotif } from '../../shared/notifications.js';
 import { getDocData, saveDoc } from '../../data/firestore.js';
@@ -25,6 +25,7 @@ import { _STAT_KEY } from './vtt-constants.js';
 import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
 import { listGithubFolder, GH_IMAGE_EXTS, slugFromFile, fileKey } from '../../shared/github-folder.js';
 import { resolveControlledTokenId } from './vtt-token-control.js';
+import { _live } from './vtt-effective.js';
 import { _vttPublishOptimisticLog } from './vtt-chat.js';
 import {
   VTT_ACTIONS, _showEmoteBubble, _canControlToken, _conditionStatRollMode,
@@ -263,6 +264,16 @@ export function _emoteTokenColor(t) {
   return _EMOTE_COLORS[h % _EMOTE_COLORS.length];
 }
 
+function _emoteAvatar(t) {
+  const live = _live(t);
+  const name = live?.displayName || t?.name || '?';
+  const image = normalizeImageUrl(live?.displayImage || t?.imageUrl || '');
+  return `<span class="vtt-emote-av" style="--c:${_emoteTokenColor(t)}">
+    <span class="vtt-emote-av-initial">${_esc(name[0] || '?')}</span>
+    ${image ? `<img src="${_esc(image)}" alt="" loading="lazy" draggable="false">` : ''}
+  </span>`;
+}
+
 // ── Émetteur (token qui envoie) ─────────────────────────────────────
 function _emoteControllable() {
   const uid = STATE.user?.uid;
@@ -339,9 +350,9 @@ export function _renderEmotePicker() {
   const emitter = emitterId ? VS.tokens[emitterId]?.data : null;
   const ctrl = _emoteControllable();
   const emitterBtn = emitter
-    ? `<button class="vtt-emote-emitter" data-vtt-fn="_vttEmoteMenu" title="Token qui envoie l'émote"><span class="vtt-emote-av" style="--c:${_emoteTokenColor(emitter)}">${_esc((emitter.name || '?')[0])}</span><small>depuis</small><b>${_esc(emitter.name || 'Token')}</b>${ctrl.length > 1 ? '<i>▾</i>' : ''}</button>`
+    ? `<button class="vtt-emote-emitter" data-vtt-fn="_vttEmoteMenu" title="Token qui envoie l'émote">${_emoteAvatar(emitter)}<small>depuis</small><b>${_esc(emitter.name || 'Token')}</b>${ctrl.length > 1 ? '<i>▾</i>' : ''}</button>`
     : `<button class="vtt-emote-emitter" data-vtt-fn="_vttEmoteMenu" title="Aucun token contrôlable"><small>depuis</small><b>—</b></button>`;
-  const item = (x) => `<button class="${x.id === emitterId ? 'on' : ''}" data-vtt-fn="_vttEmotePickEmitter" data-vtt-args="${x.id}"><span class="vtt-emote-av" style="--c:${_emoteTokenColor(x.data)}">${_esc((x.data.name || '?')[0])}</span><span>${_esc(x.data.name || 'Token')}</span></button>`;
+  const item = (x) => `<button class="${x.id === emitterId ? 'on' : ''}" data-vtt-fn="_vttEmotePickEmitter" data-vtt-args="${x.id}">${_emoteAvatar(x.data)}<span>${_esc(x.data.name || 'Token')}</span></button>`;
   const mine = ctrl.filter(x => _emoteIsMine(x.data));
   const others = ctrl.filter(x => !_emoteIsMine(x.data));
   const menu = (_emoteMenu && ctrl.length > 1)
@@ -389,6 +400,9 @@ function _emoteFootHtml() {
 
 // Liaisons (recherche + survol du pied) — préserve le focus/caret.
 function _bindEmoteInputs() {
+  document.querySelectorAll('.vtt-emote-av img').forEach(img => {
+    img.addEventListener('error', () => img.remove(), { once: true });
+  });
   const q = document.getElementById('vtt-emote-q');
   if (q) {
     q.oninput = e => { _emoteQuery = e.target.value; _renderEmotePicker(); };

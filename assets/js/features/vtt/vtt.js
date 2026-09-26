@@ -71,7 +71,7 @@ import { fogHasUnlimitedVision, fogVisionRadiusCells, vttCanvasPixelRatio, vttPi
 import { vttStructureLegendSvg } from './vtt-wall-utils.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenFootprintMeta, tokenHiddenHealthRatio, tokenMovementMeta, tokenRelationTone, tokenResourceArcs, tokenVisibleHealthMeta } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
-import { attackRollHitsTarget, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
+import { attackRollHitsTarget, gridDistanceForRange, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
 import { planGroupGridStep } from './vtt-group-movement.js';
 import { invocableCharacterTokens, resolveCharacterControlToken } from './vtt-token-control.js';
@@ -3682,7 +3682,7 @@ const _tokenAttackDistance = (src, tgt, portee = null) => {
   const s = _tokenDims(src), g = _tokenDims(tgt);
   const dx = Math.max(0, Math.max(src.col, tgt.col) - Math.min(src.col + s.w - 1, tgt.col + g.w - 1));
   const dy = Math.max(0, Math.max(src.row, tgt.row) - Math.min(src.row + s.h - 1, tgt.row + g.h - 1));
-  return portee === 1 ? Math.max(dx, dy) : dx + dy;
+  return gridDistanceForRange(dx, dy, portee);
 }
 
 // [VTT_ACTION_RUNE / _vttAmpDispCircleSize / _vttSpellActionMode / _vttDisplayRunes
@@ -7655,12 +7655,13 @@ function _tokenCenter(t) {
   return { x: t.col * CELL + d.w * CELL / 2, y: t.row * CELL + d.h * CELL / 2 };
 }
 
-/** Distance en CASES (Manhattan, comme la règle de mesure) entre le lanceur et la
- *  case centrale d'une zone (px centre → case entière). Sert au contrôle de portée. */
-function _zoneCenterDistCells(casterCenter, zx, zy) {
+/** Distance entre le lanceur et la case centrale d'une zone. La portée 1 suit
+ *  la règle de mêlée (8 cases adjacentes) ; les portées supérieures restent en
+ *  Manhattan comme la règle de mesure historique. */
+function _zoneCenterDistCells(casterCenter, zx, zy, range = null) {
   const cCol = Math.floor(casterCenter.x / CELL), cRow = Math.floor(casterCenter.y / CELL);
   const zCol = Math.floor(zx / CELL), zRow = Math.floor(zy / CELL);
-  return Math.abs(zCol - cCol) + Math.abs(zRow - cRow);
+  return gridDistanceForRange(zCol - cCol, zRow - cRow, range);
 }
 
 /** Dessine une ligne pointillée src→tgt sur le layer token. */
@@ -7913,7 +7914,7 @@ function _buildZonePreview() {
   // le placement sera refusé à la validation).
   const _srcC = VS.tokens[_zoneCtx.srcId]?.data ? _tokenCenter(VS.tokens[_zoneCtx.srcId].data) : null;
   const _range = Math.max(0, parseInt(_zoneCtx.opt?.portee) || 1);
-  const _oor = !!(_srcC && _zoneCenterDistCells(_srcC, x, y) > _range);
+  const _oor = !!(_srcC && _zoneCenterDistCells(_srcC, x, y, _range) > _range);
   _zoneCtx._oor = _oor;   // mémorise l'état (détection du basculement dans _zoneUpdatePreview)
   const _fill = _oor ? 'rgba(255,90,110,0.30)' : 'rgba(253,224,71,0.42)';
   const _stroke = _oor ? '#ff5a6e' : '#ffe86b';
@@ -7976,7 +7977,7 @@ function _zoneUpdatePreview(wp) {
   // (ou pour le cône auto, dont l'orientation dépend aussi de la position).
   const _srcC = VS.tokens[_zoneCtx.srcId]?.data ? _tokenCenter(VS.tokens[_zoneCtx.srcId].data) : null;
   const _range = Math.max(0, parseInt(_zoneCtx.opt?.portee) || 1);
-  const _oorNow = !!(_srcC && _zoneCenterDistCells(_srcC, snapX, snapY) > _range);
+  const _oorNow = !!(_srcC && _zoneCenterDistCells(_srcC, snapX, snapY, _range) > _range);
   const _coneAuto = _zoneCtx.opt?.zoneShape === 'cone' && !_zoneCtx.coneDirManual;
   if (_coneAuto || _oorNow !== _zoneCtx._oor) {
     _buildZonePreview();   // recouleur (rouge/jaune) + orientation du cône
@@ -8190,11 +8191,10 @@ async function _zoneValidate(finalize = true) {
   const srcData = VS.tokens[srcId]?.data;
   if (srcData) {
     const sc = _tokenCenter(srcData);
-    // Distance en CASES ENTIÈRES entre la case centrale de la zone et le lanceur,
-    // en Manhattan (|Δcol|+|Δligne|) — MÊME métrique que la règle de mesure. La
-    // case centrale ne peut PAS dépasser la portée (pas de tolérance flottante).
-    const distCells = _zoneCenterDistCells(sc, x, y);
     const range = Math.max(0, parseInt(opt.portee) || 1);
+    // Portée 1 : les huit cases collées sont valides. Au-delà, on conserve le
+    // losange Manhattan utilisé par la règle de mesure.
+    const distCells = _zoneCenterDistCells(sc, x, y, range);
     if (distCells > range) {
       showNotif(`Zone hors de portée (${distCells}c — portée : ${range}c)`, 'error');
       return;

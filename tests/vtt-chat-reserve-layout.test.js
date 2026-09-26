@@ -44,6 +44,9 @@ test('la réserve propose cartes liste sélection multiple et placement groupé'
   assert.match(css, /\.vtt-scene-token-ring\s*\{[\s\S]*?conic-gradient/);
   assert.match(css, /\.vtt-res-line-dot\s*\{[\s\S]*?width:\s*54px/);
   assert.match(css, /#vtt-reserve-body \.vtt-res-line\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-direction:\s*column;[\s\S]*?margin:\s*0/);
+  assert.match(css, /#vtt-reserve-body \.vtt-res-line\s*\{[\s\S]*?height:\s*154px;[\s\S]*?padding:\s*30px 6px 10px/);
+  assert.match(css, /#vtt-reserve-body \.vtt-res-line-main\s*\{[\s\S]*?height:\s*52px;[\s\S]*?flex:\s*0 0 52px/);
+  assert.match(css, /#vtt-reserve-body \.vtt-res-line-meta i\s*\{[\s\S]*?text-overflow:\s*ellipsis/);
   assert.match(css, /#vtt-reserve-body \.vtt-res-line-meta i\s*\{[\s\S]*?background:\s*none/);
   assert.match(vtt, /function _patchHpOptimistically[\s\S]*?_refreshDisplayedIdentitySoon\(token\.id\);[\s\S]*?_renderTraySoon\(\);/);
 });

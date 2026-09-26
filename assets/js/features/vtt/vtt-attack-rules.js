@@ -25,3 +25,14 @@ export function attackRollHitsTarget({ hitTotal = 0, targetCA = 10, autoHit = fa
   if (isFumble) return false;
   return Number(hitTotal) >= Number(targetCA);
 }
+
+/**
+ * Distance tactique utilisée par les portées du VTT.
+ * À portée 1, les huit cases adjacentes sont autorisées (diagonales incluses).
+ * Au-delà, la mesure historique reste Manhattan.
+ */
+export function gridDistanceForRange(dx = 0, dy = 0, range = null) {
+  const x = Math.abs(Number(dx) || 0);
+  const y = Math.abs(Number(dy) || 0);
+  return Number(range) === 1 ? Math.max(x, y) : x + y;
+}
