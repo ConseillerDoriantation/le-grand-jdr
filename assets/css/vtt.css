@@ -4681,10 +4681,16 @@ html:not([data-theme="light"]) .vtt-root {
 }
 /* Indisponibles : atténuées, raison affichée (pas masquées). */
 .vtt-aopt.vtt-action-choice.is-oor,
+.vtt-aopt.vtt-action-choice.is-blocked,
 .vtt-aopt.vtt-action-choice.is-cooldown { opacity: .44; }
 .vtt-aopt.vtt-action-choice.is-oor:hover,
+.vtt-aopt.vtt-action-choice.is-blocked:hover,
 .vtt-aopt.vtt-action-choice.is-cooldown:hover { opacity: .7; transform: none; }
+.vtt-aopt.vtt-action-choice.is-blocked,
 .vtt-aopt.vtt-action-choice.is-cooldown { cursor: not-allowed; }
+/* Sort injouable (ressource/objet manquant) : liseré + pied rouge, motif clair. */
+.vtt-aopt.vtt-action-choice.is-blocked { border-color: color-mix(in srgb, var(--crimson) 45%, transparent); }
+.vtt-action-choice.is-blocked .vtt-action-choice-hint { color: var(--crimson); font-weight: 700; }
 /* Armes principale / secondaire : mises en avant en JAUNE (repérables d'un coup d'œil). */
 .vtt-aopt.vtt-action-choice.is-primary-weapon,
 .vtt-aopt.vtt-action-choice.is-secondary-weapon {
@@ -6052,13 +6058,17 @@ html:not([data-theme="light"]) .vtt-root {
   background: rgba(251, 191, 36, .075);
 }
 .vtt-aopt-pill.cooldown.ready { color: #94a3b8; border-color: var(--border); background: transparent; }
-.cs-v3 .vtt-castcard.is-cooldown {
+.cs-v3 .vtt-castcard.is-cooldown,
+.cs-v3 .vtt-castcard.is-blocked {
   opacity: .58;
   cursor: not-allowed;
   filter: saturate(.55);
 }
-.cs-v3 .vtt-castcard.is-cooldown:hover { transform: none; box-shadow: none; }
+.cs-v3 .vtt-castcard.is-cooldown:hover,
+.cs-v3 .vtt-castcard.is-blocked:hover { transform: none; box-shadow: none; }
 .cs-v3 .vtt-castcard.is-cooldown .vtt-castcard-cta { color: #fbbf24; }
+.cs-v3 .vtt-castcard.is-blocked { border-color: color-mix(in srgb, var(--crimson) 45%, transparent); }
+.cs-v3 .vtt-castcard.is-blocked .vtt-castcard-cta { color: var(--crimson); font-weight: 700; white-space: normal; line-height: 1.2; text-align: right; }
 .vtt-log-source-btn {
   width: 20px;
   height: 20px;

@@ -6289,15 +6289,34 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
     const runeChipsHtml = _vttSpellRuneChips(o, srcChar);
 
     const weaponTraitsHtml = cardKind === 'is-weapon' ? _vttWeaponTraitsHtml(o) : '';
-    const cardState = onCooldown ? 'is-cooldown' : noTgt ? 'is-aim' : canHit ? 'is-ready' : 'is-oor';
+
+    // ── Lançabilité : ressource insuffisante OU objet requis manquant ──────────
+    // La carte est désactivée (non cliquable) et le pied indique ce qui manque,
+    // au lieu de laisser lancer puis d'échouer à l'activation.
+    let _blockReason = '';
+    {
+      const _rc = _resCurMap[_res.id];
+      if (o.pmCost > 0 && !o.summonManaSource && _rc != null && o.pmCost > _rc) {
+        const _s = (_res.label === 'PM' || _res.label === 'PV') ? 's' : '';
+        _blockReason = `${_res.label} insuffisant${_s} · ${_rc}/${o.pmCost}`;
+      }
+      if (!_blockReason && o.consumable?.nom && o.consumable.required && srcChar) {
+        const _need = Math.max(1, parseInt(o.consumable.qty) || 1);
+        const _have = _spellConsumableCount(srcChar, o.consumable);
+        if (_have < _need) _blockReason = `🧪 ${o.consumable.nom} manquant · ${_have}/${_need}`;
+      }
+    }
+
+    const cardState = onCooldown ? 'is-cooldown' : _blockReason ? 'is-blocked' : noTgt ? 'is-aim' : canHit ? 'is-ready' : 'is-oor';
     const cardHint = onCooldown ? `Recharge ${o.cooldownRemaining}t`
+      : _blockReason ? _blockReason
       : noTgt ? 'Choisir puis viser'
       : canHit ? 'Lancer'
       : 'Hors portée';
 
     const launchFn = noTgt ? '_vttAimOpt' : '_vttPickOpt';
     const launchArgs = noTgt ? `${srcId}|${i}` : `${srcId}|${tgtId}|${i}`;
-    const buttonAttrs = `type="button" style="--type-col:${accentCol}" data-vtt-fn="${launchFn}" data-vtt-args="${launchArgs}" ${onCooldown ? 'disabled aria-disabled="true"' : ''}`;
+    const buttonAttrs = `type="button" style="--type-col:${accentCol}" data-vtt-fn="${launchFn}" data-vtt-args="${launchArgs}" ${(onCooldown || _blockReason) ? 'disabled aria-disabled="true"' : ''}`;
 
     if (!noTgt) {
       // Coût rapporté à la réserve (fantôme + alerte « mana insuffisant »). On ne
