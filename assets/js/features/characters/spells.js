@@ -2,6 +2,7 @@ import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
 import { trySave } from '../../shared/crud.js';
+import { loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect, updateModalContent, confirmModal, setModalCloseGuard, clearModalCloseGuard } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../../shared/html.js';
@@ -2778,6 +2779,7 @@ function _buildClassicSortFromDOM(idx = -1, prevList = []) {
     pm,
     pmOverride: null,
     costResource: (() => { const v = document.getElementById('s-classic-cost-resource')?.value || 'pm'; return SPELL_COST_RESOURCES.some(r => r.id === v) ? v : 'pm'; })(),
+    consumable: _readConsumableFromDOM(),
     portee: target === 'self' ? 0 : _classicInt('s-classic-range', 1, 0, 99),
     zoneW: zoneEnabled ? _classicInt('s-classic-zone-w', 1, 1, 50) : null,
     zoneH: zoneEnabled ? _classicInt('s-classic-zone-h', 1, 1, 50) : null,
@@ -3097,6 +3099,7 @@ async function _openClassicSortModal(idx, s, allTypes) {
                 <label><span>Recharge</span><div class="classic-spell-unit"><input type="number" id="s-classic-cooldown" class="input-field" min="0" max="99" value="${s?.cooldownTurns ?? 0}"><span>tours</span></div></label>
               </div>
             </section>
+            ${_consumableSectionHtml(s)}
             <section class="classic-spell-section classic-spell-mj">
               <div class="classic-spell-section-head"><span>MJ</span><div><b>Validation</b><small>Équilibrage et exceptions.</small></div></div>
               ${STATE.isAdmin ? `
@@ -3154,7 +3157,7 @@ export async function openSortModal(idx, s) {
   _sortEditWasOk = idx >= 0 && !STATE.isAdmin && _sortValidationState(s) === 'ok';
   _sortEditContentBaseline = null;   // capturé au mount (après stabilisation des dropdowns)
   const [allTypes, matrices, , conditions] = await Promise.all([
-    loadDamageTypes(), loadSpellMatrices(), loadSpellSystem(), loadConditionLibrary(),
+    loadDamageTypes(), loadSpellMatrices(), loadSpellSystem(), loadConditionLibrary(), _ensureConsumableCatalog(),
   ]);
   // Caches globaux utilisés par _getSortCA, _calcSortSoin, suggestions...
   setSpellCaches(matrices, allTypes);
@@ -3692,10 +3695,11 @@ export async function openSortModal(idx, s) {
           <label class="fld"><span class="fld-l">⏳ Durée</span><input id="s-duree-base" value="${s?.dureeBase ?? ''}" placeholder="auto"><span class="fld-u">tours</span></label>
           <label class="fld"><span class="fld-l">🎯 Portée</span><input type="number" id="s-portee" min="0" max="50" value="${s?.portee != null ? s.portee : ''}" placeholder="arme"><span class="fld-u">cases</span></label>
         </div>
+        ${_consumableSectionHtml(s)}
         <textarea class="note" id="s-effet" placeholder="Note narrative, conditions spéciales…">${s?.effet||''}</textarea>
       </div>
 
-      <details class="mj" open>
+      <details class="mj"${_sortValidationState(s) === 'no' ? ' open' : ''}>
         <summary>🔒 Validation MJ &amp; exceptions <span class="st pd" id="s-mj-badge">⏳ En attente</span></summary>
         <div class="mj-b">
     ${(() => {
@@ -5273,6 +5277,65 @@ function _sortPlayLine() {
   return bits.join(' · ');
 }
 
+// ── Objet consommable requis par un sort ────────────────────────────────────
+// Un sort peut exiger un objet de l'inventaire, retiré au lancement (VTT).
+// Le catalogue (boutique, session-live → lecture ~gratuite) alimente le datalist
+// pour choisir l'objet ; on stocke { itemId, nom, qty, required }.
+let _consumableCatalog = [];
+let _consumableCatalogLoaded = false;
+async function _ensureConsumableCatalog() {
+  if (_consumableCatalogLoaded) return _consumableCatalog;
+  try {
+    const items = await loadCollection('shop');
+    _consumableCatalog = (items || [])
+      .map(it => ({ id: it.id, nom: (it.nom || it.name || '').trim() }))
+      .filter(x => x.nom)
+      .sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+  } catch { _consumableCatalog = []; }
+  _consumableCatalogLoaded = true;
+  return _consumableCatalog;
+}
+
+// Bloc d'édition « objet consommé au lancement ». Présent pour les sorts de
+// personnage ET les actions d'objet (le sort d'un objet peut consommer d'autres
+// objets de l'inventaire). Compact : en-tête + une ligne (nom · qté · oblig.).
+function _consumableSectionHtml(s) {
+  const cons = s?.consumable && typeof s.consumable === 'object' ? s.consumable : null;
+  const nom = cons?.nom || '';
+  const qty = Math.max(1, parseInt(cons?.qty) || 1);
+  const required = cons ? cons.required !== false : true;
+  const opts = _consumableCatalog.map(x => `<option value="${_esc(x.nom)}"></option>`).join('');
+  return `
+    <div class="cs-consumable" role="group" aria-label="Objet consommé au lancement">
+      <span class="cs-consumable-hd">🧪 Objet consommé au lancement</span>
+      <div class="cs-consumable-row">
+        <input type="text" id="s-consumable-name" list="s-consumable-list" value="${_esc(nom)}"
+          placeholder="Aucun objet requis" autocomplete="off"
+          title="Objet retiré de l'inventaire du lanceur à chaque lancement (VTT)">
+        <input type="number" id="s-consumable-qty" min="1" max="20" value="${qty}"
+          aria-label="Quantité par lancement" title="Quantité consommée par lancement">
+        <label class="cs-consumable-req" title="Bloque le lancement si l'objet manque">
+          <input type="checkbox" id="s-consumable-required" ${required ? 'checked' : ''}><span>Oblig.</span></label>
+      </div>
+      <datalist id="s-consumable-list">${opts}</datalist>
+      <input type="hidden" id="s-consumable-id" value="${_esc(cons?.itemId || '')}">
+    </div>`;
+}
+
+// Lit le bloc consommable → null si aucun objet renseigné.
+function _readConsumableFromDOM() {
+  const nameEl = document.getElementById('s-consumable-name');
+  if (!nameEl) return null;
+  const nom = (nameEl.value || '').trim();
+  if (!nom) return null;
+  let itemId = document.getElementById('s-consumable-id')?.value || '';
+  const match = _consumableCatalog.find(x => x.nom.toLowerCase() === nom.toLowerCase());
+  if (match) itemId = match.id;   // re-résout l'id si le nom colle au catalogue
+  const qty = Math.max(1, Math.min(20, parseInt(document.getElementById('s-consumable-qty')?.value) || 1));
+  const required = !!document.getElementById('s-consumable-required')?.checked;
+  return { itemId: itemId || '', nom, qty, required };
+}
+
 /** Reconstruit un objet sort depuis l'état du modal (pour la preview live) */
 function _buildSortFromDOM() {
   const noyau       = document.getElementById('s-noyau')?.value || '';
@@ -5335,6 +5398,7 @@ function _buildSortFromDOM() {
     toucherStat: _readVisibleStatOverride('s-toucher-stat'),
     degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
     invocation:  _buildInvocationFromDOM(),
+    consumable:  _readConsumableFromDOM(),
     mjNotes: document.getElementById('s-mj-notes')?.value || '',
   };
 }
@@ -5809,6 +5873,7 @@ export async function saveSort(idx, btn = null) {
       pm:       autoPm,
       pmOverride,
       costResource,
+      consumable: _readConsumableFromDOM(),
       noyau,
       noyauTypeId,
       noyauTypeIds: [..._noyauIdsEdit],
@@ -5967,6 +6032,7 @@ function _buildSortFromForm(idx, prevList = []) {
     pm:       autoPm,
     pmOverride,
     costResource,
+    consumable: _readConsumableFromDOM(),
     mjAlwaysMax: STATE.isAdmin
       ? !!document.getElementById('s-mj-always-max')?.checked
       : (idx >= 0 ? !!prevList[idx]?.mjAlwaysMax : false),
