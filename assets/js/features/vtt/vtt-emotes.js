@@ -317,9 +317,9 @@ function _emoteTiles(list, favs) {
     const fi = favs.indexOf(em.name);
     const isFav = fi >= 0;
     const kbd = isFav && fi < 8 ? `<kbd>${fi + 1}</kbd>` : '';
-    return `<div class="vtt-emote-tile" data-emote="${safe}" title=":${safe}:">
+    return `<div class="vtt-emote-tile${isFav ? ' is-favorite' : ''}" data-emote="${safe}" title=":${safe}:">
       <img src="${em.url}" alt=":${safe}:" loading="lazy" draggable="false">${kbd}
-      <button class="vtt-emote-star${isFav ? ' on' : ''}" data-vtt-fn="_vttToggleFav" data-vtt-args="${safe}" title="${isFav ? 'Retirer de la roue' : 'Ajouter à la roue'}">${isFav ? '★' : '☆'}</button>
+      <button class="vtt-emote-star${isFav ? ' on' : ''}" data-vtt-fn="_vttToggleFav" data-vtt-args="${safe}" title="${isFav ? 'Retirer de la roue' : 'Ajouter à la roue'}" aria-label="${isFav ? 'Retirer cette émote des favoris' : 'Ajouter cette émote aux favoris'}" aria-pressed="${isFav}">${isFav ? '★' : '☆'}</button>
     </div>`;
   }).join('');
 }
@@ -513,17 +513,16 @@ export async function _vttSendEmote(name, opts = {}) {
   _pushRecent(name);
   const ts = now;
   const key = `${uid}_${ts}`;
-  const authorName = STATE.user?.pseudo || STATE.user?.displayName || (STATE.isAdmin ? 'MJ' : STATE.user?.email || '');
-
   // Affichage local immédiat (ancré au token émetteur).
-  _showEmoteBubble(tokenId, em.url, name, key, { big, targetTokenId, authorName, remote: false, count });
+  _showEmoteBubble(tokenId, em.url, name, key, { big, targetTokenId, remote: false, count });
 
-  // Propagation temps réel (champs ajoutés : big / targetTokenId / authorName / count).
+  // Propagation temps réel. Une réaction n'embarque aucune identité textuelle :
+  // le token d'origine suffit et aucune adresse de compte ne doit être exposée.
   setDoc(_reactionRef(uid), {
     tokenId, emoteName: name, emoteUrl: em.url,
     pageId: VS.activePage?.id ?? null,
     createdAt: ts,
-    big, targetTokenId: targetTokenId || null, authorName: authorName || '', count,
+    big, targetTokenId: targetTokenId || null, count,
   }).catch(err => {
     console.error('[vtt] émote temps réel — écriture refusée. Vérifier vttEmoteReactions dans Firestore.', err);
   });

@@ -97,3 +97,13 @@ test('le sélecteur d’émetteur des émotes affiche les portraits avec repli s
   assert.match(emotes, /<img src=/);
   assert.match(css, /\.vtt-emote-av img \{ width:100%; height:100%; object-fit:cover; \}/);
 });
+
+test('les émotes ne révèlent aucune identité de compte et montrent clairement les favoris', () => {
+  assert.doesNotMatch(emotes, /STATE\.user\?\.email/);
+  assert.doesNotMatch(emotes, /authorName:\s*authorName/);
+  assert.doesNotMatch(vtt, /opts\.remote && opts\.authorName/);
+  assert.match(emotes, /vtt-emote-tile\$\{isFav \? ' is-favorite' : ''\}/);
+  assert.match(emotes, /aria-pressed="\$\{isFav\}"/);
+  assert.match(css, /\.vtt-emote-star\.on \{[^}]*background:var\(--amber/);
+  assert.match(css, /\.vtt-emote-tile\.is-favorite/);
+});

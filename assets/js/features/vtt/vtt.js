@@ -3062,7 +3062,7 @@ function _emoteRetire(rec) {
 
 // Émote ancrée : UNE bulle par token, centrée au-dessus. Une nouvelle émote
 // remplace la précédente ; la même (combo) incrémente ×N sans empiler.
-// opts : { big, targetTokenId, authorName, remote, count }.
+// opts : { big, targetTokenId, remote, count }.
 function _spawnTokenEmote(tokenId, t, emoteUrl, emoteName, opts = {}) {
   const K = window.Konva;
   if (!K || !VS.layers.ping) return;
@@ -3116,19 +3116,6 @@ function _spawnTokenEmote(tokenId, t, emoteUrl, emoteName, opts = {}) {
     clip.add(new K.Image({ image: imgEl, width: side, height: side, x: -side / 2, y: -side / 2 })); VS.layers.ping.batchDraw(); };
   imgEl.onerror = () => {};
   imgEl.src = emoteUrl;
-
-  // Étiquettes : envoyeur (remote) + cible (« → Nom »).
-  const labels = [];
-  if (opts.remote && opts.authorName) labels.push(opts.authorName);
-  if (targetId) { const tt = VS.tokens[targetId]?.data; if (tt) labels.push(`→ ${tt.name || '?'}`); }
-  if (labels.length) {
-    const txt = new K.Text({ text: labels.join('   '), fontSize: Math.max(10, R * 0.34), fontStyle: '600',
-      fill: '#fff', align: 'center' });
-    txt.offsetX(txt.width() / 2); txt.y(-R - txt.height() - 4); txt.offsetY(0);
-    const bg = new K.Rect({ x: -txt.width() / 2 - 5, y: -R - txt.height() - 7, width: txt.width() + 10, height: txt.height() + 6,
-      cornerRadius: 8, fill: 'rgba(8,12,20,.82)', stroke: targetId ? 'rgba(255,90,126,.5)' : color, strokeWidth: 1 });
-    group.add(bg); group.add(txt);
-  }
 
   // Badge combo si count > 1 dès l'arrivée (rattrapage après fusion d'écritures).
   if (rec.count > 1) _emoteBadge(rec, rec.count, color);
@@ -11819,7 +11806,6 @@ function _initListeners() {
       _showEmoteBubble(r.tokenId, r.emoteUrl, r.emoteName, key, {
         big: !!r.big,
         targetTokenId: r.targetTokenId || null,
-        authorName: r.authorName || '',
         count: r.count || 1,
         remote: r.id !== STATE.user?.uid,
       });
