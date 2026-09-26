@@ -12251,10 +12251,10 @@ button.vtt-loot-qb:hover:not(:disabled) { background:var(--surface-3,var(--bg-el
 .vtt-emote-tile:active { transform:scale(.94); }
 .vtt-emote-tile img { width:86%; height:86%; object-fit:contain; border-radius:50%; pointer-events:none; }
 .vtt-emote-tile kbd { position:absolute; left:3px; top:3px; min-width:14px; height:14px; font-size:9px; padding:0 3px; background:var(--surface-sunken,var(--bg-panel)); }
-.vtt-emote-star { position:absolute; right:1px; top:0; width:18px; height:18px; display:grid; place-items:center; font-size:11px; color:var(--text-dim,var(--text-muted)); opacity:0; background:none; border:0; cursor:pointer; transition:opacity .12s; }
-.vtt-emote-tile:hover .vtt-emote-star, .vtt-emote-star.on { opacity:1; }
-.vtt-emote-star.on { color:var(--amber,#f4c430); }
-.vtt-emote-star:hover { color:var(--amber,#f4c430); }
+.vtt-emote-star { position:absolute; right:-3px; top:-3px; width:23px; height:23px; display:grid; place-items:center; padding:0; border-radius:50%; font-size:14px; line-height:1; color:var(--text-muted); opacity:1; background:var(--surface-1,var(--bg-panel)); border:1px solid var(--border-strong,var(--border-md)); box-shadow:0 2px 7px rgba(0,0,0,.35); cursor:pointer; transition:transform .12s,color .12s,background .12s,border-color .12s,box-shadow .12s; z-index:2; }
+.vtt-emote-star:hover { transform:scale(1.12); color:var(--amber,#f4c430); border-color:color-mix(in srgb,var(--amber,#f4c430) 60%,var(--border)); }
+.vtt-emote-star.on { color:#1b1504; background:var(--amber,#f4c430); border-color:color-mix(in srgb,var(--amber,#f4c430) 70%,white); box-shadow:0 0 0 2px color-mix(in srgb,var(--amber,#f4c430) 20%,transparent),0 3px 8px rgba(0,0,0,.4); }
+.vtt-emote-tile.is-favorite { border-color:color-mix(in srgb,var(--amber,#f4c430) 60%,var(--border)); background:color-mix(in srgb,var(--amber,#f4c430) 9%,var(--surface-2,var(--bg-elevated))); }
 .vtt-emote-empty { padding:26px 10px; text-align:center; color:var(--text-dim,var(--text-muted)); font-size:12px; display:flex; flex-direction:column; gap:4px; }
 .vtt-emote-empty b { font-family:var(--font-display,inherit); color:var(--text-muted); font-size:13px; font-weight:600; }
 
