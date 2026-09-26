@@ -69,7 +69,7 @@ import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual, vttLowFx, setVttLowFx, _stripShadows } from './vtt-render.js';
 import { fogHasUnlimitedVision, fogVisionRadiusCells, vttCanvasPixelRatio, vttPinchCameraTransform } from './vtt-fog-performance.js';
 import { vttStructureLegendSvg } from './vtt-wall-utils.js';
-import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenHealthMeta, tokenMovementMeta, tokenRelationTone } from './vtt-token-visual.js';
+import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenHealthMeta, tokenHiddenHealthRatio, tokenMovementMeta, tokenRelationTone, tokenResourceArcs } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { attackRollHitsTarget, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
@@ -741,6 +741,75 @@ async function _spendCharSpellCost(cid, res, cost, tokenId, label) {
   });
 }
 
+// ── Objet consommable requis par un sort (indépendant du coût en ressource) ──
+// Un sort édité sur la fiche peut exiger un objet de l'inventaire du lanceur.
+// « Obligatoire » bloque le lancement s'il manque ; sinon l'objet est retiré au
+// lancement seulement s'il est présent en quantité suffisante. Convention
+// inventaire « 1 entrée = 1 unité » → on retire N entrées correspondantes.
+function _spellConsumableCount(c, cons) {
+  if (!c || !cons) return 0;
+  const inv = Array.isArray(c.inventaire) ? c.inventaire : [];
+  if (cons.itemId) {
+    const byId = inv.filter(it => it?.itemId === cons.itemId).length;
+    if (byId) return byId;
+  }
+  return cons.nom ? inv.filter(it => (it?.nom || '') === cons.nom).length : 0;
+}
+/** Pré-vol : autorise (true) ou bloque (false) le lancement selon l'objet requis. */
+function _spellConsumableCheck(charId, opt) {
+  const cons = opt?.consumable;
+  if (!cons || !cons.nom) return true;
+  const c = charId ? VS.characters[charId] : null;
+  if (!c) return true;                       // PNJ/monstre sans inventaire → non applicable
+  if (!cons.required) return true;           // optionnel : jamais bloquant
+  const need = Math.max(1, parseInt(cons.qty) || 1);
+  const have = _spellConsumableCount(c, cons);
+  if (have < need) {
+    showNotif(`⚠ ${cons.nom} manquant (${have}/${need}) — sort impossible`, 'error');
+    return false;
+  }
+  return true;
+}
+/** Consomme les exemplaires au lancement (garanti si obligatoire ; optionnel si présent). */
+async function _spellConsumableConsume(charId, opt) {
+  const cons = opt?.consumable;
+  if (!cons || !cons.nom) return;
+  const c = charId ? VS.characters[charId] : null;
+  if (!c?.id) return;
+  const need = Math.max(1, parseInt(cons.qty) || 1);
+  if (_spellConsumableCount(c, cons) < need) return;   // optionnel non satisfait → rien
+  const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const findIdx = () => {
+    let i = cons.itemId ? inv.findIndex(it => it?.itemId === cons.itemId) : -1;
+    if (i < 0 && cons.nom) i = inv.findIndex(it => (it?.nom || '') === cons.nom);
+    return i;
+  };
+  let removedItem = null, removed = 0;
+  for (let k = 0; k < need; k++) {
+    const i = findIdx();
+    if (i < 0) break;
+    removedItem = inv[i];
+    inv.splice(i, 1);
+    removed++;
+  }
+  if (!removed) return;
+  const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('consume', removedItem, removed, {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+    source: 'VTT',
+    note: opt.nom || opt.label || '',
+  }));
+  const prevInv = c.inventaire, prevHist = c.inventoryHistory;
+  c.inventaire = inv;
+  c.inventoryHistory = historyPatch.inventoryHistory;
+  await updateDoc(_chrRef(c.id), { inventaire: inv, ...historyPatch }).catch(error => {
+    c.inventaire = prevInv;
+    c.inventoryHistory = prevHist;
+    throw error;
+  });
+  showNotif(`🧪 ${cons.nom}${removed > 1 ? ` ×${removed}` : ''} consommé`, 'info');
+}
+
 // « Garde » : un coup DIRECT reçu et bloqué par la CA (jet d'attaque < CA, ni
 // critique, ni maladresse, ni auto-touche) charge de +1 la réserve défensive du
 // PERSONNAGE ciblé, s'il possède la mécanique (gardeMax > 0). Réservé aux persos
@@ -1118,6 +1187,7 @@ function _cleanup() {
   _resetKeyboardMovement({ persist:true });
   VS.unsubs.forEach(u => u?.());
   VS.unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
+  _tokenTooltip?.remove(); _tokenTooltip=null;
   _resizeObs?.disconnect(); _resizeObs = null;
   _resetPresence();
   _timerStopTick();
@@ -1594,11 +1664,106 @@ const _TOKEN_RING_TONES = {
   hostile:  { stroke:'#fb7185', shadow:'#dc2626' },
 };
 
+let _tokenTooltip = null;
+
+function _ensureTokenTooltip() {
+  if (_tokenTooltip?.isConnected) return _tokenTooltip;
+  _tokenTooltip=document.createElement('div');
+  _tokenTooltip.className='vtt-token-tooltip';
+  _tokenTooltip.setAttribute('role','tooltip');
+  if (vttLowFx()) _tokenTooltip.dataset.lowfx='1';
+  _tokenTooltip.hidden=true;
+  document.body.appendChild(_tokenTooltip);
+  return _tokenTooltip;
+}
+
+function _tokenTooltipDuration(effect) {
+  if (effect.turnsLeft == null) return '∞';
+  if (effect.turnsLeft === 1) return 'expire';
+  return `${effect.turnsLeft} tours`;
+}
+
+function _renderTokenTooltip(token) {
+  if (!token) return;
+  const tip=_ensureTokenTooltip();
+  const ld=_live(token);
+  const health=tokenHealthMeta(ld.displayHp,ld.displayHpMax);
+  const down=health.isDown||!!ld.isDown;
+  const hiddenHealth=!STATE.isAdmin&&token.type==='enemy';
+  const hpRatio=down?0:(hiddenHealth?tokenHiddenHealthRatio(health.tone):health.ratio);
+  const hpValue=down?'KO':hiddenHealth?health.label:(health.known?`${health.current} / ${health.maximum}`:'Inconnu');
+  const pm=Number(ld.displayPm), pmMax=Number(ld.displayPmMax);
+  const hasMana=!hiddenHealth&&ld.displayPm!=null&&Number.isFinite(pmMax)&&pmMax>0;
+  const movement=tokenMovementMeta(ld.displayMovement??6,token.bonusMvt,token.movedCells);
+  const effects=tokenActiveEffects(token,CONDITION_BY_ID,VS.session?.combat?.round??0);
+  const campColor=TYPE_COLOR[token.type]??'#94a3b8';
+  const campLabel=token.type==='player'?'Joueur':token.type==='npc'?'PNJ':'Ennemi';
+  const size=tokenFootprintMeta(ld.displayTokenW||1,ld.displayTokenH||1);
+  const ca=ld.caBadge??ld.displayDefense??0;
+  const caBuff=ld._activeCaBuff;
+  const caTurns=caBuff
+    ? (caBuff.expiresAtRound!=null&&VS.session?.combat?.round>0
+      ? caBuff.expiresAtRound-VS.session.combat.round+1
+      : caBuff.totalDuration??'∞')
+    : null;
+  const subtitle=[
+    campLabel,
+    token.summonKind?'invocation':'',
+    size.isLarge?size.label:'',
+    `CA ${ca}${caBuff?` (+buff, ${caTurns} t.)`:''}`,
+  ].filter(Boolean).join(' · ');
+  const meter=(label,ratio,color,value,extra='')=>`<div class="vtt-token-tip-meter${extra}">
+    <b>${label}</b><span><i style="width:${Math.round(Math.max(0,Math.min(1,ratio))*100)}%;background:${color}"></i></span><strong style="color:${color}">${_esc(value)}</strong>
+  </div>`;
+  tip.dataset.tokenId=token.id;
+  tip.innerHTML=`<div class="vtt-token-tip-head"><i style="background:${campColor}"></i><strong>${_esc(ld.displayName??token.name??'Token')}</strong></div>
+    <div class="vtt-token-tip-sub">${_esc(subtitle)}</div>
+    <div class="vtt-token-tip-meters">
+      ${meter('PV',hpRatio,health.color,hpValue)}
+      ${hasMana?meter('PM',pmMax>0?pm/pmMax:0,'#a78bfa',`${pm} / ${pmMax}`):''}
+      ${meter('DÉP',movement.maximum>0?movement.remaining/movement.maximum:0,'#38bdf8',`${movement.remaining} / ${movement.maximum} cases`)}
+    </div>
+    ${effects.length?`<div class="vtt-token-tip-effects">${effects.map(effect=>`<div><span>${effect.icon}</span><b>${_esc(effect.label)}</b><em class="${effect.turnsLeft===1?'exp':''}">${_esc(_tokenTooltipDuration(effect))}</em></div>`).join('')}</div>`:''}`;
+}
+
+function _positionTokenTooltip(event) {
+  if (!_tokenTooltip||_tokenTooltip.hidden||!event) return;
+  const gap=16, margin=10;
+  const width=_tokenTooltip.offsetWidth||228, height=_tokenTooltip.offsetHeight||140;
+  const left=Math.max(margin,Math.min(event.clientX+gap,window.innerWidth-width-margin));
+  const top=Math.max(margin,Math.min(event.clientY+gap,window.innerHeight-height-margin));
+  _tokenTooltip.style.left=`${left}px`;
+  _tokenTooltip.style.top=`${top}px`;
+}
+
+function _showTokenTooltip(token,event) {
+  if (!token||!event||event.pointerType==='touch') return;
+  const tip=_ensureTokenTooltip();
+  _renderTokenTooltip(token);
+  tip.hidden=false;
+  _positionTokenTooltip(event);
+}
+
+function _hideTokenTooltip() {
+  if (!_tokenTooltip) return;
+  _tokenTooltip.hidden=true;
+  delete _tokenTooltip.dataset.tokenId;
+}
+
+function _refreshTokenTooltipIfOpen(tokenId) {
+  if (!_tokenTooltip||_tokenTooltip.hidden||_tokenTooltip.dataset.tokenId!==tokenId) return;
+  _renderTokenTooltip(VS.tokens[tokenId]?.data);
+}
+
 function _setRingTone(ring, tone='selected') {
   if (!ring) return;
   const colors=_TOKEN_RING_TONES[tone] || _TOKEN_RING_TONES.selected;
-  ring.stroke(colors.stroke);
-  ring.shadowColor(colors.shadow);
+  const children=typeof ring.getChildren==='function' ? ring.getChildren() : null;
+  const nodes=children?.length?[...children]:[ring];
+  nodes.forEach(node=>{
+    if (typeof node.stroke==='function') node.stroke(colors.stroke);
+    if (typeof node.shadowColor==='function') node.shadowColor(colors.shadow);
+  });
 }
 
 function _setSelectionRing(id, visible=true) {
@@ -1608,7 +1773,6 @@ function _setSelectionRing(id, visible=true) {
   _setRingTone(ring, 'selected');
   ring.visible(visible);
   const footprint=shape.findOne('.sel-footprint');
-  _setRingTone(footprint, 'selected');
   footprint?.visible(visible);
   const spin=shape.findOne('.sel-spin');
   if (spin) { spin.visible(visible); if (!visible) spin.rotation(0); }
@@ -1633,7 +1797,7 @@ function _configureTargetRings(shape, tone='hostile', visible=true) {
   const footprint=shape?.findOne('.target-footprint');
   if (!ring) return;
   _setRingTone(ring, tone);
-  ring.dash(tone==='hostile'?[6,3]:[]);
+  ring.find?.('Line').forEach(node=>node.dash(tone==='hostile'?[6,3]:[]));
   ring.visible(visible);
   if (inner) {
     _setRingTone(inner, tone);
@@ -1678,41 +1842,40 @@ function _clearTargetRings() {
   Object.values(VS.tokens || {}).forEach(entry => _configureTargetRings(entry?.shape, 'hostile', false));
 }
 
-function _syncTokenResourceLabels(shape, scale=VS.stage?.scaleX?.() ?? 1) {
+function _syncTokenResourceLabels(shape) {
   if (!shape) return;
-  // Sous 90 %, afficher seulement la valeur restante et agrandir légèrement le
-  // panneau complet. Son texte conserve ainsi une taille visuelle exploitable.
-  const compact=scale<.9;
-  const fontSize=compact?10:8;
-  const panelScale=Math.min(1.45,Math.max(1,.86/Math.max(.25,scale)));
   const hp=shape.getAttr('displayHpSnapshot');
-  const hpMax=shape.getAttr('displayHpMaxSnapshot');
-  const pm=shape.getAttr('displayPmSnapshot');
-  const pmMax=shape.getAttr('displayPmMaxSnapshot');
-  const hpText=shape.findOne('.hp-val');
-  const pmText=shape.findOne('.pm-val');
-  if (hpText) {
-    hpText.text(hp==null?'♥?':(compact?`♥${hp}`:`♥${hp}/${hpMax ?? '?'}`));
-    hpText.fontSize(fontSize);
-  }
-  if (pmText) {
-    pmText.text(pm==null?'✦?':(compact?`✦${pm}`:`✦${pmMax>0?`${pm}/${pmMax}`:pm}`));
-    pmText.fontSize(fontSize);
-  }
-  shape.findOne('.resource-panel')?.scale({x:panelScale,y:panelScale});
+  const value=shape.findOne('.move-value');
+  if (!value || shape.getAttr('movementValueActive')) return;
+  const down=shape.getAttr('isDownSnapshot');
+  value.text(down ? (shape.getAttr('healthLabel')||'KO')
+    : shape.getAttr('hiddenHealth') ? (shape.getAttr('healthLabel')||'Inconnu') : (hp==null?'?':String(hp)));
+  value.fill(shape.getAttr('healthColor')||'#94a3b8');
 }
 
 function _applyTokenDetailToShape(shape, scale=VS.stage?.scaleX?.() ?? 1) {
   if (!shape) return;
   const level=tokenDetailLevel(scale);
-  const showIdentity=level!=='compact';
-  const showEffects=level==='detailed';
-  shape.find('.token-name').forEach(node=>node.visible(showIdentity));
-  // Les valeurs PV/PM sont essentielles au jeu : elles restent visibles même
-  // au zoom compact, contrairement au nom et aux détails d'effets.
-  shape.find('.resource-value').forEach(node=>node.visible(true));
-  shape.find('.effect-detail').forEach(node=>node.visible(showEffects));
-  _syncTokenResourceLabels(shape, scale);
+  shape.find('.token-name-detailed').forEach(node=>node.visible(level==='detailed'));
+  shape.find('.token-name-standard').forEach(node=>node.visible(level==='standard'));
+  shape.find('.token-noncompact').forEach(node=>node.visible(level!=='compact'));
+  shape.find('.effect-detailed').forEach(node=>node.visible(level==='detailed'));
+  shape.find('.effect-standard').forEach(node=>node.visible(level==='standard'));
+  shape.find('.effect-compact').forEach(node=>node.visible(level==='compact'));
+  if (level==='compact') {
+    shape.findOne('.stack-badge')?.visible(false);
+    shape.findOne('.stack-count')?.visible(false);
+  } else {
+    const count=Number(shape.getAttr('stackCount'))||1;
+    if (count>1) {
+      shape.findOne('.stack-badge')?.visible(true);
+      shape.findOne('.stack-count')?.visible(true);
+    } else {
+      shape.findOne('.stack-badge')?.visible(false);
+      shape.findOne('.stack-count')?.visible(false);
+    }
+  }
+  _syncTokenResourceLabels(shape);
   shape.setAttr('detailLevel', level);
 }
 
@@ -1744,7 +1907,8 @@ function _stackPeers(token) {
 function _syncTokenStackVisuals() {
   Object.values(VS.tokens || {}).forEach(entry=>{
     const count=_stackPeers(entry?.data).length;
-    const visible=count>1;
+    const visible=count>1 && entry?.shape?.getAttr('detailLevel')!=='compact';
+    entry?.shape?.setAttr('stackCount',count);
     entry?.shape?.findOne('.stack-badge')?.visible(visible);
     const label=entry?.shape?.findOne('.stack-count');
     if (label) { label.text(`×${count}`); label.visible(visible); }
@@ -1765,14 +1929,19 @@ function _syncTokenMovementVisual() {
     const visible=id===VS.selected && !!VS.session?.combat?.active && _canControlToken(token);
     const bg=entry?.shape?.findOne('.move-badge');
     const value=entry?.shape?.findOne('.move-value');
-    bg?.visible(visible);
-    value?.visible(visible);
+    entry?.shape?.setAttr('movementValueActive',visible);
     if (visible && value) {
       const movement=tokenMovementMeta(_live(token).displayMovement??6,token.bonusMvt,token.movedCells);
-      value.text(`🏃 ${movement.remaining}/${movement.maximum}`);
+      value.text(`${movement.remaining}/${movement.maximum}`);
       bg.stroke(movement.exhausted?'#f97316':'#38bdf8');
-      bg.fill(movement.exhausted?'rgba(67,20,7,.94)':'rgba(8,47,73,.94)');
-      value.fill(movement.exhausted?'#ffedd5':'#e0f2fe');
+      bg.fill('rgba(6,9,15,.94)');
+      value.fill(movement.exhausted?'#ffedd5':'#7dd3fc');
+    } else {
+      if (bg) {
+        bg.stroke(`${TYPE_COLOR[token?.type]??'#94a3b8'}b3`);
+        bg.fill('rgba(6,9,15,.94)');
+      }
+      _syncTokenResourceLabels(entry?.shape);
     }
   });
   VS.layers.token?.batchDraw();
@@ -1786,6 +1955,13 @@ function _buildShape(t) {
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const g = _buildTokenVisual(t, ld, CONDITION_BY_ID);
   _applyTokenDetailToShape(g);
+  g.on('mouseenter',e=>_showTokenTooltip(VS.tokens[t.id]?.data||t,e.evt));
+  g.on('mousemove',e=>{
+    const current=VS.tokens[t.id]?.data||t;
+    if (!_tokenTooltip||_tokenTooltip.hidden||_tokenTooltip.dataset.tokenId!==t.id) _showTokenTooltip(current,e.evt);
+    else _positionTokenTooltip(e.evt);
+  });
+  g.on('mouseleave',_hideTokenTooltip);
 
   const canDrag = _canControlToken(t);
   g.setAttr('vttCanDragToken', canDrag);
@@ -1797,6 +1973,7 @@ function _buildShape(t) {
     });
     // ─ Début du drag : mémoriser les positions du groupe ─
     g.on('dragstart', () => {
+      _hideTokenTooltip();
       // La delegation peut changer apres la creation du shape : revalider au
       // moment exact du geste, pas uniquement lors du rendu initial.
       if (!_canControlToken(VS.tokens[t.id]?.data || t)) {
@@ -2011,6 +2188,7 @@ function _buildShape(t) {
 
   const handleTokenAction = (e, opts = {}) => {
     e.cancelBubble = true;
+    _hideTokenTooltip();
     if (VS.tool === 'ruler' || VS.tool === 'draw') return; // outils de dessin ignorent les tokens
     // Le calque des dessins est sous celui des tokens : si le clic atteint bien un
     // token, l'intention est d'interagir avec lui. Retirer alors le Transformer évite
@@ -2131,6 +2309,17 @@ function _showTokenDelta(token, delta, resource='hp') {
     align:'center', fontSize:10, fontStyle:'bold', fill:color,
     fontFamily:'Inter,sans-serif', listening:false }));
   VS.layers.ping.add(group);
+  if (meta.resource==='hp') {
+    const flash=shape.findOne('.token-flash');
+    if (flash) {
+      // Konva.Shape ne possède pas de méthode stop() : l'ancien appel levait une
+      // exception avant l'application des dégâts. Repartir simplement de
+      // l'opacité courante remplace proprement le tween précédent.
+      flash.fill(meta.value<0?'#ef4444':'#22c55e');
+      flash.opacity(.4);
+      flash.to({opacity:0,duration:.45,easing:K.Easings.EaseOut});
+    }
+  }
   VS.layers.ping.batchDraw();
   const reduced=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
   // Temps de lecture fixe, puis montée/fondu. Auparavant le texte disparaissait
@@ -2262,7 +2451,9 @@ function _patchShapeImpl(id) {
   const currentEffectKeys=new Set(currentEffects.map(effect=>`${effect.kind}:${effect.key}`));
   const expiredEffects=(g.getAttr('activeEffectsSnapshot')||[])
     .filter(effect=>!currentEffectKeys.has(`${effect.kind}:${effect.key}`));
-  if ((ld.displayPm != null || ld.hasMana) !== hasPmBar || hasCaBuff !== needsCaBuff
+  const hiddenHealth=!STATE.isAdmin && e.data.type==='enemy';
+  const needsManaRing=!hiddenHealth && (ld.displayPm != null || ld.hasMana);
+  if (needsManaRing !== hasPmBar || hasCaBuff !== needsCaBuff
       || sizeMismatch || imageMismatch || effectsMismatch) {
     const shape = _buildShape(e.data);
     g.destroy();
@@ -2285,41 +2476,71 @@ function _patchShapeImpl(id) {
     if (VS.selected===id) _syncTokenMovementVisual();
     _syncFxAnim();
     VS.layers.token?.batchDraw();
+    _refreshTokenTooltipIfOpen(id);
     return;
   }
   g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.22, easing:window.Konva?.Easings?.EaseInOut });
   const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
   // KO visible par tous, même PV masqués (ld.isDown = PV réels, sans le nombre).
   const isDown = health.isDown || !!ld.isDown;
-  const bW=Math.max(62, Math.min(CELL*sw*0.98, 150));
-  const hasMana=ld.displayPm!=null || ld.hasMana;
-  const hpW=hasMana?(bW-1)/2:bW;
+  const hasMana=needsManaRing;
+  const pmMax=Number(ld.displayPmMax);
+  const pmRatio=ld.displayPm!=null&&Number.isFinite(pmMax)&&pmMax>0
+    ? Math.min(1,Math.max(0,Number(ld.displayPm)/pmMax)) : 0;
+  const healthRatio=isDown?0:(hiddenHealth?tokenHiddenHealthRatio(health.tone):health.ratio);
+  const arcs=tokenResourceArcs({hasMana,hpRatio:healthRatio,pmRatio,down:isDown});
   const fill=g.findOne('.hp-fill');
-  if (fill){fill.width(Math.max(2,(hpW-2)*health.ratio));fill.fill(health.color);}
-  g.findOne('.hp-val')?.text(health.known?`♥${health.current}/${health.maximum}`:'♥?');
-  g.findOne('.portrait')?.opacity(isDown ? .46 : 1);
+  if (fill) {
+    fill.rotation(arcs.hpFill.start-90);
+    fill.angle(Math.max(.001,arcs.hpFill.span));
+    fill.visible(arcs.hpFill.span>.001);
+    fill.fill(health.color);
+  }
+  const portraitGroup=g.findOne('.portrait');
+  portraitGroup?.opacity(isDown ? .42 : 1);
+  portraitGroup?.setAttr('isDownPortrait',isDown);
+  const portraitImage=g.findOne('.portrait-image');
+  if (portraitImage && window.Konva?.Filters?.Grayscale) {
+    const grayscale=!!portraitImage.getAttr('vttGrayscale');
+    if (isDown&&!grayscale) {
+      portraitImage.cache({pixelRatio:1});
+      portraitImage.filters([window.Konva.Filters.Grayscale]);
+      portraitImage.setAttr('vttGrayscale',true);
+    } else if (!isDown&&grayscale) {
+      portraitImage.filters([]);
+      portraitImage.clearCache();
+      portraitImage.setAttr('vttGrayscale',false);
+    }
+  }
   g.findOne('.down-overlay')?.visible(isDown);
   g.findOne('.down-icon')?.visible(isDown);
+  g.find('.hp-hidden-tick').forEach(node=>node.visible(!isDown));
   const tokenRing=g.findOne('.token-ring');
   if (tokenRing) {
     tokenRing.stroke(isDown ? '#ef4444' : (TYPE_COLOR[e.data.type] ?? '#94a3b8'));
-    tokenRing.shadowColor(isDown ? '#ef4444' : '#000');
-    tokenRing.shadowBlur(isDown ? 10 : 5);
   }
   g.setAttr('healthTone', health.tone);
+  g.setAttr('healthLabel', isDown ? (Math.min(sw,sh)>1?'À terre':'KO') : health.label);
+  g.setAttr('healthColor', health.color);
+  g.setAttr('isDownSnapshot', isDown);
+  g.setAttr('hiddenHealth', hiddenHealth);
   g.setAttr('displayHpSnapshot', health.known ? health.current : null);
   g.setAttr('displayHpMaxSnapshot', health.known ? health.maximum : null);
+  const standardHealthValue=g.findOne('.standard-health-value');
+  standardHealthValue?.text(isDown?'KO':'');
+  standardHealthValue?.fill(health.color);
   // PM (créatures avec mana ; "✨?" si pas d'estimation côté joueur)
   const _pm=ld.displayPm;
   if (_pm!=null || ld.hasMana) {
     const _pmK=_pm!=null;
-    const pmMax=Number(ld.displayPmMax);
     const pmMaxKnown=Number.isFinite(pmMax)&&pmMax>0;
-    const pmRat=_pmK&&pmMaxKnown?Math.min(1,Math.max(0,_pm/pmMax)):(_pmK?1:0);
-    const pmW=bW-hpW-1;
-    g.findOne('.pm-fill')?.width(Math.max(2,(pmW-2)*pmRat));
-    g.findOne('.pm-fill')?.fill(_pmK?'#a78bfa':'#475569');
-    g.findOne('.pm-val')?.text(_pmK?(pmMaxKnown?`✦${_pm}/${pmMax}`:`✦${_pm}`):'✦?');
+    const pmFill=g.findOne('.pm-fill');
+    if (pmFill) {
+      pmFill.rotation(arcs.pmFill.start-90);
+      pmFill.angle(Math.max(.001,arcs.pmFill.span));
+      pmFill.visible(arcs.pmFill.span>.001);
+      pmFill.fill(_pmK&&pmMaxKnown?'#a78bfa':'#475569');
+    }
   }
   g.setAttr('displayPmSnapshot', _pm == null ? null : Number(_pm));
   g.setAttr('displayPmMaxSnapshot', Number.isFinite(Number(ld.displayPmMax)) ? Number(ld.displayPmMax) : null);
@@ -2328,22 +2549,29 @@ function _patchShapeImpl(id) {
   const _buff   = ld._activeCaBuff;
   const _buffed = !!_buff;
   const _round  = VS.session?.combat?.round ?? 0;
-  g.findOne('.ca-lbl')?.text(`🛡${ld.caBadge ?? (ld.displayDefense??0)}`);
+  g.findOne('.ca-lbl')?.text(String(ld.caBadge ?? (ld.displayDefense??0)));
   g.findOne('.ca-lbl')?.fill(_buffed ? '#c4b5fd' : '#e2e8f0');
-  g.findOne('.ca-bg')?.stroke(_buffed ? '#818cf8' : '#64748b');
-  g.findOne('.ca-bg')?.strokeWidth(_buffed ? 1.5 : 1);
-  g.findOne('.ca-bg')?.fill(_buffed ? 'rgba(30,27,80,0.95)' : 'rgba(15,15,25,0.9)');
+  g.findOne('.ca-bg')?.stroke(_buffed ? '#a5b4fc' : 'rgba(203,213,225,.55)');
+  g.findOne('.ca-bg')?.strokeWidth(1.1);
+  g.findOne('.ca-bg')?.fill(_buffed ? '#1e1b50' : 'rgba(8,12,20,.94)');
   if (_buff) {
     const tl = _buff.expiresAtRound != null && _round > 0 ? _buff.expiresAtRound - _round + 1 : _buff.totalDuration ?? '∞';
     g.findOne('.ca-buff-turns')?.text(String(tl));
   }
-  g.findOne('.lbl')?.text(ld.displayName??e.data.name);
+  const nextName=String(ld.displayName??e.data.name??'?');
+  const detailedName=g.findOne('.lbl-detailed');
+  const standardName=g.findOne('.lbl-standard');
+  detailedName?.text(nextName);
+  standardName?.text(nextName.split(/[ ']/)[0]||nextName);
+  detailedName?.fill(isDown?'#94a3b8':'#f1f5f9');
+  standardName?.fill(isDown?'#94a3b8':'#f1f5f9');
   g.findOne('.turn-active')?.visible(!!VS.session?.combat?.active && VS.session?.combat?.activeTokenId===id);
   _syncFxAnim();
   if (hpDelta) _showTokenDelta(e.data, hpDelta, 'hp');
   if (pmDelta) _showTokenDelta(e.data, pmDelta, 'pm');
   g.visible(STATE.isAdmin || (!!e.data.visible && !_tokenOffGrid(e.data)));
   if (VS.selected===id) _syncTokenMovementVisual();
+  _refreshTokenTooltipIfOpen(id);
   VS.layers.token?.batchDraw();
 }
 
@@ -3834,8 +4062,11 @@ async function _vttApplyDeplacement(src, tgtData, mode, distance) {
 // Déduit le coût PM des actions utilitaires. Une invocation peut utiliser sa
 // propre réserve ; sinon elle conserve le comportement historique (invocateur).
 async function _vttSpendSpellPm(src, opt) {
+  // Lanceur (perso) porteur de l'inventaire pour l'objet consommable éventuel.
+  const _consChar = src.summonOwnerCharId ? VS.characters[src.summonOwnerCharId] : _characterForToken(src);
+  if (!_spellConsumableCheck(_consChar?.id, opt)) return false;
   const cost = Math.max(0, parseInt(opt?.pmCost) || 0);
-  if (cost <= 0) return true;
+  if (cost <= 0) { await _spellConsumableConsume(_consChar?.id, opt); return true; }
   if (src.summonKind === 'invocation' && src.summonUsesOwnMana) {
     const current = Math.max(0, _numOr(src.pm, _numOr(src.pmMax, 0)));
     if (current < cost) {
@@ -3856,6 +4087,7 @@ async function _vttSpendSpellPm(src, opt) {
       _patchShape(src.id);
       throw error;
     }
+    await _spellConsumableConsume(_consChar?.id, opt);
     return true;
   }
   const c = src.summonOwnerCharId ? VS.characters[src.summonOwnerCharId] : _characterForToken(src);
@@ -3871,6 +4103,7 @@ async function _vttSpendSpellPm(src, opt) {
     }
     await _spendCharSpellCost(c.id, res, cost, src.id, opt.label);
   }
+  await _spellConsumableConsume(_consChar?.id, opt);
   return true;
 }
 
@@ -4659,6 +4892,10 @@ function _buildSpellOption(s, ctx) {
     id, sortIdx, spellId, portee,
     pmCost, basePm, pmRaw, pmSetDelta,
     costRes: s.costResource || 'pm',   // ressource dépensée : 'pm' | 'pv' | 'or' | 'none'
+    consumable: (s.consumable && s.consumable.nom)
+      ? { itemId: s.consumable.itemId || '', nom: s.consumable.nom,
+          qty: Math.max(1, parseInt(s.consumable.qty) || 1), required: s.consumable.required !== false }
+      : null,   // objet de l'inventaire retiré au lancement
     nbCibles, zoneW, zoneH, zoneShape, mods, actionType,
     sortDuree: _sortDureeVtt(s),
     classicDuration: s.designMode === 'classic' ? _sortDureeVtt(s) : null,
@@ -7139,6 +7376,16 @@ function _vttPickOpt(srcId, tgtId, idx) {
   } else if ((opt.nbCibles || 1) > 1) {
     _extraChip = `<span class="vtt-atk-chip">🎯 ${opt.nbCibles} cibles</span>`;
   }
+  // Objet consommable requis : chip 🧪 (rouge « missing » si le lanceur ne l'a pas).
+  let _consChip = '';
+  if (opt.consumable?.nom) {
+    const _need = Math.max(1, parseInt(opt.consumable.qty) || 1);
+    const _have = _spellConsumableCount(srcChar, opt.consumable);
+    const _missing = !!srcChar && _have < _need;   // PNJ sans inventaire → chip neutre
+    const _qtyLbl = _need > 1 ? ` ×${_need}` : '';
+    const _req = opt.consumable.required ? 'obligatoire' : 'optionnel';
+    _consChip = `<span class="vtt-atk-chip consumable${_missing ? ' missing' : ''}" title="Objet ${_req} : ${_esc(opt.consumable.nom)} (${_have}/${_need} en inventaire)">🧪 ${_esc(opt.consumable.nom)}${_qtyLbl}${_missing ? ` (${_have}/${_need})` : ''}</span>`;
+  }
 
   // Bande de notes : pills + runes + effet(s) Affliction/Enchantement + note de raté +
   // interaction élémentaire + description (dépliable). Les conteneurs à id restent
@@ -7171,7 +7418,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
           <span class="vtt-atk-ctxname"><b title="${_esc(opt.label)}">${_esc(opt.label)}</b><span class="vtt-atk-tag">${_typeTag}</span></span>
           <span class="vtt-atk-route">${_srcName}<i>→</i><span class="vtt-atk-tgt ${targetTone}">${_tgtName}</span><i>·</i>${_distTxt}</span>
         </span>
-        <span class="vtt-atk-ctxres">${_costChip}${_extraChip}<span class="vtt-atk-chip ok">à portée</span></span>
+        <span class="vtt-atk-ctxres">${_costChip}${_consChip}${_extraChip}<span class="vtt-atk-chip ok">à portée</span></span>
       </header>
       ${targetChips}
 
@@ -8637,32 +8884,37 @@ async function _vttRollAttack() {
   // Convention "1 entrée = 1 unité" → on retire la 1ère entrée correspondante.
   // Ré-évaluation par itemId (l'index peut s'être déplacé entre build et usage).
   const _consumeItem = async () => {
+    // (1) Action d'objet marquée `consommable` (potion, parchemin…).
     const meta = opt._itemAction;
-    if (!meta?.consommable || !_srcChar?.id) return;
-    const c = VS.characters[_srcChar.id] || _srcChar;
-    const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-    let idx = -1;
-    if (meta.itemId)  idx = inv.findIndex(it => it?.itemId === meta.itemId);
-    if (idx < 0 && meta.itemNom) idx = inv.findIndex(it => it?.nom === meta.itemNom);
-    if (idx < 0) return; // déjà consommé
-    const consumedItem = inv[idx];
-    const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('consume', consumedItem, 1, {
-      actorUid: STATE.user?.uid || '',
-      actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
-      source: 'VTT',
-      note: opt.nom || opt.label || '',
-    }));
-    inv.splice(idx, 1);
-    const previousInventory = c.inventaire;
-    const previousHistory = c.inventoryHistory;
-    c.inventaire = inv;
-    c.inventoryHistory = historyPatch.inventoryHistory;
-    await updateDoc(_chrRef(_srcChar.id), { inventaire: inv, ...historyPatch }).catch(error => {
-      c.inventaire = previousInventory;
-      c.inventoryHistory = previousHistory;
-      throw error;
-    });
-    showNotif(`🧪 ${meta.itemNom || 'Objet'} consommé`, 'info');
+    if (meta?.consommable && _srcChar?.id) {
+      const c = VS.characters[_srcChar.id] || _srcChar;
+      const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+      let idx = -1;
+      if (meta.itemId)  idx = inv.findIndex(it => it?.itemId === meta.itemId);
+      if (idx < 0 && meta.itemNom) idx = inv.findIndex(it => it?.nom === meta.itemNom);
+      if (idx >= 0) { // sinon déjà consommé
+        const consumedItem = inv[idx];
+        const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('consume', consumedItem, 1, {
+          actorUid: STATE.user?.uid || '',
+          actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+          source: 'VTT',
+          note: opt.nom || opt.label || '',
+        }));
+        inv.splice(idx, 1);
+        const previousInventory = c.inventaire;
+        const previousHistory = c.inventoryHistory;
+        c.inventaire = inv;
+        c.inventoryHistory = historyPatch.inventoryHistory;
+        await updateDoc(_chrRef(_srcChar.id), { inventaire: inv, ...historyPatch }).catch(error => {
+          c.inventaire = previousInventory;
+          c.inventoryHistory = previousHistory;
+          throw error;
+        });
+        showNotif(`🧪 ${meta.itemNom || 'Objet'} consommé`, 'info');
+      }
+    }
+    // (2) Sort exigeant un objet de l'inventaire du lanceur (édité sur la fiche).
+    await _spellConsumableConsume(_pmPayerCharId || _srcChar?.id, opt);
   };
   const _markActionUsed = async () => {
     const combat = VS.session?.combat;
@@ -8807,6 +9059,9 @@ async function _vttRollAttack() {
         }
       }
     }
+
+    // ── Objet consommable requis (obligatoire) : bloque si absent ──────────
+    if (!_spellConsumableCheck(_pmPayerCharId || _srcChar?.id, opt)) return;
 
     // ── Combo Sort suspendu ──────────────────────────────────────────────
     // 1er cast : on STOCKE le sort (PM payé) sans exécuter l'effet. Une version
@@ -12915,6 +13170,10 @@ async function _vttShieldCancelAttack(logId) {
   const pick = _findUsableReactiveShield(dtok, m.attackerRank || 'classique');
   if (!pick) { showNotif('Aucun bouclier réactif utilisable (palier d\'attaquant ou ressource insuffisante)', 'info'); return; }
 
+  // Objet consommable requis par le sort bouclier (obligatoire → bloque).
+  const _shieldOpt = { consumable: pick.spell?.consumable || null, nom: pick.spell?.nom || '' };
+  if (!_spellConsumableCheck(pick.char?.id, _shieldOpt)) return;
+
   // Restaure les PV infligés (cap au max) via _setHp (sync fiche perso incluse).
   const restore = Math.max(0, m.dmgTotal || 0);
   const lt = _live(dtok);
@@ -12930,6 +13189,7 @@ async function _vttShieldCancelAttack(logId) {
     await _setHp(dtok, newHp);
     await _syncDownedCondition(dtok, newHp);
     if (!isPvCost) await _spendCharSpellCost(pick.char.id, pick.res, pick.cost, dtok.id, pick.spell.nom);
+    await _spellConsumableConsume(pick.char?.id, _shieldOpt);
     await updateDoc(doc(_logCol(), logId), {
       shieldCancelled: true, shieldCancelledBy: STATE.user?.uid || null,
       shieldSpell: pick.spell.nom || 'Bouclier réactif',
@@ -13291,17 +13551,27 @@ async function _vttMsSetHp(charId, uid, hp) {
   if (!STATE.isAdmin && c.uid !== STATE.user?.uid && !controlledToken) return;
   const max = calcPVMax(c);
   const val = Math.max(0, Math.min(max, Math.round(hp)));
+  const previous = Math.max(0, Math.min(max, Number(c.hp) || 0));
+  if (val === previous) return;
   const patch = controlledToken
     ? { hp: val, vttControlTokenId: controlledToken.id }
     : { hp: val };
-  const saved = await updateDoc(_chrRef(charId), patch).then(() => true).catch(error => {
+
+  c.hp = val;
+  _patchEntityTokenShapes('characterId', charId);
+  if (VS.miniUid === uid && VS.miniCharId === charId) _renderMiniSheet(uid);
+  _renderInspectorSoon();
+
+  await updateDoc(_chrRef(charId), patch).catch(error => {
+    if ((Number(c.hp) || 0) === val) {
+      c.hp = previous;
+      _patchEntityTokenShapes('characterId', charId);
+      if (VS.miniUid === uid && VS.miniCharId === charId) _renderMiniSheet(uid);
+      _renderInspectorSoon();
+    }
     console.error('[vtt] PV personnage non modifiés depuis la mini-fiche', error);
     showNotif('Impossible de modifier les PV de ce personnage', 'error');
-    return false;
   });
-  if (!saved) return;
-  c.hp = val;
-  _renderMiniSheet(uid);
 }
 
 async function _vttMsSetPm(charId, uid, pm) {
@@ -13311,19 +13581,28 @@ async function _vttMsSetPm(charId, uid, pm) {
   if (!STATE.isAdmin && c.uid !== STATE.user?.uid && !controlledToken) return;
   const max = calcPMMax(c);
   const val = Math.max(0, Math.min(max, Math.round(pm)));
+  const previous = _charPmCur(c);
+  if (val === previous) return;
   const patch = {
     ..._charPmPatch(val),
     ...(controlledToken ? { vttControlTokenId: controlledToken.id } : {}),
   };
-  const saved = await updateDoc(_chrRef(charId), patch).then(() => true).catch(error => {
+
+  Object.assign(c, _charPmPatch(val));
+  _patchEntityTokenShapes('characterId', charId);
+  if (VS.miniUid === uid && VS.miniCharId === charId) _renderMiniSheet(uid);
+  _renderInspectorSoon();
+
+  await updateDoc(_chrRef(charId), patch).catch(error => {
+    if (_charPmCur(c) === val) {
+      Object.assign(c, _charPmPatch(previous));
+      _patchEntityTokenShapes('characterId', charId);
+      if (VS.miniUid === uid && VS.miniCharId === charId) _renderMiniSheet(uid);
+      _renderInspectorSoon();
+    }
     console.error('[vtt] PM personnage non modifiés depuis la mini-fiche', error);
     showNotif('Impossible de modifier les PM de ce personnage', 'error');
-    return false;
   });
-  if (!saved) return;
-  c.pm = val;
-  c.pmActuel = val;
-  _renderMiniSheet(uid);
 }
 
 // Ajuste la réserve de Garde d'un personnage depuis la mini-fiche (bornée à

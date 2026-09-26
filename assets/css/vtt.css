@@ -420,6 +420,126 @@ html:not([data-theme="light"]) .vtt-root {
 @media (prefers-reduced-motion: reduce) {
   .vtt-combat-tracker.vct-enter { animation: none; }
 }
+
+/* ── Infobulle des tokens « Médaillon » ─────────────────────────────── */
+.vtt-token-tooltip {
+  position: fixed;
+  z-index: 1200;
+  width: 228px;
+  max-width: calc(100vw - 20px);
+  padding: 12px;
+  border: 1px solid rgba(117,139,173,.28);
+  border-radius: 14px;
+  background: rgba(9,17,29,.96);
+  box-shadow: 0 16px 38px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.025);
+  color: #e8eef8;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.vtt-token-tooltip[hidden] { display: none; }
+.vtt-token-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.vtt-token-tip-head > i {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+}
+.vtt-token-tip-head > strong {
+  overflow: hidden;
+  color: #f4f7fc;
+  font-family: var(--font-display, Cinzel, serif);
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vtt-token-tip-sub {
+  margin: 3px 0 12px 15px;
+  overflow: hidden;
+  color: #8fa1bb;
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vtt-token-tip-meters { display: grid; gap: 8px; }
+.vtt-token-tip-meter {
+  display: grid;
+  grid-template-columns: 27px minmax(0,1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.vtt-token-tip-meter > b {
+  color: #7f91aa;
+  font-size: 9.5px;
+  letter-spacing: .08em;
+}
+.vtt-token-tip-meter > span {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #172234;
+}
+.vtt-token-tip-meter > span > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 0;
+  border-radius: inherit;
+  transition: width .16s ease-out;
+}
+.vtt-token-tip-meter > strong {
+  color: #dfe8f5;
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.vtt-token-tip-effects {
+  display: grid;
+  gap: 5px;
+  margin-top: 11px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(130,150,180,.16);
+}
+.vtt-token-tip-effects > div {
+  display: grid;
+  grid-template-columns: 18px minmax(0,1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.vtt-token-tip-effects span { font-size: 12px; text-align: center; }
+.vtt-token-tip-effects b {
+  overflow: hidden;
+  color: #c8d2e1;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vtt-token-tip-effects em {
+  color: #8395ae;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 650;
+}
+.vtt-token-tip-effects em.exp { color: #f59e0b; }
+.vtt-root[data-vtt-lowfx="1"] ~ .vtt-token-tooltip,
+.vtt-token-tooltip[data-lowfx="1"] {
+  box-shadow: 0 8px 22px rgba(0,0,0,.34);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+@media (hover: none), (pointer: coarse) {
+  .vtt-token-tooltip { display: none !important; }
+}
 .vct-header {
   display: flex; align-items: center; gap: .5rem;
   padding: .5rem .65rem;
@@ -3769,6 +3889,8 @@ html:not([data-theme="light"]) .vtt-root {
 }
 .vtt-atk-chip.pm { color: var(--arcane-light); background: color-mix(in srgb, var(--arcane) 12%, transparent); border-color: color-mix(in srgb, var(--arcane) 30%, transparent); }
 .vtt-atk-chip.ok { color: var(--emerald); background: color-mix(in srgb, var(--emerald) 10%, transparent); border-color: color-mix(in srgb, var(--emerald) 28%, transparent); }
+.vtt-atk-chip.consumable { color: var(--gold, #e8b84b); background: color-mix(in srgb, var(--gold, #e8b84b) 12%, transparent); border-color: color-mix(in srgb, var(--gold, #e8b84b) 30%, transparent); }
+.vtt-atk-chip.consumable.missing { color: var(--danger, #ff5a7e); background: color-mix(in srgb, var(--danger, #ff5a7e) 14%, transparent); border-color: color-mix(in srgb, var(--danger, #ff5a7e) 40%, transparent); }
 
 /* Cibles supplémentaires (multi-cible) sous la ligne de contexte. */
 .vtt-atk-targets { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px 13px 0; }
