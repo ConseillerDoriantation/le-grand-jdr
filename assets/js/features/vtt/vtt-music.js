@@ -7,7 +7,7 @@
 // _killAudio (teardown), handlers _vtt* (registre VTT_ACTIONS).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { db, doc, collection, addDoc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, Timestamp } from '../../config/firebase.js';
+import { db, doc, collection, addDoc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, Timestamp, writeBatch } from '../../config/firebase.js';
 import Sortable from '../../vendor/sortable.esm.js';
 import { STATE } from '../../core/state.js';
 import { VS, aid } from './vtt-state.js';
@@ -175,6 +175,7 @@ function _closeMusicPanel() {
   if (_musicCloseOut) { document.removeEventListener('mousedown', _musicCloseOut, true); _musicCloseOut=null; }
   clearInterval(_musicProgTimer); _musicProgTimer=null;
   _musicSortables.forEach(s => s.destroy()); _musicSortables=[];
+  _stopMusicDropTracking();
   _stopPreview();
   syncVttSessionDock();
 }
@@ -310,10 +311,14 @@ function _renderMusicPanel() {
   // DnD + clic droit (piste → menu son ; entrée de rail playlist → menu playlist).
   if (mj) {
     _initMusicSortable();
+    _bindMusicCategoryDropZones(panel);
+    panel.querySelectorAll('.pl-grip,.t-grip').forEach(grip => {
+      grip.onclick = e => { e.preventDefault(); e.stopPropagation(); };
+    });
     panel.querySelectorAll('.t[data-sound-id]').forEach(row => {
       // Clic sur la ligne = lecture, sauf sur un bouton ou juste après un drag.
       row.onclick = e => {
-        if (_musicDragActive || e.target.closest('button, a, input')) return;
+        if (_musicDragActive || e.target.closest('button, a, input, .t-grip')) return;
         _vttPlaySound(row.dataset.soundId, false);
       };
       row.oncontextmenu = e => {
@@ -488,6 +493,78 @@ function _msDur(s) {
 // Anti-« clic-lecture » après un glisser-déposer (le clic de fin de drag doit
 // être ignoré). Posé par Sortable onStart, relâché peu après onEnd.
 let _musicDragActive = false;
+let _musicDropPlaylistId = null;
+let _musicDraggedSoundId = null;
+let _musicTrackDropMarker = null;
+
+function _clearMusicTrackDropMarker() {
+  _musicTrackDropMarker?.element?.classList.remove('drop-before', 'drop-after');
+  _musicTrackDropMarker = null;
+}
+
+function _markMusicTrackDrop(element, after) {
+  if (_musicTrackDropMarker?.element === element && _musicTrackDropMarker.after === after) return;
+  _clearMusicTrackDropMarker();
+  if (!element?.matches?.('.t[data-sound-id]')) return;
+  element.classList.add(after ? 'drop-after' : 'drop-before');
+  _musicTrackDropMarker = { element, after };
+}
+
+function _stopMusicDropTracking() {
+  const target = _musicDropPlaylistId;
+  _musicDropPlaylistId = null;
+  _musicDraggedSoundId = null;
+  _clearMusicTrackDropMarker();
+  document.querySelectorAll('.vtt-music-panel .pl.drop').forEach(el => el.classList.remove('drop'));
+  return target;
+}
+
+// Les catégories utilisent le DnD natif comme simples zones de dépôt. Aucun
+// Sortable imbriqué ni listener global de pointeur : le coût reste constant.
+function _bindMusicCategoryDropZones(panel) {
+  _stopMusicDropTracking();
+  panel.querySelectorAll('.pl[data-drop]').forEach(el => {
+    el.ondragover = event => {
+      if (!_musicDraggedSoundId) return;
+      event.preventDefault();
+      el.classList.add('drop');
+    };
+    el.ondragleave = event => {
+      if (!event.relatedTarget || !el.contains(event.relatedTarget)) el.classList.remove('drop');
+    };
+    el.ondrop = event => {
+      if (!_musicDraggedSoundId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      _musicDropPlaylistId = el.dataset.drop || null;
+      el.classList.remove('drop');
+    };
+  });
+}
+
+function _finishMusicDrag() {
+  const target = _stopMusicDropTracking();
+  setTimeout(() => { _musicDragActive = false; }, 60);
+  return target;
+}
+
+async function _addMusicSoundToPlaylist(playlistId, soundId) {
+  const pl = _playlists.find(p => p.id === playlistId);
+  if (!pl || !soundId) return;
+  if ((pl.soundIds || []).includes(soundId)) {
+    showNotif('Déjà dans cette playlist.', 'info');
+    return;
+  }
+  const previous = [...(pl.soundIds || [])];
+  pl.soundIds = [...previous, soundId];
+  await updateDoc(_playlistRef(playlistId), { soundIds: pl.soundIds }).catch(error => {
+    pl.soundIds = previous;
+    _renderMusicPanel();
+    console.error('[vtt music] classement du titre:', error);
+    showNotif('Impossible de ranger ce titre.', 'error');
+  });
+}
+
 function _vttMusicSelectRail(sel) { _setMusicSel(sel); }
 
 // Rail gauche : Tous / Non classés / séparateur / playlists.
@@ -497,6 +574,7 @@ function _renderRail() {
   const railRow = (sel, name, color, count, icon, plId) => {
     const playing = plId && _musicState.playing && _musicState.currentPlaylistId === plId && !_musicState.paused;
     return `<div class="pl${_musicSel === sel ? ' sel' : ''}" data-vtt-fn="_vttMusicSelectRail" data-vtt-args="${sel}"${plId ? ` data-drop="${plId}" data-pl-id="${plId}"` : ''} tabindex="0">
+      ${plId ? `<span class="pl-grip" title="Déplacer la catégorie" aria-label="Déplacer la catégorie">${_mi('grip')}</span>` : ''}
       ${icon ? _mi(icon) : `<span class="dot" style="background:${color || '#6366f1'}"></span>`}
       <span class="nm">${_esc(name)}</span>${playing ? _MS_WAVE : ''}<span class="ct">${count}</span>
       ${plId ? `<span class="pl-acts">
@@ -573,6 +651,7 @@ function _trackRow(s, ctx, i, mj) {
   const titleHidden = s.hideTitle === true;
   const previewing = _previewEl && _previewEl.dataset.soundId === s.id;
   return `<div class="t${isCurrent ? ' cur' : ''}${isAmb ? ' isamb' : ''}" data-sound-id="${s.id}"${inPlaylist ? ` data-plctx="${inPlaylist}"` : ''} title="${_esc(s.name)}">
+    ${mj ? `<span class="t-grip" title="Déplacer le titre" aria-label="Déplacer le titre">${_mi('grip')}</span>` : ''}
     <span class="n"><span class="num">${i + 1}</span><span class="ph">${_mi(isCurrent && !paused ? 'pause' : 'play')}</span>${_MS_WAVE}</span>
     <span class="nm"><span>${_esc(s.name)}</span>${mj && titleHidden ? _mi('eyeoff') : ''}${isAmb ? '<span class="ambtag">AMBIANCE</span>' : ''}</span>
     ${mj ? `<span class="qa">
@@ -588,54 +667,106 @@ function _trackRow(s, ctx, i, mj) {
 // ── Initialisation Sortable ────────────────────────────────────────
 function _initMusicSortable() {
   _musicSortables.forEach(s => s.destroy()); _musicSortables = [];
-  // Ghost détaché du body (sinon clippé par l'overflow du panneau) + auto-scroll.
-  const scrollEl = document.querySelector('.vtt-music-panel .lib') || document.getElementById('vtt-music-panel') || true;
+  _stopMusicDropTracking();
+  // Le navigateur gère le déplacement natif sur desktop : beaucoup plus fluide
+  // que le clone JS forcé. Sortable conserve automatiquement son fallback tactile.
   const dragOpts = {
-    forceFallback: true, fallbackOnBody: true, fallbackClass: 'vtt-ms-drag',
-    animation: 0, fallbackTolerance: 6, delay: 0,
-    scroll: scrollEl, scrollSensitivity: 60, scrollSpeed: 10, bubbleScroll: true,
-    onStart: () => { _musicDragActive = true; },
-    onEnd: () => { setTimeout(() => { _musicDragActive = false; }, 60); },
+    forceFallback: false, fallbackOnBody: true, fallbackClass: 'vtt-ms-drag',
+    animation: 100, easing: 'cubic-bezier(.22,.61,.36,1)',
+    fallbackTolerance: 4, delay: 100, delayOnTouchOnly: true, touchStartThreshold: 4,
+    scrollSensitivity: 48, scrollSpeed: 12, bubbleScroll: false,
   };
 
-  // Rail : réordonner les playlists + chaque entrée = zone de dépôt d'un son.
+  // Rail : une seule instance pour réordonner les catégories.
   const rail = document.getElementById('vtt-music-rail');
   if (rail) {
     _musicSortables.push(new Sortable(rail, {
-      ...dragOpts, ghostClass: 'vtt-sort-ghost',
-      draggable: '.pl[data-pl-id]', filter: '.ib,.pl-acts',
-      onUpdate: async () => {
-        const ids = [...rail.querySelectorAll('.pl[data-pl-id]')].map(e => e.dataset.plId).filter(Boolean);
-        await Promise.all(ids.map((id, i) => updateDoc(_playlistRef(id), { order: i }).catch(() => {})));
+      ...dragOpts, ghostClass: 'vtt-sort-ghost', chosenClass: 'vtt-sort-chosen',
+      draggable: '.pl[data-pl-id]', handle: '.pl-grip', filter: '.ib,.pl-acts',
+      scroll: rail, direction: () => rail.closest('.vtt-music-panel')?.classList.contains('compact') ? 'horizontal' : 'vertical',
+      swapThreshold: 0.62,
+      onStart: () => { _musicDragActive = true; },
+      onEnd: async evt => {
+        _finishMusicDrag();
+        if (evt.oldDraggableIndex === evt.newDraggableIndex) return;
+        const ids = [...rail.children]
+          .filter(el => el.matches?.('.pl[data-pl-id]'))
+          .map(el => el.dataset.plId).filter(Boolean);
+        const previous = [..._playlists];
+        const byId = new Map(previous.map(p => [p.id, p]));
+        _playlists = ids.map((id, order) => ({ ...byId.get(id), order })).filter(p => p.id);
+        const batch = writeBatch(db);
+        ids.forEach((id, order) => batch.update(_playlistRef(id), { order }));
+        await batch.commit().catch(error => {
+          _playlists = previous;
+          _renderMusicPanel();
+          console.error('[vtt music] ordre des catégories:', error);
+          showNotif("Impossible d'enregistrer l'ordre des catégories.", 'error');
+        });
       },
     }));
-    rail.querySelectorAll('.pl[data-drop]').forEach(el => {
-      const plId = el.dataset.drop;
-      _musicSortables.push(new Sortable(el, {
-        group: { name: 'vtt-sounds', pull: false, put: true }, sort: false, animation: 0, ghostClass: 'vtt-sort-ghost',
-        onAdd: async evt => {
-          const soundId = evt.item.dataset.soundId; evt.item.remove();
-          const pl = _playlists.find(p => p.id === plId); if (!pl || !soundId) return;
-          if ((pl.soundIds || []).includes(soundId)) { showNotif('Déjà dans cette playlist.', 'info'); return; }
-          await updateDoc(_playlistRef(plId), { soundIds: [...(pl.soundIds || []), soundId] }).catch(() => {});
-        },
-      }));
-    });
   }
 
-  // Liste de pistes : source (clone → dépôt sur le rail) + réordonnancement
-  // interne uniquement quand une playlist est sélectionnée (data-pl-id).
+  // Liste de pistes : seconde et dernière instance. Elle réordonne une playlist
+  // ouverte ; le dépôt sur une autre catégorie est géré sous le pointeur.
   const list = document.getElementById('vtt-music-list');
   const plId = list?.dataset.plId || null;
   if (list) {
     _musicSortables.push(new Sortable(list, {
-      ...dragOpts, ghostClass: 'vtt-sort-ghost',
-      group: { name: 'vtt-sounds', pull: 'clone', put: false }, sort: !!plId,
-      draggable: '.t[data-sound-id]', filter: '.ib,.btn,.qa,.grp,.empty,.sec-hd',
-      onUpdate: async () => {
+      ...dragOpts, animation: 70, ghostClass: 'vtt-sort-ghost', chosenClass: 'vtt-sort-chosen',
+      sort: !!plId, scroll: list,
+      draggable: '.t[data-sound-id]', handle: '.t-grip', filter: '.ib,.btn,.qa,.grp,.empty,.sec-hd',
+      direction: 'vertical', swapThreshold: 1,
+      onStart: evt => {
+        _musicDragActive = true;
+        _musicDraggedSoundId = evt.item?.dataset?.soundId || null;
+      },
+      onMove: (evt, originalEvent) => {
+        const related = evt.related;
+        if (!plId || !related?.matches?.('.t[data-sound-id]') || related === evt.dragged) {
+          _clearMusicTrackDropMarker();
+          return;
+        }
+        const pointer = originalEvent?.touches?.[0] || originalEvent?.changedTouches?.[0] || originalEvent;
+        const y = Number(pointer?.clientY);
+        const rect = evt.relatedRect;
+        if (!Number.isFinite(y) || !rect) return;
+        const after = y >= rect.top + rect.height / 2;
+        _markMusicTrackDrop(related, after);
+        // Sortable suit exactement le repère affiché, sans zone de permutation
+        // approximative dépendant de la vitesse du pointeur.
+        return after ? 1 : -1;
+      },
+      onEnd: async evt => {
+        const marker = _musicTrackDropMarker
+          ? { soundId:_musicTrackDropMarker.element?.dataset?.soundId, after:_musicTrackDropMarker.after }
+          : null;
+        const targetPlaylistId = _finishMusicDrag();
+        const soundId = evt.item?.dataset?.soundId;
+        if (targetPlaylistId && targetPlaylistId !== plId) {
+          await _addMusicSoundToPlaylist(targetPlaylistId, soundId);
+          return;
+        }
         if (!plId) return;
-        const ids = [...list.querySelectorAll('.t[data-sound-id]')].map(e => e.dataset.soundId).filter(Boolean);
-        await updateDoc(_playlistRef(plId), { soundIds: ids }).catch(() => {});
+        const pl = _playlists.find(p => p.id === plId); if (!pl) return;
+        const previous = [...(pl.soundIds || [])];
+        let ids;
+        if (marker?.soundId && marker.soundId !== soundId) {
+          ids = previous.filter(id => id !== soundId);
+          const relatedIndex = ids.indexOf(marker.soundId);
+          ids.splice(Math.max(0, relatedIndex + (marker.after ? 1 : 0)), 0, soundId);
+        } else {
+          if (evt.oldDraggableIndex === evt.newDraggableIndex) return;
+          ids = [...list.querySelectorAll('.t[data-sound-id]')].map(e => e.dataset.soundId).filter(Boolean);
+        }
+        if (ids.length === previous.length && ids.every((id, index) => id === previous[index])) return;
+        pl.soundIds = ids;
+        await updateDoc(_playlistRef(plId), { soundIds: ids }).catch(error => {
+          pl.soundIds = previous;
+          _renderMusicPanel();
+          console.error('[vtt music] ordre des titres:', error);
+          showNotif("Impossible d'enregistrer l'ordre des titres.", 'error');
+        });
       },
     }));
   }

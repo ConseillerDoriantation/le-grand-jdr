@@ -71,6 +71,25 @@ test('les commandes musicales répondent avant le retour Firestore', () => {
   assert.match(music, /sound\.hideTitle = hideTitle;[\s\S]*?_setMusicState\(\{ currentTitleHidden: hideTitle \}\);[\s\S]*?updateDoc\(_sonRef\(soundId\), \{ hideTitle \}\)\.catch/);
 });
 
+test('les catégories et les titres musicaux ont un tri précis par poignée', () => {
+  assert.match(music, /import Sortable from '\.\.\/\.\.\/vendor\/sortable\.esm\.js'/);
+  assert.equal((music.match(/new Sortable\(/g) || []).length, 2);
+  assert.match(music, /class="pl-grip"/);
+  assert.match(music, /draggable: '\.pl\[data-pl-id\]', handle: '\.pl-grip'/);
+  assert.match(music, /const batch = writeBatch\(db\)/);
+  assert.match(music, /class="t-grip"/);
+  assert.match(music, /draggable: '\.t\[data-sound-id\]', handle: '\.t-grip'/);
+  assert.match(music, /forceFallback: false/);
+  assert.match(music, /_bindMusicCategoryDropZones\(panel\)/);
+  assert.match(music, /el\.ondragover = event/);
+  assert.doesNotMatch(music, /document\.addEventListener\('(pointermove|dragover|touchmove)'/);
+  assert.match(music, /direction: 'vertical', swapThreshold: 1/);
+  assert.match(music, /const after = y >= rect\.top \+ rect\.height \/ 2/);
+  assert.match(music, /return after \? 1 : -1/);
+  assert.match(css, /\.vtt-music-panel \.t\.drop-before::before/);
+  assert.match(css, /\.vtt-music-panel \.vtt-sort-ghost/);
+});
+
 test('le sélecteur d’émetteur des émotes affiche les portraits avec repli sur l’initiale', () => {
   assert.match(emotes, /const live = _live\(t\)/);
   assert.match(emotes, /live\?\.displayImage \|\| t\?\.imageUrl/);
