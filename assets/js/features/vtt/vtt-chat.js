@@ -17,7 +17,7 @@ import { _vttPanelError } from './vtt-utils.js';
 import { _findUsableReactiveShield, _canControlToken, _vttPatchTokenOptimistically, _vttNotifyChatMessage } from './vtt.js'; // circ. (combat)
 import { _applyEmotes } from './vtt-emotes.js'; // leaf émotes
 import { _live } from './vtt-effective.js';
-import { combatTargetResourceVisibility, trackedCombatResourceValues } from './vtt-chat-visibility.js';
+import { combatTargetResourceVisibility, trackedCombatResourceValues, visibleCombatDamage } from './vtt-chat-visibility.js';
 import { combatHpDeltas, replayCombatHpEstimates } from './vtt-hp-estimates.js';
 
 // État chat (déplacé de vtt.js)
@@ -641,7 +641,14 @@ export function _renderChatLogImpl(msgs) {
       const shownCA = _viewCA(m, m.targetCA);
       const verdict = isCrit ? 'CRITIQUE' : isFumble ? 'MALADRESSE' : isHit ? 'TOUCHÉ' : isHalf ? 'EFFET PARTIEL' : 'RATÉ';
       const hasEffect = isHit || isHalf || isCrit;
-      const dmgVal = m.dmgTotal < 0 ? `+${-m.dmgTotal}` : (m.dmgTotal ?? 0);
+      const targetToken = _chatTargetToken(m, m.defenderTokenId || m.tokenId);
+      const visibleDamage = visibleCombatDamage({
+        isAdmin: STATE.isAdmin,
+        target: m,
+        token: targetToken,
+        canControl: !!targetToken && _canControlToken(targetToken),
+      });
+      const dmgVal = visibleDamage < 0 ? `+${-visibleDamage}` : visibleDamage;
       const damageLabel = m.interaction === 'Absorption' ? 'PV SOIGNÉS'
         : m.interaction === 'Immunité' ? 'AUCUN DÉGÂT'
           : m.newHp === 0 ? 'KO' : isHalf ? '½ DÉGÂTS' : 'DÉGÂTS';
@@ -900,9 +907,6 @@ export function _renderChatLogImpl(msgs) {
         : r.techniqueSplash ? (r.hit ? '#f97316' : '#6b7280') : r.hit ? '#22c38e' : r.halfDmg ? '#b47fff' : '#6b7280';
       const icon = isHeal ? (m.isMana ? '💙' : '💚')
         : r.techniqueSplash ? (r.hit ? '💥' : '✗') : r.hit ? '✓' : r.halfDmg ? '✦' : '✗';
-      const dmgVal = isHeal
-        ? `+${Math.max(0, Number(r.applied) || 0)}`
-        : (r.hit || r.halfDmg) ? (r.dmgTotal < 0 ? `+${-r.dmgTotal}` : r.dmgTotal) : '—';
       const targetToken = _chatTargetToken(r, r.tokenId);
       const targetVisibility = combatTargetResourceVisibility({
         isAdmin: STATE.isAdmin,
@@ -910,6 +914,15 @@ export function _renderChatLogImpl(msgs) {
         token: targetToken,
         canControl: !!targetToken && _canControlToken(targetToken),
       });
+      const visibleDamage = visibleCombatDamage({
+        isAdmin: STATE.isAdmin,
+        target: r,
+        token: targetToken,
+        canControl: !!targetToken && _canControlToken(targetToken),
+      });
+      const dmgVal = isHeal
+        ? `+${Math.max(0, Number(r.applied) || 0)}`
+        : (r.hit || r.halfDmg) ? (visibleDamage < 0 ? `+${-visibleDamage}` : visibleDamage) : '—';
       const targetIsHiddenEnemy = targetVisibility !== 'exact';
       const visibleResourceCurrent = targetVisibility === 'estimate'
         ? _trackedResourceValues(r, targetToken, !!m.isMana).current

@@ -13,6 +13,27 @@ export function combatTargetResourceVisibility({ isAdmin = false, target = {}, t
   return 'hidden';
 }
 
+/**
+ * Quantité de dégâts que le journal peut afficher sans révéler les vrais PV.
+ *
+ * `dmgTotal` reste le résultat public du jet et sert notamment à faire évoluer
+ * l'estimation personnelle d'un ennemi. `dmgApplied` correspond, lui, aux PV
+ * réellement retirés après la borne à 0. Cette seconde valeur n'est affichable
+ * que lorsque le spectateur a déjà accès aux ressources exactes de la cible.
+ */
+export function visibleCombatDamage({ isAdmin = false, target = {}, token = null, canControl = false } = {}) {
+  const rolled = Number(target?.dmgTotal);
+  if (!Number.isFinite(rolled)) return 0;
+  // Une absorption est encodée avec une valeur négative et n'entre pas dans
+  // `dmgApplied` (qui ne mesure que les PV perdus).
+  if (rolled < 0) return rolled;
+
+  const applied = Number(target?.dmgApplied);
+  const visibility = combatTargetResourceVisibility({ isAdmin, target, token, canControl });
+  if (visibility !== 'exact' || !Number.isFinite(applied)) return rolled;
+  return Math.max(0, Math.min(rolled, applied));
+}
+
 /** Ressource estimée, strictement bornée par ce que le joueur a renseigné. */
 export function trackedCombatResourceValues({ tracker = null, token = null, estimateCurrent = null, isMana = false } = {}) {
   const maxRaw = isMana ? tracker?.pmActuel : tracker?.pvActuel;
