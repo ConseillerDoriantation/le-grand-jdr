@@ -4576,9 +4576,11 @@ html:not([data-theme="light"]) .vtt-root {
   box-shadow: 0 0 10px -2px color-mix(in srgb, var(--arcane) 60%, transparent);
   transition: width .2s;
 }
-/* Fantôme ancré à droite : coût qui serait débité (survol / sélection). */
+/* Fantôme ancré sur le bord du remplissage courant : coût qui serait débité
+   (survol / sélection). `left` + `width` sont posés par _vttAoptBindControls
+   pour que le segment colle à la valeur actuelle, pas au bout de la barre. */
 .vtt-aopt-mana-ghost {
-  position: absolute; top: 0; bottom: 0; right: 0; width: 0;
+  position: absolute; top: 0; bottom: 0; left: 0; width: 0;
   background: repeating-linear-gradient(135deg,
     color-mix(in srgb, var(--crimson) 62%, transparent) 0 5px,
     color-mix(in srgb, var(--crimson) 26%, transparent) 5px 10px);

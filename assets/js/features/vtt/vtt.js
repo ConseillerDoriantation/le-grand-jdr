@@ -6706,7 +6706,16 @@ function _vttAoptBindControls(root) {
       const costOut = g.querySelector('.vtt-aopt-mana-cost');
       const now = g.querySelector('.vtt-aopt-mana-now');
       if (ghost) {
-        ghost.style.width = (on && max > 0) ? `${(Math.min(cur, cost) / max) * 100}%` : '0';
+        if (on && max > 0) {
+          // Segment collé au bord DROIT du remplissage courant (valeur actuelle),
+          // s'étendant vers la gauche de la quantité débitée. Ainsi il « ronge » la
+          // barre depuis le niveau réel, pas depuis l'extrémité de la piste.
+          const spend = Math.min(cur, cost);
+          ghost.style.left = `${((cur - spend) / max) * 100}%`;
+          ghost.style.width = `${(spend / max) * 100}%`;
+        } else {
+          ghost.style.width = '0';
+        }
         ghost.classList.toggle('is-over', on && cost > cur);
       }
       if (costOut) {
