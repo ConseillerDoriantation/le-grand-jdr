@@ -31,9 +31,11 @@ import {
   _tokenStatMod, _vttLogTargetFields, _vttTokenIdAtClient, _vttEmoteDropHalo,
 } from './vtt.js'; // circ. (runtime)
 import { _renderInspector } from './vtt-inspector.js'; // re-render après changement de mode de jet
+import { openVttSessionDockPanel, registerVttSessionDockPanel, syncVttSessionDock } from './vtt-session-dock.js';
 
 // État émotes (déplacé de vtt.js). _emotes exporté : préchargé au montage côté vtt.js.
 export let _emotes = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
+let _emoteCloseOutside = null;
 
 export async function _loadEmotes() {
   // 1. Tenter le path scopé à l'aventure (path normal)
@@ -420,8 +422,8 @@ export function _vttToggleFav(name) {
   _renderEmotePicker();
 }
 
-// ── Ouverture / fermeture (plus de fermeture au clic extérieur : permet le
-// glisser vers la carte). Ferme par ✕, Échap ou le bouton de la barre. ──
+// ── Ouverture / fermeture. Le glisser démarre dans le panneau, donc la fermeture
+// au clic extérieur reste compatible avec le dépôt d'une émote sur la carte. ──
 export function _closeEmotePicker() {
   const el  = document.getElementById('vtt-emote-picker');
   const btn = document.querySelector('.vtt-emote-trigger');
@@ -430,17 +432,34 @@ export function _closeEmotePicker() {
   btn?.classList.remove('open');
   btn?.setAttribute('aria-expanded', 'false');
   _emoteMenu = false;
+  if (_emoteCloseOutside) {
+    document.removeEventListener('mousedown', _emoteCloseOutside, true);
+    _emoteCloseOutside = null;
+  }
+  syncVttSessionDock();
 }
 
 export function _vttToggleEmotePicker() {
   const el  = document.getElementById('vtt-emote-picker');
   const btn = document.querySelector('.vtt-emote-trigger');
   if (!el) return;
-  const open = el.classList.toggle('open');
+  const willOpen = !el.classList.contains('open');
+  if (willOpen) openVttSessionDockPanel('emote');
+  const open = el.classList.toggle('open', willOpen);
   btn?.classList.toggle('open', open);
   btn?.setAttribute('aria-expanded', open ? 'true' : 'false');
   el.setAttribute('aria-hidden', open ? 'false' : 'true');
-  if (open) { _emoteMenu = false; _emoteJustOpened = true; _renderEmotePicker(); }
+  if (open) {
+    _emoteMenu = false; _emoteJustOpened = true; _renderEmotePicker(); syncVttSessionDock();
+    const closeOutside = event => {
+      const float = document.querySelector('.vtt-emote-float');
+      if (float && !float.contains(event.target)) _closeEmotePicker();
+    };
+    _emoteCloseOutside = closeOutside;
+    requestAnimationFrame(() => {
+      if (_emoteCloseOutside === closeOutside) document.addEventListener('mousedown', closeOutside, true);
+    });
+  }
   else _closeEmotePicker();
 }
 
@@ -450,8 +469,10 @@ export function _updateEmoteTrigger(name) {
   const btn = document.querySelector('.vtt-emote-trigger');
   if (!btn) return;
   const em = _emoteLast ? _emotes.find(e => e.name === _emoteLast) : null;
-  btn.innerHTML = em ? `<img class="vtt-emote-trigger-img" src="${em.url}" alt=":${_esc(em.name)}:">` : '😄';
+  btn.dataset.lastEmote = em?.name || '';
 }
+
+registerVttSessionDockPanel('emote', 'vtt-emote-picker', '.vtt-emote-trigger', _closeEmotePicker, 'open');
 
 // ── Envoi (clic / roue / touche / geste) ────────────────────────────
 // opts : { big, targetTokenId }
