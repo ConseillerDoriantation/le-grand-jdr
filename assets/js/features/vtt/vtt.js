@@ -69,7 +69,7 @@ import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual, vttLowFx, setVttLowFx, _stripShadows } from './vtt-render.js';
 import { fogHasUnlimitedVision, fogVisionRadiusCells, vttCanvasPixelRatio, vttPinchCameraTransform } from './vtt-fog-performance.js';
 import { vttStructureLegendSvg } from './vtt-wall-utils.js';
-import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenHealthMeta, tokenHiddenHealthRatio, tokenMovementMeta, tokenRelationTone, tokenResourceArcs } from './vtt-token-visual.js';
+import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenFootprintMeta, tokenHiddenHealthRatio, tokenMovementMeta, tokenRelationTone, tokenResourceArcs, tokenVisibleHealthMeta } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { attackRollHitsTarget, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
@@ -1687,11 +1687,16 @@ function _renderTokenTooltip(token) {
   if (!token) return;
   const tip=_ensureTokenTooltip();
   const ld=_live(token);
-  const health=tokenHealthMeta(ld.displayHp,ld.displayHpMax);
-  const down=health.isDown||!!ld.isDown;
   const hiddenHealth=!STATE.isAdmin&&token.type==='enemy';
-  const hpRatio=down?0:(hiddenHealth?tokenHiddenHealthRatio(health.tone):health.ratio);
-  const hpValue=down?'KO':hiddenHealth?health.label:(health.known?`${health.current} / ${health.maximum}`:'Inconnu');
+  const health=tokenVisibleHealthMeta(ld.displayHp,ld.displayHpMax,{
+    hidden:hiddenHealth,
+    actualDown:!!ld.isDown,
+  });
+  const down=health.isDown;
+  const hpRatio=down?0:(hiddenHealth&&!health.known?tokenHiddenHealthRatio(health.tone):health.ratio);
+  const hpValue=down?'KO':hiddenHealth
+    ? (health.known?`${health.current} / ${health.maximum} estimés`:'Inconnu')
+    : (health.known?`${health.current} / ${health.maximum}`:'Inconnu');
   const pm=Number(ld.displayPm), pmMax=Number(ld.displayPmMax);
   const hasMana=!hiddenHealth&&ld.displayPm!=null&&Number.isFinite(pmMax)&&pmMax>0;
   const movement=tokenMovementMeta(ld.displayMovement??6,token.bonusMvt,token.movedCells);
@@ -1730,8 +1735,12 @@ function _positionTokenTooltip(event) {
   if (!_tokenTooltip||_tokenTooltip.hidden||!event) return;
   const gap=16, margin=10;
   const width=_tokenTooltip.offsetWidth||228, height=_tokenTooltip.offsetHeight||140;
-  const left=Math.max(margin,Math.min(event.clientX+gap,window.innerWidth-width-margin));
-  const top=Math.max(margin,Math.min(event.clientY+gap,window.innerHeight-height-margin));
+  const pointer=VS.stage?.getPointerPosition?.();
+  const rect=VS.stage?.container?.()?.getBoundingClientRect?.();
+  const clientX=Number.isFinite(event.clientX)?event.clientX:(rect&&pointer?rect.left+pointer.x:margin);
+  const clientY=Number.isFinite(event.clientY)?event.clientY:(rect&&pointer?rect.top+pointer.y:margin);
+  const left=Math.max(margin,Math.min(clientX+gap,window.innerWidth-width-margin));
+  const top=Math.max(margin,Math.min(clientY+gap,window.innerHeight-height-margin));
   _tokenTooltip.style.left=`${left}px`;
   _tokenTooltip.style.top=`${top}px`;
 }
@@ -1955,13 +1964,13 @@ function _buildShape(t) {
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const g = _buildTokenVisual(t, ld, CONDITION_BY_ID);
   _applyTokenDetailToShape(g);
-  g.on('mouseenter',e=>_showTokenTooltip(VS.tokens[t.id]?.data||t,e.evt));
-  g.on('mousemove',e=>{
+  g.on('mouseenter pointerenter',e=>_showTokenTooltip(VS.tokens[t.id]?.data||t,e.evt));
+  g.on('mousemove pointermove',e=>{
     const current=VS.tokens[t.id]?.data||t;
     if (!_tokenTooltip||_tokenTooltip.hidden||_tokenTooltip.dataset.tokenId!==t.id) _showTokenTooltip(current,e.evt);
     else _positionTokenTooltip(e.evt);
   });
-  g.on('mouseleave',_hideTokenTooltip);
+  g.on('mouseleave pointerleave',_hideTokenTooltip);
 
   const canDrag = _canControlToken(t);
   g.setAttr('vttCanDragToken', canDrag);
@@ -2393,6 +2402,28 @@ function _patchHpOptimistically(token, hp, pvCombatHp = undefined) {
   _renderTraySoon();
 }
 
+// L'estimation de PV est une vue locale au joueur. Lorsqu'il porte lui-même
+// l'attaque, on l'avance au même instant que les vrais PV du token, sans attendre
+// que le message de combat fasse l'aller-retour par Firestore.
+function _patchEnemyHpEstimateOptimistically(token, current, maximum) {
+  if (STATE.isAdmin || token?.type !== 'enemy') return null;
+  const cur=Number(current), max=Number(maximum);
+  if (!Number.isFinite(cur) || !Number.isFinite(max) || max<=0) return null;
+  const previous=VS.combatHpEstimates.has(token.id)
+    ? { ...VS.combatHpEstimates.get(token.id) }
+    : null;
+  VS.combatHpEstimates.set(token.id,{current:Math.max(0,Math.min(max,cur)),max});
+  return previous;
+}
+
+function _restoreEnemyHpEstimate(token, previous) {
+  if (STATE.isAdmin || token?.type !== 'enemy') return;
+  if (previous) VS.combatHpEstimates.set(token.id,previous);
+  else VS.combatHpEstimates.delete(token.id);
+  _patchShape(token.id);
+  _refreshDisplayedIdentitySoon(token.id);
+}
+
 function _showTokenNotice(token, label, color='#fbbf24') {
   if (!token || !label || token.pageId!==VS.activePage?.id || !VS.layers.ping || !window.Konva) return;
   const shape=VS.tokens[token.id]?.shape;
@@ -2480,14 +2511,17 @@ function _patchShapeImpl(id) {
     return;
   }
   g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.22, easing:window.Konva?.Easings?.EaseInOut });
-  const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
-  // KO visible par tous, même PV masqués (ld.isDown = PV réels, sans le nombre).
-  const isDown = health.isDown || !!ld.isDown;
+  const health = tokenVisibleHealthMeta(ld.displayHp, ld.displayHpMax, {
+    hidden:hiddenHealth,
+    actualDown:!!ld.isDown,
+  });
+  // Pour un ennemi masqué, seul l'état réel peut afficher le marqueur de mort.
+  const isDown = health.isDown;
   const hasMana=needsManaRing;
   const pmMax=Number(ld.displayPmMax);
   const pmRatio=ld.displayPm!=null&&Number.isFinite(pmMax)&&pmMax>0
     ? Math.min(1,Math.max(0,Number(ld.displayPm)/pmMax)) : 0;
-  const healthRatio=isDown?0:(hiddenHealth?tokenHiddenHealthRatio(health.tone):health.ratio);
+  const healthRatio=isDown?0:(hiddenHealth&&!health.known?tokenHiddenHealthRatio(health.tone):health.ratio);
   const arcs=tokenResourceArcs({hasMana,hpRatio:healthRatio,pmRatio,down:isDown});
   const fill=g.findOne('.hp-fill');
   if (fill) {
@@ -10239,10 +10273,17 @@ async function _vttRollAttack() {
           const newEst = prevEst == null
             ? null
             : Math.max(0, Math.min(estimateMax, prevEst - dmgTotal));
+          const previousEstimate=_patchEnemyHpEstimateOptimistically(curTgtData,newEst,estimateMax);
           _showAppliedHpDelta(curTgtData, realCur, newHp, STATE.isAdmin ? newHp : newEst);
           _patchHpOptimistically(curTgtData, newHp);
           targetWrite = updateDoc(_tokRef(curTgtData.id), { hp:newHp })
-            .then(() => _syncDownedCondition(curTgtData, newHp));
+            .then(() => _syncDownedCondition(curTgtData, newHp))
+            .catch(error=>{
+              curTgtData.hp=realCur;
+              _restoreEnemyHpEstimate(curTgtData,previousEstimate);
+              _patchHpOptimistically(curTgtData,realCur);
+              throw error;
+            });
         } else {
           // Le registre VTT contient aussi les personnages des autres joueurs.
           // STATE.characters peut être volontairement limité au compte courant :

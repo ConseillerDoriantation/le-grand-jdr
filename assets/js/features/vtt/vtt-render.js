@@ -17,7 +17,14 @@ import { githubPagesUrl } from '../../shared/github-folder.js';
 import { _pgRef } from './vtt-refs.js';
 import { _showCtxMenu } from './vtt-utils.js';
 import { showNotif } from '../../shared/notifications.js';
-import { tokenActiveEffects, tokenEffectsSignature, tokenFootprintMeta, tokenHealthMeta } from './vtt-token-visual.js';
+import {
+  tokenActiveEffects,
+  tokenEffectsSignature,
+  tokenFootprintMeta,
+  tokenHiddenHealthRatio,
+  tokenResourceArcs,
+  tokenVisibleHealthMeta,
+} from './vtt-token-visual.js';
 import { _cellInShape } from '../../shared/spell-zones.js';
 
 /**
@@ -74,11 +81,23 @@ export function setVttLowFx(on) {
   try { localStorage.setItem('vtt.lowFx', on ? '1' : '0'); } catch {}
 }
 
-function _addTokenPortrait(portrait, fallback, src, rx, ry) {
+function _addTokenPortrait(portrait, fallback, src, radius) {
   const attach = image => {
     // Le token a pu être reconstruit/supprimé pendant le chargement.
     if (!portrait.getParent()) return;
-    portrait.add(new window.Konva.Image({ image, x:-rx, y:-ry, width:rx*2, height:ry*2, listening:false }));
+    const iw=Math.max(1,image.naturalWidth||image.width||1);
+    const ih=Math.max(1,image.naturalHeight||image.height||1);
+    const side=Math.min(iw,ih);
+    const node=new window.Konva.Image({
+      image, x:-radius, y:-radius, width:radius*2, height:radius*2,
+      crop:{x:(iw-side)/2,y:(ih-side)/2,width:side,height:side}, listening:false,name:'portrait-image',
+    });
+    portrait.add(node);
+    if (portrait.getAttr('isDownPortrait') && window.Konva.Filters?.Grayscale) {
+      node.cache({pixelRatio:1});
+      node.filters([window.Konva.Filters.Grayscale]);
+      node.setAttr('vttGrayscale',true);
+    }
     fallback.visible(false);
     VS.layers.token?.batchDraw();
   };
@@ -136,28 +155,58 @@ export function _stageToWorld(ptr) {
 // CA/états/buffs, nom, portrait clippé. AUCUN handler d'interaction (ceux-ci
 // restent dans vtt.js, attachés au groupe retourné). `ld` = données effectives
 // (calculées par _live côté vtt.js), `condById` = index des conditions.
+function _tokenArc(K, { x=0, y=0, radius, width, start, span, fill, name='', visible=true }) {
+  return new K.Arc({
+    x, y, innerRadius:Math.max(0,radius-width/2), outerRadius:radius+width/2,
+    rotation:start-90, angle:Math.max(.001,span), fill, visible:visible&&span>.001,
+    listening:false, name,
+  });
+}
+
+function _tokenBrackets(K, width, height, color, dashed=false, name='') {
+  const inset=2.5, length=Math.min(14,width*.22);
+  const left=-width/2+inset, right=width/2-inset;
+  const top=-height/2+inset, bottom=height/2-inset;
+  return [
+    [left+length,top,left,top,left,top+length],
+    [right-length,top,right,top,right,top+length],
+    [left,bottom-length,left,bottom,left+length,bottom],
+    [right-length,bottom,right,bottom,right,bottom-length],
+  ].map(points=>new K.Line({
+    points,stroke:color,strokeWidth:2.5,dash:dashed?[4,3]:[],lineCap:'round',lineJoin:'round',
+    listening:false,name,
+  }));
+}
+
+function _tokenShieldPath(width, height) {
+  return `M${width/2} 0L${width} ${height*.16}V${height*.52}`
+    + `C${width} ${height*.8} ${width*.72} ${height*.93} ${width/2} ${height}`
+    + `C${width*.28} ${height*.93} 0 ${height*.8} 0 ${height*.52}V${height*.16}Z`;
+}
+
 export function _buildTokenVisual(t, ld, condById) {
   const K  = window.Konva;
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
-  // Le portrait est légèrement remonté dans l'emprise de sa case. Cela réserve
-  // un vrai pied de 17 px au nom et aux ressources, sans aucun débordement.
-  // Un ratio identique évite l'effet de portrait aplati sur les tokens 1×1.
-  // Le léger décalage vers le haut conserve le pied d'informations dans la case.
-  const rx = CELL*sw*0.37, ry = CELL*sh*0.37, portraitY = -9;
-  const bW = Math.max(62, Math.min(CELL*sw*0.98, 150));
-  const nameW = bW;
-  const typeColor = TYPE_COLOR[t.type] ?? '#94a3b8';
   const footprint = tokenFootprintMeta(sw, sh);
   const footprintW = CELL * footprint.width;
   const footprintH = CELL * footprint.height;
-  const footprintX = -footprintW / 2 + 2;
-  const footprintY = -footprintH / 2 + 2;
-  const footprintInnerW = footprintW - 4;
-  const footprintInnerH = footprintH - 4;
-  const health = tokenHealthMeta(ld.displayHp, ld.displayHpMax);
-  // KO visible par TOUS (crâne + token grisé + anneau rouge), même quand les PV de
-  // l'ennemi sont masqués : ld.isDown vient des PV réels, sans révéler le nombre.
-  const isDown = health.isDown || !!ld.isDown;
+  const size=Math.min(sw,sh), scale=Math.min(size,1.6);
+  const ringRadius=28*size, portraitRadius=22.5*size, ringWidth=4.6*scale;
+  const typeColor = TYPE_COLOR[t.type] ?? '#94a3b8';
+  const hiddenHealth=!STATE.isAdmin && t.type==='enemy';
+  const health = tokenVisibleHealthMeta(ld.displayHp, ld.displayHpMax, {
+    hidden:hiddenHealth,
+    actualDown:!!ld.isDown,
+  });
+  const isDown = health.isDown;
+  // Une valeur connue ici est l'estimation propre au joueur : afficher sa
+  // progression exacte ne révèle aucun PV MJ et rend chaque dégât visible.
+  const healthRatio=isDown?0:(hiddenHealth&&!health.known?tokenHiddenHealthRatio(health.tone):health.ratio);
+  const hasMana=!hiddenHealth && (ld.displayPm!=null || ld.hasMana);
+  const pmMax=Number(ld.displayPmMax);
+  const pmRatio=ld.displayPm!=null && Number.isFinite(pmMax) && pmMax>0
+    ? Math.min(1,Math.max(0,Number(ld.displayPm)/pmMax)) : 0;
+  const arcs=tokenResourceArcs({hasMana,hpRatio:healthRatio,pmRatio,down:isDown});
   const round = VS.session?.combat?.round ?? 0;
   const effects = tokenActiveEffects(t, condById, round);
   const g = new K.Group({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2, id:`tok-${t.id}` });
@@ -167,64 +216,112 @@ export function _buildTokenVisual(t, ld, condById) {
   g.setAttr('effectSignature', tokenEffectsSignature(effects));
   g.setAttr('activeEffectsSnapshot', effects.map(({kind,key,icon,label})=>({kind,key,icon,label})));
   g.setAttr('healthTone', health.tone);
+  g.setAttr('healthLabel', isDown ? (size>1?'À terre':'KO') : health.label);
+  g.setAttr('healthColor', health.color);
+  g.setAttr('isDownSnapshot', isDown);
   g.setAttr('displayHpSnapshot', health.known ? health.current : null);
   g.setAttr('displayHpMaxSnapshot', health.known ? health.maximum : null);
   g.setAttr('displayPmSnapshot', ld.displayPm == null ? null : Number(ld.displayPm));
   g.setAttr('displayPmMaxSnapshot', Number.isFinite(Number(ld.displayPmMax)) ? Number(ld.displayPmMax) : null);
+  g.setAttr('hiddenHealth', hiddenHealth);
+  g.setAttr('hasManaRing', hasMana);
+  g.setAttr('stackCount', 1);
 
-  // Empreinte tactique alignée sur la grille. Le portrait reste rond, mais un
-  // grand token montre désormais clairement toutes les cases qu'il occupe.
-  // Le rectangle sert aussi de hitbox : ses angles sont réellement cliquables.
+  const footprintX=-footprintW/2+2, footprintY=-footprintH/2+2;
+  const footprintInnerW=footprintW-4, footprintInnerH=footprintH-4;
   if (footprint.isLarge) {
     g.add(new K.Rect({
       x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
-      cornerRadius:5, fill:'rgba(15,23,42,.13)', stroke:'rgba(226,232,240,.74)',
-      strokeWidth:1.35, dash:[7,4], listening:true, name:'token-hit token-footprint',
+      cornerRadius:6, fill:'rgba(15,23,42,.14)', stroke:'rgba(226,232,240,.35)',
+      strokeWidth:1.2, dash:[6,4], listening:true, name:'token-hit token-footprint',
     }));
-    const corner = Math.min(13, CELL * .28);
-    const left=footprintX, top=footprintY, right=footprintX+footprintInnerW, bottom=footprintY+footprintInnerH;
-    [
-      [left+corner,top,left,top,left,top+corner],
-      [right-corner,top,right,top,right,top+corner],
-      [left,bottom-corner,left,bottom,left+corner,bottom],
-      [right-corner,bottom,right,bottom,right,bottom-corner],
-    ].forEach(points => g.add(new K.Line({
-      points, stroke:typeColor, strokeWidth:2.5, lineCap:'round', lineJoin:'round',
-      listening:false, name:'token-footprint-corner',
-    })));
+    const badgeX=footprintW/2-30, badgeY=footprintH/2-17;
     g.add(new K.Rect({
-      x:left+5, y:top+5, width:27, height:13, cornerRadius:6.5,
-      fill:'rgba(5,8,14,.92)', stroke:typeColor, strokeWidth:1,
-      listening:false, name:'token-footprint-size',
+      x:badgeX, y:badgeY, width:26, height:13, cornerRadius:6.5,
+      fill:'rgba(5,8,14,.9)', stroke:'rgba(226,232,240,.3)', strokeWidth:1,
+      listening:false, name:'token-footprint-size token-noncompact',
     }));
     g.add(new K.Text({
-      x:left+5, y:top+7, width:27, height:9, text:footprint.label,
-      align:'center', fontSize:7.5, fontStyle:'bold', fill:'#f8fafc',
-      fontFamily:'Inter,sans-serif', listening:false, name:'token-footprint-size',
+      x:badgeX, y:badgeY+2, width:26, height:9, text:footprint.label,
+      align:'center', fontSize:8, fontStyle:'bold', fill:'#cbd5e1',
+      fontFamily:'Inter,sans-serif', listening:false, name:'token-footprint-size token-noncompact',
     }));
   }
 
-  // Ombre au sol + fond : le token se détache même sur une battlemap chargée.
-  g.add(new K.Ellipse({ x:0, y:portraitY+4, radiusX:rx+4, radiusY:ry+4, fill:'rgba(0,0,0,.48)',
-    shadowColor:'#000', shadowBlur:9, shadowOpacity:.7, listening:false }));
-  // Cette ellipse est aussi la zone de hit Konva du groupe. Les autres éléments
-  // restent non interactifs afin que jauges, badges et libellé ne détournent pas
-  // le clic, mais il faut conserver une Shape écoutable pour sélectionner/draguer.
-  g.add(new K.Ellipse({ x:0, y:portraitY, radiusX:rx, radiusY:ry, fill:typeColor, opacity:.92, listening:true, name:'token-hit' }));
-
-  // Portrait/fallback ajoutés avant les informations afin qu'aucun chargement
-  // asynchrone ne repasse devant les anneaux, jauges ou badges.
-  const portrait = new K.Group({
-    clipFunc: ctx => { ctx.ellipse(0,0,rx,ry,0,0,Math.PI*2,false); },
-    x:0, y:portraitY, listening:false, name:'portrait', opacity:isDown ? .46 : 1,
+  // États tactiques sur toute l'emprise, sans modifier la hitbox.
+  g.add(new K.Rect({x:-footprintW/2+1.5,y:-footprintH/2+1.5,width:footprintW-3,height:footprintH-3,
+    cornerRadius:7,fill:'rgba(79,140,255,.10)',visible:false,listening:false,name:'sel-footprint'}));
+  const selection=new K.Group({visible:false,listening:false,name:'sel'});
+  _tokenBrackets(K,footprintW,footprintH,'#60a5fa',false,'sel-bracket').forEach(node=>selection.add(node));
+  g.add(selection);
+  // Alias historique conservé pour la couche d'état, sans second anneau.
+  g.add(new K.Group({visible:false,listening:false,name:'sel-spin'}));
+  g.add(new K.Rect({x:-footprintW/2+1.5,y:-footprintH/2+1.5,width:footprintW-3,height:footprintH-3,
+    cornerRadius:7,fill:'rgba(245,158,11,.07)',visible:false,listening:false,name:'atk-footprint'}));
+  const attack=new K.Group({visible:false,listening:false,name:'atk'});
+  _tokenBrackets(K,footprintW,footprintH,'#fbbf24',true,'atk-bracket').forEach(node=>attack.add(node));
+  g.add(attack);
+  g.add(new K.Rect({x:-footprintW/2+1.5,y:-footprintH/2+1.5,width:footprintW-3,height:footprintH-3,
+    cornerRadius:7,fill:'rgba(239,68,68,.10)',stroke:'#ef4444',strokeWidth:1.5,dash:[5,4],
+    visible:false,listening:false,name:'target-footprint'}));
+  const target=new K.Group({visible:false,listening:false,name:'target'});
+  [45,135,225,315].forEach(angle=>{
+    const rad=(angle-90)*Math.PI/180;
+    const r0=ringRadius+ringWidth/2+1.2;
+    const r1=Math.min(ringRadius+ringWidth/2+5,Math.min(footprintW,footprintH)/2-1.8);
+    target.add(new K.Line({points:[Math.cos(rad)*r0,Math.sin(rad)*r0,Math.cos(rad)*r1,Math.sin(rad)*r1],
+      stroke:'#ef4444',strokeWidth:2.4,lineCap:'round',listening:false,name:'target-mark'}));
   });
+  g.add(target);
+  g.add(new K.Group({visible:false,listening:false,name:'target-inner'}));
+  g.add(new K.Rect({x:footprintX,y:footprintY,width:footprintInnerW,height:footprintInnerH,
+    cornerRadius:5,stroke:'#fb7185',strokeWidth:2.5,fill:'rgba(239,68,68,.08)',
+    visible:false,listening:false,name:'reachable-footprint'}));
+
+  g.add(new K.Circle({x:0,y:0,radius:ringRadius+ringWidth/2+2.2,stroke:'#facc15',strokeWidth:2.2*scale,
+    shadowColor:'#f59e0b',shadowBlur:8,shadowOpacity:.8,fill:'transparent',
+    visible:!!VS.session?.combat?.active&&VS.session?.combat?.activeTokenId===t.id,
+    listening:false,name:'turn-active'}));
+
+  // Ombre et anneau de ressources du médaillon.
+  g.add(new K.Ellipse({x:0,y:3*size,radiusX:ringRadius+1,radiusY:ringRadius-1,fill:'rgba(0,0,0,.42)',
+    shadowColor:'#000',shadowBlur:3*scale,shadowOpacity:.72,listening:false}));
+  g.add(new K.Circle({x:0,y:0,radius:ringRadius,stroke:'rgba(4,7,12,.78)',strokeWidth:ringWidth+2.4,
+    fill:'transparent',listening:false,name:'token-ring-underlay'}));
+  g.add(_tokenArc(K,{radius:ringRadius,width:ringWidth,...arcs.hpTrack,fill:'rgba(255,255,255,.10)',name:'hp-track'}));
+  g.add(_tokenArc(K,{radius:ringRadius,width:ringWidth,...arcs.hpFill,fill:health.color,name:'hp-fill'}));
+  if (hasMana) {
+    g.add(_tokenArc(K,{radius:ringRadius,width:ringWidth,...arcs.pmTrack,fill:'rgba(255,255,255,.10)',name:'pm-track'}));
+    g.add(_tokenArc(K,{radius:ringRadius,width:ringWidth,...arcs.pmFill,fill:'#a78bfa',name:'pm-fill'}));
+  }
+  if (hiddenHealth&&!isDown) {
+    [.25,.5,.75].forEach(part=>{
+      const angle=arcs.hpTrack.start+arcs.hpTrack.span*part;
+      const rad=(angle-90)*Math.PI/180;
+      const inner=ringRadius-ringWidth/2-.5, outer=ringRadius+ringWidth/2+.5;
+      g.add(new K.Line({points:[Math.cos(rad)*inner,Math.sin(rad)*inner,Math.cos(rad)*outer,Math.sin(rad)*outer],
+        stroke:'rgba(4,7,12,.9)',strokeWidth:1.4,listening:false,name:'hp-hidden-tick'}));
+    });
+  }
+
+  // Zone interactive : le disque du portrait, plus le rectangle de l'emprise
+  // déjà écoutable pour les grands tokens. Tous les badges restent transparents.
+  g.add(new K.Circle({x:0,y:0,radius:portraitRadius+1,fill:typeColor,opacity:.35,listening:true,name:'token-hit'}));
+
+  const portrait = new K.Group({
+    clipFunc: ctx => { ctx.arc(0,0,portraitRadius,0,Math.PI*2,false); },
+    x:0,y:0,listening:false,name:'portrait',opacity:isDown ? .42 : 1,
+  });
+  portrait.setAttr('isDownPortrait',isDown);
   const summonIcon = t.summonKind === 'invocation' ? '🐾'
     : t.summonKind === 'sentinelle' ? '🪤'
       : t.summonKind === 'weapon' ? '⚔️' : '';
+  const initials=String(ld.displayName||t.name||'?').trim().replace(/[^A-Za-zÀ-ÿ0-9 ]/g,'')
+    .split(/\s+/).filter(Boolean).map(part=>part[0]).slice(0,2).join('').toUpperCase()||'?';
   const fallback = new K.Text({
-    x:-rx, y:-ry, width:rx*2, height:ry*2,
-    text:summonIcon || String(ld.displayName || t.name || '?').trim().slice(0,2).toUpperCase(),
-    fontSize:Math.max(16, Math.min(32, ry*.72)), fontStyle:'bold', fill:'#fff',
+    x:-portraitRadius, y:-portraitRadius, width:portraitRadius*2, height:portraitRadius*2,
+    text:summonIcon || initials,
+    fontSize:Math.max(16,18*scale), fontStyle:'bold', fill:'#fff',
     align:'center', verticalAlign:'middle', fontFamily:'Inter,sans-serif',
     shadowColor:'#000', shadowBlur:4, shadowOpacity:.72, listening:false,
     name:'portrait-fallback',
@@ -232,216 +329,114 @@ export function _buildTokenVisual(t, ld, condById) {
   portrait.add(fallback);
   g.add(portrait);
   const imgSrc = ld.displayImage;
-  if (imgSrc) {
-    _addTokenPortrait(portrait, fallback, imgSrc, rx, ry);
-  }
-  g.add(new K.Ellipse({
-    x:0, y:portraitY, radiusX:rx, radiusY:ry, fill:'transparent',
-    stroke:isDown?'#ef4444':typeColor, strokeWidth:3,
-    shadowColor:isDown?'#ef4444':'#000', shadowBlur:isDown?10:5,
-    shadowOpacity:.72, listening:false, name:'token-ring',
-  }));
-  g.add(new K.Ellipse({
-    x:0, y:portraitY, radiusX:rx+8, radiusY:ry+8, stroke:'#facc15', strokeWidth:3,
-    dash:[3,3], shadowColor:'#f59e0b', shadowBlur:12, shadowOpacity:.9,
-    fill:'transparent', visible:!!VS.session?.combat?.active && VS.session?.combat?.activeTokenId===t.id,
-    listening:false, name:'turn-active',
-  }));
-  g.add(new K.Ellipse({
-    x:0, y:portraitY, radiusX:rx+4, radiusY:ry+4, stroke:'#60a5fa', strokeWidth:3,
-    shadowColor:'#2563eb', shadowBlur:12, shadowOpacity:.9,
-    fill:'transparent', visible:false, listening:false, name:'sel',
-  }));
-  // Anneau de sélection dans la couleur du camp (double anneau avec le halo bleu).
-  // STATIQUE : pas d'animation continue (voir _syncFxAnim, retirée pour la perf).
-  g.add(new K.Ellipse({
-    x:0, y:portraitY, radiusX:rx+7, radiusY:ry+7, stroke:typeColor, strokeWidth:1.5,
-    fill:'transparent', shadowColor:typeColor, shadowBlur:5, shadowOpacity:.45,
-    visible:false, listening:false, name:'sel-spin',
-  }));
-  g.add(new K.Ellipse({
-    x:0, y:portraitY, radiusX:rx+7, radiusY:ry+7, stroke:'#fbbf24', strokeWidth:2.5, dash:[7,4],
-    shadowColor:'#f59e0b', shadowBlur:10, shadowOpacity:.75,
-    fill:'transparent', visible:false, listening:false, name:'atk',
-  }));
-  g.add(new K.Ellipse({
-    x:0, y:portraitY, radiusX:rx+5.5, radiusY:ry+5.5, stroke:'#ef4444', strokeWidth:3.5,
-    shadowColor:'#ef4444', shadowBlur:12, shadowOpacity:.9,
-    fill:'transparent', visible:false, listening:false, name:'target',
-  }));
-  g.add(new K.Ellipse({
-    x:0, y:portraitY, radiusX:rx+2.5, radiusY:ry+2.5, stroke:'#4ade80', strokeWidth:1.5,
-    fill:'transparent', visible:false, listening:false, name:'target-inner',
-  }));
-  // Les états tactiques reprennent aussi la forme carrée de l'emprise. Ainsi,
-  // sélectionner un 3×3 met en évidence ses neuf cases, pas seulement l'image.
-  g.add(new K.Rect({
-    x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
-    cornerRadius:5, stroke:'#60a5fa', strokeWidth:2.5,
-    fill:'rgba(37,99,235,.06)', visible:false, listening:false, name:'sel-footprint',
-  }));
-  g.add(new K.Rect({
-    x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
-    cornerRadius:5, stroke:'#fbbf24', strokeWidth:2.5, dash:[8,4],
-    fill:'rgba(245,158,11,.06)', visible:false, listening:false, name:'atk-footprint',
-  }));
-  g.add(new K.Rect({
-    x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
-    cornerRadius:5, stroke:'#fb7185', strokeWidth:2.5,
-    fill:'rgba(239,68,68,.08)', shadowColor:'#ef4444', shadowBlur:7, shadowOpacity:.45,
-    visible:false, listening:false, name:'reachable-footprint',
-  }));
-  g.add(new K.Rect({
-    x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
-    cornerRadius:5, stroke:'#ef4444', strokeWidth:3.5, dash:[8,4],
-    fill:'rgba(239,68,68,.08)', shadowColor:'#ef4444', shadowBlur:10, shadowOpacity:.65,
-    visible:false, listening:false, name:'target-footprint',
-  }));
+  if (imgSrc) _addTokenPortrait(portrait,fallback,imgSrc,portraitRadius);
+  g.add(new K.Circle({x:0,y:0,radius:portraitRadius,fill:'#ef4444',opacity:0,listening:false,name:'token-flash'}));
+  g.add(new K.Circle({x:0,y:0,radius:portraitRadius+1,fill:'transparent',stroke:isDown?'#ef4444':typeColor,
+    strokeWidth:2*scale,listening:false,name:'token-ring'}));
 
-  // À 0 PV, l'état est explicite sans devoir lire la jauge.
-  g.add(new K.Ellipse({ x:0, y:portraitY, radiusX:rx, radiusY:ry, fill:'rgba(5,8,14,.58)', visible:isDown, listening:false, name:'down-overlay' }));
-  g.add(new K.Text({ x:-rx, y:portraitY-13, width:rx*2, height:26, text:'☠', fontSize:23,
+  g.add(new K.Circle({x:0,y:0,radius:portraitRadius,fill:'rgba(5,8,14,.58)',visible:isDown,listening:false,name:'down-overlay'}));
+  g.add(new K.Text({x:-portraitRadius,y:-11*scale,width:portraitRadius*2,height:24*scale,text:'☠',fontSize:22*scale,
     align:'center', fill:'#fecaca', shadowColor:'#000', shadowBlur:6, shadowOpacity:1,
     visible:isDown, listening:false, name:'down-icon' }));
 
-  // Badge CA minimal dans l'angle : la valeur reste immédiate sans occuper tout
-  // le haut du portrait.
   const _buff = ld._activeCaBuff;
   const _buffed = !!_buff;
   const _toursLeft = _buff
     ? (_buff.expiresAtRound != null && round > 0 ? _buff.expiresAtRound - round + 1 : _buff.totalDuration ?? '∞')
     : null;
-  const _caW=22, _caH=13, _caX=rx-_caW, _caY=portraitY-ry+3;
-  g.add(new K.Rect({ x:_caX, y:_caY, width:_caW, height:_caH, cornerRadius:6.5,
-    fill: _buffed ? 'rgba(30,27,80,0.95)' : 'rgba(15,15,25,0.9)',
-    stroke: _buffed ? '#818cf8' : '#64748b',
-    strokeWidth: _buffed ? 1.5 : 1,
-    listening:false, name:'ca-bg' }));
-  g.add(new K.Text({ x:_caX, y:_caY+2, width:_caW, height:9,
-    text:`🛡${ld.caBadge ?? (ld.displayDefense??0)}`, fontSize:6.8, fontStyle:'bold',
-    fill: _buffed ? '#c4b5fd' : '#e2e8f0',
-    fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-lbl' }));
+  const _caW=17*scale,_caH=19*scale,_caX=footprintW/2-18*scale-1.5,_caY=-footprintH/2+1.5;
+  g.add(new K.Path({x:_caX,y:_caY,data:_tokenShieldPath(_caW,_caH),
+    fill:_buffed?'#1e1b50':'rgba(8,12,20,.94)',stroke:_buffed?'#a5b4fc':'rgba(203,213,225,.55)',
+    strokeWidth:1.1,listening:false,name:'ca-bg token-noncompact'}));
+  g.add(new K.Text({x:_caX,y:_caY+_caH*.34,width:_caW,height:_caH*.45,
+    text:String(ld.caBadge??(ld.displayDefense??0)),fontSize:8.6*scale,fontStyle:'bold',
+    fill:_buffed?'#c4b5fd':'#e2e8f0',fontFamily:'Inter,sans-serif',align:'center',
+    listening:false,name:'ca-lbl token-noncompact'}));
   if (_buffed) {
-    g.add(new K.Circle({ x:_caX+_caW-1, y:_caY+1, radius:4.5, fill:'#312e81', stroke:'#a5b4fc', strokeWidth:1, listening:false }));
-    g.add(new K.Text({ x:_caX+_caW-5.5, y:_caY-1.5, width:9, height:7,
-      text:String(_toursLeft), fontSize:5.5, fontStyle:'bold', fill:'#e0e7ff',
-      fontFamily:'Inter,sans-serif', align:'center', listening:false, name:'ca-buff-turns' }));
+    g.add(new K.Circle({x:_caX+_caW-1,y:_caY+_caH-3*scale,radius:4.4*scale,fill:'#312e81',stroke:'#a5b4fc',strokeWidth:.9,
+      listening:false,name:'token-noncompact'}));
+    g.add(new K.Text({x:_caX+_caW-1-4.4*scale,y:_caY+_caH-5.8*scale,width:8.8*scale,height:7*scale,
+      text:String(_toursLeft),fontSize:5.8*scale,fontStyle:'bold',fill:'#e0e7ff',fontFamily:'Inter,sans-serif',align:'center',
+      listening:false,name:'ca-buff-turns token-noncompact'}));
   }
 
-  // États/effets en rangée AU-DESSUS du portrait : emoji lisibles de loin
-  // (comme la maquette Claude Design). Centrés horizontalement ; ils peuvent
-  // déborder légèrement au-dessus de la case, c'est assumé — l'information
-  // d'état prime sur l'étanchéité de la grille.
   if (effects.length) {
-    const slots = (sw >= 2 || sh >= 2) ? 6 : 4;
-    const overflow = Math.max(0, effects.length - slots);
-    const shown = effects.slice(0, overflow > 0 ? slots-1 : slots);
-    const count = shown.length + (overflow > 0 ? 1 : 0);
-    const gap = 15;
-    const startX = -((count - 1) * gap) / 2;
-    const y = portraitY - ry - 10;   // juste au-dessus du portrait
-    shown.forEach((effect, i) => {
-      const x = startX + i*gap;
-      const effectStroke=effect.tone==='negative'?'#fecaca':effect.tone==='positive'?'#bbf7d0':'#bfdbfe';
-      g.add(new K.Circle({ x, y, radius:7, fill:effect.color,
-        stroke:effectStroke, strokeWidth:effect.tone==='neutral'?1:1.7,
-        shadowColor:'#000', shadowBlur:3, shadowOpacity:.55,
-        listening:false, name:`${effect.kind==='condition'?'cond-bg':'buff-bg'} effect-detail` }));
-      g.add(new K.Text({ x:x-7, y:y-5.5, width:14, height:11, text:effect.icon,
-        fontSize:8.5, align:'center', verticalAlign:'middle', fontFamily:'Inter,sans-serif',
-        listening:false, name:`${effect.kind==='condition'?'cond-ic':'buff-ic'} effect-detail` }));
-      if (effect.turnsLeft != null) {
-        const expiring=effect.turnsLeft===1;
-        g.add(new K.Circle({ x:x+6, y:y+5, radius:4.2,
-          fill:expiring?'#f97316':'#0f172a', stroke:expiring?'#fed7aa':'#94a3b8', strokeWidth:.8,
-          listening:false, name:'effect-detail effect-turn-bg' }));
-        g.add(new K.Text({ x:x+2, y:y+2, width:9, height:7, text:String(effect.turnsLeft),
-          fontSize:6, fontStyle:'bold', align:'center', fill:expiring?'#fff7ed':'#fff',
-          shadowColor:'#000', shadowBlur:2, shadowOpacity:1, listening:false, name:'effect-detail' }));
+    const addEffectRail=(level,slots)=>{
+      const rail=new K.Group({visible:level==='detailed',listening:false,name:`effect-${level}`});
+      const overflow=effects.length>slots?effects.length-(slots-1):0;
+      const shown=effects.slice(0,overflow?slots-1:slots);
+      const count=shown.length+(overflow?1:0), radius=5.8*scale, gap=15*scale;
+      const centerX=size>=2?0:-6, y=-ringRadius-.5, start=centerX-(count-1)*gap/2;
+      shown.forEach((effect,index)=>{
+        const x=start+index*gap;
+        const stroke=effect.tone==='negative'?'#fecaca':effect.tone==='positive'?'#bbf7d0':'#c7d2fe';
+        rail.add(new K.Circle({x,y,radius,fill:effect.color,stroke,strokeWidth:1.3,listening:false}));
+        rail.add(new K.Circle({x,y,radius:radius+1.2,fill:'transparent',stroke:'rgba(4,7,12,.85)',strokeWidth:1.2,listening:false}));
+        rail.add(new K.Text({x:x-radius,y:y-radius*.6,width:radius*2,height:radius*1.3,text:effect.icon,
+          fontSize:7*scale,align:'center',verticalAlign:'middle',fontFamily:'Inter,sans-serif',listening:false}));
+        if(level==='detailed'&&effect.turnsLeft!=null){
+          const expiring=effect.turnsLeft===1, bx=x+radius*.78, by=y+radius*.78;
+          rail.add(new K.Circle({x:bx,y:by,radius:3.9*scale,fill:expiring?'#f97316':'#0f172a',
+            stroke:expiring?'#fed7aa':'#94a3b8',strokeWidth:.8,listening:false}));
+          rail.add(new K.Text({x:bx-4*scale,y:by-2.8*scale,width:8*scale,height:6*scale,text:String(effect.turnsLeft),
+            fontSize:5.6*scale,fontStyle:'bold',align:'center',fill:'#fff',listening:false}));
+        }
+      });
+      if(overflow){
+        const x=start+shown.length*gap;
+        rail.add(new K.Circle({x,y,radius,fill:'#334155',stroke:'#94a3b8',strokeWidth:1,listening:false}));
+        rail.add(new K.Text({x:x-radius,y:y-radius*.55,width:radius*2,height:radius*1.2,text:`+${overflow}`,
+          fontSize:6.6*scale,fontStyle:'bold',align:'center',fill:'#fff',listening:false}));
       }
-    });
-    if (overflow > 0) {
-      const x=startX+shown.length*gap;
-      g.add(new K.Circle({ x, y, radius:7, fill:'#334155', stroke:'#94a3b8', strokeWidth:1, listening:false, name:'effect-detail' }));
-      g.add(new K.Text({ x:x-7, y:y-5, width:14, height:10, text:`+${overflow}`,
-        fontSize:7, fontStyle:'bold', align:'center', fill:'#fff', fontFamily:'Inter,sans-serif', listening:false, name:'effect-detail' }));
+      g.add(rail);
+    };
+    addEffectRail('detailed',size>=2?5:3);
+    addEffectRail('standard',2);
+    const negative=effects.some(effect=>effect.tone==='negative');
+    g.add(new K.Circle({x:0,y:-ringRadius,radius:4.2*scale,fill:negative?'#ef4444':'#22c55e',
+      stroke:'rgba(4,7,12,.9)',strokeWidth:1.5,visible:false,listening:false,name:'effect-compact'}));
+  }
+
+  const fullName=String(ld.displayName??t.name??'?');
+  const firstName=fullName.split(/[ ']/)[0]||fullName;
+  const addNamePlate=(level,name,value)=>{
+    const fontSize=8.3*scale, plateH=12.5*scale;
+    // À fort niveau de détail, le cartouche peut dépasser légèrement de la case :
+    // un nom + « Critique/Blessé » doit rester lisible au lieu d'être réduit à
+    // deux fragments. Il reste non-interactif et ne gêne donc pas les tokens voisins.
+    const maxW=level==='detailed'
+      ? Math.max(footprintW-2,Math.min(132*scale,footprintW+72*scale))
+      : Math.max(footprintW-2,74*scale);
+    const reservedValue=value||(level==='standard'?'KO':'');
+    const valueW=reservedValue?Math.min(maxW*.42,Math.max(12*scale,String(reservedValue).length*fontSize*.58)):0;
+    const preferred=Math.max(34*scale,(name.length*fontSize*.56)+valueW+18*scale);
+    const plateW=Math.min(maxW,preferred), plateY=Math.min(footprintH/2-plateH,ringRadius-plateH/2+1.5*size);
+    const plate=new K.Group({x:-plateW/2,y:plateY,visible:level==='detailed',listening:false,
+      name:`token-name token-name-${level}`});
+    plate.add(new K.Rect({x:0,y:0,width:plateW,height:plateH,cornerRadius:plateH/2,fill:'rgba(6,9,15,.94)',
+      stroke:`${typeColor}b3`,strokeWidth:1,name:level==='detailed'?'name-bg move-badge':'name-bg'}));
+    plate.add(new K.Circle({x:6.5*scale,y:plateH/2,radius:2.2*scale,fill:typeColor}));
+    plate.add(new K.Text({x:10*scale,y:0,width:Math.max(4,plateW-14*scale-valueW),height:plateH,text:name,
+      fontSize,fontStyle:'bold',fill:isDown?'#94a3b8':'#f1f5f9',ellipsis:true,wrap:'none',verticalAlign:'middle',
+      fontFamily:'Inter,sans-serif',name:`lbl lbl-${level}`}));
+    if(value||level==='standard'){
+      plate.add(new K.Text({x:plateW-valueW-4*scale,y:0,width:valueW,height:plateH,text:String(value),fontSize,fontStyle:'bold',
+        fill:health.color,align:'right',verticalAlign:'middle',fontFamily:'Inter,sans-serif',
+        name:level==='detailed'?'name-value move-value':'name-value standard-health-value'}));
     }
-  }
+    g.add(plate);
+  };
+  const detailedValue=isDown?(size>1?'À terre':'KO'):(hiddenHealth?health.label:(health.known?String(health.current):'?'));
+  addNamePlate('detailed',fullName,detailedValue);
+  addNamePlate('standard',firstName,isDown?'KO':'');
 
-  // Le nom dispose de sa propre ligne SOUS le portrait. Il ne recouvre donc ni
-  // le visage, ni le token de la ligne suivante.
-  const portraitBottom=portraitY+ry;
-  const nameH=8, nameY=portraitBottom;
-  g.add(new K.Rect({ x:-nameW/2, y:nameY, width:nameW, height:nameH, fill:'rgba(5,8,14,.94)',
-    stroke:typeColor, strokeWidth:1, cornerRadius:4, shadowColor:'#000', shadowBlur:4, shadowOpacity:.6,
-    listening:false, name:'name-bg token-name' }));
-  g.add(new K.Circle({ x:-nameW/2+5, y:nameY+nameH/2, radius:2, fill:typeColor, listening:false, name:'type-dot token-name' }));
-  g.add(new K.Text({ text:ld.displayName??t.name, x:-nameW/2+9, y:nameY,
-    width:nameW-12, height:nameH, align:'left', verticalAlign:'middle',
-    fontSize:7.4, fontStyle:'bold', fill:'#f8fafc', ellipsis:true, wrap:'none',
-    fontFamily:'Inter,sans-serif', name:'lbl token-name', listening:false }));
-
-  // PV et PM partagent la dernière ligne de la case. Les valeurs restantes sont
-  // toujours lisibles ; sans mana, les PV récupèrent toute la largeur.
-  const _pm0=ld.displayPm;
-  const hasMana=_pm0!=null || ld.hasMana;
-  const RESH=12, resourceY=nameY+nameH-1;
-  const hpW=hasMana?(bW-1)/2:bW;
-  const resources=new K.Group({ x:0, y:resourceY+RESH/2, offsetY:RESH/2,
-    listening:false, name:'resource-panel' });
-  resources.add(new K.Rect({ x:-bW/2, y:0, width:bW, height:RESH, fill:'rgba(5,8,14,.98)',
-    stroke:'rgba(255,255,255,.4)', strokeWidth:1, cornerRadius:5,
-    shadowColor:'#000', shadowBlur:4, shadowOpacity:.72, listening:false, name:'resource-bg' }));
-  resources.add(new K.Rect({ x:-bW/2+1, y:1, width:Math.max(2,(hpW-2)*health.ratio), height:RESH-2,
-    fill:health.color, cornerRadius:4, listening:false, name:'hp-fill' }));
-  if (hasMana) {
-    const _pmKnown=_pm0!=null;
-    const pmMax0=Number(ld.displayPmMax);
-    const pmMaxKnown=Number.isFinite(pmMax0)&&pmMax0>0;
-    const pmRat0=_pmKnown&&pmMaxKnown?Math.min(1,Math.max(0,_pm0/pmMax0)):(_pmKnown?1:0);
-    const pmX=-bW/2+hpW+1, pmW=bW-hpW-1;
-    resources.add(new K.Rect({ x:pmX, y:1, width:Math.max(2,(pmW-2)*pmRat0), height:RESH-2,
-      fill:_pmKnown?'#a78bfa':'#475569', cornerRadius:4, listening:false, name:'pm-fill' }));
-    resources.add(new K.Line({ points:[pmX-.5,1,pmX-.5,RESH-1],
-      stroke:'rgba(255,255,255,.55)', strokeWidth:1, listening:false }));
-  }
-  // Voile sombre uniforme : les chiffres restent nets sur toutes les couleurs
-  // de remplissage sans nécessiter de contour autour des caractères.
-  resources.add(new K.Rect({ x:-bW/2+1, y:1, width:bW-2, height:RESH-2,
-    fill:'rgba(0,0,0,.27)', cornerRadius:4, listening:false, name:'resource-contrast' }));
-  resources.add(new K.Text({ x:-bW/2, y:0, width:hpW, height:RESH, align:'center', verticalAlign:'middle',
-    text:health.known?`♥${health.current}/${health.maximum}`:'♥?', fontSize:8, fontStyle:'bold', fill:'#fff',
-    fontFamily:'Inter,sans-serif', listening:false, name:'hp-val resource-value' }));
-  if (hasMana) {
-    const _pmKnown=_pm0!=null;
-    const pmMax0=Number(ld.displayPmMax);
-    const pmMaxKnown=Number.isFinite(pmMax0)&&pmMax0>0;
-    const pmX=-bW/2+hpW+1, pmW=bW-hpW-1;
-    resources.add(new K.Text({ x:pmX, y:0, width:pmW, height:RESH, align:'center', verticalAlign:'middle',
-      text:_pmKnown?(pmMaxKnown?`✦${_pm0}/${pmMax0}`:`✦${_pm0}`):'✦?', fontSize:8, fontStyle:'bold', fill:'#fff',
-      fontFamily:'Inter,sans-serif', listening:false, name:'pm-val resource-value' }));
-  }
-  g.add(resources);
-
-  // Badges contextuels masqués par défaut : la couche interactive les active
-  // seulement quand le token est empilé ou sélectionné en combat.
-  const stackX=rx-18, stackY=portraitY-5;
-  g.add(new K.Rect({ x:stackX, y:stackY, width:18, height:11, cornerRadius:5.5,
+  const stackX=-footprintW/2+1.5, stackY=-6.5*scale;
+  g.add(new K.Rect({ x:stackX, y:stackY, width:19*scale, height:13*scale, cornerRadius:6.5*scale,
     fill:'rgba(15,23,42,.95)', stroke:'#cbd5e1', strokeWidth:1,
-    shadowColor:'#000', shadowBlur:4, shadowOpacity:.7, visible:false, listening:false, name:'stack-badge' }));
-  g.add(new K.Text({ x:stackX, y:stackY+1.5, width:18, height:8, text:'×2',
-    align:'center', fontSize:6.8, fontStyle:'bold', fill:'#f8fafc',
+    visible:false, listening:false, name:'stack-badge token-noncompact' }));
+  g.add(new K.Text({ x:stackX, y:stackY+2*scale, width:19*scale, height:9*scale, text:'×2',
+    align:'center', fontSize:8*scale, fontStyle:'bold', fill:'#f8fafc',
     fontFamily:'Inter,sans-serif', visible:false, listening:false, name:'stack-count' }));
-
-  const moveW=31, moveY=portraitY+ry-11;
-  g.add(new K.Rect({ x:-moveW/2, y:moveY, width:moveW, height:10, cornerRadius:5,
-    fill:'rgba(8,47,73,.94)', stroke:'#38bdf8', strokeWidth:1,
-    shadowColor:'#000', shadowBlur:4, shadowOpacity:.7, visible:false, listening:false, name:'move-badge' }));
-  g.add(new K.Text({ x:-moveW/2, y:moveY+1.5, width:moveW, height:7, text:'🏃 0/0',
-    align:'center', fontSize:6.2, fontStyle:'bold', fill:'#e0f2fe',
-    fontFamily:'Inter,sans-serif', visible:false, listening:false, name:'move-value' }));
-  // Mode Performance : couper toutes les ombres du token (coût de redraw majeur
-  // en canvas 2D sur machines modestes). Le reste du visuel est conservé.
   if (vttLowFx()) _stripShadows(g);
   return g;
 }
@@ -514,7 +509,10 @@ export function _renderMapImages(deps = {}) {
           if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
           if (!VS.mapMode) return;
           e.cancelBubble = true;
-          VS.tokens[VS.selected]?.shape?.findOne('.sel')?.visible(false);
+          const selectedShape=VS.tokens[VS.selected]?.shape;
+          selectedShape?.findOne('.sel')?.visible(false);
+          selectedShape?.findOne('.sel-spin')?.visible(false);
+          selectedShape?.findOne('.sel-footprint')?.visible(false);
           hideActBar();
           VS.selected=null; clearHL(); renderInspector(null); VS.layers.token.batchDraw();
           VS.selImg = img.id;

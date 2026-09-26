@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { combatTargetResourceVisibility, trackedCombatResourceValues } from '../assets/js/features/vtt/vtt-chat-visibility.js';
+import { combatTargetResourceVisibility, trackedCombatResourceValues, visibleCombatDamage } from '../assets/js/features/vtt/vtt-chat-visibility.js';
 
 test('le MJ et le contrôleur voient les ressources exactes', () => {
   assert.equal(combatTargetResourceVisibility({ isAdmin: true }), 'exact');
@@ -71,4 +71,29 @@ test('un ancien compteur sans provenance est ignoré même sous le maximum estim
     tracker: { pvActuel: 20 },
     token: { hp: 13, pvCombatHp: 13 },
   }), { current:20, max:20 });
+});
+
+test('le MJ voit les PV réellement retirés par une attaque de zone', () => {
+  assert.equal(visibleCombatDamage({
+    isAdmin: true,
+    target: { beastId:'beast-1', dmgTotal:9, dmgApplied:1 },
+    token: { type:'enemy', beastId:'beast-1' },
+  }), 1);
+  assert.equal(visibleCombatDamage({
+    isAdmin: true,
+    target: { beastId:'beast-1', dmgTotal:9, dmgApplied:9 },
+    token: { type:'enemy', beastId:'beast-1' },
+  }), 9);
+});
+
+test('un joueur conserve le résultat public sans apprendre les vrais PV ennemis', () => {
+  assert.equal(visibleCombatDamage({
+    target: { beastId:'beast-1', dmgTotal:9, dmgApplied:1 },
+    token: { type:'enemy', beastId:'beast-1' },
+  }), 9);
+});
+
+test('les anciens journaux et les absorptions conservent leur valeur publique', () => {
+  assert.equal(visibleCombatDamage({ isAdmin:true, target:{ dmgTotal:9 } }), 9);
+  assert.equal(visibleCombatDamage({ isAdmin:true, target:{ dmgTotal:-4, dmgApplied:0 } }), -4);
 });
