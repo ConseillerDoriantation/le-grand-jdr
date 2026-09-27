@@ -858,7 +858,7 @@ export function _renderChatLogImpl(msgs) {
       }
       if (hasReduction) {
         const fmt = m.dmgTotal < 0 ? `+${-m.dmgTotal}` : m.dmgTotal;
-        rows.push(_row(`Set Lourd −${m.dmgReduction} (min. 1)`, `<strong>${fmt}</strong>`, { op: '🛡', isFinal: true }));
+        rows.push(_row(`${_esc(m.dmgReductionLabel || 'Set Lourd')} −${m.dmgReduction} (min. 1)`, `<strong>${fmt}</strong>`, { op: '🛡', isFinal: true }));
       }
     }
     return rows.join('');

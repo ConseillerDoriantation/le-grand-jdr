@@ -6,7 +6,7 @@ import { getDocData, saveDoc } from '../data/firestore.js';
 // Firestore : world/spell_matrices → {
 //   enchant:      { [elementId]: { arme:'', tete:'', torse:'', pieds:'' } },
 //   affliction:   { [elementId]: { arme:'', tete:'', torse:'', pieds:'' } },
-//   protectionCA: { [elementId]: { mod: 2, note: '' } },
+//   protectionCA: { [elementId]: { mod: 2, note: '', reduction: 2 } },
 // }
 //
 // Géré côté MJ via openSpellMatricesAdmin().
@@ -143,6 +143,13 @@ export function getMatrixSuggestions(matrices, categorie, elementId, slot) {
  * Renvoie l'override Protection CA pour un élément donné.
  * Retourne { mod: number, note: string } ou null si non défini.
  */
+/** Pas de la réduction de dégâts par rune Protection, par élément (défaut 2). */
+export const DEFAULT_PROTECTION_REDUCTION_STEP = 2;
+export function getProtectionReductionStep(matrices, elementId) {
+  const v = Number(matrices?.protectionCA?.[elementId]?.reduction);
+  return Number.isFinite(v) && v >= 0 ? Math.round(v) : DEFAULT_PROTECTION_REDUCTION_STEP;
+}
+
 export function getProtectionCAOverride(matrices, elementId) {
   if (!matrices || !elementId) return null;
   const ov = matrices?.protectionCA?.[elementId];

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
+import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
 
 const sort = (runes = [], extra = {}) => ({ runes, ...extra });
 
@@ -87,4 +87,36 @@ test('les sorts classiques utilisent leur durée exacte, instantané inclus', ()
   assert.equal(calcSpellDuration({ designMode: 'classic', classicDuration: 0 }), 0);
   assert.equal(calcSpellDuration({ designMode: 'classic', classicDuration: 3 }), 3);
   assert.equal(calcSpellDuration({ designMode: 'classic', dureeBase: 6 }), 6);
+});
+
+test('Protection multi-modes : un mode par rune, défaut = renforcer le mode principal', () => {
+  const two = sort(['Protection', 'Protection'], { types: ['defensif'], protectionMode: 'soin' });
+  assert.deepEqual(getProtectionModes(two), ['soin', 'soin']);
+  assert.equal(isProtectionMultiMode(two), false);
+  const mixed = { ...two, protectionModes: ['soin', 'ca'] };
+  assert.deepEqual(getProtectionModes(mixed), ['soin', 'ca']);
+  assert.equal(protectionRunesFor(mixed, 'soin'), 1);
+  assert.equal(protectionRunesFor(mixed, 'ca'), 1);
+  assert.equal(getProtectionRestoreMode(mixed), 'soin');
+  assert.equal(getProtectionRestoreMode({ ...two, protectionModes: ['ca', 'reduction'] }), null);
+});
+
+test('Protection multi-modes : un sort mono-mode garde toutes ses runes (compat)', () => {
+  const ca = sort(['Protection', 'Protection', 'Protection'], { types: ['defensif'], protectionMode: 'ca' });
+  assert.equal(protectionRunesFor(ca, 'ca'), 3);
+  assert.equal(protectionRunesFor(ca, 'soin'), 3, 'historique : le calcul de soin voyait toutes les runes');
+});
+
+test('Protection multi-modes : Soin et PM s\'excluent (un seul jet de restauration)', () => {
+  const s = sort(['Protection', 'Protection'], { types: ['defensif'], protectionModes: ['soin', 'mana'] });
+  assert.deepEqual(getProtectionModes(s), ['soin', 'soin']);
+});
+
+test('Protection multi-modes : coupée quand un combo absorbe Protection', () => {
+  const base = { protectionModes: ['soin', 'ca'], protectionMode: 'soin' };
+  assert.equal(protectionSplitAllowed(sort(['Protection', 'Protection'], { ...base, types: ['offensif'] })), false, 'Drain');
+  assert.equal(protectionSplitAllowed(sort(['Protection', 'Affliction'], base)), false, 'Régénération');
+  assert.equal(protectionSplitAllowed(sort(['Protection', 'Déclenchement'], { ...base, actionMode: 'reaction' })), false, 'Bouclier réactif');
+  assert.equal(protectionSplitAllowed(sort(['Protection', 'Déclenchement'], { ...base, actionMode: 'action_bonus' })), true);
+  assert.deepEqual(getProtectionModes(sort(['Protection', 'Protection', 'Affliction'], base)), ['soin', 'soin']);
 });

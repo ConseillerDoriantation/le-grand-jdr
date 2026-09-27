@@ -21,9 +21,69 @@ export function usesHealingMastery(spell = {}, isMagic = false, statKey = '') {
  * ancien sort sans `types: ['defensif']` doit rester un vrai soin dans le VTT.
  */
 export function getProtectionRestoreMode(spell = {}) {
-  if (runeCount(spell, 'Protection') <= 0) return null;
-  const mode = spell?.protectionMode || 'ca';
-  return mode === 'soin' || mode === 'mana' ? mode : null;
+  return getProtectionModes(spell).find(mode => mode === 'soin' || mode === 'mana') || null;
+}
+
+// ── Protection multi-modes ───────────────────────────────────────────────────
+// Chaque rune Protection porte UN mode (`protectionModes[i]`) : ajouter une rune
+// renforce un mode existant ou en ouvre un nouveau (ex. Soin + CA). `protectionMode`
+// reste le mode de la 1re rune (compat des anciens sorts et des combos).
+export const PROTECTION_MODES = ['ca', 'soin', 'mana', 'reduction'];
+const RESTORE_MODES = new Set(['soin', 'mana']);
+
+/**
+ * La répartition est coupée quand un combo absorbe Protection : Drain (sort
+ * offensif), Régénération / Sentinelle (Affliction), Bouclier réactif (réaction).
+ * Dans ces cas toutes les runes suivent le mode principal, comme avant.
+ */
+export function protectionSplitAllowed(spell = {}) {
+  if (spell?.designMode === 'classic') return false;
+  const types = Array.isArray(spell?.types) ? spell.types : [];
+  if (types.includes('offensif')) return false;
+  if (runeCount(spell, 'Affliction') > 0) return false;
+  const runes = spell?.runes || [];
+  if (runes.includes('Réaction')) return false;
+  if (runes.includes('Déclenchement') && spell?.actionMode !== 'action_bonus') return false;
+  return true;
+}
+
+/** Mode de chaque rune Protection (longueur = nombre de runes Protection). */
+export function getProtectionModes(spell = {}) {
+  const n = runeCount(spell, 'Protection');
+  if (n <= 0) return [];
+  const valid = mode => PROTECTION_MODES.includes(mode);
+  const src = Array.isArray(spell?.protectionModes) ? spell.protectionModes : [];
+  const primary = valid(src[0]) ? src[0] : (valid(spell?.protectionMode) ? spell.protectionMode : 'ca');
+  if (!protectionSplitAllowed(spell)) return Array(n).fill(primary);
+  const out = [primary];
+  for (let i = 1; i < n; i += 1) {
+    // Rune ajoutée sans choix explicite : elle renforce le mode principal.
+    let mode = valid(src[i]) ? src[i] : primary;
+    // Un seul jet de restauration par sort : Soin et PM s'excluent.
+    const restore = out.find(m => RESTORE_MODES.has(m));
+    if (RESTORE_MODES.has(mode) && restore && mode !== restore) mode = restore;
+    out.push(mode);
+  }
+  return out;
+}
+
+export function protectionHasMode(spell = {}, mode) {
+  return getProtectionModes(spell).includes(mode);
+}
+
+/**
+ * Nombre de runes Protection qui alimentent `mode`. Un sort à mode unique garde
+ * TOUTES ses runes (comportement historique, quel que soit le mode demandé).
+ */
+export function protectionRunesFor(spell = {}, mode) {
+  const modes = getProtectionModes(spell);
+  if (new Set(modes).size <= 1) return modes.length;
+  return modes.filter(m => m === mode).length;
+}
+
+/** Sort multi-modes réel (au moins deux modes différents). */
+export function isProtectionMultiMode(spell = {}) {
+  return new Set(getProtectionModes(spell)).size > 1;
 }
 
 const SPELL_MODIFIER_STATS = new Set([

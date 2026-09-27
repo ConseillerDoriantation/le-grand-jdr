@@ -9,7 +9,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { getMainWeapon, DEFAULT_UNARMED } from '../../shared/equipment-utils.js';
 import { getMaitriseBonus, getMod } from '../../shared/char-stats.js';
-import { resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { VS } from './vtt-state.js';
 
 // Rune virtuelle d'action (Réaction / Action Bonus condensées à l'affichage).
@@ -88,8 +88,8 @@ export function _vttSortSoinFormula(s, c) {
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) return (s?.soin || '').trim();
   // Aligne sur le sheet : getMainWeapon retourne Poings par défaut si vide.
   const mainP    = c ? getMainWeapon(c) : null;
-  const runes    = s.runes || [];
-  const nbProt   = runes.filter(r => r === 'Protection').length;
+  // Multi-modes : seules les runes Protection attribuées au Soin ajoutent des dés.
+  const nbProt   = protectionRunesFor(s, 'soin');
   const base     = (s.soin || '').trim();
 
   const dmgTypes = VS.damageTypes;

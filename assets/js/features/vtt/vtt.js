@@ -38,9 +38,9 @@ import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nea
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
-import { loadSpellMatrices, getInvokedArm } from '../../shared/spell-matrices.js';
+import { loadSpellMatrices, getInvokedArm, getProtectionCAOverride, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
 import { toggleTheme } from '../../shared/theme.js';
@@ -3566,6 +3566,82 @@ function _parseCaBonus(caStr) {
   return m ? (parseInt(m[1]) || 2) : 2;
 }
 
+// Protection : valeurs des buffs posés par le sort (CA et/ou Réduction de dégâts),
+// calculées avec les seules runes attribuées à chaque mode (multi-modes). La CA
+// suit la forge : runes × mod de l'élément (console MJ), sauf formule manuelle.
+function _vttProtectionBuffValues(s) {
+  const ca = protectionHasMode(s, 'ca')
+    ? (String(s.ca || '').trim()
+      ? _parseCaBonus(s.ca)
+      : protectionRunesFor(s, 'ca') * (getProtectionCAOverride(_spellMatrices, s.noyauTypeId)?.mod ?? 2))
+    : 0;
+  const reduction = protectionHasMode(s, 'reduction')
+    ? protectionRunesFor(s, 'reduction') * getProtectionReductionStep(_spellMatrices, s.noyauTypeId)
+    : 0;
+  return { ca, reduction };
+}
+
+// Réduction de dégâts active sur un token (buff de Protection) : la plus forte
+// s'applique, sans cumul entre sorts.
+function _tokenDamageReduction(tokenData) {
+  const round = VS.session?.combat?.round ?? 0;
+  let best = 0, label = '';
+  for (const b of (tokenData?.buffs || [])) {
+    if (b?.type !== 'dmg_reduction') continue;
+    if (!(b.expiresAtRound == null || round === 0 || round <= b.expiresAtRound)) continue;
+    const v = Math.max(0, Number(b.value) || 0);
+    if (v > best) { best = v; label = b.sortLabel || 'Réduction'; }
+  }
+  return { value: best, label };
+}
+
+// Buffs de Protection (CA et/ou Réduction) posés sur les cibles d'un sort.
+// Anti-stack : un même sort remplace son buff précédent du même type.
+function _vttApplyProtectionBuffs(srcId, targetIds, opt) {
+  const round = VS.session?.combat?.round ?? 0;
+  const dur = opt.mods?.concentration ? 10 : (opt.sortDuree ?? null);
+  const baseRound = Math.max(1, round);
+  // Canalisé persistant : pas d'expiration automatique (jusqu'à rupture concentration)
+  const isCanalise = !!opt.mods?.canalisePersistant;
+  const common = {
+    totalDuration: isCanalise ? null : dur,
+    startRound: round,
+    expiresAtRound: isCanalise ? null : (dur != null ? baseRound + dur - 1 : null),
+    casterId: srcId,
+    sortLabel: opt.label,
+    // Firestore : pas de `undefined` → spread conditionnel pour les champs facultatifs
+    ...(isCanalise ? { canalisePersistant: true } : {}),
+  };
+  const newBuffs = [];
+  const ca = opt.protBuffs ? opt.protBuffs.ca : (opt.isCaSort ? (opt.caBonus ?? 2) : 0);
+  if (ca) newBuffs.push({ type: 'ca', bonus: ca, ...common, icon: isCanalise ? '🧠' : '🛡' });
+  const red = opt.protBuffs?.reduction || 0;
+  if (red > 0) newBuffs.push({ type: 'dmg_reduction', value: red, ...common, icon: isCanalise ? '🧠' : '🪨' });
+  const writes = [], names = [];
+  if (!newBuffs.length) return { writes, names };
+  const types = new Set(newBuffs.map(b => b.type));
+  for (const curTgtId of targetIds) {
+    const curTgtData = VS.tokens[curTgtId]?.data; if (!curTgtData) continue;
+    const previous = curTgtData.buffs || [];
+    const buffs = [...previous.filter(b => !(types.has(b.type) && b.sortLabel === opt.label)), ...newBuffs];
+    curTgtData.buffs = buffs;
+    _patchShape(curTgtId);
+    writes.push(updateDoc(_tokRef(curTgtId), { buffs }).catch(error => {
+      curTgtData.buffs = previous;
+      _patchShape(curTgtId);
+      console.error('[vtt] buff de Protection non appliqué', error);
+    }));
+    names.push(_live(curTgtData).displayName ?? curTgtData.name);
+  }
+  return { writes, names };
+}
+
+// Libellé court des buffs de Protection d'une option (« +4 CA · −2 dégâts »).
+function _protBuffsLabel(pb) {
+  return [pb?.ca ? `${pb.ca > 0 ? '+' : ''}${pb.ca} CA` : '', pb?.reduction ? `−${pb.reduction} dégâts/coup` : '']
+    .filter(Boolean).join(' · ');
+}
+
 const _sortDureeVtt = calcSpellDuration;
 const _vttSortCibles = calcSpellTargets;
 
@@ -4879,7 +4955,6 @@ function _buildSpellOption(s, ctx) {
   const runes = Array.isArray(s.runes) ? s.runes : [];
   const types = Array.isArray(s.types) && s.types.length ? s.types
               : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : ['utilitaire']));
-  const protMode = s.protectionMode || 'ca';
   // En mode Déplacement, l'Amplification produit un déplacement, pas une zone.
   const _isDepl = s.ampMode === 'deplacement';
   // Avec Enchantement, l'Amplification BOOSTE l'effet (portée/déplacement de l'état) :
@@ -5088,6 +5163,10 @@ function _buildSpellOption(s, ctx) {
   const protectionRestoreMode = getProtectionRestoreMode(s);
   // Mode Mana : même mécanique que le Soin mais restaure des PM (drapeau isMana).
   const isManaRegen = protectionRestoreMode === 'mana';
+  // Protection multi-modes : CA / Réduction posés en plus (ou seuls). Jamais pour
+  // le Bouclier réactif, qui annule une attaque au lieu de donner de la CA.
+  const _pbVals = mods?.bouclierReactif ? { ca: 0, reduction: 0 } : _vttProtectionBuffValues(s);
+  const protBuffs = (_pbVals.ca || _pbVals.reduction) ? _pbVals : null;
   if (isClassicHeal || protectionRestoreMode === 'soin' || isManaRegen || isAmpSupportHeal) {
     // Régén PM : formule littérale (pas de scaling Protection ni de stat auto) ;
     // la stat explicite éventuelle est déjà intégrée dans la formule.
@@ -5127,6 +5206,8 @@ function _buildSpellOption(s, ctx) {
     return { ...common,
       icon: isManaRegen ? '💙' : '💚', label, rawDice: sRawDice, dice: soinFormula,
       isHeal: true, isMana: isManaRegen, halfOnMiss: false,
+      // Multi-modes : Soin/PM + CA et/ou Réduction appliqués aux mêmes cibles.
+      ...(protBuffs && !isClassicHeal ? { protBuffs, sortDuree: _sortDureeVtt(s) } : {}),
       formulaFixedBonus: soinBaseFixed,
       maitriseBonus: soinMaitrise,
       mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
@@ -5136,12 +5217,13 @@ function _buildSpellOption(s, ctx) {
       toucherStatLabel: soinTouchNoMod ? '' : (statShort(soinTouchStat) || soinTouchStat),
     };
   }
-  if (types.includes('defensif') && protMode === 'ca') {
+  if (types.includes('defensif') && (protectionHasMode(s, 'ca') || protectionHasMode(s, 'reduction'))) {
+    const pb = protBuffs || { ca: 0, reduction: 0 };
     return { ...common,
-      icon: '🛡️', label,
-      dice: s.ca || 'CA +2 (2 tours)',
+      icon: protectionHasMode(s, 'ca') ? '🛡️' : '🪨', label,
+      dice: _protBuffsLabel(pb) || s.ca || 'CA +2 (2 tours)',
       isCaSort: true, halfOnMiss: false,
-      caBonus: _parseCaBonus(s.ca), sortDuree: _sortDureeVtt(s),
+      caBonus: pb.ca, protBuffs: pb, sortDuree: _sortDureeVtt(s),
     };
   }
   // Utilitaire libre
@@ -9433,44 +9515,13 @@ async function _vttRollAttack() {
       });
 
 
-      // Appliquer le buff CA sur chaque cible
+      // Appliquer les buffs de Protection (CA et/ou Réduction) sur chaque cible
       const buffResults = [];
       const effectWrites = [];
       if (opt.isCaSort) {
-        const round = VS.session?.combat?.round ?? 0;
-        const dur   = opt.mods?.concentration ? 10 : (opt.sortDuree ?? null);
-        const baseRound = Math.max(1, round); // traiter round 0 comme round 1
-        // Canalisé persistant : pas d'expiration automatique (jusqu'à rupture concentration)
-        const isCanalise = !!opt.mods?.canalisePersistant;
-        // Firestore : pas de `undefined` → spread conditionnel pour les champs facultatifs
-        const _canFields = isCanalise ? { canalisePersistant: true } : {};
-        const newBuff = {
-          type: 'ca',
-          bonus: opt.caBonus ?? 2,
-          totalDuration: isCanalise ? null : dur,
-          startRound: round,
-          expiresAtRound: isCanalise ? null : (dur != null ? baseRound + dur - 1 : null),
-          casterId: srcId,
-          sortLabel: opt.label,
-          icon: isCanalise ? '🧠' : '🛡',
-          ..._canFields,
-        };
-        const buffType = newBuff.type;
-        for (const curTgtId of targetIds) {
-          const curTgtData = VS.tokens[curTgtId]?.data; if (!curTgtData) continue;
-          // Filtre les buffs existants du même sort (anti-stack)
-          const existingBuffs = (curTgtData.buffs || []).filter(b => !(b.type === buffType && b.sortLabel === opt.label));
-          const previous = curTgtData.buffs || [];
-          const buffs = [...existingBuffs, newBuff];
-          curTgtData.buffs = buffs;
-          _patchShape(curTgtId);
-          effectWrites.push(updateDoc(_tokRef(curTgtId), { buffs }).catch(error => {
-            curTgtData.buffs = previous;
-            _patchShape(curTgtId);
-            console.error('[vtt] bonus de CA non appliqué', error);
-          }));
-          buffResults.push(_live(curTgtData).displayName ?? curTgtData.name);
-        }
+        const applied = _vttApplyProtectionBuffs(srcId, targetIds, opt);
+        effectWrites.push(...applied.writes);
+        buffResults.push(...applied.names);
         if (buffResults.length) await _vttApplyCasterConcentration(srcId, opt);
       }
 
@@ -9547,7 +9598,7 @@ async function _vttRollAttack() {
       if (opt.isAffliction) {
         showNotif(`🪄 ${opt.label} lancé · résultat des JS ci-dessous`, 'info');
       } else {
-        const buffInfo = opt.isCaSort ? ` (+${opt.caBonus??2} CA${opt.sortDuree ? `, ${opt.sortDuree}t` : ''})`
+        const buffInfo = opt.isCaSort ? ` (${_protBuffsLabel(opt.protBuffs || { ca: opt.caBonus ?? 2 })}${opt.sortDuree ? `, ${opt.sortDuree}t` : ''})`
                        : opt.isEnchant    ? ` · ${castEffect}`
                        : '';
         showNotif(`✨ ${opt.label} activé !${buffInfo}${_ciblSuffix(rCa)}`, 'success');
@@ -9858,7 +9909,13 @@ async function _vttRollAttack() {
           showNotif(`${_healIco}${critTag}${luckTag} ${healTotal} ${_healUnit} → ${r.name}`, 'success');
         }
       }
-      await Promise.all([healSourceWrites, ...healTargetWrites, healLogWrite]);
+      // Protection multi-modes : CA / Réduction posés sur les cibles soignées.
+      const _healProt = opt.protBuffs ? _vttApplyProtectionBuffs(srcId, targetIds, opt) : null;
+      if (_healProt?.names.length) {
+        showNotif(`🛡 ${_protBuffsLabel(opt.protBuffs)} → ${_healProt.names.join(', ')}`, 'success');
+        await _vttApplyCasterConcentration(srcId, opt);
+      }
+      await Promise.all([healSourceWrites, ...healTargetWrites, healLogWrite, ...(_healProt?.writes || [])]);
       return;
     }
 
@@ -10289,6 +10346,7 @@ async function _vttRollAttack() {
       // Valeur AVANT interaction du profil de la créature (pour log "10 → 5").
       let dmgPre = dmgTotal;
       let dmgReduction = 0;
+      let dmgReductionLabel = null;
       let damageBreakdown = [];
       const techniqueReductionRatio = damageBeforeTargetConditions > 0
         ? Math.min(1, Math.max(0, dmgTotal / damageBeforeTargetConditions)) : 0;
@@ -10331,6 +10389,14 @@ async function _vttRollAttack() {
         if (curTgtData.type === 'enemy' && curTgtData.beastId) {
           const bEnt    = VS.bestiary[curTgtData.beastId];
           dmgTotal      = resolveDamagePieces(bEnt);
+          // Réduction de dégâts (buff de Protection) : 1 dégât minimum.
+          const _buffRed = _tokenDamageReduction(curTgtData);
+          if (dmgTotal > 0 && _buffRed.value > 0) {
+            const beforeRed = dmgTotal;
+            dmgTotal = Math.max(1, dmgTotal - _buffRed.value);
+            dmgReduction = beforeRed - dmgTotal;
+            dmgReductionLabel = _buffRed.label;
+          }
 
           const realMax = _numOr(bEnt?.pvMax, 20);
           const realCur = curTgtData.hp !== null ? _numOr(curTgtData.hp, realMax) : realMax;
@@ -10376,12 +10442,18 @@ async function _vttRollAttack() {
           }
           // Set Lourd : réduction plate par coup (sur des dégâts positifs uniquement —
           // une absorption rend des PV et ne doit pas être rognée).
-          if (dmgTotal > 0 && tgtChar) {
-            const setReduction = getArmorSetData(tgtChar).modifiers.damageReduction || 0;
-            if (setReduction > 0) {
+          // Réduction de sort (buff de Protection) : la plus forte des deux s'applique,
+          // sans cumul avec le set Lourd.
+          if (dmgTotal > 0) {
+            const setReduction = tgtChar ? (getArmorSetData(tgtChar).modifiers.damageReduction || 0) : 0;
+            const _buffRed = _tokenDamageReduction(curTgtData);
+            const useBuff = _buffRed.value > setReduction;
+            const reduction = useBuff ? _buffRed.value : setReduction;
+            if (reduction > 0) {
               const beforeSet = dmgTotal;
-              dmgTotal = Math.max(1, dmgTotal - setReduction);
+              dmgTotal = Math.max(1, dmgTotal - reduction);
               dmgReduction = beforeSet - dmgTotal;
+              dmgReductionLabel = useBuff ? _buffRed.label : 'Set Lourd';
             }
           }
           // Borne haute = hpMax pour qu'une absorption ne soigne pas au-delà du max.
@@ -10534,7 +10606,7 @@ async function _vttRollAttack() {
 
       targetResults.push({
         name: lCurTgt.displayName ?? curTgtData.name ?? 'Cible', targetCA, hit, halfDmg,
-        dmgTotal, dmgApplied, dmgPre, dmgReduction, newHp, hpMax, interaction,
+        dmgTotal, dmgApplied, dmgPre, dmgReduction, dmgReductionLabel, newHp, hpMax, interaction,
         tokenId: curTgtData.id,   // pour l'annulation manuelle (bouclier réactif)
         shieldBlocked: isBlocked,
         techniqueDefenseBonus: isTechniqueSplash ? 0 : techniqueDefenseBonus,
@@ -10855,7 +10927,7 @@ async function _vttRollAttack() {
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
-        dmgTotal: r.dmgTotal, dmgApplied: r.dmgApplied, dmgFull: r.dmgPre ?? sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0,
+        dmgTotal: r.dmgTotal, dmgApplied: r.dmgApplied, dmgFull: r.dmgPre ?? sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0, dmgReductionLabel: r.dmgReductionLabel || null,
         bonusHitDice: bonusHitDice||null, extraHitRolls: extraHitRolls.length ? extraHitRolls : null,
         critNormalMax: sharedCritNormalMax, critRaw2: sharedCritRaw2, critFixed2: sharedCritFixed2,
         critFormula: criticalEffectFormulaLabel(),
