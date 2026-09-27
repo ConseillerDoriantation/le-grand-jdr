@@ -171,6 +171,9 @@ function _seCombineMode(a, b) {
 }
 
 /** Applique une affliction : JS Sa de la cible, buff selon slot si échec. */
+// Libellé d'une faiblesse d'élément (« Faiblesse Lumière »).
+const _weakLbl = (elementId) => `Faiblesse ${(VS.damageTypes || []).find(t => t.id === elementId)?.label || 'élément'}`;
+
 export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null, statsDelta = null } = {}) {
   const aff = opt.mods?.affliction; if (!aff) return;
   const shared = _buffShared(opt, srcId);
@@ -201,7 +204,9 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     targetName: tgtNames,
     optLabel: opt.label || 'Affliction',
     mode, dd: aff.dd, statLabel: statShortStr,
-    effectLbl: mode === 'etat' && aff.etatId && CONDITION_BY_ID[aff.etatId]
+    effectLbl: mode === 'faiblesse'
+               ? `💢 ${_weakLbl(aff.element)}`
+               : mode === 'etat' && aff.etatId && CONDITION_BY_ID[aff.etatId]
                ? `${CONDITION_BY_ID[aff.etatId].icon} ${CONDITION_BY_ID[aff.etatId].label}`
                : `🩸 DoT ${dotFormula}/tour`,
     createdAt: serverTimestamp(),
@@ -246,6 +251,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     // Permet au MJ et aux joueurs de voir le résultat du jet, le mod utilisé
     // et la résolution (résistance vs application de l'effet).
     const _effectLbl = (() => {
+      if (mode === 'faiblesse') return `💢 ${_weakLbl(aff.element)}`;
       if (mode === 'etat' && aff.etatId && CONDITION_BY_ID[aff.etatId]) {
         const l = CONDITION_BY_ID[aff.etatId];
         return `${l.icon} ${l.label}`;
@@ -274,6 +280,28 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       showNotif(_immune
         ? `🛡 ${tgtName} est immunisé à ${_effectLbl} — aucun effet`
         : `🛡️ ${tgtName} résiste${luck ? ` · 🍀 relance ${luck.reroll}` : ''} · ${rollStr}`, 'info');
+      return;
+    }
+
+    // ── Mode "Faiblesse" : dégâts ×2 de l'élément du sort (buff, durée du sort) ──
+    // Une seule faiblesse par élément sur la cible : la nouvelle remplace l'ancienne.
+    if (mode === 'faiblesse') {
+      if (!aff.element) {
+        showNotif(`⚠️ Sort "${opt.label}" en mode Faiblesse sans élément — rien n'est appliqué`, 'warning');
+        return;
+      }
+      const newBuff = { ...shared, type: 'dmg_weakness', element: aff.element, icon: '💢' };
+      const previousBuffs = td.buffs || [];
+      const nextBuffs = [...previousBuffs.filter(b => !(b.type === 'dmg_weakness' && b.element === aff.element)), newBuff];
+      _vttPatchTokenOptimistically(tid, { buffs: nextBuffs });
+      try {
+        await updateDoc(_tokRef(tid), { buffs: nextBuffs });
+        showNotif(`💢 ${tgtName} subit ${_weakLbl(aff.element)} · ${rollStr} (échec)`, 'success');
+      } catch (err) {
+        _vttPatchTokenOptimistically(tid, { buffs: previousBuffs });
+        console.error('[VTT] Faiblesse non appliquée :', err);
+        showNotif(`⚠️ ${tgtName} : échec d'application de la faiblesse (${err?.message || err})`, 'error');
+      }
       return;
     }
 

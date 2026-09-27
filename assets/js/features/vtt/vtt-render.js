@@ -620,20 +620,14 @@ export function _buildAnnotVisual(K, data) {
     const zw = data.w || CELL, zh = data.h || CELL;
     const g = new K.Group({ name: 'annot', listening: false });
     const _zsw = data.strokeWidth || 2;
-    if (data.shape === 'cross') {
-      // Croix : barre verticale (1 case × hauteur) + barre horizontale (largeur × 1 case).
-      g.add(new K.Rect({ x: -CELL / 2, y: -zh / 2, width: CELL, height: zh,
-        fill: col + '24', stroke: col, strokeWidth: _zsw, dash: [10, 6], hitStrokeWidth: 0, listening: true }));
-      g.add(new K.Rect({ x: -zw / 2, y: -CELL / 2, width: zw, height: CELL,
-        fill: col + '24', stroke: col, strokeWidth: _zsw, dash: [10, 6], hitStrokeWidth: 0, listening: true }));
-    } else if (data.shape === 'diamond') {
+    if (data.shape === 'diamond') {
       g.add(new K.Line({
         points: [0, -zh / 2, zw / 2, 0, 0, zh / 2, -zw / 2, 0],
         closed: true, fill: col + '24', stroke: col, strokeWidth: _zsw,
         dash: [10, 6], hitStrokeWidth: 0, listening: true,
       }));
-    } else if (data.shape === 'cone' || data.shape === 'ring' || data.shape === 'diamond' || data.shape === 'line') {
-      // Formes en CASES (cône stepped 1/3/5…, anneau en losange évidé, losange plein, ligne 1×L) :
+    } else if (data.shape === 'cone' || data.shape === 'ring' || data.shape === 'cross' || data.shape === 'line') {
+      // Formes en CASES (cône stepped 1/3/5…, anneau en losange évidé, croix diagonale ✕, ligne 1×L) :
       // on surligne exactement les cases couvertes → cohérent avec le ciblage.
       for (const cell of _zoneCellRects(K, zw, zh, data.shape, data.coneDir || 'down', {
         fill: col + '5a', stroke: col, strokeWidth: 2, shadowColor: col, shadowBlur: 8, shadowOpacity: 0.6, hitStrokeWidth: 0, listening: true,

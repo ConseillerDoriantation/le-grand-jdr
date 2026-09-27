@@ -19,13 +19,17 @@ export const ACTION_RUNE = 'Déclenchement';
  * @typedef {Object} SheetLineState
  * @property {string[]|Set<string>} types      - 'offensif' | 'defensif' | 'utilitaire'
  * @property {Record<string,number>} counts    - { nomRune: nombre }
- * @property {string} [protMode]   - 'ca' | 'soin' | 'mana'  (défaut 'ca')
+ * @property {string} [protMode]   - 'ca' | 'soin' | 'mana' | 'reduction' (défaut 'ca') — mode de la 1re rune
+ * @property {string[]} [protModes] - mode de CHAQUE rune Protection (multi-modes)
+ * @property {boolean} [protSplit]  - répartition autorisée (aucun combo n'absorbe Protection)
  * @property {string} [ampMode]    - 'zone' | 'deplacement'  (défaut 'zone')
  * @property {boolean} [deplSwap] - déplacement Soi : échange de place autorisé
- * @property {string} [afflMode]   - 'dot' | 'etat' | 'laceration' (défaut 'dot')
+ * @property {string} [afflMode]   - 'dot' | 'etat' | 'laceration' | 'faiblesse' (défaut 'dot')
  * @property {string} [enchMode]   - 'dmg' | 'etat'          (défaut 'etat')
  * @property {string} [zoneShape]  - 'rect' | 'cross' | 'cone' | 'ring' | 'line' (défaut 'rect')
  * @property {string} [actionMode] - 'reaction' | 'action_bonus' (défaut 'reaction')
+ * @property {boolean} [isLight]   - sort Lumière (élément lumineux + Concentration, sans rune d'effet)
+ * @property {string} [lightMode]  - 'self' | 'place' (défaut 'self')
  */
 
 /**
@@ -85,8 +89,14 @@ export function computeSheetLines(state = {}) {
   // de chance ; visibles hors « offensif » en mode Lacération (frappe l'attaque de base).
   const attackVisible = (isOffensive || isLaceration)
     && !isCoupChance && !hasAfflictionDebuff && !isDepl && !anyInvoc;
+  // Protection multi-modes : un mode par rune (la 1re = protMode). Répartition
+  // affichée seulement à partir de 2 runes et si aucun combo n'absorbe Protection.
+  const nProt = counts.Protection || 0;
+  const protModes = Array.isArray(state.protModes) && state.protModes.length === nProt
+    ? state.protModes : Array(nProt).fill(protMode);
+  const protSplit = !!state.protSplit && nProt >= 2;
   const soinBearing = !isDrain && !isRegen
-    && ((hasProt && (protMode === 'soin' || protMode === 'mana')) || isAmpSupportHeal);
+    && ((hasProt && protModes.some(m => m === 'soin' || m === 'mana')) || isAmpSupportHeal);
 
   /** @type {SheetLine[]} */
   const lines = [];
@@ -102,20 +112,33 @@ export function computeSheetLines(state = {}) {
   // 2 · Protection / Soin (ou Drain / Bouclier réactif) — ou Soin via Amplification
   if (hasProt && !isRegen) {
     const reactiveShield = hasReac && protMode === 'ca';
-    const line = { slot: 'prot', id: 'prot', icon: protMode === 'ca' ? '🛡️' : protMode === 'soin' ? '💚' : '💙' };
-    if (!isDrain) line.segment = { key: 'protMode', cur: protMode, hiddenId: 's-prot-mode', opts: [['ca', 'CA', '#4f8cff'], ['soin', 'Soin', '#22c38e'], ['mana', 'PM', '#8b5cf6']] };
+    const line = { slot: 'prot', id: 'prot', mode: protMode, icon: PROT_ICON[protMode] || '🛡️' };
+    if (!isDrain) line.segment = { key: 'protMode', cur: protMode, hiddenId: 's-prot-mode', opts: _protOpts(protModes, 0) };
     if (isDrain) line.drain = true;
     else if (reactiveShield) line.reactiveShield = true;          // pas d'override (valeur = « bloque 1 attaque »)
     else if (protMode === 'ca') line.override = { fieldId: 's-ca' };
-    else line.override = { fieldId: 's-soin' };                    // soin / mana : montant réglable
+    else if (protMode !== 'reduction') line.override = { fieldId: 's-soin' };   // soin / mana : montant réglable
     lines.push(line);
+    // Runes suivantes : chacune renforce un mode déjà présent ou en ouvre un autre.
+    if (protSplit && !isDrain) {
+      for (let i = 1; i < nProt; i += 1) {
+        const mode = protModes[i];
+        const sub = { slot: 'prot', id: `prot${i + 1}`, sub: true, mode, runeIdx: i, icon: PROT_ICON[mode] || '🛡️',
+          segment: { key: 'protModeAt', cur: `${i}:${mode}`, opts: _protOpts(protModes, i).map(([v, lbl, col]) => [`${i}:${v}`, lbl, col]) } };
+        // Réglage manuel porté par la 1re ligne de chaque mode (champ unique par mode).
+        const firstOfMode = protModes.indexOf(mode) === i;
+        if (firstOfMode && mode === 'ca') sub.override = { fieldId: 's-ca' };
+        else if (firstOfMode && (mode === 'soin' || mode === 'mana')) sub.override = { fieldId: 's-soin' };
+        lines.push(sub);
+      }
+    }
   } else if (isAmpSupportHeal && !isDrain && !isRegen) {
     lines.push({ slot: 'prot', id: 'soin', icon: '💚', override: { fieldId: 's-soin' } });
   }
   // Maîtrise de soin : uniquement s'il n'y a pas de ligne de dégâts (sinon la maîtrise
   // est portée par la ligne Dégâts). Réplique la règle « premier effet qui l'utilise ».
   if (soinBearing && !attackVisible) {
-    const soinLine = lines.find((l) => l.slot === 'prot');
+    const soinLine = lines.find((l) => l.slot === 'prot' && (!l.mode || l.mode === 'soin' || l.mode === 'mana'));
     if (soinLine) soinLine.mastery = 'heal';
   }
 
@@ -135,7 +158,10 @@ export function computeSheetLines(state = {}) {
     if (anyInvoc) {
       line.sentinelle = true;                                     // portée par la sentinelle : pas de réglage
     } else {
-      line.segment = { key: 'afflMode', cur: afflMode, hiddenId: 's-affliction-mode', opts: [['dot', 'DoT', '#e8894b'], ['etat', 'État', '#a855f7'], ['laceration', 'Lacér.', '#ff5a7e']] };
+      // Faiblesse (dégâts ×2 de l'élément du sort) : débloquée à 2 runes Affliction.
+      const afflOpts = [['dot', 'DoT', '#e8894b'], ['etat', 'État', '#a855f7'], ['laceration', 'Lacér.', '#ff5a7e']];
+      if ((counts.Affliction || 0) >= 2) afflOpts.push(['faiblesse', 'Faibl.', '#f59e0b']);
+      line.segment = { key: 'afflMode', cur: afflMode, hiddenId: 's-affliction-mode', opts: afflOpts };
       if (afflMode === 'etat') { line.select = { hiddenId: 's-affliction-etat', label: 'État', saveStatId: 's-affliction-save-stat' }; line.inlineSlots = ['s-affliction-etat']; }   // juste le <select>, compact
       else if (afflMode === 'dot') line.override = { fieldId: 's-affliction-dot-formula' };
       // laceration : valeur calculée (CA cible −n) → pas d'override
@@ -145,7 +171,12 @@ export function computeSheetLines(state = {}) {
   }
 
   // 6 · Zone (Amplification = TAILLE, forme au choix) + Dispersion (= nombre de poses)
-  if (hasAmp && !hasEnchant) {
+  // Sort Lumière : l'Amplification règle le rayon → ligne dédiée à la place de la zone.
+  if (state.isLight) {
+    const lightMode = state.lightMode === 'place' ? 'place' : 'self';
+    lines.push({ slot: 'zone', id: 'light', icon: '💡',
+      segment: { key: 'lightMode', cur: lightMode, opts: [['self', 'Sur soi', '#f9d71c'], ['place', 'Posée', '#f59e0b']] } });
+  } else if (hasAmp && !hasEnchant) {
     lines.push({ slot: 'zone', id: 'amp', icon: ampMode === 'zone' ? '🌐' : '↔️',
       segment: { key: 'ampMode', cur: ampMode, hiddenId: 's-amp-mode', opts: [['zone', 'Zone', '#4f8cff'], ['deplacement', 'Dépl.', '#f59e42']] } });
     // Déplacement : sens du mouvement (soi / pousser / attirer) — sous-ligne dédiée.
@@ -159,8 +190,8 @@ export function computeSheetLines(state = {}) {
     // Forme de zone : débloquée à partir de 2 Amplification (à 1 Amp c'est toujours
     // la ligne 1×3, choisir une forme n'aurait aucun effet).
     if (ampMode === 'zone' && (counts.Amplification || 0) >= 2)
-      lines.push({ slot: 'zone', id: 'shape', sub: true, icon: zoneShape === 'cross' ? '✚' : zoneShape === 'cone' ? '🔺' : zoneShape === 'ring' ? '◯' : zoneShape === 'line' ? '▬' : '▭',
-        segment: { key: 'zoneShape', cur: zoneShape, hiddenId: 's-zone-shape', opts: [['rect', '▭', '#4f8cff'], ['cross', '✚', '#a855f7'], ['cone', '🔺', '#f59e42'], ['ring', '◯', '#22c38e'], ['line', '▬', '#e8b84b']] } });
+      lines.push({ slot: 'zone', id: 'shape', sub: true, icon: zoneShape === 'cross' ? '✕' : zoneShape === 'cone' ? '🔺' : zoneShape === 'ring' ? '◯' : zoneShape === 'line' ? '▬' : '▭',
+        segment: { key: 'zoneShape', cur: zoneShape, hiddenId: 's-zone-shape', opts: [['rect', '▭', '#4f8cff'], ['cross', '✕', '#a855f7'], ['cone', '🔺', '#f59e42'], ['ring', '◯', '#22c38e'], ['line', '▬', '#e8b84b']] } });
   }
   // Dispersion : répète l'effet (1 + nDisp). Avec Amp → N zones ; seule → N cibles.
   if (has('Dispersion') && !isRegen)
@@ -185,13 +216,24 @@ export function computeSheetLines(state = {}) {
   return lines;
 }
 
+// ── Protection : icônes + options de mode par rune ──
+const PROT_ICON = { ca: '🛡️', soin: '💚', mana: '💙', reduction: '🪨' };
+const PROT_OPTS = [['ca', 'CA', '#4f8cff'], ['soin', 'Soin', '#22c38e'], ['mana', 'PM', '#8b5cf6'], ['reduction', 'Réd.', '#a16207']];
+// Un seul jet de restauration par sort : Soin et PM s'excluent entre runes.
+function _protOpts(protModes, idx) {
+  const other = protModes.find((m, j) => j !== idx && (m === 'soin' || m === 'mana'));
+  return PROT_OPTS.filter(([v]) => !(other && (v === 'soin' || v === 'mana') && v !== other));
+}
+
 // ── Actions déléguées existantes pour les segments de mode (registre VTT/actions) ──
 const SEG_ACTION = {
   protMode:  '_selectProtMode',
+  protModeAt: '_selectProtModeAt',
   afflMode:  '_selectAfflictionMode',
   ampMode:   '_selectAmpMode',
   deplMode:  '_selectDeplMode',
   deplSwap:  '_selectDeplSwap',
+  lightMode: '_selectLightMode',
   zoneShape: '_selectZoneShape',
   actionMode:'_selectActionMode',
 };

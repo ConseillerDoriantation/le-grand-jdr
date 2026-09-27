@@ -3,7 +3,7 @@ import { registerActions } from '../../core/actions.js';
 import { openModal, closeModal, closeModalDirect, confirmModal, setModalCloseGuard } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { loadWeaponFormats, saveWeaponFormats, normalizeWeaponTechnique } from '../../shared/weapon-formats.js';
-import { loadDamageTypes, saveDamageTypes } from '../../shared/damage-types.js';
+import { loadDamageTypes, saveDamageTypes, damageTypeEmitsLight } from '../../shared/damage-types.js';
 import { CONDITION_DEFAULT_LIBRARY, loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
@@ -764,6 +764,17 @@ function _renderDamageTypesModal(types) {
               <small>Réservé aux personnages qui le connaissent · dégâts via maîtrise + stat magique.</small>
             </span>
           </label>
+          <label class="dt-magic">
+            <span class="dt-switch">
+              <input type="checkbox" ${damageTypeEmitsLight(t) ? 'checked' : ''}
+                data-change="_saveDmgTypeProp" data-i="${i}" data-prop="emitsLight" data-vtype="bool">
+              <span class="dt-switch-track"><span class="dt-switch-thumb"></span></span>
+            </span>
+            <span class="dt-magic-txt">
+              <b>💡 Émet de la lumière</b>
+              <small>Un sort de cet élément avec Concentration (sans rune d’effet) crée une source de lumière.</small>
+            </span>
+          </label>
         </div>
       </div>
     </div>`;
@@ -1116,7 +1127,7 @@ function _renderSpellMatricesModal(types) {
   const TABS = [
     { id:'enchant',      label:'✨ Enchantement',     desc:'Effets sur les alliés (Action · 2 tours)' },
     { id:'affliction',   label:'💀 Affliction',       desc:'Effets sur les ennemis (Action · 2 tours)'      },
-    { id:'protectionCA', label:'🛡️ Protection CA',    desc:'Variantes du bonus CA par élément'              },
+    { id:'protectionCA', label:'🛡️ Protection',       desc:'Bonus de CA et réduction de dégâts par élément' },
     { id:'combos',       label:'🔗 Combos',           desc:'Activer / renommer les combos de runes'         },
     { id:'combo_arms',   label:'⚔️ Armes invoquées',  desc:'Arme par élément pour le combo Enchant+Invoc'   },
   ];
@@ -1138,13 +1149,14 @@ function _renderSpellMatricesModal(types) {
     // Tableau : élément → mod CA + note
     tabBodyHtml = `
       <p style="font-size:.74rem;color:var(--text-dim);margin:.4rem 0 .6rem">
-        Bonus de CA par rune Protection selon l'élément du noyau.
-        Valeur par défaut : <strong>+2</strong> par rune. La note s'affiche dans la fiche du sort.
+        Bonus de CA et réduction de dégâts par rune Protection selon l'élément du noyau.
+        Valeurs par défaut : <strong>+2 CA</strong> et <strong>−2 dégâts</strong> par rune (1 dégât minimum). La note s'affiche dans la fiche du sort.
       </p>
       <div style="display:flex;flex-direction:column;gap:.35rem">
         ${types.map(t => {
           const ov  = _spellMatricesDraft.protectionCA[t.id] || {};
           const mod = ov.mod ?? 2;
+          const red = ov.reduction ?? 2;
           const note = ov.note || '';
           return `<div style="display:flex;align-items:center;gap:.5rem;background:var(--bg-elevated);
             border:1px solid var(--border);border-radius:7px;padding:.4rem .6rem">
@@ -1153,6 +1165,13 @@ function _renderSpellMatricesModal(types) {
               CA /rune
               <input type="number" min="0" max="10" step="1" value="${mod}"
                 data-change="_setSpellMatrixCAMod" data-tid="${t.id}"
+                style="width:48px;padding:.2rem;text-align:center;background:var(--bg-base);
+                border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:.85rem">
+            </label>
+            <label style="display:flex;align-items:center;gap:.25rem;font-size:.72rem;color:var(--text-dim)" title="Dégâts retirés à chaque coup reçu, par rune Protection en mode Réduction">
+              Réd. /rune
+              <input type="number" min="0" max="10" step="1" value="${red}"
+                data-change="_setSpellMatrixRedStep" data-tid="${t.id}"
                 style="width:48px;padding:.2rem;text-align:center;background:var(--bg-base);
                 border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:.85rem">
             </label>
@@ -1361,14 +1380,22 @@ function _setSpellMatrixCAMod(elementId, val) {
   _spellMatricesDraft.protectionCA[elementId].mod = Math.max(0, Math.min(10, n));
 }
 
+function _setSpellMatrixRedStep(elementId, val) {
+  const n = parseInt(val);
+  if (!Number.isFinite(n)) return;
+  if (!_spellMatricesDraft.protectionCA[elementId]) _spellMatricesDraft.protectionCA[elementId] = {};
+  _spellMatricesDraft.protectionCA[elementId].reduction = Math.max(0, Math.min(10, n));
+}
+
 function _setSpellMatrixCANote(elementId, val) {
   if (!_spellMatricesDraft.protectionCA[elementId]) _spellMatricesDraft.protectionCA[elementId] = {};
   const v = (val || '').trim();
   if (v) _spellMatricesDraft.protectionCA[elementId].note = v;
   else   delete _spellMatricesDraft.protectionCA[elementId].note;
-  // Cleanup si entrée vide (ni mod ≠ 2, ni note)
+  // Cleanup si entrée vide (ni mod ≠ 2, ni réduction ≠ 2, ni note)
   const entry = _spellMatricesDraft.protectionCA[elementId];
-  if (entry && (entry.mod === undefined || entry.mod === 2) && !entry.note) {
+  if (entry && (entry.mod === undefined || entry.mod === 2)
+      && (entry.reduction === undefined || entry.reduction === 2) && !entry.note) {
     delete _spellMatricesDraft.protectionCA[elementId];
   }
 }
@@ -1494,6 +1521,7 @@ registerActions({
     _saveDmgTypeProp(Number(el.dataset.i), el.dataset.prop, v);
   },
   _setSpellMatrixCAMod:        (el) => _setSpellMatrixCAMod(el.dataset.tid, el.value),
+  _setSpellMatrixRedStep:      (el) => _setSpellMatrixRedStep(el.dataset.tid, el.value),
   _setSpellMatrixCANote:       (el) => _setSpellMatrixCANote(el.dataset.tid, el.value),
   _setSpellMatrixComboEnabled: (el) => _setSpellMatrixComboEnabled(el.dataset.id, el.checked),
   _setSpellMatrixComboName:    (el) => _setSpellMatrixComboName(el.dataset.id, el.value),

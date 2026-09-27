@@ -88,6 +88,14 @@ export function getDamageTypeRules(types, typeId) {
   return { ...DEFAULT_RULES, ...(types.find(t => t.id === typeId)?.rules || {}) };
 }
 
+// Éléments qui éclairent par défaut (tant que le MJ n'a pas réglé la case).
+const DEFAULT_LIGHT_TYPE_IDS = new Set(['feu', 'lumiere', 'radiant']);
+/** Vrai si l'élément peut produire une source de lumière (sort Lumière). */
+export function damageTypeEmitsLight(type) {
+  if (!type) return false;
+  return typeof type.emitsLight === 'boolean' ? type.emitsLight : DEFAULT_LIGHT_TYPE_IDS.has(type.id);
+}
+
 /** Retourne uniquement les types magiques (isMagic: true). */
 export function getMagicTypes(types) {
   return (types || DEFAULT_DAMAGE_TYPES).filter(t => t.isMagic);

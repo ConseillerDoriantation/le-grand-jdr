@@ -14,9 +14,9 @@ import { _esc, _norm, loadingHtml } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { openModal, closeModalDirect } from '../../shared/modal.js';
 import { getArmorSetData, syncEquipmentAfterInventoryMutation, _getTraits } from '../../shared/equipment-utils.js';
-import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode, isLightSpell, lightSpellRadius } from '../../shared/spell-runes.js';
 import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
-import { getDamageTypeById } from '../../shared/damage-types.js';
+import { getDamageTypeById, damageTypeEmitsLight } from '../../shared/damage-types.js';
 import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
          computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
          sortCharactersForDisplay, favoriteFirst } from '../../shared/char-stats.js';
@@ -958,9 +958,13 @@ function _vttSpellChips(s, c) {
   const nbAmp = runes.filter(r => r === 'Amplification').length;
   // Avec Enchantement (hors Invocation), l'Amplification booste l'effet → pas de zone.
   const _enchNoZone = runes.includes('Enchantement') && !runes.includes('Invocation');
-  const _zoneIcon = (shp) => shp === 'cross' ? '✚' : shp === 'cone' ? '🔺' : shp === 'ring' ? '◯' : shp === 'line' ? '▬' : shp === 'diamond' ? '◇' : '📐';
-  const _zoneLbl  = (shp) => shp === 'cross' ? 'Zone en croix' : shp === 'cone' ? 'Zone en cône' : shp === 'ring' ? 'Zone en anneau' : shp === 'line' ? 'Zone en ligne' : shp === 'diamond' ? 'Zone circulaire sur la grille' : 'Zone rectangulaire';
-  if (isClassic && (parseInt(s.zoneW) || 0) > 0 && (parseInt(s.zoneH) || 0) > 0) {
+  const _zoneIcon = (shp) => shp === 'cross' ? '✕' : shp === 'cone' ? '🔺' : shp === 'ring' ? '◯' : shp === 'line' ? '▬' : shp === 'diamond' ? '◇' : '📐';
+  const _zoneLbl  = (shp) => shp === 'cross' ? 'Zone en croix diagonale' : shp === 'cone' ? 'Zone en cône' : shp === 'ring' ? 'Zone en anneau' : shp === 'line' ? 'Zone en ligne' : shp === 'diamond' ? 'Zone circulaire sur la grille' : 'Zone rectangulaire';
+  // Sort Lumière : l'Amplification règle le rayon de la lumière (pas une zone).
+  const _isLight = isLightSpell(s, damageTypeEmitsLight(getDamageTypeById(VS.damageTypes, s.noyauTypeId)));
+  if (_isLight) {
+    chips.push({ icon:'💡', val:`Lumière ${lightSpellRadius(s)}c`, color:'#f9d71c', lbl:s.lightMode === 'place' ? 'Source de lumière posée à portée' : 'Lumière portée par le lanceur' });
+  } else if (isClassic && (parseInt(s.zoneW) || 0) > 0 && (parseInt(s.zoneH) || 0) > 0) {
     chips.push({ icon:_zoneIcon(s.zoneShape), val:`${parseInt(s.zoneW)}×${parseInt(s.zoneH)} cases`, color:'#b47fff', lbl:_zoneLbl(s.zoneShape), dim:true });
   } else if (nbAmp > 0 && s.ampMode !== 'deplacement' && !_enchNoZone) {
     // Modèle zones v2 : Amplification pilote la taille (forme au choix), Dispersion répète.

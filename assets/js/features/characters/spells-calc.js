@@ -8,10 +8,11 @@
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '../../shared/char-stats.js';
-import { getProtectionCAOverride, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
+import { getProtectionCAOverride, getProtectionReductionStep, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
 import { ZONE_SHAPES, _zoneCount, _zoneDims, _zoneShapeUnlocked, _zoneCellCount } from '../../shared/spell-zones.js';
-import { calcSpellDuration, calcSpellTargets, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { damageTypeEmitsLight } from '../../shared/damage-types.js';
+import { calcSpellDuration, calcSpellTargets, getAfflictionMode, isLightSpell, lightSpellRadius, getProtectionModes, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { spellSetCostDelta } from '../../shared/spell-system.js';
 import { calculateSummonStats, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
@@ -196,8 +197,8 @@ export function _calcSortSoin(s, c) {
     const mod = statKey ? getMod(c, statKey) : 0;
     return mod ? `${base}${mod > 0 ? ' +' : ' '}${mod}` : base;
   }
-  const runes  = s.runes || [];
-  const nbProt = runes.filter(r => r === 'Protection').length;
+  // Multi-modes : seules les runes Protection attribuées au Soin ajoutent des dés.
+  const nbProt = protectionRunesFor(s, 'soin');
   const base   = (s.soin || '').trim();
 
   // Stat de soin : 'none' = aucun modificateur (potion flat, etc.)
@@ -242,8 +243,7 @@ export function _calcSortSoin(s, c) {
  *   (le sélecteur « Auto » et « Aucune » ne rajoutent rien).
  */
 export function _calcSortMana(s, c) {
-  const runes  = s?.runes || [];
-  const nbProt = runes.filter(r => r === 'Protection').length;
+  const nbProt = protectionRunesFor(s, 'mana');
   const base   = (s?.soin || '').trim();
   const statKey = resolveSpellModifierStat(s, 'degatsStat');
   const statMod = statKey ? getMod(c, statKey) : 0;
@@ -294,8 +294,7 @@ function _calcHealDisplayParts(s, c) {
     const statMod = statKey ? getMod(c, statKey) : 0;
     return { label: _calcSortSoin(s, c), statLbl: statKey ? statShort(statKey) : '', statMod, maitrise: 0 };
   }
-  const runes = s?.runes || [];
-  const nbProt = runes.filter(r => r === 'Protection').length;
+  const nbProt = protectionRunesFor(s, 'soin');
   const baseRaw = (s?.soin || '').trim();
   const isDefault = !baseRaw || baseRaw.toLowerCase() === '= base';
   const base = isDefault ? '1d4' : baseRaw;
@@ -319,6 +318,21 @@ function _calcHealDisplayParts(s, c) {
 /** Mode de la rune Protection : 'soin' | 'ca' — stocké dans s.protectionMode */
 export function _getSortProtectionMode(s) {
   return s?.protectionMode || 'ca'; // défaut CA si non précisé
+}
+
+/**
+ * Réduction de dégâts (rune Protection en mode « reduction ») : −X dégâts sur
+ * chaque coup reçu pendant la durée du sort, 1 dégât minimum. X = pas × runes ;
+ * le pas dépend de l'élément (console MJ, défaut 2).
+ */
+export function _calcSortReduction(s) {
+  const runes = protectionRunesFor(s, 'reduction');
+  const step = getProtectionReductionStep(_spellMatricesCache, s?.noyauTypeId);
+  return { value: runes * step, step, runes };
+}
+export function _autoSourceReduction(s) {
+  const { step, runes } = _calcSortReduction(s);
+  return `auto · Protection ×${runes} · −${step}/rune · 1 dégât minimum (2 tours)`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -515,7 +529,7 @@ export function _autoSourceDegats(s, c) {
   return `auto · ${parts.join(' + ')}`;
 }
 export function _autoSourceSoin(s, c) {
-  const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
+  const nbProt = protectionRunesFor(s, 'soin');
   const isMagic = _isNoyauMagic(s);
   const statKey = _getSortSoinStatKey(s, c);
   const noMod = !statKey;
@@ -532,7 +546,7 @@ export function _autoSourceSoin(s, c) {
     : `auto · base 1d4 · ${natureStr}${masteryStr}`;
 }
 export function _autoSourceCA(s) {
-  const nbProt = (s.runes||[]).filter(r => r === 'Protection').length;
+  const nbProt = protectionRunesFor(s, 'ca');
   const ov = getProtectionCAOverride(_spellMatricesCache, s?.noyauTypeId);
   if (nbProt === 0) return 'auto · CA +2 (2 tours)';
   // Combo Bouclier réactif : pas de bonus CA — source informe
@@ -644,7 +658,7 @@ function _legacySlotToStat(slot) {
 export function _getSortCA(s) {
   const manual = (s?.ca || '').trim();
   if (manual) return manual;
-  const nbProt = (s.runes || []).filter(r => r === 'Protection').length;
+  const nbProt = protectionRunesFor(s, 'ca');
   if (nbProt === 0) return 'CA +2 (2 tours)';
   // Combo Bouclier réactif : pas de bonus CA, juste un blocage en réaction
   const hasReaction = _isReactionSpell(s);
@@ -744,7 +758,7 @@ export function _needsDureeBase(s) {
   if (!runes.length) return false;
   if (runes.includes('Durée')) return true;
   if (runes.includes('Enchantement') || runes.includes('Affliction')) return true;
-  if (runes.includes('Protection') && (s?.protectionMode || 'ca') === 'ca') return true;
+  if (protectionHasMode(s, 'ca') || protectionHasMode(s, 'reduction')) return true;
   // Concentration maintenue (hors combo Réaction) : sort à durée (10 tours).
   if (runes.includes('Concentration') && !runes.includes('Réaction')) return true;
   return false;
@@ -806,7 +820,15 @@ export { ZONE_SHAPES, _zoneCount, _zoneDims, _zoneShapeUnlocked, _zoneCellCount 
  *      Defaut combo Amp + Disp = 3 × 3
  *  - Source: 'manual' | 'runes' | null
  */
+/** Sort Lumière : élément lumineux + Concentration, sans rune d'effet (cf. spell-runes). */
+export function _isLightSpell(s) {
+  const type = (_damageTypesCache || []).find(t => t.id === s?.noyauTypeId);
+  return isLightSpell(s, damageTypeEmitsLight(type));
+}
+
 export function _calcSortZone(s) {
+  // Sort Lumière : l'Amplification règle le rayon de la lumière, pas une zone.
+  if (_isLightSpell(s)) return null;
   // En mode déplacement, l'Amplification produit un déplacement, pas une zone.
   if (s.ampMode === 'deplacement') return null;
   const runes  = s.runes || [];
@@ -841,6 +863,7 @@ export function _calcSortZone(s) {
  *  Fallback legacy : ancien déplacement autonome { mode, distance } sans ampMode.
  */
 export function _calcSortDeplacement(s) {
+  if (_isLightSpell(s)) return null;   // sort Lumière : l'Amplification règle le rayon
   if (s.ampMode === 'deplacement') {
     const nbAmp = (s.runes || []).filter(r => r === 'Amplification').length;
     if (nbAmp < 1) return null;
@@ -1026,7 +1049,7 @@ export function _buildSortResume(s, c) {
   if (concentration && !isSuspended) actionStr += ' + 🧠 Concentration';
   // Nature : instantané sauf si une durée explicite est définie ou si Enchant/Affliction/Protection CA actifs
   const isPersistent = !isSuspended && (runes.includes('Durée') || runes.includes('Enchantement') || runes.includes('Affliction')
-                    || (runes.includes('Protection') && (s.protectionMode || 'ca') === 'ca' && !_isReactionSpell(s))
+                    || ((protectionHasMode(s, 'ca') || protectionHasMode(s, 'reduction')) && !_isReactionSpell(s))
                     || !!(s.dureeBase && s.dureeBase >= 2));
   const natureStr = isPersistent ? '⏳ Persistant' : '⏱️ Instantané';
   const concDD = isSuspended ? 0 : _calcConcentrationDD(s);
@@ -1089,7 +1112,9 @@ export function _buildSortResume(s, c) {
   // Protection : Drain (si sort offensif) → sinon Soin ou CA selon protectionMode
   const hasDefensif = types.includes('defensif');
   if (nbProt > 0) {
-    const mode = _getSortProtectionMode(s);
+    // Multi-modes : une ligne par mode présent (ordre des runes), chacune calculée
+    // avec les seules runes qui lui sont attribuées.
+    const protModes = [...new Set(getProtectionModes(s))];
     // Combo Drain (sort offensif + Protection) : pas de CA ni de soin direct — le
     // lanceur récupère un % des dégâts infligés, fixé par le nombre de Protection.
     if (comboIds.has('regeneration')) {
@@ -1097,17 +1122,21 @@ export function _buildSortResume(s, c) {
     } else if (comboIds.has('drain')) {
       const pct = Math.round(_calcDrainPct(s) * 100);
       lines.push({ icon:'🩸', label:`Drain ${pct}% des dégâts`, detail:`Soigne le lanceur · cap frappe de base hors Puissance · ${nbProt} Protection` });
-    } else if (mode === 'mana') {
+    } else protModes.forEach(mode => {
+    if (mode === 'mana') {
       // Régén PM : formule littérale (pas de scaling Protection ni de stat auto).
       lines.push({ icon:'💙', label:`${_calcSortMana(s, c)} PM`, detail:`Régénère des PM à la cible${monoStr}` });
     } else if (mode === 'soin') {
       {
         const soin = _calcHealDisplayParts(s, c);
-        const detailParts = ['Soin', `+${nbProt}d4 Prot`];
+        const detailParts = ['Soin', `+${protectionRunesFor(s, 'soin')}d4 Prot`];
         if (soin.statMod) detailParts.push(`${soin.statLbl} ${_fmtSigned(soin.statMod)}`);
         if (soin.maitrise) detailParts.push(`Maîtrise ${_fmtSigned(soin.maitrise)}`);
         lines.push({ icon:'💚', label:soin.label, detail:`${detailParts.join(' · ')}${monoStr}` });
       }
+    } else if (mode === 'reduction') {
+      const red = _calcSortReduction(s);
+      lines.push({ icon:'🪨', label:`Réduction −${red.value} dégâts / coup`, detail:`Protection ×${red.runes} · 1 dégât minimum (2 tours)${monoStr}` });
     } else {
       // Mode CA — sauf si combo Bouclier réactif : la réaction instantanée ne donne pas de CA
       if (comboIds.has('bouclier_reactif')) {
@@ -1122,6 +1151,7 @@ export function _buildSortResume(s, c) {
         lines.push({ icon:'🛡️', label: caLbl, detail: `Bonus de CA (2 tours)${monoStr}` });
       }
     }
+    });
   } else if (hasDefensif && nbAmp > 0 && s.ampMode !== 'deplacement') {
     const soin = _calcHealDisplayParts(s, c);
     const detailParts = ['Soin de soutien', 'base 1d4'];
@@ -1139,6 +1169,12 @@ export function _buildSortResume(s, c) {
       ? '1 rune Dispersion · cibles différentes uniquement'
       : `${nbDisp} runes Dispersion · cibles différentes`;
     lines.push({ icon:'🎯', label:`${nbCibles} cibles différentes`, detail: dispDetail });
+  }
+
+  // Lumière (élément lumineux + Concentration) : source portée ou posée.
+  if (_isLightSpell(s)) {
+    lines.push({ icon:'💡', label:`Lumière · rayon ${lightSpellRadius(s)} cases`,
+      detail: `${s.lightMode === 'place' ? 'Source posée à portée' : 'Portée par le lanceur'} · tant que la concentration tient` });
   }
 
   // Zone (Amplification ou manuelle)
@@ -1275,7 +1311,7 @@ export function _buildSortResume(s, c) {
 
   // ── Affliction (mode DoT ou État) ── (la branche Lacération est rendue plus haut)
   if (nbAff > 0 && !hideAff && s.afflictionMode !== 'laceration') {
-    const mode = s.afflictionMode || 'dot';
+    const mode = getAfflictionMode(s);
     // Stat de JS dérivée (comme dans le VTT)
     let saveStat = 'constitution';
     const stateId = mode === 'etat' ? _afflictionStateId(s) : '';
@@ -1295,7 +1331,10 @@ export function _buildSortResume(s, c) {
     const nbCib   = _calcSortCibles(s);
     const cibleStr = nbCib === 1 ? 'sur 1 ennemi' : `sur ${nbCib} ennemis`;
 
-    if (mode === 'etat') {
+    if (mode === 'faiblesse') {
+      lines.push({ icon:'💢', label:`Affliction · Faiblesse ${s.noyau || '(élément du sort)'}`,
+                   detail: `${cibleStr} · JS ${statLbl} DD ${dd} · dégâts ×2 de cet élément (2 tours)` });
+    } else if (mode === 'etat') {
       // Mode État : on affiche l'état appliqué, PAS la formule DoT
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
       lines.push({ icon:'⛓', label:`Affliction · État : ${lbl}`,

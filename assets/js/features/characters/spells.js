@@ -10,16 +10,16 @@ import { calcDeckMax, calcPMMax, getMaitriseBonus as getSharedMaitriseBonus } fr
 import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell, spellValidationState as _sortValidationState } from '../../shared/spell-deck.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary } from '../../shared/conditions.js';
-import { loadSpellMatrices, getMatrixSuggestions, getComboConfig } from '../../shared/spell-matrices.js';
+import { loadSpellMatrices, getMatrixSuggestions, getComboConfig, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
 import { getSpellSystemMode, loadSpellSystem, spellRuneCost, spellSetCostDelta } from '../../shared/spell-system.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-runes.js';
+import { resolveSpellModifierStat, usesSpellMastery, lightSpellRadius, getAfflictionMode, getProtectionModes, getProtectionRestoreMode, protectionSplitAllowed, isProtectionMultiMode, protectionRunesFor } from '../../shared/spell-runes.js';
 import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationSelection, normalizeInvocationStats } from '../../shared/invocation-stats.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _isLightSpell, _calcSortReduction, _autoSourceReduction, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
 import { computeSheetLines, renderSheetLines } from '../../shared/spell-sheet-lines.js';
 import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 
@@ -35,14 +35,46 @@ function _sortSheetState(s) {
     types:      s?.types || [],
     counts:     _runeCountsEdit || {},
     protMode:   s?.protectionMode || 'ca',
+    protModes:  getProtectionModes(s || {}),
+    protSplit:  protectionSplitAllowed(s || {}),
     ampMode:    s?.ampMode || 'zone',
     deplMode:   _deplModeEdit || s?.deplacement?.mode || 'self',
     deplSwap:   _deplSwapEdit,
-    afflMode:   s?.afflictionMode || 'dot',
+    isLight:    _isLightSpell(s || {}),
+    lightMode:  _lightModeEdit,
+    afflMode:   getAfflictionMode(s || {}),
     enchMode:   s?.enchantMode || 'etat',
     zoneShape:  _zoneShapeEdit || 'rect',
     actionMode: s?.actionMode || _actionModeEdit || 'reaction',
   };
+}
+
+// Protection multi-modes : valeur d'une ligne de rune. La 1re rune d'un mode affiche
+// le total de ce mode ; les suivantes indiquent qu'elles le renforcent.
+const _PROT_LBL = { ca: 'CA', soin: 'Soin', mana: 'PM', reduction: 'Réduction' };
+const _PROT_COL = { ca: '#4f8cff', soin: '#22c38e', mana: '#8b5cf6', reduction: '#a16207' };
+function _protLineCtx(l, s, c) {
+  const mode = l.mode || s?.protectionMode || 'ca';
+  const color = _PROT_COL[mode] || '#4f8cff';
+  const modes = getProtectionModes(s || {});
+  if (modes.indexOf(mode) < (l.runeIdx || 0)) {
+    return { value: `Renforce ${_PROT_LBL[mode] || mode}`, text: true, source: `${_PROT_LBL[mode]} ×${protectionRunesFor(s, mode)} au total`, color };
+  }
+  if (mode === 'ca') return { value: _getSortCA(s), text: true, source: _autoSourceCA(s), color };
+  if (mode === 'reduction') return { value: `−${_calcSortReduction(s).value} dégâts / coup`, text: true, source: _autoSourceReduction(s), color };
+  if (mode === 'mana') return { value: _calcSortMana(s, c), source: 'Régénération de PM · (runes PM)d4', color };
+  return { value: _calcSortSoin(s, c), source: _autoSourceSoin(s, c), color };
+}
+
+// Répartition courante des runes Protection (état d'édition, sans relire tout le DOM).
+function _protModesNow() {
+  return getProtectionModes({
+    runes: _buildRunesFromCounts(),
+    types: [...(_sortTypesEdit || [])],
+    protectionMode: document.getElementById('s-prot-mode')?.value || _protModeEdit || 'ca',
+    protectionModes: _protModesEdit,
+    actionMode: document.getElementById('s-action-mode')?.value || _actionModeEdit,
+  });
 }
 
 // Valeurs affichées par ligne (calculées au rendu, contexte perso). Réutilise les
@@ -52,6 +84,8 @@ function buildLineCtx(lines, s, c) {
   const li = (nom) => _runeLiveContribution(nom, counts)?.main || '';
   const ctx = {};
   for (const l of lines) {
+    // Runes Protection supplémentaires (multi-modes) : prot2, prot3…
+    if (l.slot === 'prot' && /^prot\d+$/.test(l.id)) { ctx[l.id] = _protLineCtx(l, s, c); continue; }
     switch (l.id) {
       case 'dmg':
         ctx.dmg = { value: _calcSortDegats(s, c), source: _autoSourceDegats(s, c), color: '#ff6b4a' };
@@ -60,11 +94,9 @@ function buildLineCtx(lines, s, c) {
         ctx.hit = { value: '1d20', text: true, source: 'Toucher · mod. de stat + maîtrise', color: '#f4c430' };
         break;
       case 'prot': {
-        const pm = s?.protectionMode || 'ca';
         if (l.drain) ctx.prot = { value: `Vol de vie ${_calcDrainPct(counts.Protection || 0)}%`, text: true, source: 'Combo Drain · soigne le lanceur', color: '#ff5a7e' };
         else if (l.reactiveShield) ctx.prot = { value: 'Bloque 1 attaque', text: true, source: 'Combo Bouclier réactif · sans bonus de CA', color: '#4f8cff' };
-        else if (pm === 'ca') ctx.prot = { value: _getSortCA(s), text: true, source: _autoSourceCA(s), color: '#4f8cff' };
-        else ctx.prot = { value: (pm === 'mana' ? _calcSortMana(s, c) : _calcSortSoin(s, c)), source: (pm === 'mana' ? 'Régénération de PM · (nb Protection)d4' : _autoSourceSoin(s, c)), color: (pm === 'mana' ? '#8b5cf6' : '#22c38e') };
+        else ctx.prot = _protLineCtx(l, s, c);
         break;
       }
       case 'soin':
@@ -89,9 +121,15 @@ function buildLineCtx(lines, s, c) {
         break;
       }
       case 'affl': {
-        const am = s?.afflictionMode || 'dot';
+        const am = getAfflictionMode(s || {});
         if (l.sentinelle) ctx.affl = { value: 'Portée par la sentinelle', text: true, source: 'Combo Sentinelle · stationnaire', color: '#a16207' };
         else if (am === 'dot') ctx.affl = { value: _calcAfflictionDot(s), source: _autoSourceAfflictionDot(s), color: '#e8894b' };
+        else if (am === 'faiblesse') ctx.affl = {
+          value: `💢 Faiblesse ${s?.noyau || '(élément du sort)'}`, text: true,
+          source: `Sur échec · JS DD ${11 + 2 * ((counts.Affliction || 1) - 1)} · dégâts ×2 de cet élément · 2 tours`,
+          color: '#f59e0b',
+          note: s?.noyauTypeId ? 'Annule une résistance à cet élément ; sans effet contre une immunité ou une absorption.' : '⚠ Choisis un élément (noyau) : la faiblesse porte sur l’élément du sort.',
+        };
         else if (am === 'etat') {
           // Nom + effet de l'état infligé (crucial pour les joueurs qui lisent le sort).
           const id = _spellAfflictionStateId(s);
@@ -128,6 +166,13 @@ function buildLineCtx(lines, s, c) {
         ctx.deplmode = { value: info[0], text: true, source: `1 à ${_ampLength(counts.Amplification || 1)} cases`, color: info[1] };
         break;
       }
+      case 'light': {
+        const place = _lightModeEdit === 'place';
+        ctx.light = { value: `Lumière · rayon ${lightSpellRadius(s || {})} cases`, text: true,
+          source: `${place ? 'Posée sur une case à portée' : 'Portée par le lanceur'} · tant que la concentration tient · +2 cases / Amplification`,
+          color: '#f9d71c' };
+        break;
+      }
       case 'deplswap': {
         ctx.deplswap = _deplSwapEdit
           ? { value: 'Échange de place autorisé', text: true, source: 'Clic sur une créature à portée : le lanceur et elle permutent', color: '#e8b84b' }
@@ -135,7 +180,7 @@ function buildLineCtx(lines, s, c) {
         break;
       }
       case 'shape': {
-        const SHP_DESC = { rect: 'Carré — zone pleine', cross: 'Croix — bras longs, sans diagonales', cone: 'Cône — depuis le lanceur, rien derrière', ring: 'Anneau — couronne, centre épargné' };
+        const SHP_DESC = { rect: 'Carré — zone pleine', cross: 'Croix — diagonales (✕), bras longs', cone: 'Cône — depuis le lanceur, rien derrière', ring: 'Anneau — couronne, centre épargné' };
         const SHP_COL  = { rect: '#4f8cff', cross: '#a855f7', cone: '#f59e42', ring: '#22c38e' };
         const shp = ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect';
         ctx.shape = { value: SHP_DESC[shp], text: true, source: 'Forme de la zone', color: SHP_COL[shp] };
@@ -203,8 +248,10 @@ let _sortAllowedNoyauIds = null;
 let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] = primaire (compat soin/suggestions/VTT).
 let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
-let _deplSwapEdit = false;   // déplacement Soi : échange de place lanceur ↔ cible autorisé
+let _deplSwapEdit = false;
+let _lightModeEdit = 'self'; // sort Lumière : 'self' (portée par le lanceur) | 'place' (posée à portée)   // déplacement Soi : échange de place lanceur ↔ cible autorisé
 let _actionModeEdit = 'reaction';
+let _protModesEdit = [];   // mode de chaque rune Protection (multi-modes) — [0] = _protModeEdit
 let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin'|'mana') — source fiable (≠ DOM périmé)
 let _zoneShapeEdit = 'rect'; // forme de zone en cours d'édition ('rect'|'cross'|'cone'|'ring'|'line')
 let _enchantExtraSavedEdit = [];   // états d'enchantement supplémentaires sauvegardés (slots 2..n)
@@ -1772,7 +1819,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   const hasEnchant    = runesAll.includes('Enchantement');
   const hasAffliction = runesAll.includes('Affliction');
   const enchantMode   = s.enchantMode || 'dmg';
-  const afflictionMode = s.afflictionMode || 'dot';
+  const afflictionMode = getAfflictionMode(s);
   // Branche Lacération d'Affliction : frappe l'attaque de base + réduit la CA,
   // donc PAS de suppression d'impact ni de chip DoT/État.
   const isLaceration  = _hasLaceration(s);
@@ -1839,7 +1886,9 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
         : 'Réduction de CA de la cible (Lacération)',
     });
   } else if (hasAfflictionDebuff && !activeIds.has('regeneration')) {
-    if (afflictionMode === 'etat') {
+    if (afflictionMode === 'faiblesse') {
+      chips.push({ icon:'💢', val:`Faiblesse ${s.noyau || ''}`.trim(), color:'#f59e0b', lbl:'Dégâts ×2 de l’élément du sort sur l’ennemi (Affliction)' });
+    } else if (afflictionMode === 'etat') {
       // Mode État : on affiche TOUJOURS un chip état, jamais DoT
       const stateId = _spellAfflictionStateId(s);
       const etat = _spellConditionMeta(stateId, {
@@ -1891,10 +1940,12 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
 
   // ── 4. Protection (CA ou Soin) ──
   if (nbProt > 0) {
-    const mode = _getSortProtectionMode(s);
     if (activeIds.has('regeneration')) {
       const dice = nbProt + runesAll.filter(r => r === 'Affliction').length;
       chips.push({ icon:'💚', val: `${(s.regenerationFormula || '').trim() || `${dice}d4`}/t`, color:'#22c38e', lbl:'Soin par tour (Régénération)' });
+    } else [...new Set(getProtectionModes(s))].forEach(mode => {
+    if (mode === 'reduction') {
+      chips.push({ icon:'🪨', val:`−${_calcSortReduction(s).value}/coup`, color:'#a16207', lbl:'Réduction de dégâts (Protection)' });
     } else if (mode === 'soin') {
       if (activeIds.has('drain')) {
         const pct = Math.round(_calcDrainPct(s) * 100);
@@ -1912,6 +1963,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
         chips.push({ icon:'🛡️', val:_getSortCA(s), color:'#22c38e', lbl:'Bonus de CA (Protection)' });
       }
     }
+    });
   } else if (types.includes('defensif') && nbAmp > 0 && s.ampMode !== 'deplacement') {
     const soinBase = _calcSortSoin(s, c);
     chips.push({ icon:'💚', val: soinBase, color:'#22c38e', lbl:'Soin' });
@@ -1921,6 +1973,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff', lbl:'Nombre de cibles', dim:true });
   const zone  = _calcSortZone(s);
   if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff', lbl:'Zone d\'effet (cases)', dim:true });
+  if (_isLightSpell(s)) chips.push({ icon:'💡', val:`${lightSpellRadius(s)}c`, color:'#f9d71c', lbl: s.lightMode === 'place' ? 'Source de lumière posée à portée' : 'Lumière portée par le lanceur', dim:true });
   const depl  = _calcSortDeplacement(s);
   if (depl) {
     const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
@@ -2378,6 +2431,17 @@ function _runeLiveContribution(nom, counts) {
         return {
           main:  `Combo Bouclier réactif · Bloque 1 attaque entrante · plafond ${tier}`,
         };
+      }
+      // Multi-modes : résumé de la répartition des runes.
+      const _modes = _protModesNow();
+      if (new Set(_modes).size > 1) {
+        const _cnt = {};
+        _modes.forEach(m => { _cnt[m] = (_cnt[m] || 0) + 1; });
+        return { main: Object.entries(_cnt).map(([m, n]) => `${_PROT_LBL[m] || m} ×${n}`).join(' · ') };
+      }
+      if (protMode === 'reduction') {
+        const step = getProtectionReductionStep(getSpellMatricesCache(), document.getElementById('s-noyau-id')?.value || _noyauIdsEdit?.[0]);
+        return { main: `−${cnt * step} dégâts par coup reçu · sur 1 cible (2 tours)` };
       }
       // Mode CA pur (sans Réaction)
       if (protMode === 'ca') {
@@ -3054,7 +3118,7 @@ async function _openClassicSortModal(idx, s, allTypes) {
                 <div id="s-classic-zone-fields" class="classic-spell-zone classic-spell-span-2">
                   <label><span>Largeur</span><input type="number" id="s-classic-zone-w" class="input-field" min="1" max="50" value="${parseInt(s?.zoneW) || 3}"></label>
                   <label><span>Hauteur</span><input type="number" id="s-classic-zone-h" class="input-field" min="1" max="50" value="${parseInt(s?.zoneH) || 3}"></label>
-                  <label><span>Forme</span><select id="s-classic-zone-shape" class="input-field">${_classicSelectOptions([['rect','Rectangle / carré'],['cross','Croix'],['diamond','Cercle sur la grille']], s?.zoneShape || 'rect')}</select></label>
+                  <label><span>Forme</span><select id="s-classic-zone-shape" class="input-field">${_classicSelectOptions([['rect','Rectangle / carré'],['cross','Croix diagonale (✕)'],['diamond','Cercle sur la grille']], s?.zoneShape || 'rect')}</select></label>
                 </div>
               </div>
             </section>
@@ -3169,6 +3233,7 @@ export async function openSortModal(idx, s) {
   const runeCounts = {};
   _actionModeEdit = _spellActionMode(s);
   _protModeEdit = s?.protectionMode || 'ca';   // fixé depuis la donnée (pas le DOM périmé)
+  _protModesEdit = Array.isArray(s?.protectionModes) ? [...s.protectionModes] : [];
   _zoneShapeEdit = ZONE_SHAPES.includes(s?.zoneShape) ? s.zoneShape : 'rect';
   _enchantExtraSavedEdit = Array.isArray(s?.enchantEtatIds) ? s.enchantEtatIds.slice(1) : [];
   runesSrc.forEach(r => {
@@ -3226,6 +3291,7 @@ export async function openSortModal(idx, s) {
   _sortTypesEdit  = new Set(typesInit);
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
   _deplSwapEdit   = !!s?.deplacement?.swap;
+  _lightModeEdit  = s?.lightMode === 'place' ? 'place' : 'self';
   _invImageEdit   = s?.invocation?.image || '';
   _invOriginal    = (s?.invocation && typeof s.invocation === 'object') ? s.invocation : null;
 
@@ -3615,14 +3681,14 @@ export async function openSortModal(idx, s) {
           📐 <b>Amplification = TAILLE</b> d'une zone · <b>Dispersion = NOMBRE de poses</b> (chaque zone applique l'effet plein). La forme se choisit à partir de <b>2 Amplifications</b>.
         </div>
         <div id="s-amp-shape-row" class="form-group" style="${nbAmp >= 2?'':'display:none'}">
-          <label style="font-size:.72rem">✚ Forme de zone</label>
+          <label style="font-size:.72rem">📐 Forme de zone</label>
           <div style="font-size:.66rem;color:var(--text-dim);padding:0 .1rem .25rem;line-height:1.4">
-            <b>Carré</b> = plus de cases (diagonales). <b>Croix</b> = bras longs sans diagonales. <b>Cône</b> = éventail depuis le lanceur. <b>Anneau</b> = couronne (centre épargné). <b>Ligne</b> = rayon droit large de 1 (portée max, +2 cases/Amp).
+            <b>Carré</b> = zone pleine, le plus de cases. <b>Croix</b> = diagonales (✕), bras longs. <b>Cône</b> = éventail depuis le lanceur. <b>Anneau</b> = couronne (centre épargné). <b>Ligne</b> = rayon droit large de 1 (portée max, +2 cases/Amp).
           </div>
           <div style="display:flex;gap:.4rem;flex-wrap:wrap">
             ${[
               { v:'rect',  label:'▭ Carré',  color:'#4f8cff' },
-              { v:'cross', label:'✚ Croix',  color:'#a855f7' },
+              { v:'cross', label:'✕ Croix',  color:'#a855f7' },
               { v:'cone',  label:'🔺 Cône',   color:'#f59e42' },
               { v:'ring',  label:'◯ Anneau', color:'#22c38e' },
               { v:'line',  label:'▬ Ligne',  color:'#e8b84b' },
@@ -4077,12 +4143,15 @@ function _refreshConditionalSections() {
     portedNote.style.display = (hasEnchant && enchMode === 'etat' && afflMode === 'laceration' && !anyInvoc) ? '' : 'none';
   }
   if (protGroup) protGroup.style.display = (isDrain || isRegen) ? 'none' : '';
-  if (caSec)     caSec.style.display     = (!isDrain && !isRegen && protMode === 'ca') ? '' : 'none';
+  // Multi-modes : chaque section suit la présence de son mode sur au moins une rune.
+  const _pModes = hasProt ? _protModesNow() : [];
+  const _restore = _pModes.find(m => m === 'soin' || m === 'mana') || null;
+  if (caSec)     caSec.style.display     = (!isDrain && !isRegen && (_pModes.includes('ca') || (!_pModes.length && protMode === 'ca'))) ? '' : 'none';
   if (sSec) {
     // Section « montant » partagée par Soin (PV) et Régénération de PM (Mana).
-    sSec.style.display = (!isDrain && !isRegen && ((hasProt && (protMode === 'soin' || protMode === 'mana')) || isAmpSupportHeal)) ? '' : 'none';
+    sSec.style.display = (!isDrain && !isRegen && ((hasProt && !!_restore) || isAmpSupportHeal)) ? '' : 'none';
     const sLbl = sSec.querySelector('.cs-spell-autoval-label');
-    if (sLbl) sLbl.textContent = (hasProt && protMode === 'mana') ? '💙 Régénération de PM' : '💚 Soin';
+    if (sLbl) sLbl.textContent = (hasProt && _restore === 'mana') ? '💙 Régénération de PM' : '💚 Soin';
   }
   // Le réglage est présenté dans le premier effet qui l'utilise. Les sorts
   // mixtes ne l'affichent donc qu'une fois, tandis qu'un soin pur le conserve
@@ -4731,6 +4800,11 @@ function _deplPayload(mode) {
   return mode === 'self' && _deplSwapEdit ? { mode, swap: true } : { mode };
 }
 
+function _selectLightMode(val) {
+  _lightModeEdit = val === 'place' ? 'place' : 'self';
+  _updateSortPreview();
+}
+
 function _selectDeplSwap(val) {
   _deplSwapEdit = val === 'swap';
   _updateSortPreview();
@@ -4811,8 +4885,29 @@ function _selectActionMode(mode) {
   _updateSortPreview();
 }
 
+// Mode d'une rune Protection précise (multi-modes). `val` = « index:mode ».
+function _selectProtModeAt(val) {
+  const [rawIdx, mode] = String(val || '').split(':');
+  const idx = parseInt(rawIdx);
+  if (!Number.isFinite(idx) || idx < 0 || !mode) return;
+  if (idx === 0) { _selectProtMode(mode); return; }
+  const modes = _protModesNow();
+  modes[idx] = mode;
+  _protModesEdit = modes;
+  _refreshConditionalSections();
+  const dureeSec = document.getElementById('s-duree-base-section');
+  if (dureeSec) dureeSec.style.display = _needsDureeBase(_buildSortFromDOM()) ? '' : 'none';
+  _refreshRunesSection?.('Protection');
+  _updateSortPreview();
+}
+
 function _selectProtMode(mode) {
   _protModeEdit = mode;   // garde l'état module synchro (source du label de la carte rune)
+  // Multi-modes : la 1re rune suit ce mode ; les autres gardent leur choix explicite.
+  // Sort à mode unique : toutes les runes suivent (comportement historique).
+  const _cur = _protModesNow();
+  if (new Set(_cur).size <= 1) _protModesEdit = [];
+  else { _cur[0] = mode; _protModesEdit = _cur; }
   const hidden  = document.getElementById('s-prot-mode');
   const caSec   = document.getElementById('s-ca-section');
   if (hidden)  hidden.value = mode;
@@ -4995,9 +5090,10 @@ function _refreshAutoValChips() {
     if (r && source !== undefined) r.textContent = source || '';
   };
   apply('s-degats',         _calcSortDegats(s, c),  _autoSourceDegats(s, c));
+  const _isManaRestore = getProtectionRestoreMode(s) === 'mana';
   apply('s-soin',
-    s.protectionMode === 'mana' ? _calcSortMana(s, c) : _calcSortSoin(s, c),
-    s.protectionMode === 'mana' ? 'régén PM · formule libre · défaut (nb Protection)d4' : _autoSourceSoin(s, c));
+    _isManaRestore ? _calcSortMana(s, c) : _calcSortSoin(s, c),
+    _isManaRestore ? 'régén PM · formule libre · défaut (nb Protection)d4' : _autoSourceSoin(s, c));
   apply('s-ca',             _getSortCA(s),          _autoSourceCA(s));
   apply('s-enchant-degats', _calcEnchantDegats(s),  _autoSourceEnchantDeg(s));
   apply('s-enchant-state-move-bonus', _calcEnchantStateMoveAuto(s), 'État + Amplification');
@@ -5199,6 +5295,7 @@ function _selectAfflictionMode(mode) {
   document.getElementById('s-affliction-mode-dot')?.classList.toggle('selected', mode === 'dot');
   document.getElementById('s-affliction-mode-etat')?.classList.toggle('selected', mode === 'etat');
   document.getElementById('s-affliction-mode-laceration')?.classList.toggle('selected', mode === 'laceration');
+  // 'faiblesse' : aucun bloc de réglage (l'élément du sort suffit).
   const dotBlock = document.getElementById('s-affliction-dot-block');
   const etatBlock = document.getElementById('s-affliction-etat-block');
   const lacBlock = document.getElementById('s-affliction-laceration-block');
@@ -5368,6 +5465,7 @@ function _buildSortFromDOM() {
     ca:     document.getElementById('s-ca')?.value || '',
     effet:  document.getElementById('s-effet')?.value || '',
     protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
+    protectionModes: [..._protModesEdit],
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
     enchantBonus:     (() => { const v = document.getElementById('s-enchant-bonus')?.value; const n = parseInt(v); return (v != null && v !== '' && Number.isFinite(n)) ? n : null; })(),
@@ -5390,6 +5488,7 @@ function _buildSortFromDOM() {
     zoneH: null,
     dureeBase: dureeBase >= 2 ? dureeBase : null,
     deplacement: _deplPayload(deplMode),
+    lightMode: _lightModeEdit === 'place' ? 'place' : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
     // Portée + stats overrides : doivent être lus du DOM pour que la preview live
@@ -5681,6 +5780,13 @@ function _sanitizeAbsorbedComboFields(s) {
     s.ampMode = 'zone';
     s.deplacement = null;
   }
+  // Protection multi-modes : on ne stocke la répartition que si elle mélange
+  // réellement plusieurs modes ; `protectionMode` reste le mode de la 1re rune.
+  if (Array.isArray(s.protectionModes) || s.protectionModes === null) {
+    const modes = getProtectionModes(s);
+    s.protectionModes = isProtectionMultiMode(s) ? modes : null;
+    if (modes.length) s.protectionMode = modes[0];
+  }
   if (comboIds.has('coup_chance')) {
     s.degats = '';
     if (Array.isArray(s.types)) {
@@ -5896,6 +6002,7 @@ export async function saveSort(idx, btn = null) {
       ca:       document.getElementById('s-ca')?.value||'',
       effet:    document.getElementById('s-effet')?.value||'',
       protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
+    protectionModes: [..._protModesEdit],
       // Legacy compat : typeSoin si defensif sans offensif + mode soin
       typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
       catId:         document.getElementById('s-catid')?.value || '',
@@ -5928,6 +6035,7 @@ export async function saveSort(idx, btn = null) {
       zoneH: null,
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
       deplacement: _deplPayload(deplMode),
+    lightMode: _lightModeEdit === 'place' ? 'place' : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
       // Portée override : 0 ou vide = utilise la portée de l'arme par défaut (côté VTT)
@@ -6058,6 +6166,7 @@ function _buildSortFromForm(idx, prevList = []) {
     ca:       document.getElementById('s-ca')?.value||'',
     effet:    document.getElementById('s-effet')?.value||'',
     protectionMode: document.getElementById('s-prot-mode')?.value || 'ca',
+    protectionModes: [..._protModesEdit],
     typeSoin: types.includes('defensif') && !types.includes('offensif') && (document.getElementById('s-prot-mode')?.value === 'soin'),
     enchantDegats:    document.getElementById('s-enchant-degats')?.value?.trim() || '',
     enchantMode:      document.getElementById('s-enchant-mode')?.value || 'dmg',
@@ -6080,6 +6189,7 @@ function _buildSortFromForm(idx, prevList = []) {
     zoneW: null, zoneH: null,
     dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
     deplacement: _deplPayload(deplMode),
+    lightMode: _lightModeEdit === 'place' ? 'place' : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
     portee:     (() => {
@@ -6198,7 +6308,9 @@ registerActions({
   _pickNewSortCatColor:   (btn) => _pickNewSortCatColor(btn),
   _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),
   _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val),
+  _selectProtModeAt:      (btn) => _selectProtModeAt(btn.dataset.val),
   _selectDeplSwap:        (btn) => _selectDeplSwap(btn.dataset.val),
+  _selectLightMode:       (btn) => _selectLightMode(btn.dataset.val),
   _selectActionMode:      (btn) => _selectActionMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
   _selectAmpMode:         (btn) => _selectAmpMode(btn.dataset.val),

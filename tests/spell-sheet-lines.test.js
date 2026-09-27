@@ -26,7 +26,7 @@ test('ordre stable : ajouter Protection ne décale pas les Dégâts', () => {
 
 test('Protection soin (soutien) : ligne unique avec segment + maîtrise de soin', () => {
   const s = { types: ['defensif'], counts: { Protection: 2 }, protMode: 'soin' };
-  assert.deepEqual(ids(s), ['prot']);
+  assert.deepEqual(ids(s), ['prot']);   // sans protSplit : ligne unique (compat)
   const l = line(s, 'prot');
   assert.equal(l.override.fieldId, 's-soin');
   assert.equal(l.mastery, 'heal');
@@ -203,4 +203,39 @@ test('renderSheetLines : segment Protection écrit via _selectProtMode + hidden 
   const html = renderSheetLines(lines, { prot: { value: '1d4' } }, new Set());
   assert.match(html, /data-action="_selectProtMode" data-val="ca"/);
   assert.match(html, /class="sg on" style="[^"]*" data-action="_selectProtMode" data-val="soin"/);
+});
+
+test('Protection multi-modes : une sous-ligne par rune supplémentaire', () => {
+  const s = { types: ['defensif'], counts: { Protection: 3 }, protMode: 'soin', protModes: ['soin', 'ca', 'ca'], protSplit: true };
+  assert.deepEqual(ids(s), ['prot', 'prot2', 'prot3']);
+  const r2 = line(s, 'prot2');
+  assert.equal(r2.sub, true);
+  assert.equal(r2.segment.key, 'protModeAt');
+  assert.equal(r2.segment.cur, '1:ca');
+  assert.equal(r2.override.fieldId, 's-ca');            // 1re ligne CA porte le réglage
+  assert.equal(line(s, 'prot3').override, undefined);   // CA déjà réglable plus haut
+  // Soin présent sur une autre rune → PM indisponible (un seul jet de restauration).
+  assert.deepEqual(r2.segment.opts.map(o => o[0]), ['1:ca', '1:soin', '1:reduction']);
+  assert.equal(line(s, 'prot').mastery, 'heal');
+});
+
+test('Protection multi-modes : pas de répartition en Drain ni avec une seule rune', () => {
+  assert.deepEqual(ids({ types: ['offensif'], counts: { Puissance: 1, Protection: 2 }, protSplit: true }), ['dmg', 'hit', 'prot']);
+  assert.deepEqual(ids({ types: ['defensif'], counts: { Protection: 1 }, protSplit: true }), ['prot']);
+});
+
+test('Protection : mode Réduction sans réglage de formule', () => {
+  const l = line({ types: ['defensif'], counts: { Protection: 1 }, protMode: 'reduction' }, 'prot');
+  assert.equal(l.icon, '🪨');
+  assert.equal(l.override, undefined);
+  assert.ok(l.segment.opts.some(o => o[0] === 'reduction'));
+});
+
+test('Sort Lumière : ligne Lumière (Sur soi / Posée) à la place de la zone', () => {
+  const s = { types: ['utilitaire'], counts: { Concentration: 1, Amplification: 2 }, isLight: true, lightMode: 'place' };
+  assert.equal(line(s, 'amp'), undefined);
+  assert.equal(line(s, 'shape'), undefined);
+  const l = line(s, 'light');
+  assert.equal(l.segment.key, 'lightMode');
+  assert.equal(l.segment.cur, 'place');
 });
