@@ -104,13 +104,21 @@ test('Amplification ≥2 SANS Dispersion : la forme est réglable (v2)', () => {
 
 test('Amplification déplacement : segment zone/dépl + sous-ligne sens, pas de dégâts', () => {
   const s = { types: ['offensif'], counts: { Amplification: 1 }, ampMode: 'deplacement' };
-  assert.deepEqual(ids(s), ['amp', 'deplmode']);
+  assert.deepEqual(ids(s), ['amp', 'deplmode', 'deplswap']);
   assert.equal(line(s, 'amp').segment.hiddenId, 's-amp-mode');
   // Sous-ligne : sens du déplacement (soi / pousser / attirer).
   const seg = line(s, 'deplmode').segment;
   assert.equal(seg.key, 'deplMode');
   assert.deepEqual(seg.opts.map(o => o[0]), ['self', 'push', 'pull']);
   assert.equal(line(s, 'deplmode').sub, true);
+});
+
+test('Déplacement Soi : échange de place opt-in, absent en Pousser/Attirer', () => {
+  const base = { types: ['utilitaire'], counts: { Amplification: 1 }, ampMode: 'deplacement' };
+  assert.equal(line(base, 'deplswap').segment.cur, 'off');
+  assert.equal(line({ ...base, deplSwap: true }, 'deplswap').segment.cur, 'swap');
+  assert.equal(line({ ...base, deplMode: 'push', deplSwap: true }, 'deplswap'), undefined);
+  assert.equal(line({ ...base, deplMode: 'pull' }, 'deplswap'), undefined);
 });
 
 test('Enchantement masque la ligne Amplification (Amp booste l’état)', () => {

@@ -37,6 +37,7 @@ function _sortSheetState(s) {
     protMode:   s?.protectionMode || 'ca',
     ampMode:    s?.ampMode || 'zone',
     deplMode:   _deplModeEdit || s?.deplacement?.mode || 'self',
+    deplSwap:   _deplSwapEdit,
     afflMode:   s?.afflictionMode || 'dot',
     enchMode:   s?.enchantMode || 'etat',
     zoneShape:  _zoneShapeEdit || 'rect',
@@ -127,6 +128,12 @@ function buildLineCtx(lines, s, c) {
         ctx.deplmode = { value: info[0], text: true, source: `1 à ${_ampLength(counts.Amplification || 1)} cases`, color: info[1] };
         break;
       }
+      case 'deplswap': {
+        ctx.deplswap = _deplSwapEdit
+          ? { value: 'Échange de place autorisé', text: true, source: 'Clic sur une créature à portée : le lanceur et elle permutent', color: '#e8b84b' }
+          : { value: 'Pas d’échange de place', text: true, source: 'Seules les cases libres sont atteignables', color: '#9ca3af' };
+        break;
+      }
       case 'shape': {
         const SHP_DESC = { rect: 'Carré — zone pleine', cross: 'Croix — bras longs, sans diagonales', cone: 'Cône — depuis le lanceur, rien derrière', ring: 'Anneau — couronne, centre épargné' };
         const SHP_COL  = { rect: '#4f8cff', cross: '#a855f7', cone: '#f59e42', ring: '#22c38e' };
@@ -196,6 +203,7 @@ let _sortAllowedNoyauIds = null;
 let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] = primaire (compat soin/suggestions/VTT).
 let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
+let _deplSwapEdit = false;   // déplacement Soi : échange de place lanceur ↔ cible autorisé
 let _actionModeEdit = 'reaction';
 let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin'|'mana') — source fiable (≠ DOM périmé)
 let _zoneShapeEdit = 'rect'; // forme de zone en cours d'édition ('rect'|'cross'|'cone'|'ring'|'line')
@@ -3223,6 +3231,7 @@ export async function openSortModal(idx, s) {
 
   _sortTypesEdit  = new Set(typesInit);
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
+  _deplSwapEdit   = !!s?.deplacement?.swap;
   _invImageEdit   = s?.invocation?.image || '';
   _invOriginal    = (s?.invocation && typeof s.invocation === 'object') ? s.invocation : null;
 
@@ -4722,6 +4731,17 @@ async function _libInvDeleteAction(aidx) {
   _refreshLibInvEditor();
 }
 
+// Payload `deplacement` sauvegardé : l'échange n'a de sens qu'en mode Soi.
+function _deplPayload(mode) {
+  if (!mode) return null;
+  return mode === 'self' && _deplSwapEdit ? { mode, swap: true } : { mode };
+}
+
+function _selectDeplSwap(val) {
+  _deplSwapEdit = val === 'swap';
+  _updateSortPreview();
+}
+
 function _selectDeplMode(mode) {
   _deplModeEdit = mode;
   const DEPL_CFG = { self:'#22c38e', push:'#e8b84b', pull:'#4f8cff' };
@@ -5375,7 +5395,7 @@ function _buildSortFromDOM() {
     zoneW: null,
     zoneH: null,
     dureeBase: dureeBase >= 2 ? dureeBase : null,
-    deplacement: deplMode ? { mode: deplMode } : null,
+    deplacement: _deplPayload(deplMode),
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
     // Portée + stats overrides : doivent être lus du DOM pour que la preview live
@@ -5911,7 +5931,7 @@ export async function saveSort(idx, btn = null) {
       zoneW: null,
       zoneH: null,
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
-      deplacement: deplMode ? { mode: deplMode } : null,
+      deplacement: _deplPayload(deplMode),
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
       // Portée override : 0 ou vide = utilise la portée de l'arme par défaut (côté VTT)
@@ -6063,7 +6083,7 @@ function _buildSortFromForm(idx, prevList = []) {
     afflictionEtatIcon: afflictionState.icon,
     zoneW: null, zoneH: null,
     dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
-    deplacement: deplMode ? { mode: deplMode } : null,
+    deplacement: _deplPayload(deplMode),
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
     portee:     (() => {
@@ -6182,6 +6202,7 @@ registerActions({
   _pickNewSortCatColor:   (btn) => _pickNewSortCatColor(btn),
   _toggleSortType:        (btn) => _toggleSortType(btn.dataset.type),
   _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val),
+  _selectDeplSwap:        (btn) => _selectDeplSwap(btn.dataset.val),
   _selectActionMode:      (btn) => _selectActionMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
   _selectAmpMode:         (btn) => _selectAmpMode(btn.dataset.val),
