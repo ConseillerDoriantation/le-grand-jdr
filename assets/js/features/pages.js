@@ -2536,6 +2536,28 @@ async function _statsReloadAfterMutation() {
   if (Math.abs(window.scrollY - y) > 1) window.scrollTo({ top: y, behavior: 'auto' });
 }
 
+// Vrai si la modale « Gérer les statistiques » est affichée (au premier plan).
+const _statsManageIsOpen = () => !!document.querySelector('#modal-overlay.show #modal-body .stats-mng');
+
+// Marque la ligne en cours de suppression (retour visuel pendant l'écriture).
+function _statsManageMarkBusy(action, scope, busy) {
+  const btn = [...document.querySelectorAll(`#modal-body [data-action="${action}"]`)]
+    .find(b => b.dataset.scope === scope);
+  btn?.closest('.stats-mng-row')?.classList.toggle('is-busy', busy);
+  if (btn) btn.disabled = busy;
+}
+
+// Après une suppression lancée depuis la modale de gestion : la liste se met à
+// jour EN PLACE (modale conservée, défilement préservé par openModal) dès que le
+// miroir mémoire est à jour, puis la page se rafraîchit derrière. Si le
+// rechargement modifie encore les données, la modale est redessinée une 2e fois.
+async function _statsAfterManageDelete() {
+  _statsData = peekStats() || (await loadStats()) || {};
+  if (_statsManageIsOpen()) _statsOpenManageModal();
+  await _statsReloadAfterMutation();
+  if (_statsManageIsOpen()) _statsOpenManageModal();
+}
+
 // Construit / rouvre la modale « Gérer les statistiques ». Extrait de l'action
 // `_statsManage` pour pouvoir la ROUVRIR après une suppression (rester dans la
 // modale, liste à jour). openModal préserve le défilement interne quand la même
@@ -4653,16 +4675,17 @@ registerActions({
       title: '🗑 Supprimer une séance', confirmLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true,
     }).catch(() => false);
     if (!ok) return;
+    _statsManageMarkBusy('_statsDelDate', d, true);
     const done = await deleteDateStats(d);
     if (!done) {
+      _statsManageMarkBusy('_statsDelDate', d, false);
       showNotif('La séance n’a pas pu être supprimée. La fenêtre reste ouverte pour éviter toute ambiguïté.', 'error');
       return;
     }
     showNotif('Séance supprimée.', 'success');
-    closeModalDirect();
     if (_statsScope === d) _statsScope = null;
     _statsGroupSel = null;
-    await _statsReloadAfterMutation();
+    await _statsAfterManageDelete();
   },
   // Supprime les stats liées à une mission (toutes ses séances).
   _statsDelMission: async (btn) => {
@@ -4672,10 +4695,12 @@ registerActions({
       title: '🗑 Supprimer une mission', confirmLabel: 'Supprimer', cancelLabel: 'Annuler', danger: true,
     }).catch(() => false);
     if (!ok) return;
+    _statsManageMarkBusy('_statsDelMission', mid, true);
     const done = await deleteMissionStats(mid);
     showNotif(done ? 'Stats de la mission supprimées.' : 'Échec de la suppression.', done ? 'success' : 'error');
-    closeModalDirect();
-    if (done) { _statsScope = null; _statsGroupSel = null; _statsGroupMissionId = ''; await _statsReloadAfterMutation(); }
+    if (!done) { _statsManageMarkBusy('_statsDelMission', mid, false); return; }
+    _statsScope = null; _statsGroupSel = null; _statsGroupMissionId = '';
+    await _statsAfterManageDelete();
   },
   // Suppression TOTALE — confirmation explicite par saisie (« EFFACER »).
   _statsResetAsk: async () => {
