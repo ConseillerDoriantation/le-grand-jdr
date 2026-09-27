@@ -9,7 +9,8 @@ import { getDocData } from '../data/firestore.js';
 import { tryDoc } from '../shared/crud.js';
 import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { _esc, _nl2br, _norm } from '../shared/html.js';
+import { _esc, _nl2br, _norm, _searchIncludes } from '../shared/html.js';
+import { lsJson } from '../shared/local-storage.js';
 import {
   richTextContentHtml, richTextEditorHtml, bindRichTextEditors, getRichTextHtml,
 } from '../shared/rich-text.js';
@@ -22,7 +23,6 @@ import {
   worldPageFor, saveWorldPage, deleteWorldPage, setCachedWorldPage, onWorldPagesChange,
 } from '../shared/world-pages.js';
 import { STATE } from '../core/state.js';
-import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
@@ -70,6 +70,9 @@ const STORE = {
 let _sortables    = [];     // instances SortableJS (une par liste de catégorie)
 let _wiCropper    = null;
 let _editingContentId = null; // section dont le contenu (diapo) est en édition
+let _searchQuery  = '';       // recherche plein texte du bandeau (filtre le sommaire)
+let _plainText    = new Map(); // id → texte brut (recherche, temps de lecture) ; vidé à chaque rendu complet
+let _tocObserver  = null;     // scroll-spy du plan « Sur cette page »
 
 // Firestore plafonne un doc à 1 048 576 octets. Chaque section a son propre doc
 // worldPages/{id} → budget dédié. Marge de sécurité + recompression auto.
@@ -165,33 +168,111 @@ function _worldCategoryFor(section) {
   return STORE.categories.find(c => c.id === section?.categoryId) || DEFAULT_CAT;
 }
 
-function _worldExcerpt(raw = '', max = 150) {
-  const tmp = document.createElement('div');
-  tmp.innerHTML = _contentToHtml(raw);
-  const text = (tmp.textContent || '').replace(/\s+/g, ' ').trim();
-  if (!text) return '';
-  return text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
+// Texte brut d'une section, mis en cache le temps d'un rendu. DOMParser = document
+// inerte : aucune image chargée ni script exécuté pendant l'extraction.
+function _sectionText(s) {
+  if (!_plainText.has(s.id)) {
+    const doc = new DOMParser().parseFromString(_contentToHtml(_sectionPlainSource(s)), 'text/html');
+    _plainText.set(s.id, (doc.body.textContent || '').replace(/\s+/g, ' ').trim());
+  }
+  return _plainText.get(s.id);
+}
+
+function _matchesSearch(s) {
+  return !_searchQuery
+    || _searchIncludes(s.titre || '', _searchQuery)
+    || _searchIncludes(_sectionText(s), _searchQuery);
+}
+
+// Extrait autour du terme trouvé dans le contenu (rien si le titre correspond déjà).
+function _searchSnippet(s) {
+  if (!_searchQuery || _searchIncludes(s.titre || '', _searchQuery)) return '';
+  const text = _sectionText(s);
+  const hay = _norm(text);
+  // Positions alignées seulement si la normalisation conserve la longueur (cas courant).
+  const at = hay.length === text.length ? Math.max(0, hay.indexOf(_norm(_searchQuery))) : 0;
+  const start = Math.max(0, at - 30);
+  const end = Math.min(text.length, start + 90);
+  return `${start ? '…' : ''}${text.slice(start, end).trim()}${end < text.length ? '…' : ''}`;
+}
+
+// Catégories repliées du sommaire : préférence locale, par aventure.
+const _collapseKey = () => `jdr-world-collapsed:${STATE.adventure?.id || 'global'}`;
+function _collapsedCats() {
+  const ids = lsJson.get(_collapseKey(), []);
+  return new Set(Array.isArray(ids) ? ids : []);
+}
+function _setCatCollapsed(catId, collapsed) {
+  const ids = _collapsedCats();
+  if (collapsed) ids.add(catId); else ids.delete(catId);
+  lsJson.set(_collapseKey(), [...ids]);
+}
+
+// Sections dans l'ordre du sommaire (catégories, puis sections) → Précédent / Suivant.
+function _orderedSections(visibleCats, visibleSections) {
+  const ids = new Set(visibleSections.map(s => s.id));
+  return visibleCats.flatMap(cat => STORE.sections.filter(s => s.categoryId === cat.id && ids.has(s.id)));
+}
+
+function _sectionPosition(s, visibleSections) {
+  const siblings = visibleSections.filter(x => x.categoryId === s?.categoryId);
+  return { index: siblings.findIndex(x => x.id === s?.id) + 1, total: siblings.length };
+}
+
+function _sectionMeta(s) {
+  if (_sectionContentMode(s) === 'slides') {
+    const deck = worldPageFor(s.id);
+    if (!hasFreePage(deck)) return '';
+    const n = Array.isArray(deck.slides) ? deck.slides.filter(sl => !sl?.hidden).length : 1;
+    return `Diaporama · ${n} diapo${n > 1 ? 's' : ''}`;
+  }
+  const words = _sectionText(s).split(' ').filter(Boolean).length;
+  if (!words) return '';
+  const parts = (String(s.contenu || '').match(/<h2[\s>]/gi) || []).length;
+  return `≈ ${Math.max(1, Math.round(words / 200))} min de lecture${parts > 1 ? ` · ${parts} parties` : ''}`;
 }
 
 function _worldStats(visibleCats, visibleSections) {
-  const hiddenCats = STORE.categories.filter(c => c.visible === false).length;
-  const hiddenSections = STORE.sections.filter(s => s.visible === false).length;
-  const illustrated = visibleSections.filter(s => !!s.imageUrl).length;
+  const hidden = STORE.categories.filter(c => c.visible === false).length
+    + STORE.sections.filter(s => s.visible === false).length;
   return [
-    { icon: '📚', label: 'Catégories', value: visibleCats.length },
-    { icon: '📖', label: 'Sections', value: visibleSections.length },
-    { icon: '🖼️', label: 'Illustrées', value: illustrated },
-    ...(STATE.isAdmin ? [{ icon: '🔒', label: 'Masquées', value: hiddenCats + hiddenSections }] : []),
+    { label: 'Catégories', value: visibleCats.length },
+    { label: 'Sections', value: visibleSections.length },
+    ...(STATE.isAdmin && hidden ? [{ label: 'Masquées', value: hidden, cls: ' is-masked' }] : []),
   ];
 }
+
+// Icônes au trait (héritent de currentColor). Les emoji restent réservés aux
+// icônes choisies par le MJ pour ses catégories / sections.
+const _svg = (paths, size = 14) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+const ICO = {
+  search:  '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  lock:    '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  plus:    '<path d="M12 5v14M5 12h14"/>',
+  pencil:  '<path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m14 6 4 4"/>',
+  trash:   '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
+  sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  left:    '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  right:   '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  up:      '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  list:    '<path d="M4 6h16M4 12h16M4 18h10"/>',
+};
+const GRIP = `<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true">${
+  [3, 8, 13].map(y => `<circle cx="3" cy="${y}" r="1.3"/><circle cx="7" cy="${y}" r="1.3"/>`).join('')}</svg>`;
+const _lockHtml = () => `<span class="world-lock" title="Masquée aux joueurs">${_svg(ICO.lock, 13)}</span>`;
 
 // ── Rendu principal ───────────────────────────────────────────────────────────
 async function renderWorld() {
   _ensureWorldReactivity();
   const content = document.getElementById('main-content');
+  // Arrivée sur la page (et non re-rendu après une sauvegarde) → recherche remise à zéro.
+  if (!document.getElementById('world-main-content')) _searchQuery = '';
   // Le splash pleine page de la navigation reste visible pendant _load (pas de
   // second loader propre — évite le flash splash→spinner, cf. npcs).
   await _load();
+  _plainText = new Map();
 
   // Catégories + section active visibles. Pour un joueur, une section dans une
   // catégorie masquée est elle aussi masquée (cohérence nav ↔ contenu).
@@ -200,7 +281,7 @@ async function renderWorld() {
     STORE.activeId = visibleSections[0]?.id || null;
   }
   const activeSection = visibleSections.find(s => s.id === STORE.activeId) || null;
-  const activeCat = _worldCategoryFor(activeSection);
+  const activeCat = activeSection ? _worldCategoryFor(activeSection) : null;
   const stats = _worldStats(visibleCats, visibleSections);
 
   content.innerHTML = `
@@ -210,101 +291,200 @@ async function renderWorld() {
         <div class="world-page-top-row">
           <div class="world-page-brand">
             <h1>Guide</h1>
-            <small>${_esc(activeCat?.nom || 'Atlas de l’aventure')}</small>
+            <small id="world-page-context">${_esc(activeCat?.nom || 'Atlas de l’aventure')}</small>
           </div>
+          <label class="world-search">
+            ${_svg(ICO.search, 15)}
+            <input type="search" id="world-search" data-input="worldSearch" value="${_esc(_searchQuery)}"
+              placeholder="Rechercher dans le guide…" aria-label="Rechercher dans le guide" autocomplete="off">
+          </label>
           <div class="world-page-stats" aria-label="Résumé du Guide">
             ${stats.map(stat => `
-              <span class="world-page-stat" title="${_esc(stat.label)}">
-                <b>${stat.value}</b> ${_esc(stat.label)}
-              </span>`).join('')}
+              <span class="world-page-stat${stat.cls || ''}"><b>${stat.value}</b> ${_esc(stat.label)}</span>`).join('')}
           </div>
           ${STATE.isAdmin ? `
             <div class="world-page-actions">
-              <button data-action="openWorldSectionModal" class="btn btn-gold btn-sm">+ Section</button>
-              <button data-action="openWorldCategoryModal" class="btn btn-outline btn-sm">+ Catégorie</button>
+              <button type="button" data-action="openWorldSectionModal" class="pill primary">${_svg(ICO.plus, 12)} Nouvelle section</button>
+              <button type="button" data-action="openWorldCategoryModal" class="pill">${_svg(ICO.plus, 12)} Catégorie</button>
             </div>` : ''}
         </div>
       </div>
     </header>
 
     <div class="world-page-body">
-      <div class="world-layout">
+      <div class="world-layout" id="world-layout">
         <aside class="world-sidebar">
-          <div class="world-nav-card">
-            <div class="world-nav-head">
-              <div>
-                <strong>Sommaire</strong>
-                <span>${visibleSections.length} entrée${visibleSections.length > 1 ? 's' : ''}</span>
+          <nav class="world-nav-card" id="world-nav-card" aria-label="Sommaire du guide">
+            <button type="button" class="world-nav-mobile" id="world-nav-mobile"
+              data-action="toggleWorldNavMobile" aria-expanded="false">${_renderMobileNavToggle(activeSection)}</button>
+            <div class="world-nav-panel">
+              <div class="world-nav-head">
+                <div><strong>Sommaire</strong><span id="world-nav-count">${_navCountLabel()}</span></div>
+                ${STATE.isAdmin ? `<button type="button" data-action="openWorldCategoryModal" class="world-icon-btn"
+                  title="Nouvelle catégorie" aria-label="Nouvelle catégorie">${_svg(ICO.plus, 13)}</button>` : ''}
               </div>
-              ${STATE.isAdmin ? `<button data-action="openWorldCategoryModal" class="world-icon-btn" title="Nouvelle catégorie">+</button>` : ''}
+              <div id="world-nav-list" class="world-nav-list">${_renderNavList()}</div>
+              ${STATE.isAdmin ? `<div class="world-nav-foot">${GRIP}<span>Glisser-déposer pour réordonner ou changer de catégorie.</span></div>` : ''}
             </div>
-            <div id="world-nav-list" class="world-nav-list">
-              ${visibleCats.map(cat => _renderCategoryGroup(cat)).join('')}
-              ${visibleCats.length === 0 ? `<div class="world-empty-note">Aucune catégorie</div>` : ''}
-            </div>
-          </div>
+          </nav>
         </aside>
 
-        <main class="world-reader">
+        <div class="world-reader">
           <div id="world-main-content">
             ${activeSection ? _renderSection(activeSection, visibleSections) : _renderEmpty()}
           </div>
-        </main>
+        </div>
+
+        <aside class="world-toc" id="world-toc" aria-label="Sur cette page" hidden></aside>
       </div>
     </div>
   </div>`;
 
-  // Bind drag & drop des items nav (admin)
+  _bindNavKeyboard();
   if (STATE.isAdmin) _bindNavDrag();
   _bindWorldContentEditor();
+  _refreshWorldToc();
 }
 
-// ── Groupe catégorie : en-tête + ses sections ─────────────────────────────────
-function _renderCategoryGroup(cat) {
+// ── Sommaire ──────────────────────────────────────────────────────────────────
+function _navCountLabel() {
+  const { visibleSections } = _worldVisibleData();
+  if (!_searchQuery) return `${visibleSections.length} entrée${visibleSections.length > 1 ? 's' : ''}`;
+  const n = visibleSections.filter(_matchesSearch).length;
+  return `${n} résultat${n > 1 ? 's' : ''}`;
+}
+
+function _renderNavList() {
+  const { visibleCats } = _worldVisibleData();
+  const collapsed = _collapsedCats();
+  const html = visibleCats.map(cat => _renderCategoryGroup(cat, collapsed)).join('');
+  if (html) return html;
+  return `<div class="world-empty-note">${_searchQuery ? `Aucun résultat pour « ${_esc(_searchQuery)} ».` : 'Aucune catégorie'}</div>`;
+}
+
+// ── Groupe catégorie : en-tête repliable + ses sections ──────────────────────
+function _renderCategoryGroup(cat, collapsed) {
   const isHidden = cat.visible === false;
   const secs = STORE.sections.filter(s => s.categoryId === cat.id && (s.visible !== false || STATE.isAdmin));
-  return `<div class="world-cat-group${isHidden ? ' is-hidden' : ''}" data-cat-id="${_esc(cat.id)}">
+  const shown = _searchQuery ? secs.filter(_matchesSearch) : secs;
+  if (_searchQuery && !shown.length) return '';
+  // Pendant une recherche, tout est déplié pour montrer les résultats.
+  const isCollapsed = !_searchQuery && collapsed.has(cat.id);
+  return `<div class="world-cat-group${isHidden ? ' is-hidden' : ''}${isCollapsed ? ' is-collapsed' : ''}" data-cat-id="${_esc(cat.id)}">
     <div class="world-cat-head">
-      <span class="world-cat-icon">${_esc(cat.icone || '📁')}</span>
-      <span class="world-cat-name">${_esc(cat.nom || 'Catégorie')}</span>
-      <span class="world-cat-count">${secs.length}</span>
-      ${isHidden ? `<span class="world-hidden-dot" title="Masquée aux joueurs"></span>` : ''}
+      <button type="button" class="world-cat-toggle" data-action="toggleWorldCategory" data-id="${_esc(cat.id)}"
+        aria-expanded="${!isCollapsed}">
+        <span class="world-cat-chevron">${_svg(ICO.chevron, 12)}</span>
+        <span class="world-cat-icon">${_esc(cat.icone || '📁')}</span>
+        <span class="world-cat-name">${_esc(cat.nom || 'Catégorie')}</span>
+        ${isHidden ? _lockHtml() : ''}
+        <span class="world-cat-count">${shown.length}</span>
+      </button>
       ${STATE.isAdmin ? `
       <div class="world-cat-actions">
-        <button data-action="openWorldSectionModal" data-cat-id="${cat.id}" data-stop-propagation
-          class="world-mini-btn" title="Ajouter une section ici">+</button>
-        <button data-action="openWorldCategoryModal" data-id="${cat.id}" data-stop-propagation
-          class="world-mini-btn" title="Modifier la catégorie">✎</button>
-        <button data-action="deleteWorldCategory" data-id="${cat.id}" data-stop-propagation
-          class="world-mini-btn world-mini-btn--danger" title="Supprimer la catégorie">×</button>
+        <button type="button" data-action="openWorldSectionModal" data-cat-id="${_esc(cat.id)}" data-stop-propagation
+          class="world-mini-btn" title="Ajouter une section ici" aria-label="Ajouter une section ici">${_svg(ICO.plus, 12)}</button>
+        <button type="button" data-action="openWorldCategoryModal" data-id="${_esc(cat.id)}" data-stop-propagation
+          class="world-mini-btn" title="Modifier la catégorie" aria-label="Modifier la catégorie">${_svg(ICO.pencil, 12)}</button>
+        <button type="button" data-action="deleteWorldCategory" data-id="${_esc(cat.id)}" data-stop-propagation
+          class="world-mini-btn world-mini-btn--danger" title="Supprimer la catégorie" aria-label="Supprimer la catégorie">${_svg(ICO.trash, 12)}</button>
       </div>` : ''}
     </div>
     <div class="world-cat-sections">
-      ${secs.map(s => _renderNavItem(s)).join('')}
-      ${secs.length === 0 ? `<div class="world-cat-empty">${STATE.isAdmin ? 'Vide - ajoute une section' : '-'}</div>` : ''}
+      ${shown.map(s => _renderNavItem(s)).join('')}
+      ${shown.length === 0 ? `<div class="world-cat-empty">${STATE.isAdmin ? 'Vide — ajoute une section' : '—'}</div>` : ''}
     </div>
   </div>`;
 }
 
 // ── Nav item ──────────────────────────────────────────────────────────────────
+// <div> (et non <button>) : SortableJS ignore les glisser démarrés sur un bouton.
+// L'activation clavier est gérée par _bindNavKeyboard.
 function _renderNavItem(s) {
   const isActive = s.id === STORE.activeId;
   const isHidden = s.visible === false;
+  const snippet = _searchSnippet(s);
   return `<div
-    data-nav-id="${s.id}" data-sec-id="${s.id}"
-    data-action="selectWorldSection" data-id="${s.id}"
+    data-nav-id="${_esc(s.id)}" data-sec-id="${_esc(s.id)}"
+    data-action="selectWorldSection" data-id="${_esc(s.id)}" role="button" tabindex="0"${isActive ? ' aria-current="page"' : ''}
     class="world-nav-item${isActive ? ' is-active' : ''}${isHidden ? ' is-hidden' : ''}">
+    ${STATE.isAdmin && !_searchQuery ? `<span class="world-nav-grip">${GRIP}</span>` : ''}
     <span class="world-nav-icon">${_esc(s.icone || '📖')}</span>
-    <span class="world-nav-title">${_esc(s.titre || 'Section')}</span>
-    ${isHidden ? `<span class="world-hidden-dot" title="Masquée aux joueurs"></span>` : ''}
+    <span class="world-nav-text">
+      <span class="world-nav-title">${_esc(s.titre || 'Section')}</span>
+      ${snippet ? `<small class="world-nav-snippet">${_esc(snippet)}</small>` : ''}
+    </span>
+    ${isHidden ? _lockHtml() : ''}
     ${STATE.isAdmin ? `
     <div class="world-nav-actions">
-      <button data-action="openWorldSectionModal" data-id="${s.id}" data-stop-propagation
-        class="world-mini-btn" title="Modifier">✎</button>
-      <button data-action="deleteWorldSection" data-id="${s.id}" data-stop-propagation
-        class="world-mini-btn world-mini-btn--danger" title="Supprimer">×</button>
+      <button type="button" data-action="openWorldSectionModal" data-id="${_esc(s.id)}" data-stop-propagation
+        class="world-mini-btn" title="Réglages de la section" aria-label="Réglages de la section">${_svg(ICO.pencil, 12)}</button>
+      <button type="button" data-action="deleteWorldSection" data-id="${_esc(s.id)}" data-stop-propagation
+        class="world-mini-btn world-mini-btn--danger" title="Supprimer" aria-label="Supprimer la section">${_svg(ICO.trash, 12)}</button>
     </div>` : ''}
   </div>`;
+}
+
+function _bindNavKeyboard() {
+  document.getElementById('world-nav-list')?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const item = e.target.closest?.('.world-nav-item');
+    if (!item || e.target !== item) return;   // les boutons internes gèrent leur propre activation
+    e.preventDefault();
+    selectWorldSection(item.dataset.id);
+  });
+}
+
+// Barre mobile « où je suis » : replie le sommaire au-dessus du lecteur.
+function _renderMobileNavToggle(section) {
+  const { visibleSections } = _worldVisibleData();
+  const pos = section ? _sectionPosition(section, visibleSections) : null;
+  return `<span class="world-nav-mobile-icon">${_svg(ICO.list, 16)}</span>
+    <span class="world-nav-mobile-text">
+      <small>Sommaire${section ? ` · ${_esc(_worldCategoryFor(section)?.nom || 'Catégorie')}` : ''}</small>
+      <strong>${section ? `${_esc(section.icone || '📖')} ${_esc(section.titre || 'Section')}` : _navCountLabel()}</strong>
+    </span>
+    ${pos?.index ? `<span class="world-nav-mobile-pos">${pos.index}/${pos.total}</span>` : ''}
+    <span class="world-nav-mobile-chevron">${_svg(ICO.chevron, 16)}</span>`;
+}
+
+function _setMobileNavOpen(open) {
+  document.getElementById('world-nav-card')?.classList.toggle('is-open', open);
+  document.getElementById('world-nav-mobile')?.setAttribute('aria-expanded', String(open));
+}
+
+function toggleWorldNavMobile() {
+  _setMobileNavOpen(!document.getElementById('world-nav-card')?.classList.contains('is-open'));
+}
+
+function toggleWorldCategory(btn) {
+  const group = btn.closest('.world-cat-group');
+  if (!group) return;
+  const collapsed = !group.classList.contains('is-collapsed');
+  group.classList.toggle('is-collapsed', collapsed);
+  btn.setAttribute('aria-expanded', String(!collapsed));
+  _setCatCollapsed(group.dataset.catId, collapsed);
+}
+
+// Déplie la catégorie d'une section atteinte autrement que par le sommaire (Précédent / Suivant).
+function _expandCategoryOf(section) {
+  const group = document.querySelector(`.world-cat-group[data-cat-id="${CSS.escape(section.categoryId || '')}"]`);
+  if (!group?.classList.contains('is-collapsed')) return;
+  group.classList.remove('is-collapsed');
+  group.querySelector('.world-cat-toggle')?.setAttribute('aria-expanded', 'true');
+  _setCatCollapsed(section.categoryId, false);
+}
+
+// Recherche plein texte : ne re-rend que la liste (le champ garde le focus).
+function worldSearch(input) {
+  _searchQuery = String(input?.value || '').trim();
+  const list = document.getElementById('world-nav-list');
+  if (!list) return;
+  list.innerHTML = _renderNavList();
+  const count = document.getElementById('world-nav-count');
+  if (count) count.textContent = _navCountLabel();
+  if (STATE.isAdmin) _bindNavDrag();
+  if (_searchQuery) _setMobileNavOpen(true);
 }
 
 // ── Contenu d'une section ─────────────────────────────────────────────────────
@@ -312,39 +492,49 @@ function _renderSection(s, visibleSections = null) {
   const isHidden = s.visible === false;
   const cat = _worldCategoryFor(s);
   const sections = visibleSections || _worldVisibleData().visibleSections;
-  return `<article class="world-section-panel${isHidden ? ' is-hidden' : ''}">
+  const pos = _sectionPosition(s, sections);
+  const editing = _editingContentId === s.id;
+  const slides = _sectionContentMode(s) === 'slides';
+  const meta = _sectionMeta(s);
+  return `<article class="world-section-panel${isHidden ? ' is-hidden' : ''}${s.imageUrl ? ' has-cover' : ''}">
     ${s.imageUrl ? `
       <div class="world-section-cover">
-        <img src="${_esc(s.imageUrl)}" alt="${_esc(s.titre || '')}">
+        <img src="${_esc(s.imageUrl)}" alt="">
       </div>` : ''}
 
-    <header class="world-sec-head${s.imageUrl ? ' has-cover' : ''}">
+    <header class="world-sec-head">
       <div class="world-sec-headrow">
         <div class="world-section-titleblock">
-          <span class="world-section-crumb">${_esc(cat?.icone || '📁')} ${_esc(cat?.nom || 'Catégorie')}</span>
+          <div class="world-section-crumb">
+            <span class="world-crumb-chip">${_esc(cat?.icone || '📁')} ${_esc(cat?.nom || 'Catégorie')}</span>
+            ${pos.total > 1 ? `<span>Section ${pos.index} sur ${pos.total}</span>` : ''}
+          </div>
           <div class="world-section-titleline">
-            <span>${_esc(s.icone || '📖')}</span>
+            <span class="world-section-icon">${_esc(s.icone || '📖')}</span>
             <h1>${_esc(s.titre || 'Section')}</h1>
           </div>
-          ${isHidden ? `<span class="world-hidden-badge">🔒 Masquée aux joueurs</span>` : ''}
+          ${meta ? `<div class="world-section-meta">${_esc(meta)}</div>` : ''}
+          ${isHidden ? `<span class="world-hidden-badge">${_svg(ICO.lock, 12)} Masquée aux joueurs</span>` : ''}
         </div>
-        ${STATE.isAdmin && _editingContentId !== s.id ? `
+        ${STATE.isAdmin && !editing ? `
         <div class="world-section-actions">
-          <button data-action="worldEditContent" data-id="${s.id}"
-            class="btn btn-gold btn-sm">${_sectionContentMode(s) === 'slides' ? 'Modifier le diaporama' : 'Modifier le texte'}</button>
-          <button data-action="openWorldSectionModal" data-id="${s.id}"
-            class="btn btn-outline btn-sm">Réglages</button>
-          <button data-action="deleteWorldSection" data-id="${s.id}"
-            class="btn btn-outline btn-sm world-danger-btn">Supprimer</button>
+          <button type="button" data-action="worldEditContent" data-id="${_esc(s.id)}"
+            class="pill primary">${_svg(ICO.pencil, 13)} ${slides ? 'Modifier le diaporama' : 'Modifier le texte'}</button>
+          <button type="button" data-action="openWorldSectionModal" data-id="${_esc(s.id)}"
+            class="pill">${_svg(ICO.sliders, 13)} Réglages</button>
+          <button type="button" data-action="deleteWorldSection" data-id="${_esc(s.id)}"
+            class="pill world-pill-icon world-pill-danger" title="Supprimer la section" aria-label="Supprimer la section">${_svg(ICO.trash, 14)}</button>
         </div>` : ''}
       </div>
     </header>
 
-    <div class="world-sec-body">
+    ${!editing && !slides ? `<nav class="world-toc-chips" id="world-toc-chips" aria-label="Sur cette page" hidden></nav>` : ''}
+
+    <div class="world-sec-body${slides ? ' is-slides' : ''}">
       ${_renderSectionBody(s)}
     </div>
 
-    ${_editingContentId === s.id ? '' : _renderSectionCards(s, sections)}
+    ${editing ? '' : _renderSectionPager(s, sections)}
   </article>`;
 }
 
@@ -371,8 +561,8 @@ function _renderContentEditor(s) {
         minHeight: 360,
       })}
       <div class="world-content-editor-bar">
-        <button class="btn btn-outline btn-sm" data-action="worldCancelContent">Annuler</button>
-        <button class="btn btn-gold btn-sm" data-action="worldSaveContent" data-id="${s.id}">Enregistrer le texte</button>
+        <button type="button" class="pill" data-action="worldCancelContent">Annuler</button>
+        <button type="button" class="pill primary" data-action="worldSaveContent" data-id="${_esc(s.id)}">Enregistrer le texte</button>
       </div>
     </div>`;
   }
@@ -380,8 +570,8 @@ function _renderContentEditor(s) {
   return `<div class="world-content-editor">
     ${freePageEditorHtml({ id: `world-page-${s.id}`, page: deck })}
     <div class="world-content-editor-bar">
-      <button class="btn btn-outline btn-sm" data-action="worldCancelContent">Annuler</button>
-      <button class="btn btn-gold btn-sm" data-action="worldSaveContent" data-id="${s.id}">Enregistrer le contenu</button>
+      <button type="button" class="pill" data-action="worldCancelContent">Annuler</button>
+      <button type="button" class="pill primary" data-action="worldSaveContent" data-id="${_esc(s.id)}">Enregistrer le contenu</button>
     </div>
   </div>`;
 }
@@ -396,65 +586,123 @@ function _bindWorldContentEditor() {
   else bindFreePageEditor(host);
 }
 
-function _renderSectionCards(activeSection, visibleSections) {
-  const siblings = visibleSections
-    .filter(sec => sec.categoryId === activeSection.categoryId && sec.id !== activeSection.id)
-    .slice(0, 6);
-  if (!siblings.length) return '';
-  return `<section class="world-related">
-    <div class="world-related-head">
-      <span>Dans la même catégorie</span>
-      <strong>${_esc(_worldCategoryFor(activeSection)?.nom || 'Catégorie')}</strong>
-    </div>
-    <div class="world-related-grid">
-      ${siblings.map(sec => `
-        <button type="button" class="world-related-card" data-action="selectWorldSection" data-id="${sec.id}">
-          ${sec.imageUrl ? `<img src="${_esc(sec.imageUrl)}" alt="">` : `<span class="world-related-icon">${_esc(sec.icone || '📖')}</span>`}
-          <strong>${_esc(sec.titre || 'Section')}</strong>
-          <small>${_esc(_worldExcerpt(_sectionPlainSource(sec), 92) || 'Aucun contenu renseigné.')}</small>
-        </button>`).join('')}
-    </div>
-  </section>`;
+function _renderSectionPager(s, visibleSections) {
+  const ordered = _orderedSections(_worldVisibleData().visibleCats, visibleSections);
+  const i = ordered.findIndex(x => x.id === s.id);
+  if (i < 0) return '';
+  const link = (sec, dir) => `
+    <button type="button" class="world-pager-link is-${dir}" data-action="worldGoSection" data-id="${_esc(sec.id)}">
+      ${dir === 'prev' ? _svg(ICO.left, 18) : ''}
+      <span>
+        <small>${dir === 'prev' ? 'Précédent' : 'Suivant'}</small>
+        <strong>${_esc(sec.icone || '📖')} ${_esc(sec.titre || 'Section')}</strong>
+      </span>
+      ${dir === 'next' ? _svg(ICO.right, 18) : ''}
+    </button>`;
+  const prev = ordered[i - 1];
+  const next = ordered[i + 1];
+  if (!prev && !next) return '';
+  return `<nav class="world-pager" aria-label="Navigation entre sections">
+    ${prev ? link(prev, 'prev') : ''}${next ? link(next, 'next') : ''}
+  </nav>`;
 }
 
 function _renderEmpty() {
   return `<div class="world-empty-state">
     <div>📖</div>
     <p>
-      ${STATE.isAdmin ? 'Aucune section. Ajoutez du lore depuis le bouton +.' : 'Aucun contenu disponible pour l\'instant.'}
+      ${STATE.isAdmin ? 'Aucune section. Crée la première pour partager règles maison et univers.' : 'Aucun contenu disponible pour l\'instant.'}
     </p>
-    ${STATE.isAdmin ? `<button data-action="openWorldSectionModal" class="btn btn-gold btn-sm">+ Créer la première section</button>` : ''}
+    ${STATE.isAdmin ? `<button type="button" data-action="openWorldSectionModal" class="pill primary">${_svg(ICO.plus, 12)} Créer la première section</button>` : ''}
   </div>`;
 }
+
+// ── Plan « Sur cette page » (texte enrichi, ≥ 2 titres) ──────────────────────
+// Rail à droite sur grand écran, puces sous l'en-tête sinon (bascule en CSS).
+function _refreshWorldToc() {
+  _tocObserver?.disconnect();
+  _tocObserver = null;
+  const toc = document.getElementById('world-toc');
+  const chips = document.getElementById('world-toc-chips');
+  const content = document.querySelector('#world-main-content .world-section-content');
+  const heads = content ? [...content.querySelectorAll('h2, h3')].filter(h => h.textContent.trim()) : [];
+  const show = heads.length >= 2;
+  document.getElementById('world-layout')?.classList.toggle('has-toc', show);
+  if (toc) { toc.hidden = !show; if (!show) toc.innerHTML = ''; }
+  if (chips) chips.hidden = !show;
+  if (!show) return;
+
+  heads.forEach((h, i) => { h.id = `world-h-${i}`; });
+  const link = (h, cls) => `<button type="button" class="${cls}${h.tagName === 'H3' ? ' is-sub' : ''}"
+    data-action="worldScrollTo" data-id="${h.id}">${_esc(h.textContent.trim())}</button>`;
+  if (toc) toc.innerHTML = `
+    <span class="world-toc-label">Sur cette page</span>
+    <div class="world-toc-list">${heads.map(h => link(h, 'world-toc-link')).join('')}</div>
+    <button type="button" class="world-toc-top" data-action="worldScrollTo" data-id="world-main-content">${_svg(ICO.up, 12)} Haut de page</button>`;
+  // Puces : titres H2 seulement (les H3 alourdiraient la rangée), sauf s'il n'y en a aucun.
+  const chipHeads = heads.some(h => h.tagName === 'H2') ? heads.filter(h => h.tagName === 'H2') : heads;
+  if (chips) chips.innerHTML = chipHeads.map(h => link(h, 'world-toc-chip')).join('');
+
+  const setActive = (id) => document.querySelectorAll('.world-toc-link, .world-toc-chip')
+    .forEach(el => el.classList.toggle('is-active', el.dataset.id === id));
+  setActive(heads[0].id);
+  if (!('IntersectionObserver' in window)) return;
+  _tocObserver = new IntersectionObserver((entries) => {
+    const hit = entries.filter(e => e.isIntersecting)
+      .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+    if (hit) setActive(hit.target.id);
+  }, { rootMargin: '0px 0px -65% 0px' });
+  heads.forEach(h => _tocObserver.observe(h));
+}
+
+function worldScrollTo(id) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 // ── Sélection section ─────────────────────────────────────────────────────────
+function _renderReader(section) {
+  const main = document.getElementById('world-main-content');
+  if (!main || !section) return;
+  main.innerHTML = _renderSection(section);
+  _bindWorldContentEditor();
+  _refreshWorldToc();
+}
+
 function selectWorldSection(id) {
+  const section = STORE.sections.find(s => s.id === id);
+  if (!section) return;
   _editingContentId = null;   // naviguer quitte l'éditeur de contenu
   STORE.activeId = id;
   document.querySelectorAll('[data-nav-id]').forEach(el => {
-    el.classList.toggle('is-active', el.dataset.navId === id);
+    const on = el.dataset.navId === id;
+    el.classList.toggle('is-active', on);
+    if (on) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
   });
-  const section = STORE.sections.find(s => s.id === id);
-  const category = _worldCategoryFor(section);
-  const pageContext = document.querySelector('.world-page-brand small');
-  if (pageContext && category) pageContext.textContent = category.nom || 'Atlas de l’aventure';
-  const main = document.getElementById('world-main-content');
-  if (main && section) { main.innerHTML = _renderSection(section); _bindWorldContentEditor(); }
+  _expandCategoryOf(section);
+  const ctx = document.getElementById('world-page-context');
+  if (ctx) ctx.textContent = _worldCategoryFor(section)?.nom || 'Atlas de l’aventure';
+  const mobile = document.getElementById('world-nav-mobile');
+  if (mobile) mobile.innerHTML = _renderMobileNavToggle(section);
+  _setMobileNavOpen(false);
+  _renderReader(section);
+}
+
+// Précédent / Suivant : même sélection, puis retour en haut du lecteur.
+function worldGoSection(id) {
+  selectWorldSection(id);
+  worldScrollTo('world-main-content');
 }
 
 // ── Édition du contenu diapo d'une section (mode plein cadre dans le lecteur) ──
 function worldEditContent(id) {
   _editingContentId = id;
   STORE.activeId = id;
-  const section = STORE.sections.find(s => s.id === id);
-  const main = document.getElementById('world-main-content');
-  if (main && section) { main.innerHTML = _renderSection(section); _bindWorldContentEditor(); }
+  _renderReader(STORE.sections.find(s => s.id === id));
 }
 
 function worldCancelContent() {
   _editingContentId = null;
-  const section = STORE.sections.find(s => s.id === STORE.activeId);
-  const main = document.getElementById('world-main-content');
-  if (main && section) main.innerHTML = _renderSection(section);
+  _renderReader(STORE.sections.find(s => s.id === STORE.activeId));
 }
 
 async function worldSaveContent(id) {
@@ -500,7 +748,9 @@ async function worldSaveContent(id) {
 // permet de réordonner ET de déplacer une section d'une catégorie à l'autre.
 function _bindNavDrag() {
   _destroySortables();
-  if (!STATE.isAdmin) return;
+  // Pas de tri pendant une recherche : la liste filtrée ferait perdre l'ordre des
+  // sections masquées par le filtre (_onSectionsReordered relit le DOM).
+  if (!STATE.isAdmin || _searchQuery) return;
   document.querySelectorAll('.world-cat-sections').forEach(list => {
     _sortables.push(makeSortable(list, {
       ghostClass: 'world-drag-ghost',
@@ -847,6 +1097,11 @@ PAGES.world = renderWorld;
 registerActions({
   openWorldSectionModal:  (btn) => openWorldSectionModal(btn.dataset.id || undefined, btn.dataset.catId || undefined),
   selectWorldSection:     (btn) => selectWorldSection(btn.dataset.id),
+  worldGoSection:         (btn) => worldGoSection(btn.dataset.id),
+  worldScrollTo:          (btn) => worldScrollTo(btn.dataset.id),
+  worldSearch:            (input) => worldSearch(input),
+  toggleWorldCategory:    (btn) => toggleWorldCategory(btn),
+  toggleWorldNavMobile:   ()    => toggleWorldNavMobile(),
   deleteWorldSection:     (btn) => deleteWorldSection(btn.dataset.id),
   worldEditContent:       (btn) => worldEditContent(btn.dataset.id),
   worldCancelContent:     ()    => worldCancelContent(),
