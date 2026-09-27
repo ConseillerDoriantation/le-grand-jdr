@@ -849,7 +849,7 @@ match /adventures/{adventureId} {
              'attackedThisTurn', 'bonusActionThisTurn', 'reactionThisTurn',
              'pm', 'pmCombat', 'spellCooldowns'
            ]);
-    // Sorts de déplacement : un joueur peut pousser/attirer une cible
+    // Sorts de déplacement : un joueur peut pousser/attirer une cible (ou échanger sa place avec elle)
     // sans pouvoir modifier sa page, sa visibilité ou ses compteurs de tour.
     allow update: if inAdventure(adventureId)
       && request.resource.data.diff(resource.data)

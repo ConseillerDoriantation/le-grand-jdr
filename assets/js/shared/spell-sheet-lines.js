@@ -21,6 +21,7 @@ export const ACTION_RUNE = 'Déclenchement';
  * @property {Record<string,number>} counts    - { nomRune: nombre }
  * @property {string} [protMode]   - 'ca' | 'soin' | 'mana'  (défaut 'ca')
  * @property {string} [ampMode]    - 'zone' | 'deplacement'  (défaut 'zone')
+ * @property {boolean} [deplSwap] - déplacement Soi : échange de place autorisé
  * @property {string} [afflMode]   - 'dot' | 'etat' | 'laceration' (défaut 'dot')
  * @property {string} [enchMode]   - 'dmg' | 'etat'          (défaut 'etat')
  * @property {string} [zoneShape]  - 'rect' | 'cross' | 'cone' | 'ring' | 'line' (défaut 'rect')
@@ -151,6 +152,10 @@ export function computeSheetLines(state = {}) {
     if (isDepl)
       lines.push({ slot: 'zone', id: 'deplmode', sub: true, icon: deplMode === 'push' ? '💨' : deplMode === 'pull' ? '🧲' : '🏃',
         segment: { key: 'deplMode', cur: deplMode, hiddenId: 's-depl-mode', opts: [['self', 'Soi', '#22c38e'], ['push', 'Pousser', '#e8b84b'], ['pull', 'Attirer', '#4f8cff']] } });
+    // Soi : échange de place avec une créature à portée (opt-in explicite sur le sort).
+    if (isDepl && deplMode === 'self')
+      lines.push({ slot: 'zone', id: 'deplswap', sub: true, icon: '🔄',
+        segment: { key: 'deplSwap', cur: state.deplSwap ? 'swap' : 'off', opts: [['off', 'Non', '#9ca3af'], ['swap', 'Échange', '#e8b84b']] } });
     // Forme de zone : débloquée à partir de 2 Amplification (à 1 Amp c'est toujours
     // la ligne 1×3, choisir une forme n'aurait aucun effet).
     if (ampMode === 'zone' && (counts.Amplification || 0) >= 2)
@@ -186,6 +191,7 @@ const SEG_ACTION = {
   afflMode:  '_selectAfflictionMode',
   ampMode:   '_selectAmpMode',
   deplMode:  '_selectDeplMode',
+  deplSwap:  '_selectDeplSwap',
   zoneShape: '_selectZoneShape',
   actionMode:'_selectActionMode',
 };

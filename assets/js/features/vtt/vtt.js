@@ -2247,6 +2247,12 @@ function _buildShape(t) {
       return;
     }
 
+    // Déplacement "Soi" avec échange autorisé : clic sur un token doré = échange.
+    if (_selfCtx?.swapIds?.has(t.id)) {
+      _selfSwapWith(t.id);
+      return;
+    }
+
     // Mode visée "action d'abord" : l'action est déjà choisie, ce clic désigne la cible.
     if (_aimOpt && _aimSrcId) {
       if (t.id !== _aimSrcId && !_isAimTargetInRange(_aimSrcId, t.id, _aimOpt)) return;
@@ -3803,7 +3809,9 @@ function _vttSpellMods(s) {
     // Portée = 3N cases. Sous-mode dans s.deplacement.mode.
     // Avec Enchantement, l'Amplification BOOSTE l'effet (pas de déplacement) → désactivé.
     deplacement: (!isZoneElargie && nbEnch === 0 && s.ampMode === 'deplacement' && nbAmp > 0)
-      ? { mode: s.deplacement?.mode || 'self', cells: Math.max(1, 3 * nbAmp) }
+      ? { mode: s.deplacement?.mode || 'self', cells: Math.max(1, 3 * nbAmp),
+          // Échange de place (mode Soi uniquement, opt-in sur le sort).
+          swap: (s.deplacement?.mode || 'self') === 'self' && !!s.deplacement?.swap }
       : null,
     // Enchantement mode Dégâts : bonus dégâts sur les attaques d'arme de l'allié
     // Formule auto : (1+Puiss)d4 +2 — appliquée pendant la durée du sort
@@ -4189,12 +4197,30 @@ function _selfClear() {
   VS.layers.grid?.batchDraw();
 }
 
-function _startSelfMove(srcId, opt, cells) {
+// Échange lanceur↔cible : chacun doit tenir dans la grille à la place de l'autre
+// sans recouvrir un 3e token (ni l'autre, pour des tailles différentes).
+function _selfSwapFits(src, tgt) {
+  const { cols, rows } = VS.activePage;
+  const ds = _tokenDims(src), dt = _tokenDims(tgt);
+  const A = { c: tgt.col, r: tgt.row, ...ds };   // lanceur après échange
+  const B = { c: src.col, r: src.row, ...dt };   // cible après échange
+  const inGrid = b => b.c >= 0 && b.r >= 0 && b.c + b.w <= cols && b.r + b.h <= rows;
+  const ov = (a, b) => a.c < b.c + b.w && a.c + a.w > b.c && a.r < b.r + b.h && a.r + a.h > b.r;
+  if (!inGrid(A) || !inGrid(B) || ov(A, B)) return false;
+  return !Object.values(VS.tokens).some(e => {
+    const d = e?.data;
+    if (!d || d.id === src.id || d.id === tgt.id || d.pageId !== src.pageId) return false;
+    const O = { c: d.col, r: d.row, ..._tokenDims(d) };
+    return ov(A, O) || ov(B, O);
+  });
+}
+
+function _startSelfMove(srcId, opt, cells, swap = false) {
   _zoneClear(); _selfClear();
   _clearHL(); // retire les cases de déplacement classique pour éviter la confusion
   const src = VS.tokens[srcId]?.data; if (!src || !VS.layers.grid || !VS.activePage) return;
   const mv  = Math.max(1, cells || 1);
-  _selfCtx = { srcId, cells: mv, opt };
+  _selfCtx = { srcId, cells: mv, opt, swapIds: new Set() };
   const K = window.Konva;
   const dim = _tokenDims(src);
   const { cols, rows } = VS.activePage;
@@ -4213,9 +4239,50 @@ function _startSelfMove(srcId, opt, cells) {
     VS.layers.grid.add(rect);
     _selfCells.push(rect);
   }
+  // Échange de place : tokens dont la case d'origine est à portée → surlignés en or,
+  // le clic sur le token (calque au-dessus) est capté par handleTokenAction.
+  if (swap) Object.values(VS.tokens).forEach(e => {
+    const d = e?.data;
+    if (!d || d.id === src.id || d.pageId !== src.pageId) return;
+    const dist = Math.abs(d.col - src.col) + Math.abs(d.row - src.row);
+    if (dist < 1 || dist > mv || !_selfSwapFits(src, d)) return;
+    const od = _tokenDims(d);
+    const rect = new K.Rect({
+      x: d.col * CELL, y: d.row * CELL, width: od.w * CELL, height: od.h * CELL,
+      fill: 'rgba(232,184,75,0.30)', stroke: 'rgba(232,184,75,0.9)', strokeWidth: 2, listening: false,
+    });
+    VS.layers.grid.add(rect);
+    _selfCells.push(rect);
+    _selfCtx.swapIds.add(d.id);
+  });
   VS.layers.grid.batchDraw();
   _showSelfHud();
-  showNotif(`Clic sur une case (≤ ${mv} case${mv > 1 ? 's' : ''})`, 'info');
+  showNotif(`Clic sur une case (≤ ${mv} case${mv > 1 ? 's' : ''})${_selfCtx.swapIds.size ? ' ou sur un token doré pour échanger' : ''}`, 'info');
+}
+
+// Échange de place lanceur ↔ token cliqué (sort de déplacement Soi autorisé à échanger).
+async function _selfSwapWith(tgtId) {
+  if (!_selfCtx?.swapIds?.has(tgtId)) return;
+  const { srcId, opt } = _selfCtx;
+  const src = VS.tokens[srcId]?.data, tgt = VS.tokens[tgtId]?.data;
+  _selfClear();
+  if (!src || !tgt) return;
+  if (!_selfSwapFits(src, tgt)) { showNotif('Échange impossible (place occupée)', 'error'); return; }
+  if (!(await _vttSpendSpellPm(src, opt))) return;
+  const from = { col: src.col, row: src.row }, to = { col: tgt.col, row: tgt.row };
+  try {
+    const batch = writeBatch(db);
+    batch.update(_tokRef(srcId), to);
+    batch.update(_tokRef(tgtId), from);
+    await batch.commit();
+  } catch (err) {
+    console.error('[VTT] Échange de place refusé', err);
+    showNotif('Échange refusé par Firestore', 'error');
+    return;
+  }
+  const name = _live(src).displayName ?? src.name;
+  const tgtName = _live(tgt).displayName ?? tgt.name;
+  showNotif(`🔄 ${name} échange sa place avec ${tgtName} (${opt.label})`, 'success');
 }
 
 async function _selfMoveTo(col, row) {
@@ -4249,7 +4316,7 @@ function _showSelfHud() {
       <span>🏃 ${_esc(opt.label || 'Déplacement')}</span>
       <span class="vtt-mt-hud-count" style="color:#4f8cff;background:rgba(79,140,255,.12);border-color:rgba(79,140,255,.35)">↔ ${_selfCtx.cells} case${_selfCtx.cells > 1 ? 's' : ''} max</span>
     </div>
-    <div class="vtt-zone-hint">Clic sur une case bleue · <kbd>Échap</kbd> = annuler</div>
+    <div class="vtt-zone-hint">Clic sur une case${_selfCtx.swapIds?.size ? ' ou un token doré (échange)' : ''} · <kbd>Échap</kbd> = annuler</div>
     <div class="vtt-mt-hud-actions">
       <button class="vtt-mt-btn-cancel" data-vtt-fn="_selfMoveCancel">✕ Annuler</button>
     </div>`;
@@ -7140,7 +7207,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // Sort de déplacement (rune Amplification mode Déplacement) : soi / pousse / attire.
   if (opt.mods?.deplacement && opt.sortIdx !== undefined && !_mtPending) {
     const d = opt.mods.deplacement;
-    if (d.mode === 'self') _startSelfMove(srcId, opt, d.cells);
+    if (d.mode === 'self') _startSelfMove(srcId, opt, d.cells, !!d.swap);
     else                   _vttCastPushPull(srcId, tgtId, opt, d);
     return;
   }
