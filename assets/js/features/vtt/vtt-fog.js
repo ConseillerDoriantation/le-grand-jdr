@@ -62,6 +62,15 @@ const FOG_ALPHA_ADMIN = 0.48;     // le MJ distingue le fog tout en gardant la c
 const FOG_TOKEN_VISIBLE_ALPHA = 210; // évite de révéler un token dans l'extrême bord sombre du fondu
 const LIGHT_DEF_R = 5;              // rayon par défaut des sources (cases)
 
+// Lumières de sort (fournies par vtt.js) : { x, y, radius } en cases (centre).
+// S'ajoutent aux sources posées par le MJ, sans écrire dans la page.
+let _spellLightProvider = null;
+export function fogSetSpellLightProvider(fn) { _spellLightProvider = typeof fn === 'function' ? fn : null; }
+function _spellLightsFor(page, tokens) {
+  try { return (_spellLightProvider?.(page, tokens) || []).filter(l => Number(l?.radius) > 0); }
+  catch { return []; }
+}
+
 const EDIT_COLOR  = { wall:'#ef4444', door:'#fb923c', window:'#67e8f9', light:'#fbbf24', hide:'#1e293b', reveal:'#fde047' };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -226,7 +235,7 @@ function _buildFogCanvas(page, tokens, isAdmin = false) {
       ctx.restore();
     };
 
-    const lights = page.lightSources || [];
+    const lights = [...(page.lightSources || []), ..._spellLightsFor(page, tokens)];
 
     // Les sources posées éclairent réellement leur halo pour tous les joueurs.
     // Leur LOS propre respecte les murs et rejoint la vision partagée du groupe.
@@ -379,7 +388,10 @@ function _applyTokenVisibility(page, tokens, isAdmin) {
 /** Recalcule et affiche le fog immédiatement. */
 export function fogUpdate(page, tokens, isAdmin) {
   if (!_fogLayer || !page) return;
-  const geometryKey = fogGeometrySignature(page, tokens, !!isAdmin);
+  // Les lumières de sort bougent avec leur porteur ou apparaissent/disparaissent :
+  // elles font partie de la géométrie (sinon le masque ne se reconstruit pas).
+  const spellLightsKey = _spellLightsFor(page, tokens).map(l => `${l.x},${l.y},${l.radius}`).join(';');
+  const geometryKey = `${fogGeometrySignature(page, tokens, !!isAdmin)}|L${spellLightsKey}`;
 
   // Rien à dessiner si ni LOS ni ops manuelles → retire le fog persistant.
   const hasFogOps = (page.fogOps || []).length > 0;

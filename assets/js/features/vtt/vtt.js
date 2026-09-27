@@ -32,13 +32,13 @@ import {
   combinedTechniqueTargetCA, techniqueAllowedForAction, techniqueAreaIntersects, techniqueOutcomeMultiplier, techniqueTriggerApplies,
   weaponTechniqueDamageTerms,
 } from '../../shared/weapon-techniques.js';
-import { loadDamageTypes, getDamageTypeRules, getDamageTypeById } from '../../shared/damage-types.js';
+import { loadDamageTypes, getDamageTypeRules, getDamageTypeById, damageTypeEmitsLight } from '../../shared/damage-types.js';
 import { getAttackMissEffect } from '../../shared/damage-type-rules.js';
 import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nearestHostileDistance, normalizeCombatStyle, normalizeCombatStyles } from '../../shared/combat-styles.js';
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, getAfflictionMode, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm, getProtectionCAOverride, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
@@ -49,7 +49,7 @@ import { appliedDamageAmount } from '../../shared/stats-analysis.js';
 import { classifySpellStatKinds, shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
-  fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
+  fogInit, fogSetPgRef, fogSetSpellLightProvider, fogUpdate, fogUpdateSoon, fogRenderWalls,
   fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo, fogRedo, fogCanUndo, fogCanRedo,
 } from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal, setModalCloseGuard } from '../../shared/modal.js';
@@ -1333,6 +1333,7 @@ function _initCanvas(container) {
   VS.stage.add(backLayer, VS.layers.grid, VS.layers.draw, VS.layers.token, frontLayer);
   fogInit(VS.stage, VS.layers, CELL);
   fogSetPgRef(id => _pgRef(id));
+  fogSetSpellLightProvider(_vttSpellLights);
 
   // Transformers pour redimensionner les images (MJ uniquement)
   if (STATE.isAdmin) {
@@ -4392,6 +4393,101 @@ async function _selfMoveTo(col, row) {
   showNotif(`🏃 ${name} se déplace de ${dist} case${dist > 1 ? 's' : ''} (${opt.label})`, 'success');
 }
 
+// ══ Sorts Lumière ═══════════════════════════════════════════════════════════
+// Lumières actives fournies au brouillard : buffs « spell_light » portés par un
+// token (suivent ses déplacements) + zones de sort posées avec `lightRadius`.
+function _vttSpellLights(page, tokens) {
+  if (!page) return [];
+  const round = VS.session?.combat?.round ?? 0;
+  const alive = b => b.expiresAtRound == null || round === 0 || round <= b.expiresAtRound;
+  const out = [];
+  for (const entry of Object.values(tokens || {})) {
+    const t = entry?.data;
+    if (!t || t.pageId !== page.id) continue;
+    const radius = (t.buffs || []).reduce((m, b) => (b?.type === 'spell_light' && alive(b)) ? Math.max(m, Number(b.radius) || 0) : m, 0);
+    if (radius > 0) {
+      const d = _tokenDims(t);
+      out.push({ x: t.col + d.w / 2, y: t.row + d.h / 2, radius });
+    }
+  }
+  for (const entry of Object.values(_annotations)) {
+    const d = entry?.data;
+    if (d?.type !== 'spellzone' || !(Number(d.lightRadius) > 0) || d.pageId !== page.id) continue;
+    out.push({ x: d.x / CELL, y: d.y / CELL, radius: Number(d.lightRadius) });
+  }
+  return out;
+}
+
+// Lumière portée par le lanceur : buff « spell_light » (durée du sort, rompu avec
+// la concentration comme les autres effets liés au sort).
+async function _vttCastSelfLight(srcId, opt) {
+  const src = VS.tokens[srcId]?.data; if (!src) return;
+  if (!(await _vttSpendSpellPm(src, opt))) return;
+  await _vttStartSpellCooldown(src, opt);
+  const newBuff = { ..._buffShared(opt, srcId), type: 'spell_light', radius: opt.lightRadius || 3, icon: '💡' };
+  const previous = src.buffs || [];
+  const buffs = [...previous.filter(b => !(b.type === 'spell_light' && b.sortLabel === opt.label)), newBuff];
+  src.buffs = buffs;
+  _patchShape(srcId);
+  try {
+    await updateDoc(_tokRef(srcId), { buffs });
+  } catch (err) {
+    src.buffs = previous;
+    _patchShape(srcId);
+    console.error('[VTT] Lumière non appliquée', err);
+    showNotif('Lumière refusée par Firestore', 'error');
+    return;
+  }
+  await _vttApplyCasterConcentration(srcId, opt);
+  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+  showNotif(`💡 ${opt.label} : lumière de ${opt.lightRadius || 3} cases autour de ${_live(src).displayName ?? src.name}`, 'success');
+}
+
+// Lumière posée : choix d'une case à portée (réutilise le HUD/les cases du déplacement « soi »).
+function _startLightPlacement(srcId, opt) {
+  _zoneClear(); _selfClear();
+  _clearHL();
+  const src = VS.tokens[srcId]?.data; if (!src || !VS.layers.grid || !VS.activePage) return;
+  const range = Math.max(1, parseInt(opt.portee) || 1);
+  _selfCtx = { srcId, cells: range, opt, swapIds: new Set() };
+  const K = window.Konva;
+  const { cols, rows } = VS.activePage;
+  for (let dc = -range; dc <= range; dc++) for (let dr = -range; dr <= range; dr++) {
+    if (Math.abs(dc) + Math.abs(dr) > range) continue;
+    const c = src.col + dc, r = src.row + dr;
+    if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
+    const rect = new K.Rect({
+      x: c * CELL, y: r * CELL, width: CELL, height: CELL,
+      fill: 'rgba(249,215,28,0.22)', stroke: 'rgba(249,215,28,0.75)', strokeWidth: 1.5, listening: true,
+    });
+    const tc = c, tr = r;
+    rect.on('click', async e => { if (e.evt.button !== 0) return; e.cancelBubble = true; await _vttPlaceLight(tc, tr); });
+    rect.on('contextmenu', e => { e.evt.preventDefault(); });
+    VS.layers.grid.add(rect);
+    _selfCells.push(rect);
+  }
+  VS.layers.grid.batchDraw();
+  _showSelfHud();
+  showNotif(`💡 Clic sur une case pour poser la lumière (≤ ${range} case${range > 1 ? 's' : ''})`, 'info');
+}
+
+async function _vttPlaceLight(col, row) {
+  if (!_selfCtx) return;
+  const { srcId, opt } = _selfCtx;
+  const src = VS.tokens[srcId]?.data;
+  _selfClear();
+  if (!src) return;
+  if (!(await _vttSpendSpellPm(src, opt))) return;
+  await _vttStartSpellCooldown(src, opt);
+  const id = await _vttPlaceSpellZone(srcId, opt,
+    { x: (col + 0.5) * CELL, y: (row + 0.5) * CELL, wPx: CELL, hPx: CELL },
+    { lightRadius: opt.lightRadius || 3, casterId: srcId, sortLabel: opt.label || '' });
+  if (!id) { showNotif('Lumière non posée (Firestore)', 'error'); return; }
+  await _vttApplyCasterConcentration(srcId, opt);
+  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+  showNotif(`💡 ${opt.label} : lumière de ${opt.lightRadius || 3} cases posée`, 'success');
+}
+
 function _selfMoveCancel() { _selfClear(); showNotif('Déplacement annulé', 'info'); _vttReturnToActions(); }
 
 function _showSelfHud() {
@@ -4903,6 +4999,14 @@ export async function _vttBreakConcentrationEffects(casterId, cond) {
       await updateDoc(_tokRef(tok.id), updates).catch(() => {});
     }
   }
+
+  // Lumières posées par ce sort : s'éteignent avec la concentration.
+  for (const [annotId, entry] of Object.entries(_annotations)) {
+    const d = entry?.data;
+    if (d?.type !== 'spellzone' || !(Number(d.lightRadius) > 0)) continue;
+    if (d.casterId !== casterId || (d.sortLabel || '') !== label) continue;
+    await deleteDoc(_annotRef(annotId)).catch(() => {});
+  }
 }
 
 export async function _consumeLuckyReroll(tokenId, tokenData, currentD20, shouldUse = true) {
@@ -5045,6 +5149,19 @@ function _buildSpellOption(s, ctx) {
       isLuckyReroll: true,
       friendlyOnly: true,
       halfOnMiss: false };
+  }
+
+  // Sort Lumière (élément lumineux + Concentration, sans rune d'effet) : source de
+  // lumière portée par le lanceur ou posée à portée. L'Amplification règle le rayon
+  // (jamais une zone ni un déplacement).
+  if (isLightSpell(s, damageTypeEmitsLight(getDamageTypeById(VS.damageTypes, s.noyauTypeId)))) {
+    const lightRadius = lightSpellRadius(s);
+    const lightMode = s.lightMode === 'place' ? 'place' : 'self';
+    return { ...common, label, icon: '💡',
+      dice: `Lumière · rayon ${lightRadius}c · ${lightMode === 'place' ? 'posée' : 'sur soi'}`,
+      zoneW: 0, zoneH: 0, zoneShape: null, nbCibles: 1,
+      targetSelf: true,   // pas de cible à viser : lancé depuis le lanceur
+      isUtil: true, isLight: true, lightRadius, lightMode, halfOnMiss: false };
   }
 
   // Sort de déplacement (rune Amplification mode Déplacement) : aucun dégât, pas d'attaque.
@@ -7370,6 +7487,13 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // INTÉGRÉ à la modale d'attaque (sélecteur en haut), plus de modale séparée.
   // On laisse donc tomber jusqu'à la modale finale (élément par défaut résolu là).
 
+  // Sort Lumière : sur soi (buff lumineux) ou posé sur une case à portée.
+  if (opt.isLight && !_mtPending) {
+    if (opt.lightMode === 'place') _startLightPlacement(srcId, opt);
+    else _vttCastSelfLight(srcId, opt);
+    return;
+  }
+
   // Sort de déplacement (rune Amplification mode Déplacement) : soi / pousse / attire.
   if (opt.mods?.deplacement && opt.sortIdx !== undefined && !_mtPending) {
     const d = opt.mods.deplacement;
@@ -8249,7 +8373,7 @@ function _coneLayout(srcId, x, y, wPx, hPx, forcedDir) {
 // Pose une zone de sort PERSISTANTE (sort utilitaire) : un dessin partagé par
 // tous, qui disparaît après la durée du sort (défaut 2 tours). Réutilise la
 // collection d'annotations (rendu + sync gratuits). Renvoie l'id (pour l'undo).
-async function _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx }) {
+async function _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx }, extra = {}) {
   if (!VS.activePage) return null;
   const round = VS.session?.combat?.round ?? 0;
   const dur = opt.mods?.concentration ? 10 : (opt.sortDuree ?? 2);
@@ -8272,6 +8396,7 @@ async function _vttPlaceSpellZone(srcId, opt, { x, y, wPx, hPx }) {
     totalDuration: dur, startRound: round, expiresAtRound,
     pageId: VS.activePage.id,
     createdBy: STATE.user?.uid || null, createdAt: serverTimestamp(),
+    ...extra,
   };
   const id = 'z' + Date.now() + Math.random().toString(36).slice(2, 5);
   try { await setDoc(_annotRef(id), data); _pushDrawHistory(id); return id; }
@@ -11952,6 +12077,8 @@ function _initListeners() {
     // Réappliquer le transformer sur les shapes reconstruits
     if (_selectedAnnotIds.size > 0) _applyAnnotTransformer();
     VS.layers.draw?.batchDraw();
+    // Lumières de sort posées (zones avec lightRadius) → le brouillard les éclaire.
+    if (VS.activePage?.fogEnabled) fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
   };
 
   _rebindSceneSubscriptions = () => {

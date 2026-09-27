@@ -24,6 +24,22 @@ export function getProtectionRestoreMode(spell = {}) {
   return getProtectionModes(spell).find(mode => mode === 'soin' || mode === 'mana') || null;
 }
 
+// ── Lumière ──
+// Un sort éclaire si son élément émet de la lumière (réglage du type de dégâts,
+// Feu / Lumière par défaut), s'il porte Concentration et AUCUNE rune d'effet :
+// seules Amplification (rayon) et Durée l'accompagnent. Un sort de brûlure
+// (Feu + Concentration + Affliction…) reste donc un sort de brûlure.
+export const LIGHT_SPELL_RUNES = new Set(['Concentration', 'Amplification', 'Durée']);
+export function isLightSpell(spell = {}, elementEmitsLight = false) {
+  if (!elementEmitsLight || spell?.designMode === 'classic') return false;
+  const runes = spell?.runes || [];
+  return runes.includes('Concentration') && runes.every(r => LIGHT_SPELL_RUNES.has(r));
+}
+/** Rayon de la lumière en cases : 3 de base, +2 par Amplification. */
+export function lightSpellRadius(spell = {}) {
+  return 3 + 2 * runeCount(spell, 'Amplification');
+}
+
 // ── Affliction : mode effectif ──
 // « faiblesse » (dégâts ×2 de l'élément du sort) exige 2 runes Affliction ; en
 // dessous, le sort retombe sur le DoT par défaut (pas d'effet fantôme).

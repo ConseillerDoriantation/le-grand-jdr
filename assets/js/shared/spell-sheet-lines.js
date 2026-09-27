@@ -28,6 +28,8 @@ export const ACTION_RUNE = 'Déclenchement';
  * @property {string} [enchMode]   - 'dmg' | 'etat'          (défaut 'etat')
  * @property {string} [zoneShape]  - 'rect' | 'cross' | 'cone' | 'ring' | 'line' (défaut 'rect')
  * @property {string} [actionMode] - 'reaction' | 'action_bonus' (défaut 'reaction')
+ * @property {boolean} [isLight]   - sort Lumière (élément lumineux + Concentration, sans rune d'effet)
+ * @property {string} [lightMode]  - 'self' | 'place' (défaut 'self')
  */
 
 /**
@@ -169,7 +171,12 @@ export function computeSheetLines(state = {}) {
   }
 
   // 6 · Zone (Amplification = TAILLE, forme au choix) + Dispersion (= nombre de poses)
-  if (hasAmp && !hasEnchant) {
+  // Sort Lumière : l'Amplification règle le rayon → ligne dédiée à la place de la zone.
+  if (state.isLight) {
+    const lightMode = state.lightMode === 'place' ? 'place' : 'self';
+    lines.push({ slot: 'zone', id: 'light', icon: '💡',
+      segment: { key: 'lightMode', cur: lightMode, opts: [['self', 'Sur soi', '#f9d71c'], ['place', 'Posée', '#f59e0b']] } });
+  } else if (hasAmp && !hasEnchant) {
     lines.push({ slot: 'zone', id: 'amp', icon: ampMode === 'zone' ? '🌐' : '↔️',
       segment: { key: 'ampMode', cur: ampMode, hiddenId: 's-amp-mode', opts: [['zone', 'Zone', '#4f8cff'], ['deplacement', 'Dépl.', '#f59e42']] } });
     // Déplacement : sens du mouvement (soi / pousser / attirer) — sous-ligne dédiée.
@@ -226,6 +233,7 @@ const SEG_ACTION = {
   ampMode:   '_selectAmpMode',
   deplMode:  '_selectDeplMode',
   deplSwap:  '_selectDeplSwap',
+  lightMode: '_selectLightMode',
   zoneShape: '_selectZoneShape',
   actionMode:'_selectActionMode',
 };

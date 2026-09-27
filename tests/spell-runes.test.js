@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, getAfflictionMode, withElementWeaknesses, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
+import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, getAfflictionMode, withElementWeaknesses, isLightSpell, lightSpellRadius, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
 
 const sort = (runes = [], extra = {}) => ({ runes, ...extra });
 
@@ -135,4 +135,16 @@ test('Faiblesse d\'élément : ×2, annule une résistance, ne perce pas une imm
   assert.deepEqual(resist.faiblesses, [], 'résistance + faiblesse = dégâts normaux');
   const immune = withElementWeaknesses({ immunites: ['feu'] }, ['feu']);
   assert.deepEqual(immune.immunites, ['feu'], 'l\'immunité reste prioritaire');
+});
+
+test('Lumière : élément lumineux + Concentration, sans rune d\'effet', () => {
+  const light = sort(['Concentration', 'Amplification']);
+  assert.equal(isLightSpell(light, true), true);
+  assert.equal(isLightSpell(light, false), false, 'élément non lumineux');
+  assert.equal(isLightSpell(sort(['Amplification']), true), false, 'Concentration requise');
+  assert.equal(isLightSpell(sort(['Concentration', 'Affliction']), true), false, 'brûlure : reste un sort de brûlure');
+  assert.equal(isLightSpell(sort(['Concentration', 'Puissance']), true), false);
+  assert.equal(isLightSpell(sort(['Concentration', 'Durée']), true), true);
+  assert.equal(lightSpellRadius(sort(['Concentration'])), 3);
+  assert.equal(lightSpellRadius(light), 5);
 });

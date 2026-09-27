@@ -11,7 +11,8 @@ import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '.
 import { getProtectionCAOverride, getProtectionReductionStep, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
 import { ZONE_SHAPES, _zoneCount, _zoneDims, _zoneShapeUnlocked, _zoneCellCount } from '../../shared/spell-zones.js';
-import { calcSpellDuration, calcSpellTargets, getAfflictionMode, getProtectionModes, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { damageTypeEmitsLight } from '../../shared/damage-types.js';
+import { calcSpellDuration, calcSpellTargets, getAfflictionMode, isLightSpell, lightSpellRadius, getProtectionModes, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { spellSetCostDelta } from '../../shared/spell-system.js';
 import { calculateSummonStats, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
@@ -819,7 +820,15 @@ export { ZONE_SHAPES, _zoneCount, _zoneDims, _zoneShapeUnlocked, _zoneCellCount 
  *      Defaut combo Amp + Disp = 3 × 3
  *  - Source: 'manual' | 'runes' | null
  */
+/** Sort Lumière : élément lumineux + Concentration, sans rune d'effet (cf. spell-runes). */
+export function _isLightSpell(s) {
+  const type = (_damageTypesCache || []).find(t => t.id === s?.noyauTypeId);
+  return isLightSpell(s, damageTypeEmitsLight(type));
+}
+
 export function _calcSortZone(s) {
+  // Sort Lumière : l'Amplification règle le rayon de la lumière, pas une zone.
+  if (_isLightSpell(s)) return null;
   // En mode déplacement, l'Amplification produit un déplacement, pas une zone.
   if (s.ampMode === 'deplacement') return null;
   const runes  = s.runes || [];
@@ -854,6 +863,7 @@ export function _calcSortZone(s) {
  *  Fallback legacy : ancien déplacement autonome { mode, distance } sans ampMode.
  */
 export function _calcSortDeplacement(s) {
+  if (_isLightSpell(s)) return null;   // sort Lumière : l'Amplification règle le rayon
   if (s.ampMode === 'deplacement') {
     const nbAmp = (s.runes || []).filter(r => r === 'Amplification').length;
     if (nbAmp < 1) return null;
@@ -1159,6 +1169,12 @@ export function _buildSortResume(s, c) {
       ? '1 rune Dispersion · cibles différentes uniquement'
       : `${nbDisp} runes Dispersion · cibles différentes`;
     lines.push({ icon:'🎯', label:`${nbCibles} cibles différentes`, detail: dispDetail });
+  }
+
+  // Lumière (élément lumineux + Concentration) : source portée ou posée.
+  if (_isLightSpell(s)) {
+    lines.push({ icon:'💡', label:`Lumière · rayon ${lightSpellRadius(s)} cases`,
+      detail: `${s.lightMode === 'place' ? 'Source posée à portée' : 'Portée par le lanceur'} · tant que la concentration tient` });
   }
 
   // Zone (Amplification ou manuelle)

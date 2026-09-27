@@ -17,9 +17,9 @@ import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { resolveSpellModifierStat, usesSpellMastery, getAfflictionMode, getProtectionModes, getProtectionRestoreMode, protectionSplitAllowed, isProtectionMultiMode, protectionRunesFor } from '../../shared/spell-runes.js';
+import { resolveSpellModifierStat, usesSpellMastery, lightSpellRadius, getAfflictionMode, getProtectionModes, getProtectionRestoreMode, protectionSplitAllowed, isProtectionMultiMode, protectionRunesFor } from '../../shared/spell-runes.js';
 import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationSelection, normalizeInvocationStats } from '../../shared/invocation-stats.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _calcSortReduction, _autoSourceReduction, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _isLightSpell, _calcSortReduction, _autoSourceReduction, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
 import { computeSheetLines, renderSheetLines } from '../../shared/spell-sheet-lines.js';
 import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 
@@ -40,6 +40,8 @@ function _sortSheetState(s) {
     ampMode:    s?.ampMode || 'zone',
     deplMode:   _deplModeEdit || s?.deplacement?.mode || 'self',
     deplSwap:   _deplSwapEdit,
+    isLight:    _isLightSpell(s || {}),
+    lightMode:  _lightModeEdit,
     afflMode:   getAfflictionMode(s || {}),
     enchMode:   s?.enchantMode || 'etat',
     zoneShape:  _zoneShapeEdit || 'rect',
@@ -164,6 +166,13 @@ function buildLineCtx(lines, s, c) {
         ctx.deplmode = { value: info[0], text: true, source: `1 à ${_ampLength(counts.Amplification || 1)} cases`, color: info[1] };
         break;
       }
+      case 'light': {
+        const place = _lightModeEdit === 'place';
+        ctx.light = { value: `Lumière · rayon ${lightSpellRadius(s || {})} cases`, text: true,
+          source: `${place ? 'Posée sur une case à portée' : 'Portée par le lanceur'} · tant que la concentration tient · +2 cases / Amplification`,
+          color: '#f9d71c' };
+        break;
+      }
       case 'deplswap': {
         ctx.deplswap = _deplSwapEdit
           ? { value: 'Échange de place autorisé', text: true, source: 'Clic sur une créature à portée : le lanceur et elle permutent', color: '#e8b84b' }
@@ -239,7 +248,8 @@ let _sortAllowedNoyauIds = null;
 let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] = primaire (compat soin/suggestions/VTT).
 let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
-let _deplSwapEdit = false;   // déplacement Soi : échange de place lanceur ↔ cible autorisé
+let _deplSwapEdit = false;
+let _lightModeEdit = 'self'; // sort Lumière : 'self' (portée par le lanceur) | 'place' (posée à portée)   // déplacement Soi : échange de place lanceur ↔ cible autorisé
 let _actionModeEdit = 'reaction';
 let _protModesEdit = [];   // mode de chaque rune Protection (multi-modes) — [0] = _protModeEdit
 let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin'|'mana') — source fiable (≠ DOM périmé)
@@ -1963,6 +1973,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff', lbl:'Nombre de cibles', dim:true });
   const zone  = _calcSortZone(s);
   if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff', lbl:'Zone d\'effet (cases)', dim:true });
+  if (_isLightSpell(s)) chips.push({ icon:'💡', val:`${lightSpellRadius(s)}c`, color:'#f9d71c', lbl: s.lightMode === 'place' ? 'Source de lumière posée à portée' : 'Lumière portée par le lanceur', dim:true });
   const depl  = _calcSortDeplacement(s);
   if (depl) {
     const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
@@ -3280,6 +3291,7 @@ export async function openSortModal(idx, s) {
   _sortTypesEdit  = new Set(typesInit);
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
   _deplSwapEdit   = !!s?.deplacement?.swap;
+  _lightModeEdit  = s?.lightMode === 'place' ? 'place' : 'self';
   _invImageEdit   = s?.invocation?.image || '';
   _invOriginal    = (s?.invocation && typeof s.invocation === 'object') ? s.invocation : null;
 
@@ -4788,6 +4800,11 @@ function _deplPayload(mode) {
   return mode === 'self' && _deplSwapEdit ? { mode, swap: true } : { mode };
 }
 
+function _selectLightMode(val) {
+  _lightModeEdit = val === 'place' ? 'place' : 'self';
+  _updateSortPreview();
+}
+
 function _selectDeplSwap(val) {
   _deplSwapEdit = val === 'swap';
   _updateSortPreview();
@@ -5471,6 +5488,7 @@ function _buildSortFromDOM() {
     zoneH: null,
     dureeBase: dureeBase >= 2 ? dureeBase : null,
     deplacement: _deplPayload(deplMode),
+    lightMode: _lightModeEdit === 'place' ? 'place' : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
     // Portée + stats overrides : doivent être lus du DOM pour que la preview live
@@ -6017,6 +6035,7 @@ export async function saveSort(idx, btn = null) {
       zoneH: null,
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
       deplacement: _deplPayload(deplMode),
+    lightMode: _lightModeEdit === 'place' ? 'place' : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
       // Portée override : 0 ou vide = utilise la portée de l'arme par défaut (côté VTT)
@@ -6170,6 +6189,7 @@ function _buildSortFromForm(idx, prevList = []) {
     zoneW: null, zoneH: null,
     dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
     deplacement: _deplPayload(deplMode),
+    lightMode: _lightModeEdit === 'place' ? 'place' : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
     portee:     (() => {
@@ -6290,6 +6310,7 @@ registerActions({
   _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val),
   _selectProtModeAt:      (btn) => _selectProtModeAt(btn.dataset.val),
   _selectDeplSwap:        (btn) => _selectDeplSwap(btn.dataset.val),
+  _selectLightMode:       (btn) => _selectLightMode(btn.dataset.val),
   _selectActionMode:      (btn) => _selectActionMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
   _selectAmpMode:         (btn) => _selectAmpMode(btn.dataset.val),

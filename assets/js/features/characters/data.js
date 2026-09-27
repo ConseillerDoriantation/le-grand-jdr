@@ -3,7 +3,7 @@ import { registerActions } from '../../core/actions.js';
 import { openModal, closeModal, closeModalDirect, confirmModal, setModalCloseGuard } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { loadWeaponFormats, saveWeaponFormats, normalizeWeaponTechnique } from '../../shared/weapon-formats.js';
-import { loadDamageTypes, saveDamageTypes } from '../../shared/damage-types.js';
+import { loadDamageTypes, saveDamageTypes, damageTypeEmitsLight } from '../../shared/damage-types.js';
 import { CONDITION_DEFAULT_LIBRARY, loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
@@ -762,6 +762,17 @@ function _renderDamageTypesModal(types) {
             <span class="dt-magic-txt">
               <b>🔮 Élément magique</b>
               <small>Réservé aux personnages qui le connaissent · dégâts via maîtrise + stat magique.</small>
+            </span>
+          </label>
+          <label class="dt-magic">
+            <span class="dt-switch">
+              <input type="checkbox" ${damageTypeEmitsLight(t) ? 'checked' : ''}
+                data-change="_saveDmgTypeProp" data-i="${i}" data-prop="emitsLight" data-vtype="bool">
+              <span class="dt-switch-track"><span class="dt-switch-thumb"></span></span>
+            </span>
+            <span class="dt-magic-txt">
+              <b>💡 Émet de la lumière</b>
+              <small>Un sort de cet élément avec Concentration (sans rune d’effet) crée une source de lumière.</small>
             </span>
           </label>
         </div>
