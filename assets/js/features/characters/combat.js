@@ -284,6 +284,29 @@ export function renderCharEquip(c, canEdit) {
   return html;
 }
 
+/** Définit (ou retire) l'élément favori du perso : élément par défaut au VTT.
+ *  Ouvert au joueur (fiche éditable), limité aux éléments maîtrisés. */
+export async function setFavoriteElement(charId, elemId) {
+  const c = STATE.activeChar;
+  if (!c || c.id !== charId || !(c.elements || []).includes(elemId)) return;
+  const prev = c.favoriteElement || null;
+  const next = prev === elemId ? null : elemId;
+  const rerender = () => {
+    if (charSession.getCurrentChar()?.id === c.id) charSession.set(c, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+    if (charSession.getCurrentCharTab() === 'combat') charSession.renderTab('combat', c, charSession.getCanEditChar());
+  };
+  c.favoriteElement = next;
+  rerender();
+  try {
+    await updateInCol('characters', charId, { favoriteElement: next });
+    showNotif(next ? 'Élément favori enregistré.' : 'Élément favori retiré.', 'success');
+  } catch {
+    c.favoriteElement = prev;
+    rerender();
+    showNotif('Impossible d’enregistrer le favori.', 'error');
+  }
+}
+
 /** Active ou désactive un élément sur un personnage. */
 export async function toggleCharElement(charId, elemId) {
   if (!STATE.isAdmin) { showNotif('Seul le MJ peut modifier les noyaux accessibles.', 'error'); return; }

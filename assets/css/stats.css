@@ -742,6 +742,7 @@ body .modal:has(.stats-mng) {
   padding: .45rem .6rem; border-radius: 9px;
   background: var(--bg-card); border: 1px solid var(--border);
 }
+.stats-mng-row.is-busy { opacity: .45; pointer-events: none; transition: opacity .15s; }
 .stats-mng-row.is-pending {
   border-color: rgba(245,158,11,.28);
   background: color-mix(in srgb, #f59e0b 6%, var(--bg-card));
