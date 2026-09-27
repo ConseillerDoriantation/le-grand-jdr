@@ -10,6 +10,7 @@ import {
   mergeTrackedCombatStats,
   mergeTrackedSkillStats,
   mergeVttRollDetails,
+  patchStatsRollupScopes,
   normalizeSkillStats,
   statsAverage,
   topStatTies,
@@ -658,4 +659,41 @@ test('un même identifiant d action tactique erroné est corrigé une seule fois
   ]);
 
   assert.equal(details.byCharacter.mage.combat.tacticalOvercounts, 1);
+});
+
+test('patchStatsRollupScopes : supprime des séances et recalcule la campagne par fusion', () => {
+  const scopes = {
+    '*': { byCharacter: { a: { combat: { attackActions: 99 } } }, relevantLogs: 99 },
+    s1: { byCharacter: { a: { combat: { attackActions: 2, biggestHit: 7 } } }, relevantLogs: 2 },
+    s2: { byCharacter: { a: { combat: { attackActions: 3, biggestHit: 5 } }, b: { combat: { attackActions: 1 } } }, relevantLogs: 4 },
+  };
+  const next = patchStatsRollupScopes(scopes, { removeSessions: ['s1'] });
+  assert.equal(next.s1, undefined);
+  assert.equal(next['*'].byCharacter.a.combat.attackActions, 3);
+  assert.equal(next['*'].byCharacter.a.combat.biggestHit, 5);
+  assert.equal(next['*'].relevantLogs, 4);
+  assert.equal(scopes.s1.relevantLogs, 2, 'entrée non modifiée');
+});
+
+test('patchStatsRollupScopes : retire un personnage (partout ou sur une séance)', () => {
+  const scopes = {
+    s1: { byCharacter: { a: { combat: { attackActions: 2 } }, b: { combat: { attackActions: 1 } } } },
+    s2: { byCharacter: { a: { combat: { attackActions: 3 } } } },
+  };
+  const all = patchStatsRollupScopes(scopes, { removeCharacter: 'a' });
+  assert.equal(all['*'].byCharacter.a, undefined);
+  assert.equal(all['*'].byCharacter.b.combat.attackActions, 1);
+  const one = patchStatsRollupScopes(scopes, { removeCharacterSession: { charId: 'a', key: 's1' } });
+  assert.equal(one['*'].byCharacter.a.combat.attackActions, 3);
+});
+
+test('patchStatsRollupScopes : correction manuelle de dégâts', () => {
+  const scopes = { s1: { byCharacter: { a: { combat: {
+    receivedOvercounts: { dmgTaken: 4 }, dealtOvercounts: { dmgDealt: 2 },
+  } } } } };
+  const next = patchStatsRollupScopes(scopes, { manualCorrection: { charId: 'a', key: 's1', taken: true, dealt: true } });
+  const combat = next.s1.byCharacter.a.combat;
+  assert.equal(combat.receivedOvercounts, undefined);
+  assert.equal(combat.dealtOvercounts, undefined);
+  assert.equal(combat.manualDamageDealt, true);
 });
