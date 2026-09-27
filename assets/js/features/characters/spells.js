@@ -135,7 +135,7 @@ function buildLineCtx(lines, s, c) {
         break;
       }
       case 'shape': {
-        const SHP_DESC = { rect: 'Carré — zone pleine', cross: 'Croix — bras longs, sans diagonales', cone: 'Cône — depuis le lanceur, rien derrière', ring: 'Anneau — couronne, centre épargné' };
+        const SHP_DESC = { rect: 'Carré — zone pleine', cross: 'Croix — diagonales (✕), bras longs', cone: 'Cône — depuis le lanceur, rien derrière', ring: 'Anneau — couronne, centre épargné' };
         const SHP_COL  = { rect: '#4f8cff', cross: '#a855f7', cone: '#f59e42', ring: '#22c38e' };
         const shp = ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect';
         ctx.shape = { value: SHP_DESC[shp], text: true, source: 'Forme de la zone', color: SHP_COL[shp] };
@@ -3054,7 +3054,7 @@ async function _openClassicSortModal(idx, s, allTypes) {
                 <div id="s-classic-zone-fields" class="classic-spell-zone classic-spell-span-2">
                   <label><span>Largeur</span><input type="number" id="s-classic-zone-w" class="input-field" min="1" max="50" value="${parseInt(s?.zoneW) || 3}"></label>
                   <label><span>Hauteur</span><input type="number" id="s-classic-zone-h" class="input-field" min="1" max="50" value="${parseInt(s?.zoneH) || 3}"></label>
-                  <label><span>Forme</span><select id="s-classic-zone-shape" class="input-field">${_classicSelectOptions([['rect','Rectangle / carré'],['cross','Croix'],['diamond','Cercle sur la grille']], s?.zoneShape || 'rect')}</select></label>
+                  <label><span>Forme</span><select id="s-classic-zone-shape" class="input-field">${_classicSelectOptions([['rect','Rectangle / carré'],['cross','Croix diagonale (✕)'],['diamond','Cercle sur la grille']], s?.zoneShape || 'rect')}</select></label>
                 </div>
               </div>
             </section>
@@ -3615,14 +3615,14 @@ export async function openSortModal(idx, s) {
           📐 <b>Amplification = TAILLE</b> d'une zone · <b>Dispersion = NOMBRE de poses</b> (chaque zone applique l'effet plein). La forme se choisit à partir de <b>2 Amplifications</b>.
         </div>
         <div id="s-amp-shape-row" class="form-group" style="${nbAmp >= 2?'':'display:none'}">
-          <label style="font-size:.72rem">✚ Forme de zone</label>
+          <label style="font-size:.72rem">📐 Forme de zone</label>
           <div style="font-size:.66rem;color:var(--text-dim);padding:0 .1rem .25rem;line-height:1.4">
-            <b>Carré</b> = plus de cases (diagonales). <b>Croix</b> = bras longs sans diagonales. <b>Cône</b> = éventail depuis le lanceur. <b>Anneau</b> = couronne (centre épargné). <b>Ligne</b> = rayon droit large de 1 (portée max, +2 cases/Amp).
+            <b>Carré</b> = zone pleine, le plus de cases. <b>Croix</b> = diagonales (✕), bras longs. <b>Cône</b> = éventail depuis le lanceur. <b>Anneau</b> = couronne (centre épargné). <b>Ligne</b> = rayon droit large de 1 (portée max, +2 cases/Amp).
           </div>
           <div style="display:flex;gap:.4rem;flex-wrap:wrap">
             ${[
               { v:'rect',  label:'▭ Carré',  color:'#4f8cff' },
-              { v:'cross', label:'✚ Croix',  color:'#a855f7' },
+              { v:'cross', label:'✕ Croix',  color:'#a855f7' },
               { v:'cone',  label:'🔺 Cône',   color:'#f59e42' },
               { v:'ring',  label:'◯ Anneau', color:'#22c38e' },
               { v:'line',  label:'▬ Ligne',  color:'#e8b84b' },

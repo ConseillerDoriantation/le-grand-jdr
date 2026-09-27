@@ -159,8 +159,8 @@ export function computeSheetLines(state = {}) {
     // Forme de zone : débloquée à partir de 2 Amplification (à 1 Amp c'est toujours
     // la ligne 1×3, choisir une forme n'aurait aucun effet).
     if (ampMode === 'zone' && (counts.Amplification || 0) >= 2)
-      lines.push({ slot: 'zone', id: 'shape', sub: true, icon: zoneShape === 'cross' ? '✚' : zoneShape === 'cone' ? '🔺' : zoneShape === 'ring' ? '◯' : zoneShape === 'line' ? '▬' : '▭',
-        segment: { key: 'zoneShape', cur: zoneShape, hiddenId: 's-zone-shape', opts: [['rect', '▭', '#4f8cff'], ['cross', '✚', '#a855f7'], ['cone', '🔺', '#f59e42'], ['ring', '◯', '#22c38e'], ['line', '▬', '#e8b84b']] } });
+      lines.push({ slot: 'zone', id: 'shape', sub: true, icon: zoneShape === 'cross' ? '✕' : zoneShape === 'cone' ? '🔺' : zoneShape === 'ring' ? '◯' : zoneShape === 'line' ? '▬' : '▭',
+        segment: { key: 'zoneShape', cur: zoneShape, hiddenId: 's-zone-shape', opts: [['rect', '▭', '#4f8cff'], ['cross', '✕', '#a855f7'], ['cone', '🔺', '#f59e42'], ['ring', '◯', '#22c38e'], ['line', '▬', '#e8b84b']] } });
   }
   // Dispersion : répète l'effet (1 + nDisp). Avec Amp → N zones ; seule → N cibles.
   if (has('Dispersion') && !isRegen)

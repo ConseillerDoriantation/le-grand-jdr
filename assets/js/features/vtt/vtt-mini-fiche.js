@@ -958,8 +958,8 @@ function _vttSpellChips(s, c) {
   const nbAmp = runes.filter(r => r === 'Amplification').length;
   // Avec Enchantement (hors Invocation), l'Amplification booste l'effet → pas de zone.
   const _enchNoZone = runes.includes('Enchantement') && !runes.includes('Invocation');
-  const _zoneIcon = (shp) => shp === 'cross' ? '✚' : shp === 'cone' ? '🔺' : shp === 'ring' ? '◯' : shp === 'line' ? '▬' : shp === 'diamond' ? '◇' : '📐';
-  const _zoneLbl  = (shp) => shp === 'cross' ? 'Zone en croix' : shp === 'cone' ? 'Zone en cône' : shp === 'ring' ? 'Zone en anneau' : shp === 'line' ? 'Zone en ligne' : shp === 'diamond' ? 'Zone circulaire sur la grille' : 'Zone rectangulaire';
+  const _zoneIcon = (shp) => shp === 'cross' ? '✕' : shp === 'cone' ? '🔺' : shp === 'ring' ? '◯' : shp === 'line' ? '▬' : shp === 'diamond' ? '◇' : '📐';
+  const _zoneLbl  = (shp) => shp === 'cross' ? 'Zone en croix diagonale' : shp === 'cone' ? 'Zone en cône' : shp === 'ring' ? 'Zone en anneau' : shp === 'line' ? 'Zone en ligne' : shp === 'diamond' ? 'Zone circulaire sur la grille' : 'Zone rectangulaire';
   if (isClassic && (parseInt(s.zoneW) || 0) > 0 && (parseInt(s.zoneH) || 0) > 0) {
     chips.push({ icon:_zoneIcon(s.zoneShape), val:`${parseInt(s.zoneW)}×${parseInt(s.zoneH)} cases`, color:'#b47fff', lbl:_zoneLbl(s.zoneShape), dim:true });
   } else if (nbAmp > 0 && s.ampMode !== 'deplacement' && !_enchNoZone) {

@@ -30,8 +30,9 @@ export function _zoneShapeUnlocked(nbAmp) { return (parseInt(nbAmp) || 0) >= 2; 
  * Dimensions (bounding-box) d'UNE zone selon la forme, pilotées par Amplification.
  * À 1 Amp, toute forme = la ligne de base 3×1 (le choix de forme se débloque à ≥2).
  *  - rect  (Carré pur) : 2→3×3, 3→5×5, 4→7×7 (2N−1)².
- *  - cross (Croix)     : plus symétrique d'envergure 2N+1 (2→5, 3→7), bras larges de 1 ;
- *                        même budget de cases que le carré au palier 2, mais +1 de portée.
+ *  - cross (Croix)     : croix DIAGONALE (✕) d'envergure 2N+1 (2→5, 3→7), 4N+1 cases ;
+ *                        même budget de cases que le carré au palier 2. En diagonale, elle
+ *                        ne recouvre jamais la Ligne (orthogonale) → vrai choix de forme.
  *  - cone  (Cône)      : depuis le lanceur, profondeur N+1, base 2·prof−1 (2→prof 3, base 5).
  *  - ring  (Anneau)    : couronne de rayon N (centre épargné), envergure 2N+1 (2→rayon 2, 5×5).
  *  - line  (Ligne)     : rayon droit large de 1 ; +2 cases par Amplification → longueur 2N+1
@@ -46,14 +47,14 @@ export function _zoneShapeUnlocked(nbAmp) { return (parseInt(nbAmp) || 0) >= 2; 
  * d'ouverture du cône ('down' par défaut : apex en haut). Les cases se comptent en
  * ENTIER → aucune ambiguïté sur la grille.
  *  - rect  : toute la boîte.
- *  - cross : la colonne et la ligne centrales (un +).
+ *  - cross : les deux diagonales passant par le centre (un ✕).
  *  - ring  : la couronne en losange (distance de Manhattan = rayon) → centre épargné.
  *  - cone  : apex à un bord, +1 case de large par rang (1, 3, 5, …).
  */
 export function _cellInShape(shape, ci, ri, cols, rows, dir = 'down') {
   const cc = (cols - 1) / 2, rc = (rows - 1) / 2;
   switch (shape) {
-    case 'cross':   return ci === cc || ri === rc;
+    case 'cross':   return Math.abs(ci - cc) === Math.abs(ri - rc);   // ✕ diagonal
     case 'ring':    return (Math.abs(ci - cc) + Math.abs(ri - rc)) === Math.max(cc, rc);
     case 'diamond': return (Math.abs(ci - cc) + Math.abs(ri - rc)) <= Math.max(cc, rc);   // losange plein (override MJ)
     case 'cone':

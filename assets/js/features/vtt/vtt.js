@@ -5981,7 +5981,7 @@ function _vttSpellPills(o, { includeTraits = true } = {}) {
   if (targetSelf) {
     pills.push(_vttAoptPill('targets self', `🧍 Sur soi`));
   } else if (o.zoneW > 0 || o.zoneH > 0) {
-    const zoneIcon = o.zoneShape === 'cross' ? '✚' : o.zoneShape === 'cone' ? '🔺' : o.zoneShape === 'ring' ? '◯' : o.zoneShape === 'line' ? '▬' : o.zoneShape === 'diamond' ? '◇' : '📐';
+    const zoneIcon = o.zoneShape === 'cross' ? '✕' : o.zoneShape === 'cone' ? '🔺' : o.zoneShape === 'ring' ? '◯' : o.zoneShape === 'line' ? '▬' : o.zoneShape === 'diamond' ? '◇' : '📐';
     pills.push(_vttAoptPill('zone', `${zoneIcon} ${o.zoneW||o.zoneH}×${o.zoneH||o.zoneW}c · ${o.portee}c`));
   } else if ((o.nbCibles || 1) > 1) {
     const lbl = isFriendly ? 'alliés' : isHostile ? 'ennemis' : 'cibles';
@@ -7504,7 +7504,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
   else if (opt.pmCost === 0 && opt.basePm > 0) _costChip = `<span class="vtt-atk-chip pm">🔮 Gratuit</span>`;
   let _extraChip = '';
   if (opt.zoneW > 0 || opt.zoneH > 0) {
-    const zoneIcon = opt.zoneShape === 'cross' ? '✚' : opt.zoneShape === 'cone' ? '🔺' : opt.zoneShape === 'ring' ? '◯' : opt.zoneShape === 'line' ? '▬' : opt.zoneShape === 'diamond' ? '◇' : '📐';
+    const zoneIcon = opt.zoneShape === 'cross' ? '✕' : opt.zoneShape === 'cone' ? '🔺' : opt.zoneShape === 'ring' ? '◯' : opt.zoneShape === 'line' ? '▬' : opt.zoneShape === 'diamond' ? '◇' : '📐';
     _extraChip = `<span class="vtt-atk-chip">${zoneIcon} ${opt.zoneW}×${opt.zoneH}</span>`;
   } else if ((opt.nbCibles || 1) > 1) {
     _extraChip = `<span class="vtt-atk-chip">🎯 ${opt.nbCibles} cibles</span>`;

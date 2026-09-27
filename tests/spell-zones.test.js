@@ -71,16 +71,28 @@ test('cône en cases : apex → base = 1, 3, 5 (palier 2)', () => {
 
 test('équilibrage : au palier 2, toutes les formes couvrent ~9 cases (anneau évidé un peu moins)', () => {
   assert.equal(cellCount('rect', 2), 9);   // 3×3
-  assert.equal(cellCount('cross', 2), 9);  // + de portée 5, 9 cases
+  assert.equal(cellCount('cross', 2), 9);  // ✕ d'envergure 5, 9 cases
   assert.equal(cellCount('cone', 2), 9);   // 1+3+5
   assert.equal(cellCount('ring', 2), 8);   // couronne évidée (centre épargné)
 });
 
-test('_cellInShape cross : la colonne/ligne centrale, pas les coins', () => {
+test('_cellInShape cross : croix diagonale (✕), pas les axes orthogonaux', () => {
   // boîte 5×5, centre (2,2)
-  assert.equal(_cellInShape('cross', 2, 0, 5, 5), true);   // haut-centre
-  assert.equal(_cellInShape('cross', 0, 2, 5, 5), true);   // gauche-centre
-  assert.equal(_cellInShape('cross', 0, 0, 5, 5), false);  // coin
+  assert.equal(_cellInShape('cross', 2, 2, 5, 5), true);   // centre
+  assert.equal(_cellInShape('cross', 0, 0, 5, 5), true);   // coin (bout de diagonale)
+  assert.equal(_cellInShape('cross', 3, 1, 5, 5), true);   // diagonale montante
+  assert.equal(_cellInShape('cross', 2, 0, 5, 5), false);  // haut-centre
+  assert.equal(_cellInShape('cross', 0, 2, 5, 5), false);  // gauche-centre
+});
+
+test('équilibrage : la Ligne n\'est jamais incluse dans la Croix (même palier)', () => {
+  for (const n of [2, 3, 4]) {
+    const span = 2 * n + 1, c = n;
+    // La ligne horizontale centrée (même longueur) touche des cases hors de la croix.
+    const outside = Array.from({ length: span }, (_, i) => i).filter(i => !_cellInShape('cross', i, c, span, span));
+    assert.equal(outside.length, span - 1);   // seule la case centrale est commune
+    assert.equal(cellCount('cross', n), 4 * n + 1);
+  }
 });
 
 test('_cellInShape ring : couronne en losange, centre vide', () => {
