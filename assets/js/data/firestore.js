@@ -23,7 +23,7 @@ import {
   addDoc, updateDoc, deleteDoc,
   onSnapshot,
   query, where, orderBy, limit,
-  writeBatch, runTransaction, Timestamp,
+  writeBatch, runTransaction, Timestamp, serverTimestamp,
 } from '../config/firebase.js';
 
 // ── Scope aventure ─────────────────────────────
@@ -75,6 +75,8 @@ const _CACHE_TTL = {
   collectionSettings: 30 * 60_000,
   achievements_meta:  30 * 60_000,
   vttLog:             30 * 60_000,  // historique complet chargé en arrière-plan pour les moyennes
+  availabilities:      5 * 60_000,  // centre de séance du dashboard
+  bastionAnnonces:     5 * 60_000,  // mur du dashboard (requête récente bornée)
   // Aventures — TTL moyen (structure change rarement en session)
   adventures:         60_000,
 };
@@ -388,10 +390,9 @@ const _SESSION_COLLECTIONS = [
   'characters',
 ];
 const _LAZY_SESSION_COLLECTIONS = new Set([
-  // Une seule écoute partagée pour le bandeau, le chat et le VTT. La présence
-  // reste écrite par shared/presence.js ; les consommateurs ne recréent plus
-  // chacun leur propre listener Firestore.
-  'presence',
+  // `presence` reste volontairement page-scoped : le chat ne l'écoute que
+  // lorsqu'il est ouvert et le VTT seulement lorsqu'il est monté. La conserver
+  // ici laisserait un listener permanent après la première ouverture.
   'shop', 'shopCategories',
   'npcs',
   'organizations', // utilisé par npcs.js + histoire.js, TTL 5 min insuffisant
@@ -890,6 +891,9 @@ export const getDocData = (col, id) => _readDoc(col, id, { silent: false });
 // Variante silencieuse : pas de notif "Accès refusé" si lecture optionnelle.
 export const getDocDataSilent = (col, id) => _readDoc(col, id, { silent: true });
 
+// Valeur d'horloge serveur sans obliger les features à contourner la couche data.
+export const serverTimestampValue = () => serverTimestamp();
+
 // ── Écritures ──────────────────────────────────
 // Avec un listener live actif sur la collection/doc, Firestore propage
 // l'écriture localement via latency-compensation : les observers sont
@@ -962,6 +966,67 @@ export async function mutateInCol(col, id, mutator) {
   } catch (e) {
     _handleFirestoreError(e, `mutateInCol(${path}/${id})`);
     throw e;
+  }
+}
+
+// Verrou distribué léger pour les migrations client coûteuses. Sans ce garde,
+// plusieurs navigateurs qui constatent simultanément l'absence d'un résumé
+// peuvent chacun relire la collection historique complète. La transaction ne
+// coûte qu'une lecture du document cible et n'écrit que pour le propriétaire
+// qui acquiert réellement le verrou.
+export async function claimDocumentLease(col, id, {
+  owner,
+  leaseMs = 2 * 60_000,
+  prefix = 'buildLease',
+  isReady = () => false,
+} = {}) {
+  if (!owner) throw new Error('claimDocumentLease: owner requis');
+  const path = _colPath(col);
+  const ref = doc(db, path, id);
+  const ownerField = `${prefix}Owner`;
+  const untilField = `${prefix}Until`;
+  try {
+    return await runTransaction(db, async transaction => {
+      const snapshot = await transaction.get(ref);
+      const current = snapshot.exists() ? snapshot.data() : null;
+      if (isReady(current)) return { status: 'ready', data: current };
+      const now = Date.now();
+      const until = Number(current?.[untilField]) || 0;
+      if (until > now && current?.[ownerField] !== owner) {
+        return { status: 'busy', data: current, until };
+      }
+      transaction.set(ref, {
+        [ownerField]: owner,
+        [untilField]: now + Math.max(10_000, Number(leaseMs) || 0),
+      }, { merge: true });
+      return { status: 'acquired', data: current };
+    });
+  } catch (e) {
+    _handleFirestoreError(e, `claimDocumentLease(${path}/${id})`, { silent: true });
+    throw e;
+  }
+}
+
+export async function clearDocumentLease(col, id, {
+  owner,
+  prefix = 'buildLease',
+} = {}) {
+  if (!owner) return false;
+  const path = _colPath(col);
+  const ref = doc(db, path, id);
+  const ownerField = `${prefix}Owner`;
+  const untilField = `${prefix}Until`;
+  try {
+    return await runTransaction(db, async transaction => {
+      const snapshot = await transaction.get(ref);
+      const current = snapshot.exists() ? snapshot.data() : null;
+      if (current?.[ownerField] !== owner) return false;
+      transaction.set(ref, { [ownerField]: '', [untilField]: 0 }, { merge: true });
+      return true;
+    });
+  } catch (e) {
+    _handleFirestoreError(e, `clearDocumentLease(${path}/${id})`, { silent: true });
+    return false;
   }
 }
 
