@@ -389,6 +389,43 @@ export function mergeVttRollDetails(details = []) {
   return out;
 }
 
+/**
+ * Met à jour le résumé historique des stats (statsRollups/main → `scopes`)
+ * après une suppression ou une correction, SANS relire le journal VTT.
+ * `scopes` = { '*': campagne, [cléSéance]: détail } ; le détail d'une séance ne
+ * dépend que de ses propres journaux, donc :
+ *  - supprimer des séances   → retirer leurs clés ;
+ *  - supprimer un personnage → le retirer de chaque séance ;
+ *  - supprimer 1 séance d'un personnage → le retirer de cette séance ;
+ *  - correction manuelle de dégâts → la séance ne corrige plus ces dégâts
+ *    d'après le journal (même règle que aggregateVttRollDetails).
+ * La campagne ('*') est ensuite recalculée par fusion des séances restantes,
+ * comme le sont déjà les vues par mission ou par acte.
+ * Fonction pure : renvoie de nouveaux scopes, ne modifie pas l'entrée.
+ */
+export function patchStatsRollupScopes(scopes = {}, {
+  removeSessions = [], removeCharacter = null, removeCharacterSession = null, manualCorrection = null,
+} = {}) {
+  const next = JSON.parse(JSON.stringify(scopes || {}));
+  for (const key of removeSessions || []) if (key && key !== '*') delete next[key];
+  const units = () => Object.keys(next).filter(key => key !== '*');
+  if (removeCharacter) {
+    for (const key of units()) delete next[key]?.byCharacter?.[removeCharacter];
+  }
+  if (removeCharacterSession?.charId && removeCharacterSession?.key) {
+    delete next[removeCharacterSession.key]?.byCharacter?.[removeCharacterSession.charId];
+  }
+  if (manualCorrection?.charId && manualCorrection?.key) {
+    const combat = next[manualCorrection.key]?.byCharacter?.[manualCorrection.charId]?.combat;
+    if (combat) {
+      if (manualCorrection.taken) delete combat.receivedOvercounts;
+      if (manualCorrection.dealt) { combat.manualDamageDealt = true; delete combat.dealtOvercounts; }
+    }
+  }
+  next['*'] = mergeVttRollDetails(units().map(key => next[key]));
+  return next;
+}
+
 export function mergeTrackedSkillStats(current = {}, fromLog = {}) {
   const logRolls = num(fromLog.trackedRolls);
   const trackedRolls = num(current.rolls) ? Math.min(num(current.rolls), logRolls) : logRolls;

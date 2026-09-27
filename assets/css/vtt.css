@@ -14769,3 +14769,19 @@ button.vtt-ms-fact:last-child:hover { border-right-color: transparent; }
   .vtt-session-tools :is(.vtt-rest-panel,.vtt-music-panel,.vtt-loot-panel,.vtt-emote-picker,.vtt-dice-panel),
   .vtt-session-eq i,.vtt-session-dock-badge.vote,.vtt-rest-pip.pending { animation: none !important; }
 }
+
+/* ── Émotes : fenêtre compacte (défilement interne) + tuiles agrandies ──
+   Placé en fin de fichier : surcharge la taille du panneau de session. La
+   hauteur est plafonnée (440px ou l'écran disponible) ; le corps défile. */
+.vtt-session-tools .vtt-emote-picker {
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(440px, calc(100vh - 110px));
+}
+.vtt-emote-grid2 { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.vtt-emote-tile img { width: 90%; height: 90%; }
+@media (max-width: 900px) {
+  .vtt-session-tools .vtt-emote-picker { max-height: min(440px, calc(100vh - 140px)); }
+}
+@media (max-width: 380px) {
+  .vtt-emote-grid2 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}

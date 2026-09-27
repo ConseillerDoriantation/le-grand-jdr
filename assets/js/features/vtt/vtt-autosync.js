@@ -8,7 +8,7 @@
 // ==============================================================================
 import { VS } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
-import { db, doc, writeBatch, serverTimestamp } from '../../config/firebase.js';
+import { db, doc, writeBatch, serverTimestamp, getDocs, query, where, limit } from '../../config/firebase.js';
 import { _tokRef, _toksCol } from './vtt-refs.js';
 import { _tokenEntityKey } from './vtt-utils.js';
 import { _renderTraySoon } from './vtt-tray.js'; // circ. (rendu du tray, runtime)
@@ -125,6 +125,19 @@ export async function _syncAutoTokens() {
   }
   // Les ennemis ne sont PAS auto-créés depuis le bestiaire : ils sont placés
   // manuellement depuis la section Bestiaire du tray.
+
+  // Le MJ ne suit plus tous les tokens de toutes les scènes (quota) : avant de
+  // créer un token « manquant », on vérifie côté serveur qu'aucun n'existe déjà
+  // pour cette entité (ex. ancien token sans `type` sur une scène non ouverte).
+  // 1 lecture par création — les créations sont rares (nouveau perso / PNJ).
+  if (toCreate.length) {
+    const checks = await Promise.all(toCreate.map(entry => getDocs(query(
+      _toksCol(),
+      where(entry.characterId ? 'characterId' : 'npcId', '==', entry.characterId || entry.npcId),
+      limit(1),
+    )).then(snap => snap.empty).catch(() => false)));
+    for (let i = toCreate.length - 1; i >= 0; i -= 1) if (!checks[i]) toCreate.splice(i, 1);
+  }
 
   if (!toCreate.length && !toDelete.length && !toFixOwner.length) return;
 

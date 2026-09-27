@@ -2518,26 +2518,15 @@ async function _statsReloadAfterMutation() {
   // (cache invalidé) on relit le document une fois.
   const cached = peekStats();
   _statsData = cached || (await loadStats()) || {};
-  _statsLegacyRollups = null;
   _statsVttLogs = [];
   _statsVttLogsLoaded = false;
   _statsVttDetailCache = new Map();
   _statsRowsCache = new Map();
-  // Une suppression/correction invalide le résumé historique. Cette opération
-  // est rare : on le reconstruit immédiatement afin que la vue courante reste
-  // juste, puis les prochaines ouvertures ne reliront plus vttLog.
-  if (_statsNeedsVttBackfill(_statsData)) {
-    const logs = await loadCollection('vttLog').catch(() => null);
-    if (Array.isArray(logs)) {
-      try {
-        await _statsPersistLegacyRollups(logs);
-      } catch (error) {
-        console.warn('[stats] rollup non reconstruit après mutation', error);
-        _statsVttLogs = logs;
-        _statsVttLogsLoaded = true;
-      }
-    }
-  }
+  // Le résumé historique est corrigé sur place par la mutation (shared/stats.js) :
+  // on le relit simplement (1 lecture) au lieu de relire tout le journal VTT,
+  // qui coûtait des milliers de lectures à chaque suppression ou correction.
+  const rollup = await getDocDataSilent('statsRollups', 'main').catch(() => null);
+  _statsLegacyRollups = _statsRollupReady(rollup) ? rollup.scopes : null;
   // Si le scope courant (séance / mission) a disparu avec la suppression, on
   // retombe sur la campagne entière — sinon la vue resterait figée sur du vide.
   if (_statsScope) {

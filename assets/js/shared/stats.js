@@ -24,7 +24,8 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { db, doc, getDoc, setDoc, updateDoc, increment, deleteField, runTransaction } from '../config/firebase.js';
-import { getCurrentAdventureId, deleteFromCol } from '../data/firestore.js';
+import { getCurrentAdventureId, deleteFromCol, getDocDataSilent, updateInCol } from '../data/firestore.js';
+import { patchStatsRollupScopes } from './stats-analysis.js';
 import { buildCombatCorrectionDeltas } from './stats-corrections.js';
 import {
   statsSessionEntryForChar as _sessionEntryForChar,
@@ -40,6 +41,24 @@ function _statsRef() {
 async function _invalidateStatsRollup() {
   if (!getCurrentAdventureId()) return;
   await deleteFromCol('statsRollups', 'main').catch(() => {});
+}
+
+// Corrige le résumé historique (statsRollups/main) au lieu de le supprimer.
+// Le supprimer forçait la page Statistiques à relire TOUT le journal VTT pour
+// le reconstruire (des milliers de lectures à chaque suppression / correction).
+// Ici : 1 lecture + 1 écriture. Sans résumé existant, rien à corriger.
+async function _patchStatsRollup(patch) {
+  if (!getCurrentAdventureId()) return;
+  try {
+    const rollup = await getDocDataSilent('statsRollups', 'main');
+    if (!rollup?.scopes) return;
+    await updateInCol('statsRollups', 'main', {
+      scopes: patchStatsRollupScopes(rollup.scopes, patch),
+      patchedAt: Date.now(),
+    });
+  } catch (error) {
+    console.warn('[stats] résumé historique non corrigé', error);
+  }
 }
 
 // Jour local YYYY-MM-DD. Les données historiques l'utilisent comme clé ; les
@@ -123,7 +142,7 @@ export async function deleteCharStats(charId) {
   if (!ref || !charId) return false;
   try {
     await updateDoc(ref, { [`chars.${charId}`]: deleteField() });
-    await _invalidateStatsRollup();
+    await _patchStatsRollup({ removeCharacter: charId });
     if (_mem?.chars) delete _mem.chars[charId];
     return true;
   } catch { return false; }
@@ -149,7 +168,7 @@ export async function deleteCharDateStats(charId, dateKey) {
       [bucket.field]: { [dateKey]: deleteField() },
       vttLogCutoffs: { [dateKey]: Date.now() },
     } } }, { merge: true });
-    await _invalidateStatsRollup();
+    await _patchStatsRollup({ removeCharacterSession: { charId, key: dateKey } });
     _mem = null;
     return true;
   } catch { return false; }
@@ -194,7 +213,7 @@ export async function deleteDatesStats(dates) {
       return true;
     });
     if (!changed) return false;
-    await _invalidateStatsRollup();
+    await _patchStatsRollup({ removeSessions: sessionKeys });
     // Applique la même suppression au miroir mémoire → la vue peut se rafraîchir
     // SANS relecture réseau (évite un aller-retour Firestore et l'impression de
     // lenteur). En cas d'imprévu on invalide le cache pour forcer un re-fetch propre.
@@ -285,7 +304,11 @@ export async function correctDateCombatStats(charId, dateKey, values = {}) {
   if (!Object.keys(patch).length) return true;
   try {
     await updateDoc(ref, patch);
-    await _invalidateStatsRollup();
+    await _patchStatsRollup({ manualCorrection: {
+      charId, key: dateKey,
+      taken: Object.hasOwn(values, 'dmgTaken'),
+      dealt: Object.hasOwn(values, 'dmgDealt'),
+    } });
     _mem = null;
     return true;
   } catch {
