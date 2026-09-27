@@ -1166,7 +1166,6 @@ function _renderSpellMatricesModal(types) {
     // Liste des combos avec checkbox enabled + champ nom personnalisé
     const COMBO_DESCS = {
       drain:               'Puissance + Protection → dégâts ET soin sur le même lancer',
-      zone_elargie:        'Amplification + Dispersion → Dispersion élargit la zone au lieu d\'ajouter des cibles',
       arme_invoquee:       'Enchantement + Invocation → manifeste une arme magique élémentaire (voir onglet Armes invoquées)',
       sentinelle:          'Affliction + Invocation → sentinelle stationnaire qui afflige à l\'entrée',
       canalise_persistant: 'Durée + Concentration → tient tant que la concentration · grâce après rupture',

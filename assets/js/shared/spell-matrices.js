@@ -21,7 +21,6 @@ export const SLOT_LABELS = { arme: '⚔️ Arme', tete: '👁️ Tête', torse: 
 // IDs des combos reconnus par le moteur. Doivent matcher ceux de SORT_COMBOS côté spells.js.
 export const COMBO_IDS = [
   'drain',
-  'zone_elargie',
   'arme_invoquee',
   'sentinelle',
   'canalise_persistant',
@@ -34,7 +33,6 @@ export const COMBO_IDS = [
 // Métadonnées d'affichage des combos (le MJ peut activer/désactiver et renommer)
 export const COMBO_DEFAULTS = Object.freeze({
   drain:                { enabled: true, name: 'Drain personnel' },
-  zone_elargie:         { enabled: true, name: 'Zone élargie' },
   arme_invoquee:        { enabled: true, name: 'Arme invoquée' },
   sentinelle:           { enabled: true, name: 'Sentinelle / Piège' },
   canalise_persistant:  { enabled: true, name: 'Sort canalisé persistant' },

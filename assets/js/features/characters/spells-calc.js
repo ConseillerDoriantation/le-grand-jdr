@@ -343,16 +343,6 @@ export const SORT_COMBOS = [
     },
   },
   {
-    id: 'zone_elargie',
-    icon: '🌐',
-    defaultName: 'Zone élargie',
-    detect: (counts) => counts.Amplification > 0 && counts.Dispersion > 0,
-    describe: (counts) => {
-      const size = _ampDispCircleSize(counts.Amplification, counts.Dispersion);
-      return `Amp ×${counts.Amplification} + Disp ×${counts.Dispersion} · zone ${size}×${size} cases`;
-    },
-  },
-  {
     id: 'arme_invoquee',
     icon: '⚔️',
     defaultName: 'Arme invoquée',
@@ -472,15 +462,6 @@ export function _activeCombos(s) {
 function _comboResumeLines(activeCombos, comboIds, counts, s) {
   const lines = [];
   const combo = id => activeCombos.find(c => c.id === id);
-  if (comboIds.has('zone_elargie')) {
-    const size = _ampDispCircleSize(counts.Amplification || 0, counts.Dispersion || 0);
-    lines.push({
-      icon: '📐',
-      label: `${combo('zone_elargie')?.name || 'Zone élargie'} · ${size}×${size} cases`,
-      detail: 'Zone plaçable · remplace les cibles multiples de Dispersion',
-      isCombo: true,
-    });
-  }
   if (comboIds.has('regeneration')) {
     const dice = (counts.Protection || 0) + (counts.Affliction || 0);
     const formula = (s.regenerationFormula || '').trim() || `${dice}d4`;
@@ -799,15 +780,6 @@ export function _autoSourceDuree(s) {
  */
 export function _ampLength(nbAmp) { return nbAmp >= 1 ? 3 * nbAmp : 0; }
 
-/** Taille de zone créée par le combo Amplification + Dispersion.
- *  Chaque palier consomme une paire Amp+Disp : 1 paire = 3×3, 2 paires = 7×7,
- *  3 paires = 11×11, etc.
- */
-export function _ampDispCircleSize(nbAmp, nbDisp) {
-  const rank = Math.min(parseInt(nbAmp) || 0, parseInt(nbDisp) || 0);
-  return rank >= 1 ? (4 * rank - 1) : 0;
-}
-
 /** Taille d'un AXE de la zone combo Amp+Disp, par nombre de runes de cet axe.
  *  1 → 3, 2 → 7, 3 → 11 (4N−1). L'Amplification pilote la HAUTEUR, la Dispersion
  *  la LARGEUR : chaque rune ajoutée agrandit son axe (pas d'effet « payé pour rien »).
@@ -1069,7 +1041,7 @@ export function _buildSortResume(s, c) {
   const nbPuiss   = runes.filter(r => r === 'Puissance').length;
   const nbProt    = runes.filter(r => r === 'Protection').length;
   const nbAmp     = runes.filter(r => r === 'Amplification').length;
-  const specializedComboIds = new Set(['zone_elargie', 'regeneration', 'arme_invoquee', 'sentinelle', 'coup_chance']);
+  const specializedComboIds = new Set(['regeneration', 'arme_invoquee', 'sentinelle', 'coup_chance']);
   lines.push(..._comboResumeLines(activeCombos, comboIds, _runeCounts(s), s));
   activeCombos.forEach(combo => {
     if (specializedComboIds.has(combo.id)) return;
@@ -1160,21 +1132,21 @@ export function _buildSortResume(s, c) {
     lines.push({ icon:'🛡️', label:'Effet défensif', detail:'Décris l\'effet ci-dessous' });
   }
 
-  // Cibles (uniquement si Dispersion solo, sans combo Amp+Disp)
+  // Cibles (uniquement si Dispersion solo : avec Amplification, elle répète la zone)
   const nbDisp = runes.filter(r => r === 'Dispersion').length;
-  if (nbCibles > 1 && !(nbAmp > 0 && nbDisp > 0) && !comboIds.has('zone_elargie')) {
+  if (nbCibles > 1 && !(nbAmp > 0 && nbDisp > 0)) {
     const dispDetail = nbDisp === 1
       ? '1 rune Dispersion · cibles différentes uniquement'
       : `${nbDisp} runes Dispersion · cibles différentes`;
     lines.push({ icon:'🎯', label:`${nbCibles} cibles différentes`, detail: dispDetail });
   }
 
-  // Zone (Amplification ou manuelle) — sauf combo zone élargie
-  if (zoneCalc && !comboIds.has('zone_elargie')) {
+  // Zone (Amplification ou manuelle)
+  if (zoneCalc) {
     let zoneDetail = '';
     if (zoneCalc.source === 'runes') {
       if (zoneCalc.amp > 0 && zoneCalc.disp > 0) {
-        zoneDetail = `Combo Amp ×${zoneCalc.amp} + Disp ×${zoneCalc.disp} · zone plaçable`;
+        zoneDetail = `Amplification ×${zoneCalc.amp} · Dispersion ×${zoneCalc.disp} → ${zoneCalc.count} zones plaçables`;
       } else {
         zoneDetail = `Amplification ×${zoneCalc.amp} · ${zoneCalc.w} cases`;
       }

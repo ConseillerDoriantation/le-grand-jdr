@@ -4001,6 +4001,31 @@ html:not([data-theme="light"]) .vtt-root {
   background: color-mix(in srgb, var(--ec, var(--atk-accent)) 15%, transparent);
   border-color: color-mix(in srgb, var(--ec, var(--atk-accent)) 45%, transparent);
 }
+/* Élément : rangée remontée sous l'en-tête, pastille active pleine, favori ★ */
+.vtt-atk-opts--elem { padding-top: 11px; }
+.vtt-atk-opts:has(#atk-techniques-slot:empty) { display: none; }
+.vtt-atk-elemrow .vtt-atk-elem { padding: 5px 12px; font-size: 13px; }
+.vtt-atk-elemrow .vtt-atk-elem.is-active {
+  color: var(--text); font-weight: 700;
+  background: color-mix(in srgb, var(--ec) 32%, transparent);
+  border-color: var(--ec);
+  box-shadow: 0 0 0 1px var(--ec), 0 0 12px color-mix(in srgb, var(--ec) 35%, transparent);
+}
+.vtt-atk-elem.is-fav::after { content: '★'; font-size: 10px; color: var(--gold); margin-left: 2px; }
+.vtt-atk-elemfav {
+  margin-left: auto; flex: none; padding: 3px 9px; border-radius: var(--r-full);
+  font-size: 11px; color: var(--text-muted); cursor: pointer;
+  border: 1px dashed var(--border-md); background: transparent;
+}
+.vtt-atk-elemfav:hover { color: var(--gold); border-color: var(--gold); }
+.vtt-atk-elemfav.is-on { color: var(--gold); border-style: solid; border-color: color-mix(in srgb, var(--gold) 55%, transparent); }
+.vtt-atk-elembadge {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: var(--r-full);
+  color: var(--text); background: color-mix(in srgb, var(--ec) 28%, transparent);
+  border: 1px solid var(--ec);
+}
+#atk-elem-badge { display: contents; }
 
 /* ── 4 · Bande de notes (puces + description dépliable) ── */
 .vtt-atk-notes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 13px 11px; }
