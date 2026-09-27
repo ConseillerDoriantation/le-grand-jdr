@@ -709,6 +709,18 @@ export function freePageToLegacyHtml(raw) {
     .join('');
 }
 
+// Texte cherchable d'un deck : diapos visibles et non protégées par mot de passe,
+// blocs texte visibles (un extrait de recherche ne doit rien révéler de verrouillé).
+export function freePageSearchText(raw) {
+  if (!hasFreePage(raw)) return '';
+  return visibleSlides(raw)
+    .filter((slide) => !slideRequiresPassword(slide))
+    .flatMap((slide) => slide.page.blocks)
+    .filter((block) => block.type === 'text' && !block.hidden)
+    .map((block) => block.content)
+    .join(' ');
+}
+
 function visibleSlides(deck) {
   return normalizeFreePageDeck(deck).slides.filter((slide) => !slide.hidden);
 }
@@ -5133,7 +5145,7 @@ function pushHistory(editor, { sync = true } = {}) {
 function setEditorDirty(editor, dirty) {
   if (!editor) return;
   editor.dataset.freePageDirty = dirty ? 'true' : 'false';
-  const shell = editor.closest('[data-free-page-shell], .profil-bio-edit, .world-content-editor');
+  const shell = editor.closest('[data-free-page-shell], .profil-bio-edit');
   const save = shell?.querySelector('[data-free-page-save]');
   const status = shell?.querySelector('[data-free-page-save-status]');
   save?.classList.toggle('is-dirty', dirty);

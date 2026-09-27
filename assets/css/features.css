@@ -5939,11 +5939,12 @@ body.ach-dragging * { cursor:grabbing !important; }
   border-radius: 14px;
   background: var(--surface-1);
 }
+/* Pas d'overflow ici : il rognerait les menus de l'éditeur de diaporama et
+   bloquerait ses barres collantes. Les coins arrondis sont portés par la bannière. */
 .world-section-panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  overflow: hidden;
 }
 .world-section-panel.is-hidden {
   border-style: dashed;
@@ -5953,6 +5954,7 @@ body.ach-dragging * { cursor:grabbing !important; }
 .world-section-cover {
   position: relative;
   overflow: hidden;
+  border-radius: 13px 13px 0 0;
   aspect-ratio: 16 / 5;
   max-height: 280px;
   background: var(--surface-2);
@@ -6122,22 +6124,22 @@ body.ach-dragging * { cursor:grabbing !important; }
 .world-section-content > :first-child { margin-top: 0; }
 .world-section-content > :last-child { margin-bottom: 0; }
 .world-section-content :is(h2, h3),
-.world-content-editor--rich .rte-editor :is(h2, h3) {
+.world-editor--rich .rte-editor :is(h2, h3) {
   color: var(--text);
   font-family: var(--font-display);
   font-weight: 600;
   line-height: 1.25;
 }
 .world-section-content h2,
-.world-content-editor--rich .rte-editor h2 { margin: 1.4em 0 .5em; font-size: 1.375rem; }
+.world-editor--rich .rte-editor h2 { margin: 1.4em 0 .5em; font-size: 1.375rem; }
 .world-section-content h3,
-.world-content-editor--rich .rte-editor h3 { margin: 1.2em 0 .4em; font-size: 1.125rem; }
+.world-editor--rich .rte-editor h3 { margin: 1.2em 0 .4em; font-size: 1.125rem; }
 .world-section-content :is(h2, h3) { scroll-margin-top: 24px; }
 .world-section-content :is(strong, b) { color: var(--text); }
 /* Citation = encadré (règle maison, avertissement…). `.rte-content` en plus :
    rich-text.css est chargé après ce fichier et stylise déjà la citation. */
 .rte-content.world-section-content blockquote,
-.world-content-editor--rich .rte-editor blockquote {
+.world-editor--rich .rte-editor blockquote {
   margin: 1em 0;
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--gold) 24%, transparent);
@@ -6163,22 +6165,28 @@ body.ach-dragging * { cursor:grabbing !important; }
 }
 .world-empty-copy span { color: var(--gold-2); }
 
-/* Édition en place */
-.world-content-editor { display: flex; flex-direction: column; gap: 10px; }
-.world-content-editor--rich .rte-editor {
+/* Édition en place (actions Annuler / Enregistrer dans l'en-tête de section) */
+.world-editor { display: flex; flex-direction: column; gap: 10px; }
+.world-editor--rich .rte-editor {
   min-height: 360px;
   background: rgba(5, 11, 20, .54);
 }
-.world-content-editor-bar {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 10px 0;
-  border-top: 1px solid var(--border);
-  background: linear-gradient(180deg, transparent, var(--surface-1) 40%);
+.world-editor-status {
+  align-self: center;
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
 }
+.world-editor-status.is-dirty { color: var(--amber); }
+.world-section-actions .pill.primary.is-dirty {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 35%, transparent);
+}
+
+/* Édition plein cadre : l'éditeur de diaporama (diapos | composition | inspecteur)
+   a besoin de toute la largeur → sommaire, plan et actions du bandeau masqués. */
+.world-atlas.is-editing .world-layout { grid-template-columns: minmax(0, 1fr); }
+.world-atlas.is-editing :is(.world-sidebar, .world-toc, .world-page-actions) { display: none; }
+.world-atlas.is-editing .world-sec-body { padding: 16px; }
 
 /* Précédent / Suivant */
 .world-pager {
@@ -6309,7 +6317,61 @@ body.ach-dragging * { cursor:grabbing !important; }
   .world-layout.has-toc .world-toc-chips { display: none; }
 }
 
-/* ── Modale section : choix du mode de contenu ────────────────────────────── */
+/* ── Modales section / catégorie ──────────────────────────────────────────── */
+.world-icon-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+}
+.world-icon-choice {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: border-color .1s ease, background .1s ease;
+}
+.world-icon-choice:hover { border-color: var(--border-strong); }
+.world-icon-choice.is-selected {
+  border-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 14%, transparent);
+}
+.world-hidden-toggle {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .55rem .75rem;
+  border: 1px solid rgba(255,107,107,.18);
+  border-radius: 8px;
+  background: rgba(255,107,107,.06);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: .84rem;
+}
+.world-hidden-toggle input { accent-color: #ff6b6b; }
+.world-hidden-toggle span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.world-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.world-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+#modal-body .pill { cursor: pointer; }
+
+/* Choix du mode de contenu */
 .world-content-mode {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6494,9 +6556,10 @@ body.ach-dragging * { cursor:grabbing !important; }
 [data-theme="light"] .world-empty-state { box-shadow: var(--shadow-card); }
 [data-theme="light"] .world-search,
 [data-theme="light"] .world-mini-btn { background: var(--surface-2); }
-[data-theme="light"] .world-content-editor--rich .rte-editor { background: var(--surface-2); }
+[data-theme="light"] .world-editor--rich .rte-editor { background: var(--surface-2); }
 /* --gold-2 n'a pas de variante claire : bleu foncé pour rester lisible sur fond pâle. */
 [data-theme="light"] .world-atlas .pill.primary,
+[data-theme="light"] #modal-body .world-modal-actions .pill.primary,
 [data-theme="light"] .world-empty-copy span { color: var(--gold-dark); }
 [data-theme="light"] .world-pager-link svg,
 [data-theme="light"] .world-nav-mobile-icon { color: var(--gold); }
