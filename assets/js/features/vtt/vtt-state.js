@@ -52,6 +52,8 @@ export const VS = {
   rollMode:     'normal', // 'advantage' | 'normal' | 'disadvantage' — PARTAGÉ compétences + dés libres (lanceur)
   rollBonus:    0,        // bonus contextuel temporaire (anneau, sort, etc.) — PARTAGÉ compétences + dés libres
   rollHidden:   false,    // MJ only — jet caché des joueurs (init via lsJson dans vtt.js)
+  rollSimulated: false,   // MJ only — valeurs naturelles choisies, jet toujours public et signalé
+  rollSimValues: [],      // une valeur par dé physique (donc 2 d20 en avantage/désavantage)
   diceSkills:   [],       // [{name, stat}] chargées depuis world/dice_skills
   // Historique UNIFIÉ du lanceur (compétences + dés libres), le plus récent en tête.
   // Alimenté par vtt-dice.js (_vttDiceRoll) ET vtt-emotes.js (_vttRollSkill) — état

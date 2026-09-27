@@ -32,6 +32,9 @@ const _optimisticLogs = new Map();
 const _optimisticTimers = new Map();
 const _hpEventLogs = new Map(); // conserve les actions sorties des 80 derniers messages pendant la visite
 let _chatPortraitSignature = '';
+const _PUBLIC_LOG_LIMIT = 60;
+const _GM_LOG_LIMIT = 20;
+const _RENDERED_LOG_LIMIT = 80;
 
 const _CHAT_TYPES = {
   combat: new Set(['attack', 'attack-multi', 'cast', 'affliction-cast', 'save', 'concentration-save', 'dot-tick']),
@@ -264,7 +267,7 @@ export function _initChatLogSubs() {
   _chatStuck = true;
   _chatNewBelow = 0;
   VS.unsubs.push(_watchWhileActive(
-    query(_logCol(), orderBy('createdAt', 'desc'), limit(80)),
+    query(_logCol(), orderBy('createdAt', 'desc'), limit(_PUBLIC_LOG_LIMIT)),
     snap => {
       _logMain = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       // Un snapshot local peut livrer createdAt=null tant que le Timestamp
@@ -285,7 +288,7 @@ export function _initChatLogSubs() {
   ));
   if (STATE.isAdmin) {
     VS.unsubs.push(_watchWhileActive(
-      query(_logGmCol(), orderBy('createdAt', 'desc'), limit(80)),
+      query(_logGmCol(), orderBy('createdAt', 'desc'), limit(_GM_LOG_LIMIT)),
       snap => { _logGm = snap.docs.map(d => ({ id: d.id, ...d.data() })); _rebuildChatLog(); },
       e => { console.error('[vtt] gm chat listener:', e); }
     ));
@@ -315,7 +318,7 @@ export function _rebuildChatLog() {
   const msgs = merged
     .slice()
     .sort((a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0))
-    .slice(-80);
+    .slice(-_RENDERED_LOG_LIMIT);
   _renderChatLog(msgs);
 }
 
@@ -583,6 +586,9 @@ export function _renderChatLogImpl(msgs) {
     : mode === 'dis'
       ? `<span class="vtt-log-badge vtt-log-badge--dis" title="Désavantage">⬇ DIS</span>`
       : '';
+  const _simulatedBadge = (m) => m?.simulated
+    ? `<span class="vtt-log-badge vtt-log-badge--simulated" title="Valeurs naturelles choisies par le MJ pour un test public">🧪 SIMULÉ MJ</span>`
+    : '';
 
   // ═══════════════════════════════════════════════════════════════════
   // RENDERS — un par type de message, tous au même format
@@ -606,6 +612,7 @@ export function _renderChatLogImpl(msgs) {
         })()
       : '';
     const badges = [
+      _simulatedBadge(m),
       _advBadge(m.advMode),
       _techniqueBadges(m),
       m.pmCost > 0 ? `<span class="vtt-log-badge vtt-log-badge--pm">−${m.pmCost} PM</span>` : '',
@@ -872,6 +879,7 @@ export function _renderChatLogImpl(msgs) {
       ? (isFumble ? 'fumble' : 'heal')
       : isCrit ? 'crit' : isFumble ? 'fumble' : (m.targets?.some(r=>r.hit) ? 'hit' : 'miss');
     const badges = [
+      _simulatedBadge(m),
       _advBadge(m.advMode),
       _techniqueBadges(m),
       isCrit   ? `<span class="vtt-log-badge vtt-log-badge--crit">💥 CRIT</span>` : '',
@@ -972,7 +980,7 @@ export function _renderChatLogImpl(msgs) {
     const head = _header({
       srcImg: _sourceImage(m), srcName: m.casterName || m.authorName || '?',
       tgtName: m.targetName, label: m.optLabel,
-      badges: pmBadge, ts, sourceArgs: _sourceArgs(m, 'sorts'), targetArgs: _targetArgs(m, 'combat'),
+      badges: _simulatedBadge(m) + pmBadge, ts, sourceArgs: _sourceArgs(m, 'sorts'), targetArgs: _targetArgs(m, 'combat'),
     });
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">${m.castEC ? '💔' : '✨'}</span>
@@ -1117,6 +1125,7 @@ export function _renderChatLogImpl(msgs) {
     const skillStr = m.rollSkillBonus > 0 ? `+${m.rollSkillBonus}` : m.rollSkillBonus < 0 ? `${m.rollSkillBonus}` : '';
     const skillLbl = m.rollSkillLevel === 'expert' ? 'expertise' : 'maîtrise';
     const badges = [
+      m.simulated ? `<span class="vtt-log-badge vtt-log-badge--simulated" title="Valeur naturelle choisie par le MJ pour un test public">🧪 SIMULÉ MJ</span>` : '',
       m.gmOnly ? `<span class="vtt-log-badge vtt-log-badge--hidden" title="Jet privé — invisible des joueurs">🔒 MJ seul</span>` : '',
       m.isCrit ? `<span class="vtt-log-badge vtt-log-badge--crit">✨ CRIT</span>` : '',
       m.isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',
@@ -1161,6 +1170,7 @@ export function _renderChatLogImpl(msgs) {
     });
     if (m.bonus) detail.push(m.bonus>0 ? `<span style="color:#e8b84b">+${m.bonus}</span>` : `<span style="color:#ef4444">${m.bonus}</span>`);
     const badges = [
+      m.simulated ? `<span class="vtt-log-badge vtt-log-badge--simulated" title="Valeurs naturelles choisies par le MJ pour un test public">🧪 SIMULÉ MJ</span>` : '',
       m.gmOnly ? `<span class="vtt-log-badge vtt-log-badge--hidden" title="Jet privé — invisible des joueurs">🔒 MJ seul</span>` : '',
       isCrit ? `<span class="vtt-log-badge vtt-log-badge--crit">✨ CRIT</span>` : '',
       isFumble ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 FUMBLE</span>` : '',

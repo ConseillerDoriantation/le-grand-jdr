@@ -3,14 +3,14 @@
 // relit ou réécrit anormalement beaucoup de documents.
 
 const _startedAt = Date.now();
-const _totals = { reads: 0, writes: 0, cacheReads: 0, listenerSnapshots: 0 };
+const _totals = { reads: 0, writes: 0, cacheReads: 0, initialListenerReads: 0, listenerSnapshots: 0 };
 const _paths = new Map();
 let _lastBurstWarningAt = 0;
 const _recent = [];
 
 function _bucket(path = 'inconnu') {
   const key = String(path || 'inconnu');
-  if (!_paths.has(key)) _paths.set(key, { reads: 0, writes: 0, cacheReads: 0, snapshots: 0 });
+  if (!_paths.has(key)) _paths.set(key, { reads: 0, writes: 0, cacheReads: 0, initialReads: 0, snapshots: 0 });
   return _paths.get(key);
 }
 
@@ -25,7 +25,7 @@ function _remember(kind, path, count) {
   }
 }
 
-export function recordFirestoreRead(path, count = 1, { cache = false, listener = false } = {}) {
+export function recordFirestoreRead(path, count = 1, { cache = false, listener = false, initial = false } = {}) {
   const safeCount = Math.max(0, Math.trunc(Number(count) || 0));
   if (!safeCount) return;
   const bucket = _bucket(path);
@@ -40,7 +40,15 @@ export function recordFirestoreRead(path, count = 1, { cache = false, listener =
     _totals.listenerSnapshots += 1;
     bucket.snapshots += 1;
   }
-  _remember('read', path, safeCount);
+  if (initial) {
+    _totals.initialListenerReads += safeCount;
+    bucket.initialReads += safeCount;
+  } else {
+    // Le premier remplissage serveur d'un listener peut légitimement charger
+    // plusieurs centaines de documents à l'entrée du VTT. Il reste comptabilisé
+    // dans `reads`, mais ne doit pas être diagnostiqué comme une boucle active.
+    _remember('read', path, safeCount);
+  }
 }
 
 export function recordFirestoreWrite(path, count = 1) {
@@ -69,6 +77,7 @@ export function resetFirestoreMetrics() {
   _totals.reads = 0;
   _totals.writes = 0;
   _totals.cacheReads = 0;
+  _totals.initialListenerReads = 0;
   _totals.listenerSnapshots = 0;
   _paths.clear();
   _recent.length = 0;

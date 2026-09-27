@@ -19,22 +19,31 @@ import { subscribeCollection, saveDoc, deleteFromCol } from '../data/firestore.j
 const _cache = new Map(); // sectionId -> page (deck free-page)
 let _ready = false;
 let _unsub = null;
+let _readyPromise = Promise.resolve();
+let _resolveReady = null;
 const _listeners = new Set();
 
-// Monté une fois par session d'aventure (core/adventure.js).
+// Monté uniquement à la première ouverture du Guide.
 export function initWorldPages() {
-  teardownWorldPages();
+  if (_unsub) return _readyPromise;
+  _readyPromise = new Promise(resolve => { _resolveReady = resolve; });
   _unsub = subscribeCollection('worldPages', (docs) => {
     _cache.clear();
     (docs || []).forEach((d) => { if (d?.id) _cache.set(d.id, d.page || null); });
     _ready = true;
+    _resolveReady?.();
+    _resolveReady = null;
     _listeners.forEach((fn) => { try { fn(); } catch (_) {} });
   });
+  return _readyPromise;
 }
 
 export function teardownWorldPages() {
   try { _unsub?.(); } catch (_) {}
   _unsub = null;
+  _resolveReady?.();
+  _resolveReady = null;
+  _readyPromise = Promise.resolve();
   _ready = false;
   _cache.clear();
 }

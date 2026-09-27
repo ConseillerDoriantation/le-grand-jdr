@@ -19,6 +19,8 @@ import {
 } from '../shared/view-context.js';
 import { recordRecentNavigation } from '../shared/recent-navigation.js';
 import { confirmModal } from '../shared/modal.js';
+import { initCharacterPages } from '../shared/character-pages.js';
+import { initWorldPages } from '../shared/world-pages.js';
 import {
   persistPagePreferences,
   restorePagePreferences,
@@ -95,6 +97,11 @@ async function _ensureCharactersReady(page) {
     });
   _charactersReadyPromise = { key, promise };
   return promise;
+}
+
+async function _ensurePageDocumentStores(page) {
+  if (page === 'characters' || page === 'players') await initCharacterPages();
+  if (page === 'world') await initWorldPages();
 }
 
 // ── CSS chargé en lazy par feature ────────────────────────────────────────
@@ -350,7 +357,10 @@ export async function navigate(page, { historyMode = 'push', sub = null } = {}) 
 
   // Rendre la page
   try {
-    await _ensureCharactersReady(page);
+    await Promise.all([
+      _ensureCharactersReady(page),
+      _ensurePageDocumentStores(page),
+    ]);
     if (navigationId !== _navigationSequence) return;
     if (mc) mc.dataset.page = page;
     await PAGES[page]();

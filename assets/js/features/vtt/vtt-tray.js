@@ -26,7 +26,7 @@ import { fogRenderWalls, fogUpdateSoon } from './vtt-fog.js';
 import { _renderCombatTracker } from './vtt-combat-tracker.js';
 import { _renderMjRulerRemote } from './vtt-ruler.js';
 import { _renderLibSection } from './vtt-maplib.js';
-import { _MAP_IMG_DEPS, _renderAllTokens, _renderAnnotLayer, _clearHL, _deselect, _canControlToken, _vttPageChanged } from './vtt.js';
+import { _MAP_IMG_DEPS, _renderAllTokens, _renderAnnotLayer, _clearHL, _deselect, _canControlToken, _vttPageChanged, _loadBestiaryCatalog } from './vtt.js';
 import { isTemporarySummonToken, reserveSummonTokens } from './vtt-summon-utils.js';
 import { controlledCharacterTokens, invocableCharacterTokens } from './vtt-token-control.js';
 
@@ -142,6 +142,7 @@ export function _vttTrayTab(tab) {
     v.classList.toggle('active', active);
     v.hidden = !active;
   });
+  if (tab === 'bestiary') void _loadBestiaryCatalog();
 }
 export function _vttToggleOn() { _trayOnOpen  = !_trayOnOpen;  _saveTrayPref('on',  _trayOnOpen);  _renderTraySoon(); }
 export function _vttToggleOff() { _trayOffOpen = !_trayOffOpen; _saveTrayPref('off', _trayOffOpen); _renderTraySoon(); }
@@ -161,6 +162,7 @@ export function _renderTray() {
 }
 export function _renderTrayImpl() {
   if (!STATE.isAdmin) { _renderPageTabs(); return; }
+  if (_trayTab === 'bestiary') void _loadBestiaryCatalog();
   // Préserve la position de défilement de la vue Scènes : sans ça, reconstruire
   // la liste des pages + les tokens de scène (au changement de scène) fait
   // remonter le panneau tout en haut.

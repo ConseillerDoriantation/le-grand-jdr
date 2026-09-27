@@ -78,6 +78,7 @@ import { invocableCharacterTokens, resolveCharacterControlToken } from './vtt-to
 import { naturalWeaponCombatContext } from '../../shared/bestiary-combat.js';
 import { canControlCharacter, getCharacterDelegates } from '../../shared/character-state.js';
 import { _calcAfflictionDD, rollCriticalDiceDetailed, splitSpellDiceFormula } from '../../shared/spell-math.js';
+import { MAX_SIMULATED_DICE, normalizeSimulatedNatural } from './vtt-dice-simulation.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
   _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy, rulerCells,
@@ -177,6 +178,7 @@ import {
   _vttDiceBonusSet, _vttDiceMode, _vttDiceRoll, _closeDicePanel,
   _vttDiceUseHistory, setJetsBuilder,
   _vttDiceCmdInput, _vttDiceSelectSkill, _vttDiceRerollHistory, _vttDiceRollTyped,
+  _vttDiceSimSet, _vttDiceSimToggle,
 } from './vtt-dice.js';
 import { initVttSessionDock, vttSessionDockButton, vttSessionDockIcon } from './vtt-session-dock.js';
 import {
@@ -437,6 +439,8 @@ _vttBindDispatch();
 // ── État module ─────────────────────────────────────────────────────
 let _resizeObs = null;   // VS.stage, VS.layers, VS.unsubs → VS (cœur Konva/teardown partagé)
 let _bestiaryLoads = new Map(); // beastId → Promise lecture doc ciblée
+let _bestiaryCatalogLoaded = false;
+let _bestiaryCatalogPromise = null;
 // [VS.bstTracker → VS.bstTracker] (défaut dans vtt-state.js)
 let _attackSrc = null, _moveHL = [];   // VS.selected, VS.tool → VS ; VS.characters/VS.npcs/VS.bestiary → VS
 // (état de scène : session, pages, tokens, activePage, stage, layers, characters,
@@ -479,6 +483,8 @@ let _mapLibCleanupWrite = null;
 // [VS.rollBonus → VS.rollBonus] (défaut dans vtt-state.js)
 // [_insTab → vtt-inspector.js]
 VS.rollHidden = lsJson.get('vtt-roll-hidden', false); // MJ only — jet caché des joueurs
+VS.rollSimulated = false; // un test simulé ne survit jamais à un remontage du VTT
+VS.rollSimValues = [];
 const _renderedPings     = new Set();
 const _renderedReactions = new Set();
 
@@ -1207,6 +1213,8 @@ function _cleanup() {
   _vttResetCombatHpLog();
   setActiveStatsSession(null);
   _bestiaryLoads.clear();
+  _bestiaryCatalogLoaded = false;
+  _bestiaryCatalogPromise = null;
   VS.session = {}; VS.activePage = null; VS.selected = null; _attackSrc = null;
   _clearAim(); _hideActBar();
   _moveHL = []; _renderedPings.clear(); _renderedReactions.clear();
@@ -3509,6 +3517,26 @@ export function _rollDiceDetailed(formula) {
   return { rolls, mod: p.mod, total, n: p.n, sides: p.sides, formula: String(formula) };
 }
 
+/** Variante déterministe utilisée uniquement par le mode MJ « dé simulé ». */
+function _rollDiceDetailedWithValues(formula, values, { includeMod = true } = {}) {
+  const p = _parseDice(formula);
+  if (!p) {
+    const flat = Math.max(0, parseInt(formula) || 0);
+    return { rolls: [], mod: includeMod ? flat : 0, total: includeMod ? flat : 0, n: 0, sides: 0, formula: String(formula) };
+  }
+  const rolls = Array.from({ length: p.n }, (_, index) => normalizeSimulatedNatural(values?.[index], p.sides));
+  if (rolls.some(value => value == null)) throw new RangeError('Chaque dé simulé doit avoir une valeur naturelle valide.');
+  const mod = includeMod ? p.mod : 0;
+  return {
+    rolls,
+    mod,
+    total: rolls.reduce((sum, value) => sum + value, 0) + mod,
+    n: p.n,
+    sides: p.sides,
+    formula: includeMod ? String(formula) : `${p.n}d${p.sides}`,
+  };
+}
+
 function _diceLogFields(prefix, det) {
   if (!det || !Array.isArray(det.rolls) || !det.rolls.length) return {};
   return {
@@ -4373,9 +4401,11 @@ function _ensureStatsActionId(opt = {}) {
 function _statsLogMeta(opt = {}) {
   const item = opt?._itemAction;
   const statsKinds = classifySpellStatKinds(opt);
+  const simulated = opt?._simulatedAction === true;
   return {
     statsActionId: _ensureStatsActionId(opt),
-    statsExcluded: opt?.countInStats === false,
+    statsExcluded: opt?.countInStats === false || simulated,
+    ...(simulated ? { simulated: true } : {}),
     statsSource: item ? 'item' : (opt?.sortIdx !== undefined ? 'spell' : 'weapon'),
     statsKinds,
     ...(item ? {
@@ -4393,7 +4423,7 @@ function _castStatKinds(opt = {}) {
 function _buildCastStatsDelta(src, opt, roll = {}) {
   const actor = _statsActor(src);
   const delta = { chars: {} };
-  if (opt?.countInStats === false) return delta;
+  if (opt?.countInStats === false || opt?._simulatedAction === true) return delta;
   const isSpellLike = opt?.sortIdx !== undefined || !!opt?.spellId || !!opt?.isUtil || !!opt?.isCaSort || !!opt?.isHeal || !!opt?.isInvocation;
   if (!actor.id || (!isSpellLike && !(opt?.pmCost > 0))) return delta;
   const kinds = _castStatKinds(opt);
@@ -7186,7 +7216,14 @@ function _vttPickOpt(srcId, tgtId, idx) {
 
   const dist    = _tokenAttackDistance(src, tgt);
   const combatStyle = _combatStyleContext(src, tgt, opt);
-  _atkCtx = { srcId, tgtId, opt, lS, lT, allTargets, sigil: _sigil, weaponTechnique: null, damageTechnique: null, combatStyle };
+  // L'état du dé simulé appartient à cette ouverture de modale uniquement. Il ne
+  // doit jamais rester accroché à l'option mise en cache pour une action suivante.
+  delete opt._simulatedAction;
+  _atkCtx = {
+    srcId, tgtId, opt, lS, lT, allTargets, sigil: _sigil,
+    weaponTechnique: null, damageTechnique: null, combatStyle,
+    simulation: { enabled: false, values: {} },
+  };
   // Bonus toucher d'enchantement — lu frais sur le lanceur (jamais figé dans l'option)
   const _touchBuff = _touchBuffOf(src);
   const atkBase = (opt.toucher !== null && opt.toucher !== undefined ? opt.toucher : (lS.displayAttack ?? 5)) + _touchBuff;
@@ -7404,6 +7441,24 @@ function _vttPickOpt(srcId, tgtId, idx) {
     <span id="atk-interaction">${_atkInteractionHtml(opt)}</span>
     ${opt.actionDescription ? `<details class="vtt-atk-desc"><summary>ℹ️ Description</summary><p>${_esc(opt.actionDescription)}</p></details>` : ''}`;
 
+  // Le MJ peut fixer les valeurs naturelles pour tester une vraie action de
+  // personnage. Les bonus, la CA, les coûts et les effets restent résolus par le
+  // flux normal ; le résultat est public, marqué « simulé » et exclu des stats.
+  const _hasSimulatableDice = !isAffCast && (
+    (!isCastOnly && (!opt.mjAlwaysMax || !opt.autoHit))
+    || (isEnchCast && !opt.autoHit)
+  );
+  const _simulationHtml = STATE.isAdmin && _hasSimulatableDice ? `
+    <section class="vtt-atk-simulation" data-atk-simulation>
+      <button type="button" class="vtt-atk-sim-toggle" data-vtt-fn="_vttAtkSimToggle" aria-pressed="false">
+        <span>🧪 Dé simulé MJ</span><small>Valeurs publiques · statistiques ignorées</small>
+      </button>
+      <div class="vtt-atk-sim-body" data-atk-sim-body hidden>
+        <p>Choisis les valeurs naturelles. Les bonus et les règles de l’action s’appliquent normalement.</p>
+        <div class="vtt-atk-sim-fields" data-atk-sim-fields></div>
+      </div>
+    </section>` : '';
+
   openModal('⚔️ Résoudre l’action', `
     <div class="vtt-form vtt-atk-confirm" style="--atk-accent:${btnColor};--atk-fg:${btnFg}">
       <header class="vtt-atk-ctx">
@@ -7422,6 +7477,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
       ${(elemSelectorHtml || _vttWeaponTechniquesHtml(opt)) ? `<div class="vtt-atk-opts">${elemSelectorHtml}<div id="atk-techniques-slot">${_vttWeaponTechniquesHtml(opt)}</div></div>` : ''}
 
       <div class="vtt-atk-notes">${_notesHtml}</div>
+      ${_simulationHtml}
 
       <input type="hidden" id="atk-mode" value="normal">
       <footer class="vtt-atk-footer">
@@ -7431,6 +7487,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
       </footer>
     </div>`);
   _vttAtkBindResolve(document.querySelector('#modal-box .vtt-atk-confirm'));
+  _vttRenderActionSimulationFields();
   // Toute fermeture du sélecteur (bouton, croix, Échap ou clic sur l'overlay)
   // rend la sélection au lanceur. La cible n'est qu'un contexte temporaire.
   setModalCloseGuard(() => { _restoreAttackSourceSelection(); return false; });
@@ -7504,6 +7561,148 @@ function _vttSetMode(mode) {
   });
   const inp = document.getElementById('atk-mode');
   if (inp) inp.value = mode;
+  _vttRenderActionSimulationFields();
+}
+
+function _vttActionEffectiveMode(ctx, requestedMode = 'normal') {
+  const src = VS.tokens[ctx?.srcId]?.data;
+  const tgt = VS.tokens[ctx?.tgtId]?.data;
+  const opt = ctx?.opt || {};
+  if (!src) return requestedMode;
+
+  // L'enchantement suit sa règle historique : les états automatiques ne
+  // remplacent le mode que lorsque le MJ n'a pas forcé avantage/désavantage.
+  if (opt.isEnchant) {
+    if (requestedMode !== 'normal') return requestedMode;
+    const cond = _conditionsAttackMods(src, null, opt);
+    if (cond.hasAdv && !cond.hasDis) return 'adv';
+    if (cond.hasDis && !cond.hasAdv) return 'dis';
+    return 'normal';
+  }
+
+  const cond = _conditionsAttackMods(src, opt.isHeal ? null : tgt, opt);
+  const style = _combatStyleContext(src, tgt, opt).modifiers;
+  const hasAdv = requestedMode === 'adv' || cond.hasAdv || style.hasAdv;
+  const hasDis = requestedMode === 'dis' || cond.hasDis || style.hasDis;
+  if (hasAdv && hasDis) return 'normal';
+  if (hasAdv) return 'adv';
+  if (hasDis) return 'dis';
+  return 'normal';
+}
+
+function _vttActionSimulationSpec(ctx = _atkCtx) {
+  if (!ctx?.opt) return null;
+  const opt = ctx.opt;
+  const requestedMode = document.getElementById('atk-mode')?.value || 'normal';
+  const mode = _vttActionEffectiveMode(ctx, requestedMode);
+  const isCastOnly = opt.isCaSort || opt.isUtil;
+  const hasHitRoll = !opt.autoHit && (!isCastOnly || opt.isEnchant);
+  const hitCount = hasHitRoll ? (mode === 'normal' ? 1 : 2) : 0;
+  const bonusHitDice = !isCastOnly ? Math.abs(parseInt(document.getElementById('atk-bonus-hit-dice')?.value, 10) || 0) : 0;
+  const bonusDmgDice = !isCastOnly ? (parseInt(document.getElementById('atk-bonus-dmg-dice')?.value, 10) || 0) : 0;
+  let effect = null;
+  if (!isCastOnly && !opt.mjAlwaysMax) {
+    const baseFormula = opt.rawDice || opt.dice;
+    const parsed = _parseDice(baseFormula);
+    if (parsed) effect = {
+      n: Math.max(1, parsed.n + bonusDmgDice),
+      sides: parsed.sides,
+      formula: `${Math.max(1, parsed.n + bonusDmgDice)}d${parsed.sides}` + (parsed.mod ? `${parsed.mod > 0 ? '+' : ''}${parsed.mod}` : ''),
+    };
+  }
+  return {
+    mode,
+    hitCount,
+    extraHitCount: bonusHitDice,
+    effect,
+    critThreshold: Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(VS.tokens[ctx.srcId]?.data))),
+    maximizeCritical: !!opt.mods?.chance,
+  };
+}
+
+function _vttAtkSimToggle() {
+  if (!STATE.isAdmin || !_atkCtx?.simulation) return;
+  _atkCtx.simulation.enabled = !_atkCtx.simulation.enabled;
+  _vttRenderActionSimulationFields();
+}
+
+function _vttAtkSimSet(key, input) {
+  if (!STATE.isAdmin || !_atkCtx?.simulation || !input) return;
+  // Conserver la chaîne telle qu'elle est saisie empêche le classique « 20 »
+  // transformé en « 02 » par un rerender entre les deux frappes.
+  _atkCtx.simulation.values[String(key)] = input.value;
+  input.classList.toggle('is-invalid', input.value !== '' && normalizeSimulatedNatural(input.value, Number(input.max)) == null);
+}
+
+function _vttRenderActionSimulationFields() {
+  const root = document.querySelector('#modal-box .vtt-atk-confirm');
+  const box = root?.querySelector('[data-atk-simulation]');
+  if (!box || !_atkCtx?.simulation) return;
+  const { enabled, values } = _atkCtx.simulation;
+  const toggle = box.querySelector('.vtt-atk-sim-toggle');
+  const body = box.querySelector('[data-atk-sim-body]');
+  toggle?.classList.toggle('is-active', enabled);
+  toggle?.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  if (body) body.hidden = !enabled;
+  if (!enabled) return;
+
+  const spec = _vttActionSimulationSpec();
+  const groups = [];
+  const addGroup = (title, key, count, sides, optional = false) => {
+    if (!count || !sides) return;
+    groups.push({ title, key, count, sides, optional });
+  };
+  addGroup(spec.mode === 'adv' ? 'Jet avec avantage' : spec.mode === 'dis' ? 'Jet avec désavantage' : 'Jet naturel', 'hit', spec.hitCount, 20);
+  addGroup('d20 supplémentaires', 'extra', spec.extraHitCount, 20);
+  addGroup('Dés de l’effet', 'effect', spec.effect?.n, spec.effect?.sides);
+  if (!spec.maximizeCritical) addGroup('Relance critique', 'crit', spec.effect?.n, spec.effect?.sides, true);
+
+  const total = groups.reduce((sum, group) => sum + group.count, 0);
+  const fields = box.querySelector('[data-atk-sim-fields]');
+  if (!fields) return;
+  if (!groups.length) {
+    fields.innerHTML = '<span class="vtt-atk-sim-empty">Cette action ne lance aucun dé naturel.</span>';
+    return;
+  }
+  if (total > MAX_SIMULATED_DICE) {
+    fields.innerHTML = `<span class="vtt-atk-sim-empty">Trop de dés à simuler (${total}, maximum ${MAX_SIMULATED_DICE}). Réduis les dés ajoutés.</span>`;
+    return;
+  }
+  fields.innerHTML = groups.map(group => `
+    <div class="vtt-atk-sim-group${group.optional ? ' is-optional' : ''}">
+      <span>${group.title}${group.optional ? '<small>si réussite critique</small>' : ''}</span>
+      <div>${Array.from({ length: group.count }, (_, index) => {
+        const key = `${group.key}.${index}`;
+        const value = values[key] ?? '';
+        return `<label><small>d${group.sides}${group.count > 1 ? ` · ${index + 1}` : ''}</small><input type="number" inputmode="numeric" dir="ltr" min="1" max="${group.sides}" value="${_esc(String(value))}" data-vtt-fn="_vttAtkSimSet" data-vtt-on="input" data-vtt-args="${key}|$this" aria-label="${group.title} d${group.sides} ${index + 1}"></label>`;
+      }).join('')}</div>
+    </div>`).join('');
+}
+
+function _vttResolveActionSimulation(ctx = _atkCtx) {
+  if (!ctx?.simulation?.enabled) return null;
+  if (!STATE.isAdmin) return null;
+  const spec = _vttActionSimulationSpec(ctx);
+  const values = ctx.simulation.values || {};
+  const read = (key, count, sides, required = true) => {
+    const result = Array.from({ length: count || 0 }, (_, index) => normalizeSimulatedNatural(values[`${key}.${index}`], sides));
+    if (required && result.some(value => value == null)) throw new RangeError(`Renseigne chaque d${sides} simulé (${key === 'hit' ? 'jet naturel' : key === 'extra' ? 'd20 supplémentaire' : key === 'effect' ? 'effet' : 'critique'}).`);
+    return result;
+  };
+  const potentialCritDice = spec?.effect && !spec.maximizeCritical ? spec.effect.n : 0;
+  if (!spec || spec.hitCount + spec.extraHitCount + (spec.effect?.n || 0) + potentialCritDice > MAX_SIMULATED_DICE) {
+    throw new RangeError(`Le dé simulé accepte au maximum ${MAX_SIMULATED_DICE} dés.`);
+  }
+  const hit = read('hit', spec.hitCount, 20);
+  const extra = read('extra', spec.extraHitCount, 20);
+  const kept = !hit.length ? null : spec.mode === 'adv' ? Math.max(...hit) : spec.mode === 'dis' ? Math.min(...hit) : hit[0];
+  const fumble = kept === 1;
+  const critical = kept != null && kept >= spec.critThreshold;
+  const effect = spec.effect && !fumble ? read('effect', spec.effect.n, spec.effect.sides) : [];
+  const crit = spec.effect && critical && !spec.maximizeCritical
+    ? read('crit', spec.effect.n, spec.effect.sides)
+    : [];
+  return { ...spec, hit, extra, effect, crit, kept, fumble, critical };
 }
 
 function _vttAtkBonusStep(id, delta = 0) {
@@ -7514,6 +7713,7 @@ function _vttAtkBonusStep(id, delta = 0) {
   const next = Math.max(min, Math.min(max, (parseInt(input.value, 10) || 0) + Number(delta || 0)));
   input.value = String(next);
   input.classList.toggle('has-value', next !== 0);
+  _vttRenderActionSimulationFields();
 }
 
 /**
@@ -7567,7 +7767,10 @@ function _vttAtkBindResolve(root) {
     }
   });
   root.addEventListener('input', (e) => {
-    if (e.target.matches?.('.vtt-atk-drawer input')) syncRow(e.target.closest('.vtt-atk-row'));
+    if (e.target.matches?.('.vtt-atk-drawer input')) {
+      syncRow(e.target.closest('.vtt-atk-row'));
+      _vttRenderActionSimulationFields();
+    }
   });
 }
 
@@ -7576,6 +7779,7 @@ function _vttAtkBonusReset() {
     input.value = '0';
     input.classList.remove('has-value');
   });
+  _vttRenderActionSimulationFields();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -8718,6 +8922,15 @@ async function _vttRollAttack() {
   const bonusDmg     = parseInt(document.getElementById('atk-bonus-dmg')?.value)||0;
   const bonusHitDice = parseInt(document.getElementById('atk-bonus-hit-dice')?.value)||0;
   const bonusDmgDice = parseInt(document.getElementById('atk-bonus-dmg-dice')?.value)||0;
+  let actionSimulation = null;
+  try {
+    actionSimulation = _vttResolveActionSimulation(ctx);
+  } catch (error) {
+    showNotif(error?.message || 'Valeurs du dé simulé invalides.', 'warning');
+    return;
+  }
+  if (actionSimulation) opt._simulatedAction = true;
+  else delete opt._simulatedAction;
   closeModalDirect();
   _atkCtx = null;
 
@@ -9219,10 +9432,10 @@ async function _vttRollAttack() {
         if (eCondMods.hasAdv && !eCondMods.hasDis) eMode = 'adv';
         else if (eCondMods.hasDis && !eCondMods.hasAdv) eMode = 'dis';
       }
-      const eR1 = Math.floor(Math.random()*20)+1;
-      const eR2 = eMode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
+      const eR1 = actionSimulation?.hit?.[0] ?? Math.floor(Math.random()*20)+1;
+      const eR2 = eMode !== 'normal' ? (actionSimulation?.hit?.[1] ?? Math.floor(Math.random()*20)+1) : null;
       _enchD20 = eMode === 'adv' ? Math.max(eR1, eR2) : eMode === 'dis' ? Math.min(eR1, eR2) : eR1;
-      const eLuck = await _consumeLuckyReroll(srcId, src, _enchD20, _enchD20 === 1);
+      const eLuck = actionSimulation ? null : await _consumeLuckyReroll(srcId, src, _enchD20, _enchD20 === 1);
       if (eLuck) _enchD20 = eLuck.d20;
       const eCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
       _enchRC = _enchD20 >= eCritThreshold;
@@ -9443,8 +9656,8 @@ async function _vttRollAttack() {
       else if (hHasDis) hMode = 'dis';
       const hAutomaticReasons = [...hCondMods.reasons, ...hStyleMods.reasons];
       // Roll d20 avec mode adv/dis
-      const hRoll1 = Math.floor(Math.random()*20)+1;
-      const hRoll2 = hMode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
+      const hRoll1 = actionSimulation?.hit?.[0] ?? Math.floor(Math.random()*20)+1;
+      const hRoll2 = hMode !== 'normal' ? (actionSimulation?.hit?.[1] ?? Math.floor(Math.random()*20)+1) : null;
       // Total : d20 + mod toucher + bonus set + bonus contextuel
       const hTouchMod = opt.toucherMod || 0;
       const hSetBon   = opt.toucherSetBonus || 0;
@@ -9456,13 +9669,13 @@ async function _vttRollAttack() {
       if (bonusHitDice !== 0) {
         const cnt = Math.abs(bonusHitDice);
         for (let k = 0; k < cnt; k++) {
-          const r = Math.floor(Math.random() * 20) + 1;
+          const r = actionSimulation?.extra?.[k] ?? Math.floor(Math.random() * 20) + 1;
           hExtraHitRolls.push(r);
           hExtraHitSum += bonusHitDice > 0 ? r : -r;
         }
       }
       let hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit + hExtraHitSum;
-      const hLuck = await _consumeLuckyReroll(srcId, src, hD20, hD20 === 1 || hHitTotal < HEAL_DD);
+      const hLuck = actionSimulation ? null : await _consumeLuckyReroll(srcId, src, hD20, hD20 === 1 || hHitTotal < HEAL_DD);
       if (hLuck) {
         hD20 = hLuck.d20;
         hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit + hExtraHitSum;
@@ -9487,7 +9700,7 @@ async function _vttRollAttack() {
         // Stats : soin raté → compte quand même 1 sort lancé + PM (soin 0), réversible.
         const _healDelta = { chars: {} };
         const _healActor = _statsActor(src);
-        if (_healActor.id && opt.countInStats !== false) {
+        if (_healActor.id && opt.countInStats !== false && opt._simulatedAction !== true) {
           accCastDelta(_healDelta, {
             casterId: _healActor.id, casterName: _healActor.name,
             spellName: opt.label || 'Soin', pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0), heal: 0,
@@ -9538,13 +9751,17 @@ async function _vttRollAttack() {
       } else if (hIsCrit) {
         const maxDice = _maxDice(effectiveDice);
         healCritNormalMax = maxDice + healFixed;
-        const baseDet = _rollDiceDetailed(effectiveDice);
+        const baseDet = actionSimulation
+          ? _rollDiceDetailedWithValues(effectiveDice, actionSimulation.effect)
+          : _rollDiceDetailed(effectiveDice);
         healRaw = baseDet.total;
         healRollsDetail = {
           rolls: baseDet.rolls, sides: baseDet.sides, mod: baseDet.mod,
           n: baseDet.n, formula: baseDet.formula,
         };
-        const critDet = rollCriticalDiceDetailed(effectiveDice, { maximize: !!opt.mods?.chance });
+        const critDet = actionSimulation && !opt.mods?.chance
+          ? _rollDiceDetailedWithValues(effectiveDice, actionSimulation.crit, { includeMod: false })
+          : rollCriticalDiceDetailed(effectiveDice, { maximize: !!opt.mods?.chance });
         const critRoll = critDet.total;
         healCritRollsDetail = critDet?.rolls?.length ? {
           rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod,
@@ -9557,7 +9774,9 @@ async function _vttRollAttack() {
           fixedBonus: healFixed,
         }));
       } else {
-        const det = _rollDiceDetailed(effectiveDice);
+        const det = actionSimulation
+          ? _rollDiceDetailedWithValues(effectiveDice, actionSimulation.effect)
+          : _rollDiceDetailed(effectiveDice);
         healRaw   = det.total;
         healRollsDetail = {
           rolls: det.rolls, sides: det.sides, mod: det.mod,
@@ -9616,7 +9835,7 @@ async function _vttRollAttack() {
       // Statistiques (soin) : 1 sort lancé + PM + soin réel, réversible à l'annulation.
       const _healDelta = { chars: {} };
       const _healActor = _statsActor(src);
-      if (_healActor.id && opt.countInStats !== false) {
+      if (_healActor.id && opt.countInStats !== false && opt._simulatedAction !== true) {
         accCastDelta(_healDelta, {
           casterId: _healActor.id, casterName: _healActor.name,
           spellName: opt.label || 'Soin', pm: ((opt.costRes||'pm')==='pm' ? (opt.pmCost||0) : 0),
@@ -9743,8 +9962,8 @@ async function _vttRollAttack() {
     else if (hasDis) effectiveMode = 'dis';
     const automaticReasons = [...condMods.reasons, ...styleMods.reasons];
     // ── Attaque offensive — un seul roll d20, appliqué à chaque cible ──
-    const roll1    = Math.floor(Math.random()*20)+1;
-    const roll2    = effectiveMode !== 'normal' ? Math.floor(Math.random()*20)+1 : null;
+    const roll1    = actionSimulation?.hit?.[0] ?? Math.floor(Math.random()*20)+1;
+    const roll2    = effectiveMode !== 'normal' ? (actionSimulation?.hit?.[1] ?? Math.floor(Math.random()*20)+1) : null;
     let d20        = effectiveMode === 'adv' ? Math.max(roll1, roll2)
                    : effectiveMode === 'dis' ? Math.min(roll1, roll2)
                    : roll1;
@@ -9768,7 +9987,7 @@ async function _vttRollAttack() {
     if (bonusHitDice !== 0) {
       const cnt = Math.abs(bonusHitDice);
       for (let k = 0; k < cnt; k++) {
-        const r = Math.floor(Math.random() * 20) + 1;
+        const r = actionSimulation?.extra?.[k] ?? Math.floor(Math.random() * 20) + 1;
         extraHitRolls.push(r);
         extraHitSum += bonusHitDice > 0 ? r : -r;
       }
@@ -9796,7 +10015,7 @@ async function _vttRollAttack() {
     const missesEveryTarget = targetCas.length
       ? targetCas.every(targetCA => hitTotal < targetCA)
       : false;
-    const luckyReroll = await _consumeLuckyReroll(srcId, src, d20, !isCrit && (isFumble || missesEveryTarget));
+    const luckyReroll = actionSimulation ? null : await _consumeLuckyReroll(srcId, src, d20, !isCrit && (isFumble || missesEveryTarget));
     if (luckyReroll) {
       d20 = luckyReroll.d20;
       luckRerollValue = luckyReroll.reroll;
@@ -9830,13 +10049,17 @@ async function _vttRollAttack() {
         sharedDmgTotalHit    = Math.max(1, maxDice + totalFixed);
       } else if (isCrit) {
         sharedCritNormalMax = _maxDice(effectiveDice) + totalFixed;
-        const baseDet = _rollDiceDetailed(effectiveDice);
+        const baseDet = actionSimulation
+          ? _rollDiceDetailedWithValues(effectiveDice, actionSimulation.effect)
+          : _rollDiceDetailed(effectiveDice);
         sharedDmgRaw = baseDet.total;
         sharedDmgRollsDetail = {
           rolls: baseDet.rolls, sides: baseDet.sides, mod: baseDet.mod,
           n: baseDet.n, formula: baseDet.formula,
         };
-        const critDet = rollCriticalDiceDetailed(effectiveDice, { maximize: !!opt.mods?.chance });
+        const critDet = actionSimulation && !opt.mods?.chance
+          ? _rollDiceDetailedWithValues(effectiveDice, actionSimulation.crit, { includeMod: false })
+          : rollCriticalDiceDetailed(effectiveDice, { maximize: !!opt.mods?.chance });
         sharedCritRaw2 = critDet.total;
         sharedCritRollsDetail = critDet?.rolls?.length ? {
           rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod,
@@ -9850,7 +10073,9 @@ async function _vttRollAttack() {
           fixedBonus: totalFixed,
         });
       } else {
-        const det = _rollDiceDetailed(effectiveDice);
+        const det = actionSimulation
+          ? _rollDiceDetailedWithValues(effectiveDice, actionSimulation.effect)
+          : _rollDiceDetailed(effectiveDice);
         sharedDmgRaw      = det.total;
         sharedDmgRollsDetail = {
           rolls: det.rolls, sides: det.sides, mod: det.mod,
@@ -10046,7 +10271,7 @@ async function _vttRollAttack() {
     const targetWritePromises = [];
     const techniqueSaveLogs = [];
     const _statsDelta = { chars: {} };   // delta de stats accumulé (réversible à l'annulation)
-    const _statsEnabled = opt.countInStats !== false;
+    const _statsEnabled = opt.countInStats !== false && opt._simulatedAction !== true;
     const _atkActor = _statsActor(src);
     let _maxHit = 0;                      // plus gros coup de cette attaque (record, non réversible)
     for (const curTgtId of resolutionTargetIds) {
@@ -11364,13 +11589,21 @@ document.addEventListener('bestiary:creature-updated', event => {
   _patchBestiaryTokenShapes(new Set([id]));
 });
 
-async function _loadBestiaryCatalog() {
-  try {
-    _applyBestiaryCatalog(await loadCollection('bestiary'));
-  } catch (e) {
-    console.warn('[vtt] bestiaire catalogue:', e?.code || e);
-    _applyBestiaryCatalog([]);
-  }
+export async function _loadBestiaryCatalog() {
+  if (_bestiaryCatalogLoaded) return VS.bestiary;
+  if (_bestiaryCatalogPromise) return _bestiaryCatalogPromise;
+  _bestiaryCatalogPromise = loadCollection('bestiary')
+    .then(list => {
+      _applyBestiaryCatalog(list);
+      _bestiaryCatalogLoaded = true;
+      return VS.bestiary;
+    })
+    .catch(e => {
+      console.warn('[vtt] bestiaire catalogue:', e?.code || e);
+      return VS.bestiary;
+    })
+    .finally(() => { _bestiaryCatalogPromise = null; });
+  return _bestiaryCatalogPromise;
 }
 
 function _ensureBestiaryDoc(beastId) {
@@ -11395,10 +11628,9 @@ function _ensureBestiaryDoc(beastId) {
 }
 
 function _ensureBestiaryForTokens() {
-  if (STATE.isAdmin) return;
   const ids = new Set();
   for (const { data } of Object.values(VS.tokens)) {
-    if (data?.beastId) ids.add(data.beastId);
+    if (data?.beastId && data.pageId === VS.activePage?.id) ids.add(data.beastId);
   }
   ids.forEach(id => { void _ensureBestiaryDoc(id); });
 }
@@ -11442,6 +11674,7 @@ function _clearSceneSubscriptions() {
 // limités à la scène visible.
 export function _vttPageChanged() {
   _rebindSceneSubscriptions?.();
+  _ensureBestiaryForTokens();
 }
 
 function _initListeners() {
@@ -11573,10 +11806,8 @@ function _initListeners() {
     _markNpcsReady();
   }));
 
-  // 5. Bestiaire
-  // MJ : catalogue complet pour le tray, mais sans listener permanent.
-  // Joueurs : chargement doc par doc des créatures réellement présentes en tokens.
-  if (STATE.isAdmin) void _loadBestiaryCatalog();
+  // 5. Bestiaire — uniquement les créatures de la scène active au montage.
+  // Le catalogue complet du MJ n'est chargé que s'il ouvre l'onglet Bestiaire.
 
   // 5b. Tracker bestiaire joueur (estimations personnelles)
   if (!STATE.isAdmin) {
@@ -15257,6 +15488,8 @@ export const VTT_ACTIONS = {
   _vttAoptSpellScope,
   _vttAtkBonusReset,
   _vttAtkBonusStep,
+  _vttAtkSimSet,
+  _vttAtkSimToggle,
   _vttApplyAfflictions,
   _vttApplyDeplacement,
   _vttApplyEnchantBuffs,
@@ -15337,6 +15570,8 @@ export const VTT_ACTIONS = {
   _vttDiceMode,
   _vttDiceRoll,
   _vttDiceRollTyped,
+  _vttDiceSimSet,
+  _vttDiceSimToggle,
   _vttDiceRerollHistory,
   _vttDiceSelectSkill,
   _vttDiceUseHistory,
