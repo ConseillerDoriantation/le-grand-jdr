@@ -17,7 +17,7 @@ import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { resolveSpellModifierStat, usesSpellMastery, getProtectionModes, getProtectionRestoreMode, protectionSplitAllowed, isProtectionMultiMode, protectionRunesFor } from '../../shared/spell-runes.js';
+import { resolveSpellModifierStat, usesSpellMastery, getAfflictionMode, getProtectionModes, getProtectionRestoreMode, protectionSplitAllowed, isProtectionMultiMode, protectionRunesFor } from '../../shared/spell-runes.js';
 import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationSelection, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _calcSortReduction, _autoSourceReduction, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
 import { computeSheetLines, renderSheetLines } from '../../shared/spell-sheet-lines.js';
@@ -40,7 +40,7 @@ function _sortSheetState(s) {
     ampMode:    s?.ampMode || 'zone',
     deplMode:   _deplModeEdit || s?.deplacement?.mode || 'self',
     deplSwap:   _deplSwapEdit,
-    afflMode:   s?.afflictionMode || 'dot',
+    afflMode:   getAfflictionMode(s || {}),
     enchMode:   s?.enchantMode || 'etat',
     zoneShape:  _zoneShapeEdit || 'rect',
     actionMode: s?.actionMode || _actionModeEdit || 'reaction',
@@ -119,9 +119,15 @@ function buildLineCtx(lines, s, c) {
         break;
       }
       case 'affl': {
-        const am = s?.afflictionMode || 'dot';
+        const am = getAfflictionMode(s || {});
         if (l.sentinelle) ctx.affl = { value: 'Portée par la sentinelle', text: true, source: 'Combo Sentinelle · stationnaire', color: '#a16207' };
         else if (am === 'dot') ctx.affl = { value: _calcAfflictionDot(s), source: _autoSourceAfflictionDot(s), color: '#e8894b' };
+        else if (am === 'faiblesse') ctx.affl = {
+          value: `💢 Faiblesse ${s?.noyau || '(élément du sort)'}`, text: true,
+          source: `Sur échec · JS DD ${11 + 2 * ((counts.Affliction || 1) - 1)} · dégâts ×2 de cet élément · 2 tours`,
+          color: '#f59e0b',
+          note: s?.noyauTypeId ? 'Annule une résistance à cet élément ; sans effet contre une immunité ou une absorption.' : '⚠ Choisis un élément (noyau) : la faiblesse porte sur l’élément du sort.',
+        };
         else if (am === 'etat') {
           // Nom + effet de l'état infligé (crucial pour les joueurs qui lisent le sort).
           const id = _spellAfflictionStateId(s);
@@ -1803,7 +1809,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   const hasEnchant    = runesAll.includes('Enchantement');
   const hasAffliction = runesAll.includes('Affliction');
   const enchantMode   = s.enchantMode || 'dmg';
-  const afflictionMode = s.afflictionMode || 'dot';
+  const afflictionMode = getAfflictionMode(s);
   // Branche Lacération d'Affliction : frappe l'attaque de base + réduit la CA,
   // donc PAS de suppression d'impact ni de chip DoT/État.
   const isLaceration  = _hasLaceration(s);
@@ -1870,7 +1876,9 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
         : 'Réduction de CA de la cible (Lacération)',
     });
   } else if (hasAfflictionDebuff && !activeIds.has('regeneration')) {
-    if (afflictionMode === 'etat') {
+    if (afflictionMode === 'faiblesse') {
+      chips.push({ icon:'💢', val:`Faiblesse ${s.noyau || ''}`.trim(), color:'#f59e0b', lbl:'Dégâts ×2 de l’élément du sort sur l’ennemi (Affliction)' });
+    } else if (afflictionMode === 'etat') {
       // Mode État : on affiche TOUJOURS un chip état, jamais DoT
       const stateId = _spellAfflictionStateId(s);
       const etat = _spellConditionMeta(stateId, {
@@ -5270,6 +5278,7 @@ function _selectAfflictionMode(mode) {
   document.getElementById('s-affliction-mode-dot')?.classList.toggle('selected', mode === 'dot');
   document.getElementById('s-affliction-mode-etat')?.classList.toggle('selected', mode === 'etat');
   document.getElementById('s-affliction-mode-laceration')?.classList.toggle('selected', mode === 'laceration');
+  // 'faiblesse' : aucun bloc de réglage (l'élément du sort suffit).
   const dotBlock = document.getElementById('s-affliction-dot-block');
   const etatBlock = document.getElementById('s-affliction-etat-block');
   const lacBlock = document.getElementById('s-affliction-laceration-block');

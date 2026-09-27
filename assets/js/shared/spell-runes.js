@@ -24,6 +24,35 @@ export function getProtectionRestoreMode(spell = {}) {
   return getProtectionModes(spell).find(mode => mode === 'soin' || mode === 'mana') || null;
 }
 
+// ── Affliction : mode effectif ──
+// « faiblesse » (dégâts ×2 de l'élément du sort) exige 2 runes Affliction ; en
+// dessous, le sort retombe sur le DoT par défaut (pas d'effet fantôme).
+export const AFFLICTION_WEAKNESS_MIN_RUNES = 2;
+export function getAfflictionMode(spell = {}) {
+  const mode = spell?.afflictionMode || 'dot';
+  if (mode === 'faiblesse' && runeCount(spell, 'Affliction') < AFFLICTION_WEAKNESS_MIN_RUNES) return 'dot';
+  return mode;
+}
+
+/**
+ * Profil de dégâts d'une cible, augmenté des faiblesses posées par Affliction
+ * (éléments). Une faiblesse annule une résistance au même élément (dégâts
+ * normaux) mais ne perce ni une immunité ni une absorption. Renvoie null si
+ * rien à appliquer (ni profil, ni faiblesse).
+ */
+export function withElementWeaknesses(profile, weakTypes = []) {
+  const weak = [...new Set((weakTypes || []).filter(Boolean))];
+  if (!weak.length) return profile || null;
+  const base = profile || {};
+  const resistances = Array.isArray(base.resistances) ? base.resistances : [];
+  const faiblesses = Array.isArray(base.faiblesses) ? base.faiblesses : [];
+  return {
+    ...base,
+    resistances: resistances.filter(id => !weak.includes(id)),
+    faiblesses: [...new Set([...faiblesses, ...weak.filter(id => !resistances.includes(id))])],
+  };
+}
+
 // ── Protection multi-modes ───────────────────────────────────────────────────
 // Chaque rune Protection porte UN mode (`protectionModes[i]`) : ajouter une rune
 // renforce un mode existant ou en ouvre un nouveau (ex. Soin + CA). `protectionMode`

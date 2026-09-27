@@ -536,6 +536,7 @@ export function _renderInspectorImpl(t) {
                    : bf.type === 'range_bonus' ? `+${bf.bonus} c`
                    : bf.type === 'ca' ? `${bf.bonus >= 0 ? '+' : ''}${bf.bonus} CA`
                    : bf.type === 'dmg_reduction' ? `−${bf.value} dégâts/coup`
+                   : bf.type === 'dmg_weakness' ? `×2 ${(VS.damageTypes || []).find(t => t.id === bf.element)?.label || 'élément'}`
                    : bf.type === 'dot' || bf.type === 'regen' ? `${bf.formula} / tour`
                    : bf.type === 'shield_reactive' ? `${bf.charges || 1} charge · ${bf.tier}`
                    : bf.effect ? bf.effect.slice(0, 24) : '';

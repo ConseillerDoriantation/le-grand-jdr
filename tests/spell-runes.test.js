@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
+import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, getAfflictionMode, withElementWeaknesses, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
 
 const sort = (runes = [], extra = {}) => ({ runes, ...extra });
 
@@ -119,4 +119,20 @@ test('Protection multi-modes : coupée quand un combo absorbe Protection', () =>
   assert.equal(protectionSplitAllowed(sort(['Protection', 'Déclenchement'], { ...base, actionMode: 'reaction' })), false, 'Bouclier réactif');
   assert.equal(protectionSplitAllowed(sort(['Protection', 'Déclenchement'], { ...base, actionMode: 'action_bonus' })), true);
   assert.deepEqual(getProtectionModes(sort(['Protection', 'Protection', 'Affliction'], base)), ['soin', 'soin']);
+});
+
+test('Affliction Faiblesse : exige 2 runes, sinon DoT', () => {
+  assert.equal(getAfflictionMode(sort(['Affliction'], { afflictionMode: 'faiblesse' })), 'dot');
+  assert.equal(getAfflictionMode(sort(['Affliction', 'Affliction'], { afflictionMode: 'faiblesse' })), 'faiblesse');
+  assert.equal(getAfflictionMode(sort(['Affliction'], { afflictionMode: 'etat' })), 'etat');
+});
+
+test('Faiblesse d\'élément : ×2, annule une résistance, ne perce pas une immunité', () => {
+  assert.equal(withElementWeaknesses(null, []), null);
+  assert.deepEqual(withElementWeaknesses(null, ['feu']).faiblesses, ['feu']);
+  const resist = withElementWeaknesses({ resistances: ['feu', 'eau'] }, ['feu']);
+  assert.deepEqual(resist.resistances, ['eau']);
+  assert.deepEqual(resist.faiblesses, [], 'résistance + faiblesse = dégâts normaux');
+  const immune = withElementWeaknesses({ immunites: ['feu'] }, ['feu']);
+  assert.deepEqual(immune.immunites, ['feu'], 'l\'immunité reste prioritaire');
 });

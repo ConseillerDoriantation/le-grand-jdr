@@ -24,7 +24,7 @@ export const ACTION_RUNE = 'Déclenchement';
  * @property {boolean} [protSplit]  - répartition autorisée (aucun combo n'absorbe Protection)
  * @property {string} [ampMode]    - 'zone' | 'deplacement'  (défaut 'zone')
  * @property {boolean} [deplSwap] - déplacement Soi : échange de place autorisé
- * @property {string} [afflMode]   - 'dot' | 'etat' | 'laceration' (défaut 'dot')
+ * @property {string} [afflMode]   - 'dot' | 'etat' | 'laceration' | 'faiblesse' (défaut 'dot')
  * @property {string} [enchMode]   - 'dmg' | 'etat'          (défaut 'etat')
  * @property {string} [zoneShape]  - 'rect' | 'cross' | 'cone' | 'ring' | 'line' (défaut 'rect')
  * @property {string} [actionMode] - 'reaction' | 'action_bonus' (défaut 'reaction')
@@ -156,7 +156,10 @@ export function computeSheetLines(state = {}) {
     if (anyInvoc) {
       line.sentinelle = true;                                     // portée par la sentinelle : pas de réglage
     } else {
-      line.segment = { key: 'afflMode', cur: afflMode, hiddenId: 's-affliction-mode', opts: [['dot', 'DoT', '#e8894b'], ['etat', 'État', '#a855f7'], ['laceration', 'Lacér.', '#ff5a7e']] };
+      // Faiblesse (dégâts ×2 de l'élément du sort) : débloquée à 2 runes Affliction.
+      const afflOpts = [['dot', 'DoT', '#e8894b'], ['etat', 'État', '#a855f7'], ['laceration', 'Lacér.', '#ff5a7e']];
+      if ((counts.Affliction || 0) >= 2) afflOpts.push(['faiblesse', 'Faibl.', '#f59e0b']);
+      line.segment = { key: 'afflMode', cur: afflMode, hiddenId: 's-affliction-mode', opts: afflOpts };
       if (afflMode === 'etat') { line.select = { hiddenId: 's-affliction-etat', label: 'État', saveStatId: 's-affliction-save-stat' }; line.inlineSlots = ['s-affliction-etat']; }   // juste le <select>, compact
       else if (afflMode === 'dot') line.override = { fieldId: 's-affliction-dot-formula' };
       // laceration : valeur calculée (CA cible −n) → pas d'override

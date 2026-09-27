@@ -11,7 +11,7 @@ import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '.
 import { getProtectionCAOverride, getProtectionReductionStep, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
 import { ZONE_SHAPES, _zoneCount, _zoneDims, _zoneShapeUnlocked, _zoneCellCount } from '../../shared/spell-zones.js';
-import { calcSpellDuration, calcSpellTargets, getProtectionModes, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, getAfflictionMode, getProtectionModes, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { spellSetCostDelta } from '../../shared/spell-system.js';
 import { calculateSummonStats, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
@@ -1295,7 +1295,7 @@ export function _buildSortResume(s, c) {
 
   // ── Affliction (mode DoT ou État) ── (la branche Lacération est rendue plus haut)
   if (nbAff > 0 && !hideAff && s.afflictionMode !== 'laceration') {
-    const mode = s.afflictionMode || 'dot';
+    const mode = getAfflictionMode(s);
     // Stat de JS dérivée (comme dans le VTT)
     let saveStat = 'constitution';
     const stateId = mode === 'etat' ? _afflictionStateId(s) : '';
@@ -1315,7 +1315,10 @@ export function _buildSortResume(s, c) {
     const nbCib   = _calcSortCibles(s);
     const cibleStr = nbCib === 1 ? 'sur 1 ennemi' : `sur ${nbCib} ennemis`;
 
-    if (mode === 'etat') {
+    if (mode === 'faiblesse') {
+      lines.push({ icon:'💢', label:`Affliction · Faiblesse ${s.noyau || '(élément du sort)'}`,
+                   detail: `${cibleStr} · JS ${statLbl} DD ${dd} · dégâts ×2 de cet élément (2 tours)` });
+    } else if (mode === 'etat') {
       // Mode État : on affiche l'état appliqué, PAS la formule DoT
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
       lines.push({ icon:'⛓', label:`Affliction · État : ${lbl}`,

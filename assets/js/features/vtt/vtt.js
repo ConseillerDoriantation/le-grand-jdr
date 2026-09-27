@@ -38,7 +38,7 @@ import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nea
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, getAfflictionMode, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm, getProtectionCAOverride, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
@@ -3636,6 +3636,18 @@ function _vttApplyProtectionBuffs(srcId, targetIds, opt) {
   return { writes, names };
 }
 
+// Faiblesse d'Affliction : libellé (« Faiblesse Lumière ») et éléments actifs sur un token.
+function _weaknessLabel(elementId) {
+  return `Faiblesse ${getDamageTypeById(VS.damageTypes, elementId)?.label || 'élément'}`;
+}
+function _tokenWeaknessTypes(tokenData) {
+  const round = VS.session?.combat?.round ?? 0;
+  return (tokenData?.buffs || [])
+    .filter(b => b?.type === 'dmg_weakness' && b.element
+      && (b.expiresAtRound == null || round === 0 || round <= b.expiresAtRound))
+    .map(b => b.element);
+}
+
 // Libellé court des buffs de Protection d'une option (« +4 CA · −2 dégâts »).
 function _protBuffsLabel(pb) {
   return [pb?.ca ? `${pb.ca > 0 ? '+' : ''}${pb.ca} CA` : '', pb?.reduction ? `−${pb.reduction} dégâts/coup` : '']
@@ -3951,7 +3963,7 @@ function _vttSpellMods(s) {
           //  - mode "État" : prend la defaultSaveStat de l'état choisi (si lib chargée)
           //  - mode "DoT"  : Constitution (poison/brûlure D&D standard)
           //  - fallback final : Constitution
-          const mode = s.afflictionMode || 'dot';
+          const mode = getAfflictionMode(s);
           let saveStat = 'constitution';
           let conditionLib = null;
           if (mode === 'etat' && s.afflictionEtatId) {
@@ -5087,10 +5099,12 @@ function _buildSpellOption(s, ctx) {
     const aff = mods.affliction;
     const aTypeObj = aff.element ? getDamageTypeById(VS.damageTypes, aff.element) : null;
     return { ...common,
-      icon: aff.mode === 'etat' ? '⛓' : '🩸', label,
+      icon: aff.mode === 'etat' ? '⛓' : aff.mode === 'faiblesse' ? '💢' : '🩸', label,
       dice: aff.mode === 'dot'
             ? `${aff.dotFormula}/tour`
-            : (aff.etatId && CONDITION_BY_ID[aff.etatId]?.label || 'État'),
+            : aff.mode === 'faiblesse'
+              ? `Faiblesse ${aTypeObj?.label || 'élément'}`
+              : (aff.etatId && CONDITION_BY_ID[aff.etatId]?.label || 'État'),
       isAffliction: true,
       afflictionMode: aff.mode,
       afflictionDotFormula: aff.dotFormula,
@@ -6101,7 +6115,9 @@ function _vttSpellPills(o, { includeTraits = true } = {}) {
   } else if (o.isAffliction) {
     const elemIcon = o.afflictionElementIcon || '💀';
     const elemCol  = o.afflictionElementColor || '#ef4444';
-    if (o.afflictionMode === 'etat' && o.afflictionEtatId) {
+    if (o.afflictionMode === 'faiblesse') {
+      pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">💢 ${_esc(_weaknessLabel(o.afflictionElement))}</span>`);
+    } else if (o.afflictionMode === 'etat' && o.afflictionEtatId) {
       const lib = CONDITION_BY_ID[o.afflictionEtatId];
       const lbl = lib ? `${lib.icon} ${lib.label}` : '⛓ État';
       pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${lbl}</span>`);
@@ -7519,15 +7535,19 @@ function _vttPickOpt(srcId, tgtId, idx) {
   if (isAffCast) {
     const statLbl = (_STAT_SH[opt.afflictionSaveStat] || opt.afflictionSaveStat || 'Con').toUpperCase();
     const dd = opt.afflictionDD;
-    const isEtat = opt.afflictionMode === 'etat' && opt.afflictionEtatId;
+    const isWeak = opt.afflictionMode === 'faiblesse';
+    const isEtat = !isWeak && opt.afflictionMode === 'etat' && opt.afflictionEtatId;
     const etat = isEtat ? CONDITION_BY_ID[opt.afflictionEtatId] : null;
-    const lead = isEtat
+    const lead = isWeak
+      ? `<code>💢 ${_esc(_weaknessLabel(opt.afflictionElement))}</code>`
+      : isEtat
       ? `<code>${etat ? `${etat.icon} ${_esc(etat.label)}` : 'État'}</code>`
       : `<code>🩸 ${_esc(opt.afflictionDotFormula || '')}</code>`;
     utilBlock = _atkRow({ c:'var(--crimson)', icon:opt.icon, label:'Sur échec du JS',
-      formulaHtml:_mkCell(lead, 0, isEtat ? [] : ['par tour'], 'var(--crimson)') });
+      formulaHtml:_mkCell(lead, 0, (isEtat || isWeak) ? [] : ['par tour'], 'var(--crimson)') });
     utilNotes.push(['save', `🛡 JS ${statLbl} DD ${dd}`]);
-    if (!isEtat) utilNotes.push(['weak', `🩸 DoT ${_esc(opt.afflictionDotFormula || '')}/tour`]);
+    if (isWeak) utilNotes.push(['weak', `💢 dégâts ×2 de cet élément`]);
+    else if (!isEtat) utilNotes.push(['weak', `🩸 DoT ${_esc(opt.afflictionDotFormula || '')}/tour`]);
   } else if (isEnchCast) {
     const isEtat = opt.enchantMode === 'etat' && opt.enchantEtatId;
     const etat = isEtat ? CONDITION_BY_ID[opt.enchantEtatId] : null;
@@ -8409,6 +8429,7 @@ async function _zoneValidate(finalize = true) {
   const _afflHasEffect = opt.isAffliction && (
     (opt.afflictionMode === 'dot' && String(opt.afflictionDotFormula || '').trim())
     || (opt.afflictionMode === 'etat' && opt.afflictionEtatId)
+    || (opt.afflictionMode === 'faiblesse' && opt.afflictionElement)
   );
   // Sorts à effet INSTANTANÉ (dégâts, soin, CA, enchant, régén, affliction-avec-effet) :
   // ils appliquent leur effet aux cibles de la zone et ne laissent PAS de marqueur.
@@ -9538,7 +9559,9 @@ async function _vttRollAttack() {
       const _STAT_LBL = { force:'For', dexterite:'Dex', constitution:'Con', intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
       if (opt.isAffliction) {
         const statLbl = (_STAT_LBL[opt.afflictionSaveStat] || opt.afflictionSaveStat || 'Con').toUpperCase();
-        if (opt.afflictionMode === 'etat' && opt.afflictionEtatId) {
+        if (opt.afflictionMode === 'faiblesse') {
+          castEffect = `💢 ${_weaknessLabel(opt.afflictionElement)} · JS ${statLbl} DD ${opt.afflictionDD}`;
+        } else if (opt.afflictionMode === 'etat' && opt.afflictionEtatId) {
           const lib = CONDITION_BY_ID[opt.afflictionEtatId];
           castEffect = `${lib ? `${lib.icon} ${lib.label}` : 'État'} · JS ${statLbl} DD ${opt.afflictionDD}`;
         } else {
@@ -10388,7 +10411,8 @@ async function _vttRollAttack() {
       if (hit || halfDmg) {
         if (curTgtData.type === 'enemy' && curTgtData.beastId) {
           const bEnt    = VS.bestiary[curTgtData.beastId];
-          dmgTotal      = resolveDamagePieces(bEnt);
+          // Faiblesse d'Affliction : ×2 sur l'élément marqué (annule une résistance).
+          dmgTotal      = resolveDamagePieces(withElementWeaknesses(bEnt, _tokenWeaknessTypes(curTgtData)));
           // Réduction de dégâts (buff de Protection) : 1 dégât minimum.
           const _buffRed = _tokenDamageReduction(curTgtData);
           if (dmgTotal > 0 && _buffRed.value > 0) {
@@ -10434,8 +10458,9 @@ async function _vttRollAttack() {
             : null;
           // Résistances / immunités / absorptions / faiblesses accordées par
           // l'équipement du personnage (non cumulable — cf. getCharDamageProfile).
-          if (tgtChar) {
-            const prof = getCharFullDamageProfile(tgtChar);
+          {
+            // Profil d'équipement + faiblesses d'Affliction posées sur le token.
+            const prof = withElementWeaknesses(tgtChar ? getCharFullDamageProfile(tgtChar) : null, _tokenWeaknessTypes(curTgtData));
             if (prof) {
               dmgTotal = resolveDamagePieces(prof);
             }
