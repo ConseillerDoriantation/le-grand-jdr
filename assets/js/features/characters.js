@@ -1635,7 +1635,8 @@ function renderCharCombatV3(c, canEdit) {
       const cls = on ? 'elem-chip on' : 'elem-chip';
       const style = `--elem-bg:${col}22;--elem-bd:${col}66;--elem-c:${col}`;
       const handler = canEdit ? `data-action="toggleCharElement" data-id="${c.id}" data-elem="${t.id}"` : '';
-      return `<span class="${cls}" data-elem-id="${_esc(t.id)}" style="${style}" ${handler}>${_esc(t.icon || '')} ${_esc(t.label)}</span>`;
+      const fav = on && c.favoriteElement === t.id ? ' <span title="Élément favori (défaut au VTT)">★</span>' : '';
+      return `<span class="${cls}" data-elem-id="${_esc(t.id)}" style="${style}" ${handler}>${_esc(t.icon || '')} ${_esc(t.label)}${fav}</span>`;
     }).join('');
     elemsHtml = `<div class="elem-card">
       <div class="elem-card-head">

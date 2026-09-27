@@ -6308,7 +6308,10 @@ async function _execAttack(srcId, tgtId, exOpts = {}) {
       : (o.sortIdx !== undefined ? '#818cf8' : '#94a3b8');
     // Pastille d'élément (≈ noyau des cartes de sort) : seulement pour un VRAI
     // élément magique, pas le physique (sinon redondant avec l'icône de l'arme).
-    const elemPastille = o.isMagicWeapon
+    const _favT = _optDisplayElement(o, src);
+    const elemPastille = _favT
+      ? `<span class="cs-spellcard-noyau" style="--c:${_favT.color||'#9ca3af'}" title="Élément favori : ${_esc(_favT.label)} (modifiable au lancement)">${_favT.icon||'★'}</span>`
+      : o.isMagicWeapon
       ? `<span class="cs-spellcard-noyau" style="--c:#c084fc" title="Élément choisi au lancement">🔮</span>`
       : (o.damageTypeIcon && o.damageTypeId && o.damageTypeId !== 'physique'
           ? `<span class="cs-spellcard-noyau" style="--c:${o.damageTypeColor||'#9ca3af'}" title="Élément">${o.damageTypeIcon}</span>` : '');
@@ -7000,18 +7003,82 @@ function _atkMissNoteHtml(opt) {
   return '';
 }
 
+// Élément favori (fiche perso `favoriteElement`) : mis par défaut au lancement.
+// Invocation → favori de l'invocateur.
+function _favCharOf(token) {
+  return token?.summonOwnerCharId ? VS.characters[token.summonOwnerCharId] : _characterForToken(token);
+}
+function _favoriteElementOf(token) { return _favCharOf(token)?.favoriteElement || null; }
+
+// Élément affiché sur la carte d'action : le favori s'il fait partie des choix.
+function _optDisplayElement(o, token) {
+  const fav = _favoriteElementOf(token);
+  const choices = (Array.isArray(o.spellElementChoices) && o.spellElementChoices.length > 1)
+    ? o.spellElementChoices : (o.isMagicWeapon ? (o.charElements || []) : []);
+  return fav && choices.includes(fav) ? getDamageTypeById(VS.damageTypes, fav) : null;
+}
+
+function _setOptElement(opt, elemId) {
+  const t = getDamageTypeById(VS.damageTypes, elemId);
+  opt.damageTypeId    = elemId;
+  opt.typeRules       = getDamageTypeRules(VS.damageTypes, elemId);
+  opt.damageTypeIcon  = t?.icon || '';
+  opt.damageTypeColor = t?.color || '';
+  return t;
+}
+
+// Badge « élément utilisé » de l'en-tête + bouton favori : état courant.
+function _atkElemBadgeHtml(opt) {
+  const t = opt.damageTypeId ? getDamageTypeById(VS.damageTypes, opt.damageTypeId) : null;
+  if (!t || t.id === 'physique') return '';
+  return `<span class="vtt-atk-elembadge" style="--ec:${t.color || '#9ca3af'}" title="Élément utilisé">${t.icon || ''} ${_esc(t.label)}</span>`;
+}
+function _atkRefreshElemUi(opt, favId) {
+  document.querySelectorAll('.vtt-atk-elem').forEach(b => {
+    const on = b.dataset.vttArgs === opt.damageTypeId;
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-pressed', String(on));
+    b.classList.toggle('is-fav', b.dataset.vttArgs === favId);
+  });
+  const badge = document.getElementById('atk-elem-badge');
+  if (badge) badge.innerHTML = _atkElemBadgeHtml(opt);
+  const favBtn = document.getElementById('atk-elem-fav');
+  if (favBtn) {
+    const isFav = !!favId && favId === opt.damageTypeId;
+    favBtn.classList.toggle('is-on', isFav);
+    favBtn.textContent = isFav ? '★ Favori' : '☆ Favori';
+    favBtn.title = isFav ? 'Retirer cet élément des favoris' : 'Mettre cet élément par défaut pour mes actions';
+  }
+}
+
+// Définit (ou retire) l'élément actif comme favori du perso lanceur.
+async function _vttAtkToggleFavElement() {
+  const ctx = _atkCtx; if (!ctx?.opt) return;
+  const c = _favCharOf(VS.tokens[ctx.srcId]?.data);
+  if (!c?.id) { showNotif('Aucune fiche liée à ce token', 'error'); return; }
+  const cur = ctx.opt.damageTypeId;
+  const prev = c.favoriteElement || null;
+  const next = prev === cur ? null : cur;
+  c.favoriteElement = next;
+  _atkRefreshElemUi(ctx.opt, next);
+  try {
+    await updateDoc(_chrRef(c.id), { favoriteElement: next });
+    const t = next ? getDamageTypeById(VS.damageTypes, next) : null;
+    showNotif(t ? `★ ${t.icon || ''} ${t.label} : élément par défaut` : 'Élément favori retiré', 'success');
+  } catch (err) {
+    c.favoriteElement = prev;
+    _atkRefreshElemUi(ctx.opt, prev);
+    console.error('[VTT] Élément favori refusé', err);
+    showNotif('Impossible d’enregistrer le favori', 'error');
+  }
+}
+
 // Change l'élément d'un sort multi-noyau DIRECTEMENT dans la modale d'attaque
 // (plus de modale séparée). Met à jour le contexte du jet + l'affichage en place.
 function _vttAtkSetElement(elemId) {
   const ctx = _atkCtx; if (!ctx?.opt) return;
-  const t = getDamageTypeById(VS.damageTypes, elemId);
-  ctx.opt.damageTypeId    = elemId;
-  ctx.opt.typeRules       = getDamageTypeRules(VS.damageTypes, elemId);
-  ctx.opt.damageTypeIcon  = t?.icon || '';
-  ctx.opt.damageTypeColor = t?.color || '';
-  document.querySelectorAll('.vtt-atk-elem').forEach(b => {
-    b.classList.toggle('is-active', b.dataset.vttArgs === elemId);
-  });
+  const t = _setOptElement(ctx.opt, elemId);
+  _atkRefreshElemUi(ctx.opt, _favoriteElementOf(VS.tokens[ctx.srcId]?.data));
   const ic = document.getElementById('atk-dmgtype-ic');
   if (ic) { ic.textContent = t?.icon || ''; ic.style.color = t?.color || '#9ca3af'; }
   const inter = document.getElementById('atk-interaction');
@@ -7233,19 +7300,19 @@ function _vttPickOpt(srcId, tgtId, idx) {
   const allTargets = _mtPending && _mtPending.length > 0 ? [..._mtPending] : null;
   _mtPending = null;
 
-  // Arme magique : l'élément se choisit maintenant DANS cette modale (sélecteur en
-  // haut), plus de modale séparée. On fixe un défaut tout de suite (1er élément
-  // accessible, sinon physique) pour que les dégâts/aperçus s'affichent.
-  if (opt.isMagicWeapon && !opt._mwElemReady) {
-    const avail = (opt.charElements || []).map(id => getDamageTypeById(VS.damageTypes, id)).filter(Boolean);
-    const def = avail[0] || getDamageTypeById(VS.damageTypes, 'physique');
-    if (def) {
-      opt.damageTypeId    = def.id;
-      opt.typeRules       = getDamageTypeRules(VS.damageTypes, def.id);
-      opt.damageTypeIcon  = def.icon || '';
-      opt.damageTypeColor = def.color || '';
+  // Élément par défaut (choisi DANS cette modale) : l'élément FAVORI du perso s'il
+  // est proposé ; sinon arme magique → 1er élément accessible (ou physique), sort
+  // multi-noyau → noyau primaire. Une seule fois (Retour conserve le choix).
+  if (!opt._elemDefaultReady) {
+    const fav = _favoriteElementOf(src);
+    if (Array.isArray(opt.spellElementChoices) && opt.spellElementChoices.length > 1) {
+      if (fav && opt.spellElementChoices.includes(fav)) _setOptElement(opt, fav);
+    } else if (opt.isMagicWeapon) {
+      const avail = (opt.charElements || []).map(id => getDamageTypeById(VS.damageTypes, id)).filter(Boolean);
+      const def = avail.find(t => t.id === fav) || avail[0] || getDamageTypeById(VS.damageTypes, 'physique');
+      if (def) _setOptElement(opt, def.id);
     }
-    opt._mwElemReady = true;   // évite de réinitialiser à chaque réouverture (Retour)
+    opt._elemDefaultReady = true;
   }
 
   // Sceau runique signature : capturé ici (le sort est en main) pour être joué à
@@ -7352,10 +7419,13 @@ function _vttPickOpt(srcId, tgtId, idx) {
   } else if (opt.isMagicWeapon) {
     _elemChoices = (opt.charElements || []).map(id => getDamageTypeById(VS.damageTypes, id)).filter(Boolean);
   }
+  const _favElem = _favoriteElementOf(src);
+  const _favIsActive = !!_favElem && _favElem === opt.damageTypeId;
   const elemSelectorHtml = _elemChoices.length > 1 ? `
-    <div class="vtt-atk-optrow" role="group" aria-label="Élément">
+    <div class="vtt-atk-optrow vtt-atk-elemrow" role="group" aria-label="Élément">
       <b>Élément</b>
-      ${_elemChoices.map(t => `<button type="button" class="vtt-atk-pick vtt-atk-elem ${t.id===opt.damageTypeId?'is-active':''}" style="--ec:${t.color||'#9ca3af'}" data-vtt-fn="_vttAtkSetElement" data-vtt-args="${t.id}" title="${_esc(t.label)}">${t.icon||''} ${_esc(t.label)}</button>`).join('')}
+      ${_elemChoices.map(t => `<button type="button" class="vtt-atk-pick vtt-atk-elem ${t.id===opt.damageTypeId?'is-active':''} ${t.id===_favElem?'is-fav':''}" style="--ec:${t.color||'#9ca3af'}" data-vtt-fn="_vttAtkSetElement" data-vtt-args="${t.id}" aria-pressed="${t.id===opt.damageTypeId}" title="${_esc(t.label)}">${t.icon||''} ${_esc(t.label)}</button>`).join('')}
+      ${_favCharOf(src)?.id ? `<button type="button" id="atk-elem-fav" class="vtt-atk-elemfav ${_favIsActive?'is-on':''}" data-vtt-fn="_vttAtkToggleFavElement" title="${_favIsActive ? 'Retirer cet élément des favoris' : 'Mettre cet élément par défaut pour mes actions'}">${_favIsActive ? '★' : '☆'} Favori</button>` : ''}
     </div>` : '';
 
   // ── Branches sans jet (Affliction / Enchantement) : une ligne d'effet + puces ──
@@ -7478,16 +7548,18 @@ function _vttPickOpt(srcId, tgtId, idx) {
         <button type="button" class="vtt-atk-back" data-vtt-fn="_vttBackToAtk" title="Retour au choix d'action">←</button>
         <span class="vtt-atk-aico">${opt.icon}</span>
         <span class="vtt-atk-ctxmain">
-          <span class="vtt-atk-ctxname"><b title="${_esc(opt.label)}">${_esc(opt.label)}</b><span class="vtt-atk-tag">${_typeTag}</span></span>
+          <span class="vtt-atk-ctxname"><b title="${_esc(opt.label)}">${_esc(opt.label)}</b><span class="vtt-atk-tag">${_typeTag}</span><span id="atk-elem-badge">${_atkElemBadgeHtml(opt)}</span></span>
           <span class="vtt-atk-route">${_srcName}<i>→</i><span class="vtt-atk-tgt ${targetTone}">${_tgtName}</span><i>·</i>${_distTxt}</span>
         </span>
         <span class="vtt-atk-ctxres">${_costChip}${_consChip}${_extraChip}<span class="vtt-atk-chip ok">à portée</span></span>
       </header>
       ${targetChips}
 
+      ${elemSelectorHtml ? `<div class="vtt-atk-opts vtt-atk-opts--elem">${elemSelectorHtml}</div>` : ''}
+
       <div class="vtt-atk-rows" data-atk-rows>${centerBlock}</div>
 
-      ${(elemSelectorHtml || _vttWeaponTechniquesHtml(opt)) ? `<div class="vtt-atk-opts">${elemSelectorHtml}<div id="atk-techniques-slot">${_vttWeaponTechniquesHtml(opt)}</div></div>` : ''}
+      ${(elemSelectorHtml || _vttWeaponTechniquesHtml(opt)) ? `<div class="vtt-atk-opts"><div id="atk-techniques-slot">${_vttWeaponTechniquesHtml(opt)}</div></div>` : ''}
 
       <div class="vtt-atk-notes">${_notesHtml}</div>
 
@@ -15553,6 +15625,7 @@ export const VTT_ACTIONS = {
   _vttRetireToken,
   _vttRollAttack,
   _vttAtkSetElement,
+  _vttAtkToggleFavElement,
   _vttSetWeaponTechnique,
   _vttRollSkill,
   _vttSaveStats,
