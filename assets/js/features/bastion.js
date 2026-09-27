@@ -17,7 +17,7 @@
 
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
-import { getDocData, getDocDataSilent, updateInCol, loadCollection, loadCollectionWhere, loadRecentCollection, replaceDoc, saveDoc, addToCol, deleteFromCol, mutateInCol } from '../data/firestore.js';
+import { getDocData, getDocDataSilent, updateInCol, loadCollection, loadCollectionWhere, replaceDoc, saveDoc, addToCol, deleteFromCol, mutateInCol } from '../data/firestore.js';
 import { tryDoc } from '../shared/crud.js';
 import { watchRecent, watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -3895,15 +3895,8 @@ async function renderBastionPage() {
     }
   }
 
-  // Premier chargement déterministe du mur. L'abonnement posé juste après
-  // conserve ensuite la liste à jour, mais le rendu initial n'en dépend plus.
-  void loadRecentCollection('bastionAnnonces', { field: 'ts', max: 80 })
-    .then(docs => {
-      if (STATE.currentPage === 'bastion' && !_annonces.length) _wallReceivePosts(docs);
-    })
-    .catch(error => console.debug('[bastion] chargement initial du mur indisponible', error?.code || error));
-
-  // Abonnement temps réel (idempotent) — corrige/complète les données affichées.
+  // Le premier snapshot de cet abonnement hydrate déjà le mur : ne pas le
+  // précéder d'un loadRecent identique, qui facturerait deux fois le même lot.
   _attachListener();
 
   // Secondaire : noms d'objets du coffre + portraits du personnel. Non bloquant —

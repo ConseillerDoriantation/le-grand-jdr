@@ -9,7 +9,7 @@ import { CLOUDINARY_ENABLED } from '../shared/upload-cloudinary.js';
 import { isToggleable, isFeatureEnabled } from '../shared/features.js';
 import { avatarSrcOf } from '../shared/avatar.js';
 import { routeUrl } from '../shared/route.js';
-import { subscribeCollection, subscribeDoc } from '../data/firestore.js';
+import { subscribeDoc } from '../data/firestore.js';
 
 // Masque le splash de boot dès qu'un écran principal est prêt à s'afficher.
 function _hideBootSplash() {
@@ -579,36 +579,22 @@ function _ctxEl() {
 }
 function _closeCtx() { document.getElementById('sidebar-ctx')?.classList.remove('open'); }
 
-// ── CTA « Jouer maintenant » : état de séance via présence temps réel ─────
-let _presenceUnsub = null;
+// ── CTA « Jouer maintenant » : état déclaré de la séance ────────────────
 let _sessionUnsub = null;
-let _presenceAdventureId = null;
-let _presenceList = [];
+let _sessionAdventureId = null;
 let _sessionLive = false;   // flag posé par le MJ (vtt/session.live)
 function _renderPlayCTA() {
   const sub = document.getElementById('sidebar-play-sub');
   const dot = document.getElementById('sidebar-play-dot');
   const playBtn = document.querySelector('.sidebar-play[data-navigate="vtt"]');
   const mobileBtn = document.querySelector('.bottom-nav-item--primary[data-page="vtt"]');
-  const me = STATE.user?.uid;
-  const now = Date.now();
-  const online = (_presenceList || []).filter((p) => {
-    if (!p || !p.uid || p.uid === me) return false;
-    const ts = p.lastSeen?.toMillis?.() ?? 0;
-    return ts > 0 && (now - ts) < 120_000;
-  }).length;
-  // Priorité au flag « session déclarée en cours » du MJ ; sinon repli sur la
-  // présence temps réel (des joueurs sont en ligne).
   if (_sessionLive) {
-    if (sub) sub.textContent = online > 0 ? `En direct · ${online} en ligne` : 'Séance en direct';
-  } else if (online > 0) {
-    if (sub) sub.textContent = `${online} en ligne sur la table`;
+    if (sub) sub.textContent = 'Séance en direct';
   } else {
     if (sub) sub.textContent = 'Table virtuelle';
   }
-  const hasActivity = _sessionLive || online > 0;
   if (dot) {
-    dot.hidden = !hasActivity;
+    dot.hidden = !_sessionLive;
     dot.classList.toggle('is-session-live', _sessionLive);
   }
   playBtn?.classList.toggle('is-session-live', _sessionLive);
@@ -620,29 +606,18 @@ function _renderPlayCTA() {
     ? 'Session en direct, rejoindre la table virtuelle'
     : 'Jouer maintenant, ouvrir la table virtuelle');
 }
-function _stopPresenceWatch() {
-  try { _presenceUnsub?.(); } catch {}
+function _stopSessionWatch() {
   try { _sessionUnsub?.(); } catch {}
-  _presenceUnsub = null;
   _sessionUnsub = null;
-  _presenceAdventureId = null;
-  _presenceList = [];
+  _sessionAdventureId = null;
   _sessionLive = false;
   _renderPlayCTA();
 }
-function _startPresenceWatch() {
+function _startSessionWatch() {
   const adventureId = STATE.adventure?.id || null;
-  if (!adventureId) { _stopPresenceWatch(); return; }
-  if (_presenceAdventureId && _presenceAdventureId !== adventureId) _stopPresenceWatch();
-  _presenceAdventureId = adventureId;
-  if (!_presenceUnsub) {
-    try {
-      _presenceUnsub = subscribeCollection('presence', (list) => {
-        _presenceList = list || [];
-        _renderPlayCTA();
-      });
-    } catch {}
-  }
+  if (!adventureId) { _stopSessionWatch(); return; }
+  if (_sessionAdventureId && _sessionAdventureId !== adventureId) _stopSessionWatch();
+  _sessionAdventureId = adventureId;
   if (!_sessionUnsub) {
     try {
       _sessionUnsub = subscribeDoc('vtt', 'session', (d) => {
@@ -656,7 +631,7 @@ function _startPresenceWatch() {
 // Ces listeners appartiennent à la barre latérale (pas à une page) : ils ne
 // sont donc pas couverts par unwatchAll(). Les arrêter explicitement avant le
 // logout évite leurs refus Firestore tardifs et les réarme au prochain login.
-document.addEventListener('app:session-releasing', _stopPresenceWatch);
+document.addEventListener('app:session-releasing', _stopSessionWatch);
 
 // ── Init (rendu idempotent ; écouteurs attachés une seule fois) ────────────
 function _initSidebar() {
@@ -669,7 +644,7 @@ function _initSidebar() {
   let rail = false;
   try { rail = localStorage.getItem(LS_RAIL) === '1'; } catch {}
   _applyRail(rail);
-  _startPresenceWatch();
+  _startSessionWatch();
   _renderPlayCTA();
 
   if (sb.dataset.sbBound) return;

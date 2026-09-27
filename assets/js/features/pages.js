@@ -3,7 +3,7 @@
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
-import { loadChars, loadCollection, loadCollectionAfter, loadRecentCollection, getCachedCollection, getDocData, getDocDataSilent, replaceDoc, saveDoc, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { loadChars, loadCollection, loadCollectionAfter, getCachedCollection, getDocData, getDocDataSilent, replaceDoc, saveDoc, updateInCol, deleteFromCol, claimDocumentLease, clearDocumentLease } from '../data/firestore.js';
 import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
@@ -1024,6 +1024,28 @@ function _statsRowsFor(dateKeys) {
 }
 
 const STATS_ROLLUP_VERSION = 2;
+const STATS_ROLLUP_LEASE_MS = 5 * 60_000;
+
+function _statsRollupReady(rollup) {
+  return rollup?.version === STATS_ROLLUP_VERSION && !!rollup?.scopes;
+}
+
+function _statsRollupLeaseOwner() {
+  const uid = STATE.user?.uid || 'anonymous';
+  try { return `${uid}:${crypto.randomUUID()}`; }
+  catch { return `${uid}:${Date.now()}:${Math.random().toString(36).slice(2)}`; }
+}
+
+async function _statsClaimRollupLease() {
+  const owner = _statsRollupLeaseOwner();
+  const claim = await claimDocumentLease('statsRollups', 'main', {
+    owner,
+    leaseMs: STATS_ROLLUP_LEASE_MS,
+    prefix: 'historyBuild',
+    isReady: _statsRollupReady,
+  });
+  return { owner, ...claim };
+}
 
 function _statsCompactRollupValue(value) {
   if (typeof value === 'number') return value === 0 ? undefined : value;
@@ -3806,9 +3828,8 @@ const PAGES = {
     watch('dash-story',        'story',        d => { storyItems = d || []; _sessionCenterNeedsMount = true; schedulePaint(); });
     watch('dash-achievements', 'achievements', d => { achievementsRaw = d || []; schedulePaint(); });
     watch('dash-collection',   'collection',   d => { collectionItems = d || []; schedulePaint(); });
-    void loadRecentCollection('bastionAnnonces', { field: 'ts', max: 80 }).then(d => {
-      if (!wallDocs.length) { wallDocs = d || []; schedulePaint(); }
-    }).catch(() => {});
+    // Un seul accès : le snapshot initial hydrate le mur puis reste abonné aux
+    // deltas. Un loadRecent juste avant doublerait jusqu'à 80 lectures.
     watchRecent('dash-bastion-wall', 'bastionAnnonces', d => { wallDocs = d || []; schedulePaint(); }, { field: 'ts', max: 80 });
     watchDoc('dash-bastion-wall-legacy', 'bastionAnnonces', 'main', d => { wallLegacy = Array.isArray(d?.items) ? d.items : []; schedulePaint(); });
     if (STATE.user?.uid) watchDoc('dash-bastion-wall-read', 'bastionWallReads', STATE.user.uid, d => { wallRead = d; schedulePaint(); }, { silent: true });
@@ -4462,6 +4483,10 @@ const PAGES = {
 
     const vttDetailsPromise = rollupPromise.then(async rollup => {
       if (rollup?.version === STATS_ROLLUP_VERSION && rollup?.scopes) {
+        // Les joueurs consomment le résumé compact déjà disponible. Seul le MJ
+        // vérifie et compacte la queue du journal : sinon chaque joueur ouvrant
+        // Stats après une séance relirait les mêmes entrées vttLog.
+        if (!STATE.isAdmin) return { rollups: rollup.scopes, logs: [], loaded: false };
         const cutoff = Math.max(0, Number(rollup.sourceThroughMs) || 0);
         if (cutoff) {
           const boundaryIds = new Set(rollup.sourceBoundaryIds || []);
@@ -4493,8 +4518,36 @@ const PAGES = {
         }
       }
       if (!_statsNeedsVttBackfill(_statsData)) return { rollups: null, logs: [], loaded: false };
+      // La toute première migration peut représenter des dizaines de milliers
+      // de lectures. Elle est réservée au MJ ; les joueurs continuent d'utiliser
+      // les statistiques incrémentales sans déclencher ce coût historique.
+      if (!STATE.isAdmin) return { rollups: null, logs: [], loaded: false };
+
+      // Migration historique potentiellement très lourde (plusieurs dizaines de
+      // milliers de logs). Un verrou Firestore garantit qu'un seul navigateur la
+      // lance : les autres utilisent le résumé dès qu'il existe au lieu de payer
+      // exactement la même lecture intégrale en parallèle.
+      let lease;
+      try {
+        lease = await _statsClaimRollupLease();
+      } catch {
+        return { rollups: null, logs: [], loaded: false };
+      }
+      if (lease.status === 'ready') {
+        return { rollups: lease.data.scopes, logs: [], loaded: false };
+      }
+      if (lease.status === 'busy') {
+        return { rollups: lease.data?.scopes || null, logs: [], loaded: false };
+      }
+
       const logs = await loadCollection('vttLog').catch(() => null);
-      if (!Array.isArray(logs)) return { rollups: null, logs: [], loaded: false };
+      if (!Array.isArray(logs)) {
+        await clearDocumentLease('statsRollups', 'main', {
+          owner: lease.owner,
+          prefix: 'historyBuild',
+        });
+        return { rollups: null, logs: [], loaded: false };
+      }
 
       // Une seule lecture historique : elle produit un résumé compact par séance,
       // réutilisé ensuite par tous les écrans et tous les appareils.
@@ -4503,6 +4556,10 @@ const PAGES = {
         return { rollups: scopes, logs: [], loaded: false };
       } catch (error) {
         console.warn('[stats] rollup historique non enregistré, repli sur le journal courant', error);
+        await clearDocumentLease('statsRollups', 'main', {
+          owner: lease.owner,
+          prefix: 'historyBuild',
+        });
         return { rollups: null, logs, loaded: true };
       }
     });
