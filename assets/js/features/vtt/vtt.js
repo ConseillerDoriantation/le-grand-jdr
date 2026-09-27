@@ -9,7 +9,7 @@
 import { STATE } from '../../core/state.js';
 import { registerActions } from '../../core/actions.js';
 import Sortable from '../../vendor/sortable.esm.js';
-import { getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection } from '../../data/firestore.js';
+import { getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection, subscribeDoc } from '../../data/firestore.js';
 import {
   db, doc, getDoc, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch, deleteField,
@@ -12021,13 +12021,48 @@ function _changedEntityIds(previous, next) {
   return new Set([...ids].filter(id => _entityTokenVisualKey(previous?.[id]) !== _entityTokenVisualKey(next?.[id])));
 }
 
-let _sceneTokenUnsubs = [];
+// ── PNJ côté joueur : un listener par PNJ présent dans ses tokens ──────────
+// Quota : un joueur ne lit plus toute la collection des PNJ de la campagne à
+// chaque entrée au VTT, seulement les fiches des PNJ qu'il voit (tokens).
+const _playerNpcSubs = new Map();   // npcId → unsubscribe
+const _playerNpcDocs = new Map();   // npcId → fiche
+let _playerNpcApply = null;
+function _syncPlayerNpcWatch() {
+  if (STATE.isAdmin || !_playerNpcApply) return;
+  const needed = new Set(Object.values(VS.tokens).map(e => e?.data?.npcId).filter(Boolean));
+  let removed = false;
+  for (const [id, unsub] of _playerNpcSubs) {
+    if (needed.has(id)) continue;
+    try { unsub(); } catch {}
+    _playerNpcSubs.delete(id);
+    if (_playerNpcDocs.delete(id)) removed = true;
+  }
+  for (const id of needed) {
+    if (_playerNpcSubs.has(id)) continue;
+    _playerNpcSubs.set(id, subscribeDoc('npcs', id, data => {
+      if (!_playerNpcSubs.has(id) || !_playerNpcApply) return;
+      if (data) _playerNpcDocs.set(id, data); else _playerNpcDocs.delete(id);
+      _playerNpcApply([..._playerNpcDocs.values()]);
+    }, { silent: true }));
+  }
+  if (removed) _playerNpcApply([..._playerNpcDocs.values()]);
+}
+function _stopPlayerNpcWatch() {
+  for (const unsub of _playerNpcSubs.values()) { try { unsub(); } catch {} }
+  _playerNpcSubs.clear();
+  _playerNpcDocs.clear();
+  _playerNpcApply = null;
+}
+
+let _sceneTokenUnsubs = [];   // tokens de la scène active (réabonné à chaque changement de scène)
+let _baseTokenUnsubs = [];    // réserve (+ joueurs/PNJ de toutes les scènes côté MJ) : indépendants de la scène
 let _sceneAnnotUnsub = null;
 let _rebindSceneSubscriptions = null;
 let _sceneHiddenTimer = null;
 
 function _clearSceneSubscriptions() {
   _sceneTokenUnsubs.splice(0).forEach(unsub => { try { unsub?.(); } catch {} });
+  _baseTokenUnsubs.splice(0).forEach(unsub => { try { unsub?.(); } catch {} });
   if (_sceneAnnotUnsub) { try { _sceneAnnotUnsub(); } catch {} _sceneAnnotUnsub = null; }
 }
 
@@ -12151,7 +12186,7 @@ function _initListeners() {
   }));
 
   // 4. PNJ — source de vérité des HP PNJ
-  VS.unsubs.push(subscribeCollection("npcs", data => {
+  const applyNpcs = data => {
     const prev = VS.npcs;
     const next = {};
     for (const n of data || []) next[n.id] = n;
@@ -12166,7 +12201,17 @@ function _initListeners() {
     }
     if (changed.size) _renderTraySoon();
     _markNpcsReady();
-  }));
+  };
+  if (STATE.isAdmin) {
+    // MJ : catalogue complet (ajout depuis le tray, auto-synchro des tokens).
+    VS.unsubs.push(subscribeCollection("npcs", applyNpcs));
+  } else {
+    // Joueur : seulement les PNJ qui ont un token chez lui (suivi par
+    // _syncPlayerNpcWatch à chaque snapshot de tokens), plus toute la collection.
+    _playerNpcApply = applyNpcs;
+    applyNpcs([]);
+    VS.unsubs.push(_stopPlayerNpcWatch);
+  }
 
   // 5. Bestiaire — uniquement les créatures de la scène active au montage.
   // Le catalogue complet du MJ n'est chargé que s'il ouvre l'onglet Bestiaire.
@@ -12191,14 +12236,26 @@ function _initListeners() {
     }
   }
 
-  // 6. Tokens
-  const onTokensSnapshot = snap => {
+  // 6. Tokens — plusieurs flux ciblés (scène active, réserve, et côté MJ les
+  // joueurs/PNJ de toutes les scènes). `inScope` décrit le périmètre du flux :
+  // un token qui en SORT (changement de scène) peut avoir déjà été mis à jour par
+  // un autre flux ; on ne le retire alors pas localement.
+  // `marksReady` : seul le flux qui couvre TOUS les persos/PNJ (MJ) déclare la
+  // liste prête pour l'auto-synchro, et seulement sur réponse serveur — un
+  // snapshot du cache local peut être partiel et ferait recréer (écraser) des
+  // tokens existants.
+  const makeTokensHandler = (inScope, { marksReady = false } = {}) => snap => {
     let estimateTargetsChanged = false;
     snap.docChanges().forEach(ch => {
      try {
       const id=ch.doc.id;
       let data={id,...ch.doc.data()};
-      if (ch.type==='removed') {
+      // Hors périmètre (supprimé, ou sorti du flux : changement de scène…) :
+      // on ne retire le token local que s'il relève encore de CE flux. S'il a
+      // déjà été mis à jour par un autre flux, celui-ci fait foi.
+      if (ch.type==='removed' || !inScope(data)) {
+        const local = VS.tokens[id]?.data;
+        if (!local || !inScope(local)) return;
         if (VS.tokens[id]?.data?.type === 'enemy') estimateTargetsChanged = true;
         _keyboardOptimisticMoves.delete(id);
         VS.tokens[id]?.shape?.destroy(); delete VS.tokens[id];
@@ -12211,6 +12268,12 @@ function _initListeners() {
       const optimistic=_keyboardOptimisticMoves.get(id);
       if (optimistic && !_keyboardPatchMatches(data, optimistic.patch))
         data={...data,...optimistic.patch};
+      // Anciens tokens de perso/PNJ sans `type` : le flux MJ « joueurs/PNJ » les
+      // filtre par type. On le renseigne une fois pour qu'ils restent suivis
+      // (sinon l'auto-synchro les croirait absents et créerait un doublon).
+      if (STATE.isAdmin && !data.type && (data.characterId || data.npcId)) {
+        void updateDoc(_tokRef(id), { type: data.characterId ? 'player' : 'npc' }).catch(() => {});
+      }
       const prev=VS.tokens[id];
       if (data.type === 'enemy' && (!prev || prev.data.type !== data.type || prev.data.beastId !== data.beastId)) {
         estimateTargetsChanged = true;
@@ -12250,7 +12313,8 @@ function _initListeners() {
     _renderCombatTrackerSoon();
     void _cleanupReserveDuplicates();
     void _cleanupReserveSummons();
-    _markToksReady();
+    if (marksReady && !snap.metadata?.fromCache) _markToksReady();
+    _syncPlayerNpcWatch();
     void _syncOwnedCharacterDelegations();
     _ensureBestiaryForTokens();
     // Joueur : le bouton « Invoquer mon token » dépend de l'état de SON token
@@ -12312,36 +12376,56 @@ function _initListeners() {
     if (VS.activePage?.fogEnabled) fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
   };
 
+  // Quota — périmètre des tokens écoutés :
+  //  • tout le monde : la scène active ;
+  //  • MJ : les joueurs/PNJ de TOUTES les scènes et de la réserve (réserve,
+  //    « ailleurs », compteurs des scènes). Plus les ennemis des autres scènes,
+  //    qui étaient l'essentiel du volume, ni un 2ᵉ flux réserve en doublon ;
+  //  • joueur : seulement SES tokens en réserve (propriétaire ou délégué), au
+  //    lieu de toute la réserve (1 token par PNJ et par perso de la campagne).
+  const uid = STATE.user?.uid || '';
+  const isCastToken = d => d?.type === 'player' || d?.type === 'npc';
+  const isMine = d => !!uid && (d?.ownerId === uid
+    || (Array.isArray(d?.controlDelegates) && d.controlDelegates.includes(uid)));
+  const inBaseScope = d => STATE.isAdmin ? isCastToken(d) : (!d?.pageId && isMine(d));
   _rebindSceneSubscriptions = () => {
     const pageId = VS.activePage?.id;
-    const keepAdminTokenListener = STATE.isAdmin && _sceneTokenUnsubs.length > 0;
-    if (!keepAdminTokenListener) {
-      _sceneTokenUnsubs.splice(0).forEach(unsub => { try { unsub?.(); } catch {} });
-    }
+    _sceneTokenUnsubs.splice(0).forEach(unsub => { try { unsub?.(); } catch {} });
     if (_sceneAnnotUnsub) { try { _sceneAnnotUnsub(); } catch {} _sceneAnnotUnsub = null; }
 
-    if (STATE.isAdmin && !keepAdminTokenListener) {
-      _sceneTokenUnsubs.push(onSnapshot(_toksCol(), onTokensSnapshot, () => {}));
-    } else {
-      // Retire du cache local les anciens tokens de scène, tout en gardant la
-      // réserve nécessaire au bouton « Invoquer mon token ».
-      for (const [id, entry] of Object.entries(VS.tokens)) {
-        if (!entry?.data?.pageId || entry.data.pageId === pageId) continue;
-        entry.shape?.destroy?.();
-        delete VS.tokens[id];
-      }
-      if (pageId) {
-        _sceneTokenUnsubs.push(onSnapshot(
-          query(_toksCol(), where('pageId', '==', pageId)),
-          onTokensSnapshot,
+    // Retire du cache local les tokens qui ne relèvent plus d'aucun flux (scène quittée).
+    for (const [id, entry] of Object.entries(VS.tokens)) {
+      const d = entry?.data;
+      if (!d || (pageId && d.pageId === pageId) || inBaseScope(d)) continue;
+      entry.shape?.destroy?.();
+      delete VS.tokens[id];
+    }
+    if (pageId) {
+      _sceneTokenUnsubs.push(onSnapshot(
+        query(_toksCol(), where('pageId', '==', pageId)),
+        makeTokensHandler(d => d.pageId === pageId),
+        () => {},
+      ));
+    }
+    if (!_baseTokenUnsubs.length) {
+      if (STATE.isAdmin) {
+        _baseTokenUnsubs.push(onSnapshot(
+          query(_toksCol(), where('type', 'in', ['player', 'npc'])),
+          makeTokensHandler(inBaseScope, { marksReady: true }),
+          () => {},
+        ));
+      } else if (uid) {
+        _baseTokenUnsubs.push(onSnapshot(
+          query(_toksCol(), where('ownerId', '==', uid)),
+          makeTokensHandler(inBaseScope),
+          () => {},
+        ));
+        _baseTokenUnsubs.push(onSnapshot(
+          query(_toksCol(), where('controlDelegates', 'array-contains', uid)),
+          makeTokensHandler(inBaseScope),
           () => {},
         ));
       }
-      _sceneTokenUnsubs.push(onSnapshot(
-        query(_toksCol(), where('pageId', '==', null)),
-        onTokensSnapshot,
-        () => {},
-      ));
     }
 
     for (const entry of Object.values(_annotations)) entry?.shape?.destroy?.();
