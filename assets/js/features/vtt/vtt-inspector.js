@@ -186,8 +186,11 @@ export function _renderInspectorImpl(t) {
   }
   el.dataset.tokenId = t.id || '';
   const ld=_live(t);
-  const hp=ld.displayHp??20, hpm=ld.displayHpMax??20;
-  const rat=hpm>0?Math.max(0,hp/hpm):1;
+  // PV inconnus (joueur sur un ennemi sans estimation) : « ? », jamais un 20/20 inventé.
+  const hpKnown = ld.displayHp != null && ld.displayHpMax != null;
+  const hp = hpKnown ? ld.displayHp : '?', hpm = hpKnown ? ld.displayHpMax : '?';
+  const rat = hpKnown && hpm > 0 ? Math.max(0, hp / hpm) : (hpKnown ? 1 : 0);
+  const hpCol = hpKnown ? hpColor(rat) : '#64748b';
   const icon={player:'🧑',enemy:'👹',npc:'👤'}[t.type]??'🎭';
   const lbl={player:'Joueur',enemy:'Ennemi',npc:'PNJ'}[t.type]??t.type;
   const img=ld.displayImage;
@@ -252,10 +255,10 @@ export function _renderInspectorImpl(t) {
       : (ld.displayAttackDice || (ld.displayAttack??5));
     const _canEditToken = _canControlToken(t);
     const _inCombat = !!VS.session?.combat?.active;
-    const pvEditHtml = _canEditToken
+    const pvEditHtml = (_canEditToken && hpKnown)
       ? '<input class="vtt-ins-input" type="number" value="'+hp+'" min="0" max="'+hpm+'" data-vtt-fn="_vttSetHp" data-vtt-on="change" data-vtt-args="'+t.id+'|$value">'
       : null;
-    const pvMaxHtml = _canEditToken
+    const pvMaxHtml = (_canEditToken && hpKnown)
       ? '<button type="button" class="vtt-ins-max-btn" data-vtt-fn="_vttSetHp" data-vtt-args="'+t.id+'|'+hpm+'" title="Rétablir tous les PV">Max</button>'
       : '';
     const pmEditHtml = (_canEditToken && pm !== null && pmMax !== null)
@@ -277,7 +280,7 @@ export function _renderInspectorImpl(t) {
 
     vitalsHtml =
       '<div class="vtt-ins-bars">' +
-        _bar('PV', hp, hpm, hpColor(rat), pvEditHtml, pvMaxHtml) +
+        _bar('PV', hp, hpm, hpCol, pvEditHtml, pvMaxHtml) +
         (pm !== null && pmMax !== null ? _bar('PM', pm, pmMax, '#b47fff', pmEditHtml, pmMaxHtml) : '') +
       '</div>';
     coreStatsHtml = (() => {
@@ -738,7 +741,8 @@ export function _renderInspectorImpl(t) {
       <span class="vtt-resource-value"><b>${kind}</b> ${current}/${max}</span>
       <span class="vtt-dbar-t" role="progressbar" aria-label="${label}" aria-valuenow="${current}" aria-valuemin="0" aria-valuemax="${max}"><b class="vtt-dbar-f" style="width:${Math.max(0, Math.min(100, pct))}%;background:${color}"></b></span>
     </span>`;
-    if (!_ed) return `<div class="vtt-resource vtt-resource--${resourceKey} vtt-resource--readonly" style="--vtt-resource-color:${color}">${summary}</div>`;
+    // Valeur inconnue (« ? ») : lecture seule, rien à régler.
+    if (!_ed || !Number.isFinite(Number(current))) return `<div class="vtt-resource vtt-resource--${resourceKey} vtt-resource--readonly" style="--vtt-resource-color:${color}">${summary}</div>`;
     const controls = `<div class="vtt-resource-controls" aria-label="Modifier les ${label}">
            ${stepButton(-1, current <= 0)}
            <input class="vtt-ins-input vtt-vital-input" type="number" inputmode="numeric" value="${current}" min="0" max="${max}" aria-label="${label} actuels" title="Saisir la valeur puis appuyer sur Entrée ou quitter le champ" data-vtt-fn="${setter}" data-vtt-on="change" data-vtt-args="${setArgs}">
@@ -758,7 +762,7 @@ export function _renderInspectorImpl(t) {
       <div class="vtt-fiche-main">
         <div class="vtt-who-b"><span class="vtt-who-name">${_esc(ld.displayName ?? t.name)}</span></div>
         <div class="vtt-bars vtt-bars--compact">
-          ${_resource('PV', 'points de vie', hp, hpm, Math.round(rat * 100), hpColor(rat))}
+          ${_resource('PV', 'points de vie', hp, hpm, Math.round(rat * 100), hpCol)}
           ${(_pm !== null && _pmMax !== null) ? _resource('PM', 'points de mana', _pm, _pmMax, _pmMax > 0 ? Math.round(Math.max(0, _pm) / _pmMax * 100) : 0, '#7b87f5') : ''}
           ${_gardeMax > 0 ? _resource('Garde', 'points de Garde', _gardeCur, _gardeMax, Math.round(_gardeCur / _gardeMax * 100), '#5fb0c8', {
             setter: '_vttMsSetGarde', direct: true, prefix: `${_char.id}|${_char.uid || _sheetUid || ''}`,
