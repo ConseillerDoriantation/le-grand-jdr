@@ -33,6 +33,7 @@ import {
 } from './vtt.js'; // circ. (runtime)
 import { _renderInspector } from './vtt-inspector.js'; // re-render après changement de mode de jet
 import { openVttSessionDockPanel, registerVttSessionDockPanel, syncVttSessionDock } from './vtt-session-dock.js';
+import { normalizeSimulatedNatural, simulatedDiceSlots, validateSimulatedValues } from './vtt-dice-simulation.js';
 
 // État émotes (déplacé de vtt.js). _emotes exporté : préchargé au montage côté vtt.js.
 export let _emotes = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
@@ -101,6 +102,11 @@ export function _vttSetBonus(v) {
 
 export function _vttToggleRollHidden() {
   if (!STATE.isAdmin) return;
+  if (VS.rollSimulated) {
+    VS.rollHidden = false;
+    showNotif('Un dé simulé est toujours public.', 'info');
+    return;
+  }
   VS.rollHidden = !VS.rollHidden;
   lsJson.set('vtt-roll-hidden', VS.rollHidden);
   // Le bouton 👁/🕶 vit désormais dans le lanceur (vtt-dice.js) : on le laisse se
@@ -151,11 +157,35 @@ export async function _vttRollSkill(skillName, stat) {
     ),
     skillRollMode,
   );
+  const simulated = !!(STATE.isAdmin && VS.rollSimulated);
+  let simulatedNaturals = null;
+  if (simulated) {
+    const slots = simulatedDiceSlots({ 20: 1 }, effectiveRollMode);
+    simulatedNaturals = validateSimulatedValues(slots, VS.rollSimValues);
+    // Une expertise/condition peut ajouter l'avantage après le rendu du lanceur.
+    // Dans ce cas, la valeur naturelle choisie reste la valeur des deux d20.
+    if (!simulatedNaturals && slots.length === 2 && VS.rollSimValues.length === 1) {
+      const natural = normalizeSimulatedNatural(VS.rollSimValues[0], 20);
+      if (natural != null) simulatedNaturals = [natural, natural];
+    }
+    // À l'inverse, un avantage choisi dans le lanceur peut être annulé par un
+    // désavantage d'armure/condition : seul le premier d20 saisi est alors joué.
+    if (!simulatedNaturals && slots.length === 1 && VS.rollSimValues.length >= 1) {
+      const natural = normalizeSimulatedNatural(VS.rollSimValues[0], 20);
+      if (natural != null) simulatedNaturals = [natural];
+    }
+    if (!simulatedNaturals) {
+      showNotif('Renseigne une valeur naturelle valide pour chaque d20 simulé.', 'error');
+      return;
+    }
+  }
   const d20 = () => Math.floor(Math.random() * 20) + 1;
 
-  let d1 = d20(), d2, roll;
-  if (effectiveRollMode === 'advantage')    { d2 = d20(); roll = Math.max(d1, d2); }
-  else if (effectiveRollMode === 'disadvantage') { d2 = d20(); roll = Math.min(d1, d2); }
+  let simulatedCursor = 0;
+  const nextD20 = () => simulated ? simulatedNaturals[simulatedCursor++] : d20();
+  let d1 = nextD20(), d2, roll;
+  if (effectiveRollMode === 'advantage')    { d2 = nextD20(); roll = Math.max(d1, d2); }
+  else if (effectiveRollMode === 'disadvantage') { d2 = nextD20(); roll = Math.min(d1, d2); }
   else                              { roll = d1; }
 
   const total   = roll + mod + VS.rollBonus + equipSkillBonus + skillProfBonus;
@@ -168,7 +198,7 @@ export async function _vttRollSkill(skillName, stat) {
     || n?.photoURL || n?.photo || n?.avatar || n?.imageUrl
     || b?.photoURL || b?.photo || b?.avatar || b?.imageUrl
     || t?.imageUrl || null));
-  const gmOnly = STATE.isAdmin && VS.rollHidden;
+  const gmOnly = simulated ? false : STATE.isAdmin && VS.rollHidden;
   try {
     // Jet caché → sous-collection MJ (secret serveur) ; sinon log public.
     const payload = {
@@ -188,16 +218,18 @@ export async function _vttRollSkill(skillName, stat) {
       rollSkillBonus: skillProfBonus || 0,
       rollSkillLevel: _skillLvl || null,
       isCrit, isFumble,
-      gmOnly,
+      gmOnly, simulated,
+      statsExcluded: simulated,
       createdAt: serverTimestamp(),
     };
     if (gmOnly) await addDoc(_logGmCol(), payload);
     else await _vttPublishOptimisticLog(payload);
-    if (gmOnly) showNotif('Jet caché — visible uniquement par le MJ', 'success');
+    if (simulated) showNotif(`🧪 Jet simulé public : ${skillName} = ${total}`, 'success');
+    else if (gmOnly) showNotif('Jet caché — visible uniquement par le MJ', 'success');
   } catch(e) { showNotif('Erreur jet : ' + e.message, 'error'); }
   // Statistiques : compte le jet de compétence (PJ uniquement) + crit/échec.
   // t.characterId = id fiable (VS.characters[...] ne porte pas forcément .id).
-  if (c && t.characterId) bumpSkill(t.characterId, characterName, skillName, {
+  if (c && t.characterId && !simulated) bumpSkill(t.characterId, characterName, skillName, {
     crit: isCrit,
     fumble: isFumble,
     natural: roll,
@@ -211,9 +243,13 @@ export async function _vttRollSkill(skillName, stat) {
   VS.rollHistory.unshift({
     kind: 'skill', label: skillName, skillName, stat,
     mod, mode: effectiveRollMode, bonus: VS.rollBonus || 0,
-    formulaStr: `1d20 ${_modSigned}`, total, crit: isCrit, fail: isFumble,
+    formulaStr: `1d20 ${_modSigned}`, total, crit: isCrit, fail: isFumble, simulated,
   });
   if (VS.rollHistory.length > 6) VS.rollHistory.length = 6;
+  if (simulated) {
+    VS.rollSimulated = false;
+    VS.rollSimValues = [];
+  }
   document.dispatchEvent(new CustomEvent('vtt-roll-history'));
 }
 

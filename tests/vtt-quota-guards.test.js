@@ -9,6 +9,10 @@ const presence = readFileSync(new URL('../assets/js/features/vtt/vtt-presence.js
 const chat = readFileSync(new URL('../assets/js/features/chat.js', import.meta.url), 'utf8');
 const pages = readFileSync(new URL('../assets/js/features/pages.js', import.meta.url), 'utf8');
 const vtt = readFileSync(new URL('../assets/js/features/vtt/vtt.js', import.meta.url), 'utf8');
+const tray = readFileSync(new URL('../assets/js/features/vtt/vtt-tray.js', import.meta.url), 'utf8');
+const vttChat = readFileSync(new URL('../assets/js/features/vtt/vtt-chat.js', import.meta.url), 'utf8');
+const adventure = readFileSync(new URL('../assets/js/core/adventure.js', import.meta.url), 'utf8');
+const navigation = readFileSync(new URL('../assets/js/core/navigation.js', import.meta.url), 'utf8');
 const ruler = readFileSync(new URL('../assets/js/features/vtt/vtt-ruler.js', import.meta.url), 'utf8');
 const rules = readFileSync(new URL('../docs/firestore-rules.md', import.meta.url), 'utf8');
 
@@ -41,4 +45,27 @@ test('le journal historique des stats est compacté une seule fois et seulement 
   assert.match(pages, /if \(!STATE\.isAdmin\) return \{ rollups: null, logs: \[\], loaded: false \}/);
   assert.match(pages, /_statsClaimRollupLease\(\)/);
   assert.match(firestore, /export async function claimDocumentLease/);
+});
+
+test('entrer dans une aventure ne précharge plus les collections éditoriales lourdes', () => {
+  const eagerCollections = firestore.match(/_SESSION_COLLECTIONS = \[([\s\S]*?)\];/)?.[1] || '';
+  const eagerDocs = firestore.match(/_SESSION_DOCS = \[([\s\S]*?)\];/)?.[1] || '';
+  assert.doesNotMatch(eagerCollections, /['"]quests['"]/);
+  assert.doesNotMatch(eagerCollections, /characterPages|worldPages|bestiary/);
+  assert.equal(eagerDocs.trim(), '');
+  assert.doesNotMatch(adventure, /\binitCharacterPages\(\)|\binitWorldPages\(\)/);
+  assert.match(navigation, /page === 'characters' \|\| page === 'players'[\s\S]*initCharacterPages\(\)/);
+  assert.match(navigation, /page === 'world'[\s\S]*initWorldPages\(\)/);
+});
+
+test('le VTT ne charge le catalogue complet du bestiaire que si son onglet est ouvert', () => {
+  assert.doesNotMatch(vtt, /if \(STATE\.isAdmin\) void _loadBestiaryCatalog\(\)/);
+  assert.match(vtt, /data\?\.beastId && data\.pageId === VS\.activePage\?\.id/);
+  assert.match(tray, /tab === 'bestiary'[\s\S]*_loadBestiaryCatalog\(\)/);
+});
+
+test('le journal MJ ne lit pas deux fois quatre-vingts messages pour en afficher quatre-vingts', () => {
+  assert.match(vttChat, /_PUBLIC_LOG_LIMIT = 60/);
+  assert.match(vttChat, /_GM_LOG_LIMIT = 20/);
+  assert.doesNotMatch(vttChat, /_logGmCol\(\)[\s\S]{0,80}limit\(80\)/);
 });

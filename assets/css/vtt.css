@@ -4079,6 +4079,44 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-atk-desc[open] { width: 100%; margin-left: 0; }
 .vtt-atk-desc p { width: 100%; margin-top: 8px; padding: 9px 11px; border-radius: var(--r-sm); background: var(--surface-sunken); border: 1px solid var(--border); font-size: 12px; color: var(--text-soft); line-height: 1.55; }
 
+/* Dé simulé MJ dans la résolution d'une action de personnage. */
+.vtt-atk-simulation {
+  margin: 0 13px 11px; overflow: hidden; border: 1px solid var(--border-md);
+  border-radius: var(--r-md); background: var(--surface-sunken);
+}
+.vtt-atk-sim-toggle {
+  width: 100%; min-height: 40px; padding: 7px 10px; border: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  color: var(--text-soft); background: transparent; font-family: inherit; text-align: left;
+}
+.vtt-atk-sim-toggle:hover { background: var(--surface-2); color: var(--text); }
+.vtt-atk-sim-toggle.is-active { color: #67e8f9; background: color-mix(in srgb, #0891b2 10%, transparent); }
+.vtt-atk-sim-toggle > span { font-size: 12px; font-weight: 700; white-space: nowrap; }
+.vtt-atk-sim-toggle > small { color: var(--text-muted); font-size: 9.5px; font-weight: 600; }
+.vtt-atk-sim-body { padding: 8px 10px 10px; border-top: 1px solid color-mix(in srgb, #22d3ee 24%, transparent); }
+.vtt-atk-sim-body > p { margin: 0 0 8px; color: var(--text-muted); font-size: 10.5px; line-height: 1.4; }
+.vtt-atk-sim-fields { display: grid; gap: 7px; }
+.vtt-atk-sim-group { display: grid; grid-template-columns: minmax(120px, .7fr) 1.3fr; align-items: center; gap: 8px; }
+.vtt-atk-sim-group > span { color: var(--text-soft); font-size: 10.5px; font-weight: 700; }
+.vtt-atk-sim-group > span small { display: block; margin-top: 1px; color: var(--text-dim); font-size: 8.5px; font-weight: 500; }
+.vtt-atk-sim-group.is-optional { opacity: .82; }
+.vtt-atk-sim-group > div { display: grid; grid-template-columns: repeat(6, minmax(44px, 1fr)); gap: 5px; }
+.vtt-atk-sim-group label {
+  min-width: 0; padding: 3px 4px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 3px;
+  border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface-1);
+}
+.vtt-atk-sim-group label:focus-within { border-color: #22d3ee; box-shadow: 0 0 0 2px rgba(34,211,238,.1); }
+.vtt-atk-sim-group label small { color: #67e8f9; font-family: var(--font-mono); font-size: 8.5px; white-space: nowrap; }
+.vtt-atk-sim-group input {
+  width: 100%; min-width: 0; height: 23px; padding: 0 2px; border: 0; outline: 0;
+  color: var(--text); background: transparent; font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-align: center;
+  -moz-appearance: textfield;
+}
+.vtt-atk-sim-group input.is-invalid { color: var(--crimson); }
+.vtt-atk-sim-group input::-webkit-outer-spin-button,
+.vtt-atk-sim-group input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.vtt-atk-sim-empty { color: var(--text-muted); font-size: 10.5px; }
+
 /* ── 5 · Pied ── */
 .vtt-atk-footer {
   display: flex; align-items: center; gap: 10px;
@@ -4114,6 +4152,9 @@ html:not([data-theme="light"]) .vtt-root {
   .vtt-atk-footer { flex-wrap: wrap; }
   .vtt-atk-ftk { order: 3; flex-basis: 100%; }
   .vtt-atk-runes { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .vtt-atk-sim-toggle { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .vtt-atk-sim-group { grid-template-columns: 1fr; }
+  .vtt-atk-sim-group > div { grid-template-columns: repeat(4, minmax(42px, 1fr)); }
 }
 
 /* En-têtes de catégorie */
@@ -6162,6 +6203,11 @@ html:not([data-theme="light"]) .vtt-root {
   background: rgba(124,58,237,.32);
   border: 1px solid rgba(196,181,253,.35);
 }
+.vtt-log-badge--simulated {
+  color: #67e8f9;
+  background: rgba(8,145,178,.18);
+  border: 1px solid rgba(103,232,249,.4);
+}
 
 /* ── Body : ligne principale avec résultat ───────────────────────────── */
 .vtt-log-body {
@@ -7673,6 +7719,51 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-dice-sel-f em { font-style: normal; font-size: 12px; color: var(--amber); }
 .vtt-dice-sel.none .vtt-dice-sel-b b { font-family: var(--font-body); font-size: 12.5px; font-weight: 500; color: var(--text-muted); }
 
+/* Dé simulé MJ : saisie explicite des valeurs naturelles, toujours publique. */
+.vtt-dice-simulation {
+  border: 1px solid var(--border-md); border-radius: var(--r-md);
+  background: var(--surface-1); overflow: hidden;
+}
+.vtt-dice-simulation.active {
+  border-color: color-mix(in srgb, #22d3ee 52%, var(--border));
+  background: color-mix(in srgb, #0891b2 9%, var(--surface-1));
+}
+.vtt-dice-sim-toggle {
+  width: 100%; min-height: 32px; padding: 5px 9px; border: 0; cursor: pointer;
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 7px;
+  color: var(--text-soft); background: transparent; font-family: inherit; text-align: left;
+}
+.vtt-dice-sim-toggle:hover { background: var(--surface-2); color: var(--text); }
+.vtt-dice-sim-toggle:disabled { opacity: .45; cursor: not-allowed; }
+.vtt-dice-sim-toggle b { font-size: 11.5px; }
+.vtt-dice-sim-toggle > span:last-child {
+  font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted);
+}
+.vtt-dice-simulation.active .vtt-dice-sim-toggle > span:last-child { color: #67e8f9; }
+.vtt-dice-sim-content { padding: 0 9px 8px; border-top: 1px solid color-mix(in srgb, #22d3ee 22%, transparent); }
+.vtt-dice-sim-content p { margin: 6px 0; color: var(--text-muted); font-size: 9.5px; line-height: 1.35; }
+.vtt-dice-sim-content p strong { color: #67e8f9; }
+.vtt-dice-sim-values { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; max-height: 98px; overflow-y: auto; }
+.vtt-dice-sim-values label {
+  min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px;
+  padding: 3px 4px 3px 6px; border-radius: var(--r-sm); background: var(--surface-sunken); border: 1px solid var(--border);
+}
+.vtt-dice-sim-values label:focus-within { border-color: #22d3ee; box-shadow: 0 0 0 2px rgba(34,211,238,.12); }
+.vtt-dice-sim-values label.invalid { border-color: var(--crimson); }
+.vtt-dice-sim-values span { font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; color: #67e8f9; white-space: nowrap; }
+.vtt-dice-sim-values input {
+  width: 100%; min-width: 0; height: 24px; padding: 0 3px; border: 0; outline: 0; border-radius: 4px;
+  color: var(--text); background: var(--surface-2); font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-align: center;
+  -moz-appearance: textfield;
+}
+.vtt-dice-sim-values input::-webkit-outer-spin-button,
+.vtt-dice-sim-values input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.vtt-dice-sim-warning { padding: 6px 8px; border-radius: var(--r-sm); color: var(--crimson); background: color-mix(in srgb, var(--crimson) 10%, transparent); font-size: 10.5px; }
+.vtt-dice-public-lock {
+  justify-self: end; display: inline-flex; align-items: center; height: 29px; padding: 0 10px;
+  border: 1px solid rgba(34,211,238,.35); border-radius: var(--r-full); color: #67e8f9; font-size: 11px; font-weight: 700;
+}
+
 .vtt-dice-knobs {
   display: grid;
   grid-template-columns: max-content max-content minmax(0, 1fr);
@@ -7722,6 +7813,13 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-dice-go.free {
   background: linear-gradient(180deg, var(--arcane), color-mix(in srgb, var(--arcane) 65%, #000));
   box-shadow: 0 6px 18px color-mix(in srgb, var(--arcane) 28%, transparent);
+}
+.vtt-dice-go.simulated {
+  background: linear-gradient(180deg, #0891b2, #155e75);
+  box-shadow: 0 6px 18px rgba(8,145,178,.28);
+}
+.vtt-dice-go.simulated:disabled {
+  background: var(--surface-3); color: var(--text-muted); box-shadow: none;
 }
 
 /* ── Court repos (vote groupe) ───────────────────────────────────── */

@@ -111,10 +111,12 @@ async function deleteDoc(ref) {
 }
 
 function onSnapshot(ref, ...args) {
-  let first = true;
+  let firstServerSnapshot = true;
   const wrapNext = next => snapshot => {
-    recordFirestoreRead(_metricPath(ref), _snapshotReadCount(snapshot, first), { listener: true });
-    first = false;
+    const fromCache = snapshot.metadata?.fromCache === true;
+    const initial = !fromCache && firstServerSnapshot;
+    recordFirestoreRead(_metricPath(ref), _snapshotReadCount(snapshot, initial), { listener: true, initial });
+    if (!fromCache) firstServerSnapshot = false;
     return next(snapshot);
   };
   const observerIndex = args.findIndex(value => value && typeof value === 'object' && typeof value.next === 'function');

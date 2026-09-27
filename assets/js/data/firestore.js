@@ -2,8 +2,8 @@
 // FIRESTORE — Couche d'accès aux données
 //
 // Trois niveaux de cache (du plus prioritaire au moins) :
-//   1. Live session — les données critiques du dashboard sont amorcées à
-//      l'entrée d'aventure (quests, characters, bastion/main, agenda_session/next).
+//   1. Live session — seuls les personnages, nécessaires dans presque toute
+//      l'app et dans le VTT, sont amorcés à l'entrée d'aventure.
 //      Les autres collections/docs partagés restent session-live mais démarrent
 //      au 1er accès (page, palette, abonnement). Coût ensuite : uniquement les
 //      deltas réels (latency-compensation auto sur nos propres writes).
@@ -386,7 +386,6 @@ function _primeDoc(col, id) {
 // 1er accès — page, Ctrl+K, ou abonnement réactif du dashboard), ce qui réduit
 // la rafale de lectures/transfert au démarrage à froid.
 const _SESSION_COLLECTIONS = [
-  'quests',
   'characters',
 ];
 const _LAZY_SESSION_COLLECTIONS = new Set([
@@ -394,11 +393,12 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   // lorsqu'il est ouvert et le VTT seulement lorsqu'il est monté. La conserver
   // ici laisserait un listener permanent après la première ouverture.
   'shop', 'shopCategories',
+  'quests',
   'npcs',
   'organizations', // utilisé par npcs.js + histoire.js, TTL 5 min insuffisant
   'players',       // utilisé par character-sheet tabs + inline-edit, sans cache TTL
-  // Bio « diapo » déportée hors du doc perso (1 doc/perso, base64 lourd). Session-
-  // live → 0 lecture en repeat ; lazy → amorcée à l'entrée d'aventure (initCharacterPages).
+  // Bio « diapo » déportée hors du doc perso (1 doc/perso, base64 lourd).
+  // Amorcée uniquement à l'ouverture des pages Personnages / Joueurs.
   'characterPages',
   // Contenu « diapo » des sections du Guide, déporté hors de world/main (1 doc/section).
   'worldPages',
@@ -412,11 +412,10 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   // Lazy-session → 0 lecture en repeat-visit (au prix de la RAM, cf. note ci-dessus).
   'bestiary',
 ]);
-const _SESSION_DOCS = [
-  ['bastion',          'main'], // dashboard
-  ['agenda_session',   'next'], // dashboard + agenda
-];
+const _SESSION_DOCS = [];
 const _LAZY_SESSION_DOCS = new Set([
+  'bastion/main',           // dashboard + page Bastion
+  'agenda_session/next',    // dashboard + agenda
   'world/main',             // page Monde, parfois volumineux
   'achievements_meta/order',// page Hauts-faits
   'world/dice_skills',      // histoire.js, shop.js, vtt.js

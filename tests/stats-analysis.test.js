@@ -247,6 +247,17 @@ test('aggregateVttRollDetails reconstruit les moyennes depuis les logs VTT', () 
   assert.equal(result.relevantLogs, 7);
 });
 
+test('un jet simulé MJ reste dans le chat mais jamais dans les statistiques', () => {
+  const createdAt = new Date(2026, 7, 11, 12);
+  const result = aggregateVttRollDetails([{
+    type: 'roll', characterId: 'c1', rollSkill: 'Perception',
+    rollRaw: 20, rollResult: 24, simulated: true, statsExcluded: true, createdAt,
+  }], { dateKeys: ['2026-08-11'] });
+
+  assert.deepEqual(result.byCharacter, {});
+  assert.equal(result.relevantLogs, 0);
+});
+
 test('deux séances le même jour gardent leurs journaux statistiques séparés', () => {
   const createdAt = new Date(2026, 8, 24, 15);
   const afternoonKey = '2026-09-24__apresmidi';
