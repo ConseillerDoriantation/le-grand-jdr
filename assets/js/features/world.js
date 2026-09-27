@@ -20,7 +20,7 @@ import { attachDropAndCrop } from '../shared/image-crop.js';
 import {
   freePageEditorHtml, bindFreePageEditor, getFreePageData,
   renderFreePageHtml, hasFreePage, freePageSearchText, compressFreePageImages,
-  hasUnsavedFreePageChanges,
+  hasUnsavedFreePageChanges, fitFreePageEditorIfOverflowing,
 } from '../shared/free-page.js';
 import {
   worldPageFor, saveWorldPage, deleteWorldPage, setCachedWorldPage, onWorldPagesChange,
@@ -613,6 +613,7 @@ function _afterReaderRender() {
       _richInitialHtml = getRichTextHtml(`world-rich-${_editingContentId}`);
     } else {
       bindFreePageEditor(host);
+      fitFreePageEditorIfOverflowing(host);   // diapo entière visible dès l'ouverture
     }
   }
   _refreshWorldToc();

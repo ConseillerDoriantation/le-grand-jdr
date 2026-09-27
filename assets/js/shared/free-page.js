@@ -826,6 +826,22 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
         <button type="button" class="free-page-tool free-page-tool--shape" data-fpe-action="toggle-shape-popover" title="Formes" aria-label="Formes">&#9633;</button>
         <button type="button" class="free-page-tool" data-fpe-action="add-nav">Menu</button>
       </div>
+      <div class="free-page-toolbar-group free-page-toolbar-group--history" aria-label="Organisation et historique">
+        <span class="free-page-toolbar-label">Organiser</span>
+        <button type="button" class="free-page-tool free-page-tool--position" data-fpe-action="toggle-position-popover" title="Placer sur la diapo" aria-label="Placer sur la diapo"><span></span></button>
+        <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-action="undo" title="Annuler (Ctrl+Z)" aria-label="Annuler">↶</button>
+        <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-action="redo" title="Rétablir (Ctrl+Y)" aria-label="Rétablir">↷</button>
+      </div>
+      <div class="free-page-toolbar-spacer"></div>
+      <div class="free-page-toolbar-summary">
+        <span class="free-page-slide-size" data-fpe-slide-size>${deck.format.width} × ${deck.format.height}</span>
+        <span class="free-page-weight" data-fpe-weight title="Poids du diaporama — limite Firestore ~1000 Ko">—</span>
+        <button type="button" class="free-page-tool free-page-tool--preview" data-fpe-action="preview-deck" title="Tester le rendu et les interactions">Aperçu</button>
+      </div>
+      </div>
+      <!-- Rangée 2 contextuelle : outils Texte / Calques de la sélection, sinon Affichage.
+           La rangée 1 ne change jamais → pas de chevauchement ni de saut de hauteur. -->
+      <div class="free-page-toolbar-viewbar">
       <div class="free-page-toolbar-group free-page-toolbar-group--text" data-fpe-text-toolbar>
         <span class="free-page-toolbar-label">Texte</span>
         <button type="button" class="free-page-toolbar-font" data-fpe-action="toggle-font-popover" title="Police d'écriture">
@@ -845,20 +861,7 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
         <button type="button" class="free-page-tool free-page-tool--icon free-page-layer-tool" data-fpe-action="layer-down" title="Reculer la selection" aria-label="Reculer la selection"><span aria-hidden="true">&#8681;</span></button>
         <button type="button" class="free-page-tool free-page-tool--icon free-page-layer-tool" data-fpe-action="layer-up" title="Avancer la selection" aria-label="Avancer la selection"><span aria-hidden="true">&#8679;</span></button>
       </div>
-      <div class="free-page-toolbar-group free-page-toolbar-group--history" aria-label="Organisation et historique">
-        <span class="free-page-toolbar-label">Organiser</span>
-        <button type="button" class="free-page-tool free-page-tool--position" data-fpe-action="toggle-position-popover" title="Placer sur la diapo" aria-label="Placer sur la diapo"><span></span></button>
-        <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-action="undo" title="Annuler (Ctrl+Z)" aria-label="Annuler">↶</button>
-        <button type="button" class="free-page-tool free-page-tool--icon" data-fpe-action="redo" title="Rétablir (Ctrl+Y)" aria-label="Rétablir">↷</button>
-      </div>
-      <div class="free-page-toolbar-spacer"></div>
-      <div class="free-page-toolbar-summary">
-        <span class="free-page-slide-size" data-fpe-slide-size>${deck.format.width} × ${deck.format.height}</span>
-        <span class="free-page-weight" data-fpe-weight title="Poids du diaporama — limite Firestore ~1000 Ko">—</span>
-        <button type="button" class="free-page-tool free-page-tool--preview" data-fpe-action="preview-deck" title="Tester le rendu et les interactions">Aperçu</button>
-      </div>
-      </div>
-      <div class="free-page-toolbar-viewbar">
+      <div class="free-page-toolbar-display">
       <span class="free-page-toolbar-label">Affichage</span>
       <div class="free-page-toolbar-group free-page-toolbar-group--view">
         <label class="free-page-toggle">Grille <input type="checkbox" data-fpe-grid-field="show" ${grid.show ? 'checked' : ''}></label>
@@ -871,6 +874,7 @@ export function freePageEditorHtml({ id = 'free-page-editor', page, legacyHtml =
           ${EDITOR_ZOOMS.map((zoom) => `<option value="${zoom}" ${zoom === 100 ? 'selected' : ''}>${zoom}%</option>`).join('')}
         </select>
         <button type="button" class="free-page-tool" data-fpe-action="fit-zoom" title="Adapter la diapo a l'espace disponible">Adapter</button>
+      </div>
       </div>
       </div>
       <div class="free-page-shape-popover" data-fpe-shape-popover hidden>${shapePopoverHtml()}</div>
@@ -2044,6 +2048,19 @@ function handleEditorField(editor, target) {
   const zoom = EDITOR_ZOOMS.includes(Number(target.value)) ? Number(target.value) : 100;
   target.querySelector('[data-fpe-fit-option]')?.remove();
   editor.style.setProperty('--free-page-editor-zoom', String(zoom / 100));
+}
+
+// Ouverture dans un cadre étroit : « Adapter » d'emblée si la diapo déborde de la
+// zone de composition (sinon on n'en voit qu'un morceau à 100 %).
+export function fitFreePageEditorIfOverflowing(root) {
+  const editors = root?.matches?.('[data-free-page-editor]')
+    ? [root]
+    : [...(root?.querySelectorAll?.('[data-free-page-editor]') || [])];
+  editors.forEach((editor) => {
+    const workspace = editor.querySelector('.free-page-workspace');
+    const stage = editor.querySelector('[data-fpe-stage]');
+    if (workspace && stage && stage.getBoundingClientRect().width > workspace.clientWidth) fitEditorZoom(editor);
+  });
 }
 
 function fitEditorZoom(editor) {
