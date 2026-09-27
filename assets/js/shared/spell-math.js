@@ -30,6 +30,33 @@ export function splitSpellDiceFormula(formula) {
   return { rawDice, fixed };
 }
 
+/**
+ * Relance tous les dés d'une action critique, sans rejouer son bonus fixe.
+ * Ex. 3d6+4 produit 3 nouveaux d6 ; le +4 reste géré une seule fois par
+ * la formule critique de l'aventure.
+ */
+export function rollCriticalDiceDetailed(formula, { maximize = false, random = Math.random } = {}) {
+  const compact = String(formula || '').replace(/\s+/g, '');
+  const match = compact.match(/^(\d+)[dD](\d+)(?:[+-]\d+)?$/);
+  if (!match) return { rolls: [], mod: 0, total: 0, n: 0, sides: 0, formula: '0' };
+
+  const n = Math.max(0, parseInt(match[1], 10) || 0);
+  const sides = Math.max(0, parseInt(match[2], 10) || 0);
+  if (!n || !sides) return { rolls: [], mod: 0, total: 0, n: 0, sides: 0, formula: '0' };
+
+  const rolls = Array.from({ length: n }, () => (
+    maximize ? sides : Math.floor(random() * sides) + 1
+  ));
+  return {
+    rolls,
+    mod: 0,
+    total: rolls.reduce((sum, roll) => sum + roll, 0),
+    n,
+    sides,
+    formula: `${n}d${sides}`,
+  };
+}
+
 /** DoT d'affliction effectif (mode DoT). Manuel si fourni, sinon (1+nbPuiss)d4 +2. */
 export function _calcAfflictionDot(s) {
   const manual = (s?.afflictionDotFormula || '').trim();

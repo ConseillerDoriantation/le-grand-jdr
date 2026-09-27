@@ -824,7 +824,7 @@ export async function deleteAdventure(adventureId) {
   }
 
   const SUBCOLLECTIONS = [
-    'shop', 'shopCategories', 'story', 'story_meta',
+    'shop', 'shopCategories', 'shopContent', 'story', 'story_meta',
     'places', 'organizations', 'place_types', 'map_lieux',
     'npcs', 'npc_affinites', 'settings',
     'achievements', 'achievements_meta',
@@ -832,7 +832,7 @@ export async function deleteAdventure(adventureId) {
     'collection', 'collectionSettings',
     'players', 'world',
     'recettes', 'recipes', 'combat_styles', 'order',
-    'bastion', 'characters',
+    'bastion', 'characters', 'statsRollups',
   ];
 
   // Supprimer chaque sous-collection en batches
@@ -918,7 +918,7 @@ export async function loadAllUsers(scopeAdventure = null, { forceAll = false } =
 export async function runMigration(onProgress) {
   const COLLECTIONS = [
     // Boutique
-    'shop', 'shopCategories',
+    'shop', 'shopCategories', 'shopContent',
     // Trame
     'story', 'story_meta',
     // Carte

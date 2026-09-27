@@ -13,7 +13,7 @@ import { getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollect
 import {
   db, doc, getDoc, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch, deleteField,
-  query, orderBy, limit,
+  query, where, orderBy, limit,
 } from '../../config/firebase.js';
 import { getMod, getModFromScore, calcVitesse, calcCA, calcPVMax, calcPMMax, calcGardeMax, calcPalier, calcDeckMax, getMaitriseBonus, statShort, computeEquipStatsBonus, getItemStatBonus, computeEquipSkillBonus, sortCharactersForDisplay, calcOr } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
@@ -46,7 +46,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { toggleTheme } from '../../shared/theme.js';
 import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken, bumpDamageTaken, setActiveStatsSession } from '../../shared/stats.js';
 import { appliedDamageAmount } from '../../shared/stats-analysis.js';
-import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
+import { classifySpellStatKinds, shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogUpdate, fogUpdateSoon, fogRenderWalls,
@@ -77,7 +77,7 @@ import { planGroupGridStep } from './vtt-group-movement.js';
 import { invocableCharacterTokens, resolveCharacterControlToken } from './vtt-token-control.js';
 import { naturalWeaponCombatContext } from '../../shared/bestiary-combat.js';
 import { canControlCharacter, getCharacterDelegates } from '../../shared/character-state.js';
-import { _calcAfflictionDD, splitSpellDiceFormula } from '../../shared/spell-math.js';
+import { _calcAfflictionDD, rollCriticalDiceDetailed, splitSpellDiceFormula } from '../../shared/spell-math.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
   _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy, rulerCells,
@@ -3509,13 +3509,6 @@ export function _rollDiceDetailed(formula) {
   return { rolls, mod: p.mod, total, n: p.n, sides: p.sides, formula: String(formula) };
 }
 
-function _rollCritExtraDieDetailed(formula, { maximize = false } = {}) {
-  const p = _parseDice(formula);
-  if (!p || !p.sides) return { rolls: [], mod: 0, total: 0, n: 0, sides: 0, formula: '0' };
-  const roll = maximize ? p.sides : Math.floor(Math.random() * p.sides) + 1;
-  return { rolls: [roll], mod: 0, total: roll, n: 1, sides: p.sides, formula: `1d${p.sides}` };
-}
-
 function _diceLogFields(prefix, det) {
   if (!det || !Array.isArray(det.rolls) || !det.rolls.length) return {};
   return {
@@ -4379,10 +4372,12 @@ function _ensureStatsActionId(opt = {}) {
 
 function _statsLogMeta(opt = {}) {
   const item = opt?._itemAction;
+  const statsKinds = classifySpellStatKinds(opt);
   return {
     statsActionId: _ensureStatsActionId(opt),
     statsExcluded: opt?.countInStats === false,
     statsSource: item ? 'item' : (opt?.sortIdx !== undefined ? 'spell' : 'weapon'),
+    statsKinds,
     ...(item ? {
       statsItemId: item.itemId || null,
       statsItemName: item.itemNom || null,
@@ -4392,56 +4387,7 @@ function _statsLogMeta(opt = {}) {
 }
 
 function _castStatKinds(opt = {}) {
-  const mods = opt.mods || {};
-  const support = !!(
-    opt.isCaSort
-    || opt.isRegen
-    || opt.isEnchant
-    || mods.enchant
-    || mods.regeneration
-    || mods.enchantArmeDmg
-    || mods.enchantPieds
-    || mods.enchantGeneric
-    || mods.enchantEtatId
-    || mods.enchantToucher
-    || mods.enchantMove
-    || opt.enchantMode === 'etat'
-    || opt.enchantEtatId
-    || mods.rangeBuff
-    || mods.hot
-    || opt.category === 'support'
-  );
-  const affliction = !!(
-    opt.isAffliction
-    || mods.affliction
-    || mods.laceration
-    || opt.afflictionMode
-    || opt.afflictionEtatId
-  );
-  // Contrôle réel : déplacement imposé, invocation/sentinelle ou zone purement
-  // utilitaire. Une simple AoE offensive ne rapporte pas de soutien au MVP.
-  const control = affliction || !!(
-    opt.isInvocation
-    || mods.invocation
-    || mods.sentinelle
-    || mods.move
-    || mods.push
-    || mods.pull
-    || opt.isDeplacement
-    || (opt.isUtil && (mods.zone || opt.zoneW > 0 || opt.zoneH > 0))
-  );
-  const tactical = support || affliction || !!(
-    opt.isInvocation
-    || mods.invocation
-    || mods.sentinelle
-    || mods.move
-    || mods.push
-    || mods.pull
-    || mods.zone
-    || opt.zoneW > 0
-    || opt.zoneH > 0
-  );
-  return { tactical, support, affliction, control };
+  return classifySpellStatKinds(opt);
 }
 
 function _buildCastStatsDelta(src, opt, roll = {}) {
@@ -9578,7 +9524,7 @@ async function _vttRollAttack() {
       }
 
       // ── Soin normal ou critique ────────────────────────────────────
-      // Crit : max(dés) + 1 roll supplémentaire + 2× les bonus fixes
+      // Crit : relance tous les dés de l'action ; les bonus fixes ne sont pas relancés.
       // Si opt.mjAlwaysMax (flag MJ) : remplace le jet par la valeur max systématique
       let healRaw, healTotal;
       let healRollsDetail = null;
@@ -9598,7 +9544,7 @@ async function _vttRollAttack() {
           rolls: baseDet.rolls, sides: baseDet.sides, mod: baseDet.mod,
           n: baseDet.n, formula: baseDet.formula,
         };
-        const critDet = _rollCritExtraDieDetailed(effectiveDice, { maximize: !!opt.mods?.chance });
+        const critDet = rollCriticalDiceDetailed(effectiveDice, { maximize: !!opt.mods?.chance });
         const critRoll = critDet.total;
         healCritRollsDetail = critDet?.rolls?.length ? {
           rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod,
@@ -9804,7 +9750,8 @@ async function _vttRollAttack() {
                    : roll1;
     // Combo Chance : RC abaissée (19-20, 17-20…) — élargit la plage critique
     // RC = rc du sort (rune Chance) abaissée par l'état « Chanceux » de l'attaquant,
-    // plancher 17. Le crit reste normal (max + relance) — le double-max n'est pas ici.
+    // plancher 17. Le crit garde le jet de base puis relance tous ses dés ;
+    // le double-max n'est pas appliqué ici.
     const critThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
     let isCrit   = d20 >= critThreshold;
     let isFumble = d20 === 1;
@@ -9889,7 +9836,7 @@ async function _vttRollAttack() {
           rolls: baseDet.rolls, sides: baseDet.sides, mod: baseDet.mod,
           n: baseDet.n, formula: baseDet.formula,
         };
-        const critDet = _rollCritExtraDieDetailed(effectiveDice, { maximize: !!opt.mods?.chance });
+        const critDet = rollCriticalDiceDetailed(effectiveDice, { maximize: !!opt.mods?.chance });
         sharedCritRaw2 = critDet.total;
         sharedCritRollsDetail = critDet?.rolls?.length ? {
           rolls: critDet.rolls, sides: critDet.sides, mod: critDet.mod,
@@ -11480,6 +11427,23 @@ function _changedEntityIds(previous, next) {
   return new Set([...ids].filter(id => _entityTokenVisualKey(previous?.[id]) !== _entityTokenVisualKey(next?.[id])));
 }
 
+let _sceneTokenUnsubs = [];
+let _sceneAnnotUnsub = null;
+let _rebindSceneSubscriptions = null;
+let _sceneHiddenTimer = null;
+
+function _clearSceneSubscriptions() {
+  _sceneTokenUnsubs.splice(0).forEach(unsub => { try { unsub?.(); } catch {} });
+  if (_sceneAnnotUnsub) { try { _sceneAnnotUnsub(); } catch {} _sceneAnnotUnsub = null; }
+}
+
+// Appelé par le panneau de scènes après avoir changé VS.activePage. Les joueurs
+// ne réécoutent que la nouvelle scène + la réserve ; les dessins sont toujours
+// limités à la scène visible.
+export function _vttPageChanged() {
+  _rebindSceneSubscriptions?.();
+}
+
 function _initListeners() {
   if (!aid()) return;
 
@@ -11635,7 +11599,7 @@ function _initListeners() {
   }
 
   // 6. Tokens
-  VS.unsubs.push(onSnapshot(_toksCol(), snap => {
+  const onTokensSnapshot = snap => {
     let estimateTargetsChanged = false;
     snap.docChanges().forEach(ch => {
      try {
@@ -11710,10 +11674,10 @@ function _initListeners() {
     if (snap.docChanges().some(ch => ch.doc.data()?.type === 'player')) {
       _renderShortRest(); _checkShortRestAutoApply();
     }
-  },()=>{}));
+  };
 
   // 7. Annotations (dessins + formes)
-  VS.unsubs.push(onSnapshot(_annotCol(), snap => {
+  const onAnnotationsSnapshot = snap => {
     snap.docChanges().forEach(ch => {
       const id = ch.doc.id;
       if (ch.type === 'removed') {
@@ -11751,7 +11715,79 @@ function _initListeners() {
     // Réappliquer le transformer sur les shapes reconstruits
     if (_selectedAnnotIds.size > 0) _applyAnnotTransformer();
     VS.layers.draw?.batchDraw();
-  }, () => {}));
+  };
+
+  _rebindSceneSubscriptions = () => {
+    const pageId = VS.activePage?.id;
+    const keepAdminTokenListener = STATE.isAdmin && _sceneTokenUnsubs.length > 0;
+    if (!keepAdminTokenListener) {
+      _sceneTokenUnsubs.splice(0).forEach(unsub => { try { unsub?.(); } catch {} });
+    }
+    if (_sceneAnnotUnsub) { try { _sceneAnnotUnsub(); } catch {} _sceneAnnotUnsub = null; }
+
+    if (STATE.isAdmin && !keepAdminTokenListener) {
+      _sceneTokenUnsubs.push(onSnapshot(_toksCol(), onTokensSnapshot, () => {}));
+    } else {
+      // Retire du cache local les anciens tokens de scène, tout en gardant la
+      // réserve nécessaire au bouton « Invoquer mon token ».
+      for (const [id, entry] of Object.entries(VS.tokens)) {
+        if (!entry?.data?.pageId || entry.data.pageId === pageId) continue;
+        entry.shape?.destroy?.();
+        delete VS.tokens[id];
+      }
+      if (pageId) {
+        _sceneTokenUnsubs.push(onSnapshot(
+          query(_toksCol(), where('pageId', '==', pageId)),
+          onTokensSnapshot,
+          () => {},
+        ));
+      }
+      _sceneTokenUnsubs.push(onSnapshot(
+        query(_toksCol(), where('pageId', '==', null)),
+        onTokensSnapshot,
+        () => {},
+      ));
+    }
+
+    for (const entry of Object.values(_annotations)) entry?.shape?.destroy?.();
+    _annotations = {};
+    _selectedAnnotId = null;
+    _selectedAnnotIds.clear();
+    _annotTransformer?.nodes([]);
+    if (pageId) {
+      _sceneAnnotUnsub = onSnapshot(
+        query(_annotCol(), where('pageId', '==', pageId)),
+        onAnnotationsSnapshot,
+        () => {},
+      );
+    }
+  };
+  VS.unsubs.push(() => {
+    if (_sceneHiddenTimer) clearTimeout(_sceneHiddenTimer);
+    _sceneHiddenTimer = null;
+    _clearSceneSubscriptions();
+    _rebindSceneSubscriptions = null;
+  });
+  _rebindSceneSubscriptions();
+
+  // Une table laissée dans un onglet masqué ne doit pas consommer indéfiniment
+  // les flux les plus volumineux. Après 2 minutes, tokens et dessins sont mis en
+  // pause puis resynchronisés automatiquement au retour sur l'onglet.
+  const onSceneVisibilityChange = () => {
+    if (_sceneHiddenTimer) clearTimeout(_sceneHiddenTimer);
+    _sceneHiddenTimer = null;
+    if (document.hidden) {
+      _sceneHiddenTimer = setTimeout(() => {
+        _sceneHiddenTimer = null;
+        if (document.hidden) _clearSceneSubscriptions();
+      }, 120_000);
+    } else if (!_sceneTokenUnsubs.length && !_sceneAnnotUnsub) {
+      _rebindSceneSubscriptions?.();
+    }
+  };
+  document.addEventListener('visibilitychange', onSceneVisibilityChange);
+  VS.unsubs.push(() => document.removeEventListener('visibilitychange', onSceneVisibilityChange));
+  onSceneVisibilityChange();
 
   // 8. Ciblage multi-sorts temps réel (lignes pointillées broadcast)
   // Le 1er snapshot livre les docs vttCasting persistés (anciens casts) → on

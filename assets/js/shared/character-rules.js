@@ -93,7 +93,7 @@ const VARIABLE_LABELS = {
   level: 'Niveau',
   baseRoll: 'Jet normal des dés',
   diceMax: 'Maximum des dés',
-  critRoll: 'Dé critique additionnel',
+  critRoll: 'Relance des dés critiques',
   fixedBonus: 'Bonus fixe',
   normalTotal: 'Total normal',
 };

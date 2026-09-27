@@ -126,6 +126,7 @@ export function aggregateVttRollDetails(logs = [], {
   const sessions = dateKeys ? new Set(dateKeys) : null;
   const byCharacter = {};
   const combatActionCandidates = [];
+  const correctedTacticalActions = new Set();
   let relevantLogs = 0;
   const resolve = (log, kind) => resolveCharacterId?.(log, kind)
     || (kind === 'attack' ? log?.sourceCharacterId : log?.characterId)
@@ -149,6 +150,28 @@ export function aggregateVttRollDetails(logs = [], {
     const logDate = vttLogDateKey(log.createdAt);
     const logSessionKey = log.statsSessionKey || logDate;
     if (sessions && !sessions.has(logSessionKey)) continue;
+
+    // Ancienne définition : toute zone offensive, attaque avec affliction ou
+    // soin pouvait aussi incrémenter « tactique ». Les journaux conservent le
+    // delta réellement appliqué : on retire uniquement ces faux positifs prouvés.
+    // Les nouveaux journaux portent statsKinds ; pour les anciens, toute entrée
+    // attack/attack-multi appartient déjà à Offense ou Soin et n'est pas tactique.
+    const explicitTactical = typeof log.statsKinds?.tactical === 'boolean'
+      ? log.statsKinds.tactical : null;
+    const tacticalMustBeExcluded = explicitTactical === false
+      || (explicitTactical == null && (log.type === 'attack' || log.type === 'attack-multi'));
+    if (tacticalMustBeExcluded) {
+      for (const [charId, delta] of Object.entries(log.statsDelta?.chars || {})) {
+        const excess = Math.max(0, num(delta?.combat?.tacticalSpells));
+        if (!excess || isCharacterLogExcluded?.(charId, logSessionKey, log)) continue;
+        const actionKey = String(log.statsActionId || log.id || '').trim();
+        const correctionKey = actionKey ? `${charId}:${actionKey}` : '';
+        if (correctionKey && correctedTacticalActions.has(correctionKey)) continue;
+        if (correctionKey) correctedTacticalActions.add(correctionKey);
+        const combat = entryFor(charId).combat;
+        combat.tacticalOvercounts = num(combat.tacticalOvercounts) + excess;
+      }
+    }
 
     // Les entrées principales sont corrélées après lecture du journal : certains
     // sorts ont historiquement publié un cast puis une attaque pour la même action.
@@ -338,6 +361,34 @@ export function aggregateVttRollDetails(logs = [], {
   return { byCharacter, relevantLogs };
 }
 
+// Fusionne des rollups déjà calculés (une séance, plusieurs séances, campagne).
+// Les compteurs s'additionnent, les drapeaux s'agrègent et les records restent
+// des maxima. Cela permet de conserver l'historique détaillé sans relire chaque
+// entrée de vttLog à chaque ouverture de la page Statistiques.
+export function mergeVttRollDetails(details = []) {
+  const mergeNode = (target, source, key = '') => {
+    for (const [childKey, value] of Object.entries(source || {})) {
+      if (typeof value === 'number') {
+        target[childKey] = childKey === 'biggestHit'
+          ? Math.max(Number(target[childKey]) || 0, value)
+          : (Number(target[childKey]) || 0) + value;
+      } else if (typeof value === 'boolean') {
+        target[childKey] = !!target[childKey] || value;
+      } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+        target[childKey] ??= {};
+        mergeNode(target[childKey], value, childKey);
+      }
+    }
+    return target;
+  };
+  const out = { byCharacter: {}, relevantLogs: 0 };
+  for (const detail of details || []) {
+    out.relevantLogs += Number(detail?.relevantLogs) || 0;
+    mergeNode(out.byCharacter, detail?.byCharacter || {});
+  }
+  return out;
+}
+
 export function mergeTrackedSkillStats(current = {}, fromLog = {}) {
   const logRolls = num(fromLog.trackedRolls);
   const trackedRolls = num(current.rolls) ? Math.min(num(current.rolls), logRolls) : logRolls;
@@ -375,6 +426,13 @@ export function mergeTrackedCombatStats(current = {}, fromLog = {}) {
   }
   for (const [field, excess] of Object.entries(fromLog.dealtOvercounts || {})) {
     merged[field] = Math.max(0, num(merged[field]) - num(excess));
+  }
+  // Correction d'affichage rétroactive : ne modifie pas le journal ni les
+  // compteurs Firestore, mais retire les attaques/soins anciennement classés
+  // tactiques dès que leur delta est prouvé par le journal complet.
+  const tacticalOvercount = num(fromLog.tacticalOvercounts);
+  if (tacticalOvercount > 0) {
+    merged.tacticalSpells = Math.max(0, num(merged.tacticalSpells) - tacticalOvercount);
   }
   const damageTakenCorrection = num(fromLog.receivedOvercounts?.dmgTaken);
   const damageDealtCorrection = num(fromLog.dealtOvercounts?.dmgDealt);

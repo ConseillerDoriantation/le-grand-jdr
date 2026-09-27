@@ -26,7 +26,7 @@ import { fogRenderWalls, fogUpdateSoon } from './vtt-fog.js';
 import { _renderCombatTracker } from './vtt-combat-tracker.js';
 import { _renderMjRulerRemote } from './vtt-ruler.js';
 import { _renderLibSection } from './vtt-maplib.js';
-import { _MAP_IMG_DEPS, _renderAllTokens, _renderAnnotLayer, _clearHL, _deselect, _canControlToken } from './vtt.js';
+import { _MAP_IMG_DEPS, _renderAllTokens, _renderAnnotLayer, _clearHL, _deselect, _canControlToken, _vttPageChanged } from './vtt.js';
 import { isTemporarySummonToken, reserveSummonTokens } from './vtt-summon-utils.js';
 import { controlledCharacterTokens, invocableCharacterTokens } from './vtt-token-control.js';
 
@@ -791,6 +791,7 @@ export function _renderPageTabs() {
 export async function _switchPage(pageId) {
   const page=VS.pages[pageId]; if (!page) return;
   VS.activePage=page;
+  _vttPageChanged();
   // Ne pas détruire VS.layers.map entièrement : VS.imgTr (Transformer) y vit.
   // _renderMapImages() et _renderAllTokens() gèrent leur propre nettoyage.
   VS.layers.token?.destroyChildren(); _clearHL();

@@ -93,6 +93,9 @@ const _DOC_CACHE_TTL = {
   story_histories: {
     '*':              30 * 60_000,
   },
+  shopContent: {
+    '*':              30 * 60_000,
+  },
   recettes: {
     main:             30 * 60_000,
   },
@@ -632,12 +635,12 @@ export const CAMPAIGN_EXPORT_COLLECTIONS = [
   'story', 'story_meta', 'story_histories', 'quests',
   'places', 'place_types', 'organizations', 'map_lieux',
   'world', 'informations', 'tutorial', 'settings',
-  'shop', 'shopCategories',
+  'shop', 'shopCategories', 'shopContent',
   'bestiary', 'bestiary_meta',
   'collection', 'collectionSettings', 'collection_secret',
   'achievements', 'achievements_meta', 'achievements_secret',
   'recettes', 'recipes', 'combat_styles', 'order',
-  'bastion', 'players', 'agenda_session', 'availabilities',
+  'bastion', 'players', 'agenda_session', 'availabilities', 'statsRollups',
   'vtt', 'vttPages', 'vttAnnotations', 'vttTokens', 'vttSons', 'vttPlaylists',
 ];
 
@@ -769,6 +772,25 @@ export async function loadCollectionWhere(col, field, op, value) {
   })();
   _inflight.set(key, promise);
   return promise;
+}
+
+// Lit uniquement la queue d'une collection chronologique. Contrairement au
+// cache TTL, cette requête est volontairement fraîche : elle sert à compacter
+// les nouveaux journaux dans un rollup sans jamais recharger tout l'historique.
+export async function loadCollectionAfter(col, { field = 'createdAt', value } = {}) {
+  const path = _colPath(col);
+  if (value == null) return [];
+  try {
+    const snap = await getDocs(query(
+      collection(db, path),
+      where(String(field || 'createdAt'), '>=', value),
+      orderBy(String(field || 'createdAt'), 'asc'),
+    ));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    _handleFirestoreError(e, `loadCollectionAfter(${path})`);
+    return [];
+  }
 }
 
 // Charge uniquement les documents les plus récents d'une collection volumineuse.

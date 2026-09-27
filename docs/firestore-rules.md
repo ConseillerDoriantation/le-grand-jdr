@@ -363,6 +363,7 @@ function canUseCharacterResourceViaToken(adventureId, charId, tokenId) {
 // « membre ». On verrouille donc tout le legacy racine en admin-only — un compte
 // étranger n'y a plus aucun accès (ni lecture/PII, ni vandalisme).
 match /shop/{id}              { allow read, write: if isAdmin(); }
+match /shopContent/{id}       { allow read, write: if isAdmin(); }
 match /shopCategories/{id}    { allow read, write: if isAdmin(); }
 match /story/{id}             { allow read, write: if isAdmin(); }
 match /story_meta/{id}        { allow read, write: if isAdmin(); }
@@ -467,6 +468,12 @@ match /adventures/{adventureId} {
     allow update: if inAdventure(adventureId)
       && isPremiumAdventure(adventureId)
       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['dispo']);
+  }
+  // Contenus longs (livres, lettres…) séparés du catalogue : ils ne sont lus
+  // qu'à l'ouverture depuis l'inventaire et n'alourdissent plus la boutique.
+  match /shopContent/{id} {
+    allow read:  if premiumFeatureAllowed(adventureId);
+    allow write: if premiumFeatureWriteAllowed(adventureId);
   }
   match /shopCategories/{id}    { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /story/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
@@ -755,6 +762,11 @@ match /adventures/{adventureId} {
   // Statistiques d'aventure (compteurs incrémentaux) : tous les membres
   // lisent et incrémentent (un joueur compte ses propres jets/attaques).
   match /stats/{id} {
+    allow read, write: if premiumFeatureAllowed(adventureId);
+  }
+  // Résumé historique compact des journaux VTT. Il remplace la relecture de
+  // milliers d'entrées à chaque ouverture de la page Statistiques.
+  match /statsRollups/{id} {
     allow read, write: if premiumFeatureAllowed(adventureId);
   }
   // Pages (cartes) : lecture tous, écriture MJ

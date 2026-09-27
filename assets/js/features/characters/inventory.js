@@ -1,9 +1,9 @@
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
-import { batchUpdateInCol, updateInCol, loadCollection } from '../../data/firestore.js';
+import { batchUpdateInCol, updateInCol, loadCollection, getCachedCollection, getDocDataSilent } from '../../data/firestore.js';
 import { trySave } from '../../shared/crud.js';
-import { openModal, closeModal, modalSection } from '../../shared/modal.js';
+import { openModal, pushModal, closeModal, modalSection } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _norm } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
@@ -15,7 +15,9 @@ import {
   getInventoryItemValue,
   getInventoryItemResaleValue,
   getInventoryItemImage,
+  getInventoryReadableDocument,
 } from '../../shared/inventory-utils.js';
+import { richTextContentHtml } from '../../shared/rich-text.js';
 import {
   inventoryHistoryPayload,
   inventoryHistoryTypeMeta,
@@ -67,8 +69,14 @@ function _invLooksMechanicalEffect(text = '') {
   return /\b(pv|pm|ca|degat|degats|soin|vitesse|portee|toucher|critique|avantage|desavantage|relance|dd|etat|reaction|action bonus|resistance|immunite|mana)\b/.test(n);
 }
 
+function _inventoryCatalogSnapshot() {
+  const live = getCachedCollection('shop');
+  if (Array.isArray(live)) _shopItemsCache = live;
+  return _shopItemsCache;
+}
+
 export function isInventoryCatalogReady() {
-  return Array.isArray(_shopItemsCache);
+  return Array.isArray(_inventoryCatalogSnapshot());
 }
 
 export async function ensureInventoryCatalog() {
@@ -90,7 +98,7 @@ export async function ensureInventoryCatalog() {
 
 export function getInventoryCatalogItem(itemId) {
   if (!itemId || !isInventoryCatalogReady()) return null;
-  return _shopItemsCache.find(item => item.id === itemId) || null;
+  return _inventoryCatalogSnapshot().find(item => item.id === itemId) || null;
 }
 
 function _renderInventoryChar(c, tab = 'inventaire') {
@@ -575,6 +583,8 @@ export async function openInventoryItemDetail(charId, indicesB64) {
 
   await ensureInventoryCatalog();
   const catalogItem = getInventoryCatalogItem(item.itemId);
+  const readableDocument = getInventoryReadableDocument(item, catalogItem);
+  const canReadDocument = !!readableDocument && canControlCharacter(c);
   const quantity = indices.reduce((sum, idx) =>
     sum + (parseInt(c.inventaire?.[idx]?.quantite || c.inventaire?.[idx]?.qte || 1) || 1), 0);
   const rarityIndex = Math.max(0, parseInt(item.rarete || item.rare || 0) || 0);
@@ -672,6 +682,10 @@ export async function openInventoryItemDetail(charId, indicesB64) {
       </section>` : ''}
 
       <footer class="inv-detail-footer">
+        ${canReadDocument ? `<button class="btn btn-outline inv-detail-read" data-action="openInventoryReadableContent"
+          data-id="${_esc(c.id)}" data-indices="${_esc(indicesB64)}">
+          📖 Lire
+        </button>` : ''}
         ${canEquip ? `<button class="btn ${equippedInTarget ? 'btn-outline is-equipped' : 'btn-gold'}" data-action="equipInventoryItem"
           data-index="${equipIndex}" data-slot="${_esc(equipSlotId)}" data-close-modal="true" data-render-tab="inv"
           ${equippedInTarget ? 'disabled' : ''}
@@ -688,6 +702,49 @@ export async function openInventoryItemDetail(charId, indicesB64) {
     </div>`, {
     subtitle: 'Fiche complète de l’objet',
     accent: rarityColor,
+  });
+}
+
+/** Ouvre le texte privé d'un objet uniquement depuis l'inventaire qui le possède. */
+export async function openInventoryReadableContent(charId, indicesB64) {
+  const c = getCharacterById(charId);
+  const indices = _decodeIndices(indicesB64);
+  const item = c?.inventaire?.[indices[0]];
+  if (!c || !item || !indices.length || !canControlCharacter(c)) {
+    showNotif("Ce document n'est pas accessible.", 'error');
+    return;
+  }
+
+  await ensureInventoryCatalog();
+  const catalogItem = getInventoryCatalogItem(item.itemId);
+  const metadata = getInventoryReadableDocument(item, catalogItem);
+  const stored = item.itemId ? await getDocDataSilent('shopContent', item.itemId) : null;
+  const documentData = stored?.html
+    ? {
+        title: String(stored.title || metadata?.title || item.nom || 'Document'),
+        html: String(stored.html || ''),
+      }
+    : metadata;
+  if (!documentData) {
+    showNotif("Cet objet ne contient aucun texte à lire.", 'info');
+    return;
+  }
+
+  pushModal(`📖 ${documentData.title}`, `
+    <article class="inv-reader">
+      <header class="inv-reader-head">
+        <span class="inv-reader-kicker">Document possédé par ${_esc(c.nom || 'ce personnage')}</span>
+        <h2>${_esc(documentData.title)}</h2>
+        <p>${_esc(item.nom || 'Objet')}</p>
+      </header>
+      ${richTextContentHtml({ html: documentData.html, className: 'inv-reader-content' })}
+      <footer class="inv-reader-footer">
+        <button class="btn btn-primary" data-action="closeInventoryReader">Retour à l'objet</button>
+      </footer>
+    </article>
+  `, null, {
+    subtitle: item.nom || 'Lecture',
+    accent: '#9d6fff',
   });
 }
 
@@ -1594,6 +1651,8 @@ registerActions({
   sendGold:            (btn) => sendGold(btn.dataset.id),
   saveInvItemFromShop: ()    => saveInvItemFromShop(),
   saveInvPersonalLine: (el) => saveInvPersonalLine(el.dataset.id, el.dataset.indices, el),
+  openInventoryReadableContent: (el) => openInventoryReadableContent(el.dataset.id, el.dataset.indices),
+  closeInventoryReader: () => closeModal(),
   saveInvItem:         (btn) => saveInvItem(Number(btn.dataset.idx)),
   _lootSelect:         (btn) => _lootSelect(btn.dataset.id),
   _lootSetCat:         (btn) => _lootSetCat(btn.dataset.cat),

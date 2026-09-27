@@ -751,7 +751,7 @@ export function _renderChatLogImpl(msgs) {
         } else if (m.critNormalMax) {
           rows.push(_row(`Base critique max ${sub(baseLabel)}`, `<strong>${m.critNormalMax}</strong>`, { op: '💥' }));
         }
-        rows.push(_row(`Dé critique ${critRoll}`, `<strong>${critRaw ?? '?'}</strong>`, { op: '💥' }));
+        rows.push(_row(`Dés critiques ${critRoll}`, `<strong>${critRaw ?? '?'}</strong>`, { op: '💥' }));
         if (m.critFormula) {
           rows.push(_row(`Formule critique ${sub(m.critFormula)}`, `<strong>${finalEffectValue ?? '?'}</strong>`, { op: '∑', muted: true }));
         }

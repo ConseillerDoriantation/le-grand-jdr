@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   _calcAfflictionDot, _autoSourceAfflictionDot, _calcEnchantDegats,
   _hasLaceration, _calcLaceration, _calcChance, _calcDrainPct, _calcConcentrationDD, _calcAfflictionDD, scaleSpellDiceFormula,
-  splitSpellDiceFormula,
+  rollCriticalDiceDetailed, splitSpellDiceFormula,
 } from '../assets/js/shared/spell-math.js';
 
 const rep = (rune, n) => Array.from({ length: n }, () => rune);
@@ -17,6 +17,20 @@ test('le redimensionnement des dés conserve le bonus fixe de la formule', () =>
 test('le VTT sépare et conserve le +4 de 2d6+4', () => {
   assert.deepEqual(splitSpellDiceFormula('2d6+4'), { rawDice: '2d6', fixed: 4 });
   assert.deepEqual(splitSpellDiceFormula('2d6 + 4 - 1'), { rawDice: '2d6', fixed: 3 });
+});
+
+test('un critique relance tous les dés de l action sans doubler le bonus fixe', () => {
+  const rolls = [0, 0.5, 0.999];
+  const result = rollCriticalDiceDetailed('3d6+4', { random: () => rolls.shift() });
+  assert.deepEqual(result, {
+    rolls: [1, 4, 6], mod: 0, total: 11, n: 3, sides: 6, formula: '3d6',
+  });
+});
+
+test('la rune Chance maximise tous les dés critiques', () => {
+  assert.deepEqual(rollCriticalDiceDetailed('2d10-2', { maximize: true }), {
+    rolls: [10, 10], mod: 0, total: 20, n: 2, sides: 10, formula: '2d10',
+  });
 });
 
 test('_calcAfflictionDot : auto (1+Puiss)d4 +2, manuel prioritaire', () => {

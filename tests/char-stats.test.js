@@ -42,7 +42,7 @@ test('regles par aventure : formules derivees personnalisables', () => {
   assert.equal(calcCriticalEffectTotal({ baseRoll: 4, diceMax: 8, critRoll: 5, fixedBonus: 3 }), 12);
 });
 
-test('critique par defaut : ajoute un seul de supplementaire', () => {
+test('critique par defaut : ajoute la relance des dés fournie par l action', () => {
   assert.equal(calcCriticalEffectTotal({ baseRoll: 4, diceMax: 6, critRoll: 3, fixedBonus: 2 }), 9);
 });
 

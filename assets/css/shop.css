@@ -2814,6 +2814,42 @@ body.sh-dragging * { cursor: grabbing !important; }
 .si-actions-toggle-lbl { font-size: .9rem; }
 .si-actions-toggle-hint { font-size: .72rem; color: var(--text-dim); font-weight: 400; }
 
+/* ── Onglet Texte (contenu lisible après acquisition) ──────────────── */
+.si-readable-editor {
+  display: flex;
+  flex-direction: column;
+  gap: .7rem;
+  min-width: 0;
+}
+.si-readable-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: .7rem;
+  padding: .75rem .85rem;
+  border: 1px solid rgba(157,111,255,.28);
+  border-left: 3px solid #9d6fff;
+  border-radius: 10px;
+  background: rgba(157,111,255,.07);
+}
+.si-readable-intro > span { font-size: 1.2rem; line-height: 1.2; }
+.si-readable-intro strong { display: block; color: var(--text); font-size: .88rem; }
+.si-readable-intro p {
+  margin: .18rem 0 0;
+  color: var(--text-dim);
+  font-size: .74rem;
+  line-height: 1.45;
+}
+.si-readable-title { display: flex; flex-direction: column; gap: .3rem; }
+.si-readable-title > span {
+  color: var(--text-muted);
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.si-readable-editor .rtq-wrap { min-width: 0; }
+.si-readable-hint { color: var(--text-dim); font-size: .7rem; }
+
 /* ── Onglet Méta (recette) ───────────────────────────────────────────── */
 .si-meta-grid {
   display: flex; flex-direction: column; gap: .5rem;
@@ -2856,6 +2892,7 @@ body.sh-dragging * { cursor: grabbing !important; }
   .si-tab span { display: none; }   /* sur mobile : icônes seules */
   .si-tab { flex: 1; }
   .si-panels { min-height: 420px; }
+  .si-readable-intro { padding: .65rem; }
 }
 
 /* ════════════════════════════════════════════════════════════════════

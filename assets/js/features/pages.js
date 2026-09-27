@@ -3,13 +3,13 @@
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
-import { loadChars, loadCollection, loadRecentCollection, getCachedCollection, getDocData, saveDoc, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { loadChars, loadCollection, loadCollectionAfter, loadRecentCollection, getCachedCollection, getDocData, getDocDataSilent, replaceDoc, saveDoc, updateInCol, deleteFromCol } from '../data/firestore.js';
 import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
-import { loadStats, resetStats, deleteCharStats, deleteCharDateStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
-import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, normalizeSkillStats, topStatTies, vttLogTimeMs } from '../shared/stats-analysis.js';
+import { loadStats, peekStats, applyStatsLegacyRollup, resetStats, deleteCharStats, deleteCharDateStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
+import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, mergeVttRollDetails, normalizeSkillStats, topStatTies, vttLogTimeMs } from '../shared/stats-analysis.js';
 import { MVP_AXIS_GUIDE, MVP_SCORING_GUIDE, scoreMvpView } from '../shared/stats-mvp.js';
 import { showNotif } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
@@ -56,6 +56,7 @@ function _hideDisabledDashboardBlocks(root) {
 let _statsData = null;                 // dernier doc stats chargé (pour la modale par date)
 let _statsVttLogs = [];                // journal complet : détails absents des anciens compteurs
 let _statsVttLogsLoaded = false;       // évite de présenter un ancien compteur gonflé comme canonique
+let _statsLegacyRollups = null;        // détails historiques persistés par scope (plus de scan complet répété)
 let _statsVttDetailCache = new Map();  // scope de dates → agrégat du journal
 let _statsRowsCache = new Map();       // scope de dates → lignes calculées (réutilisées entre onglets)
 let _statsEmoteUrl = new Map();        // name → url (affichage de l'émote réelle)
@@ -916,6 +917,13 @@ function _statsRowsFor(dateKeys) {
   const detailKey = dateKeys ? [...dateKeys].sort().join('|') : '*';
   if (_statsRowsCache.has(detailKey)) return _statsRowsCache.get(detailKey);
   let vttDetails = _statsVttDetailCache.get(detailKey);
+  if (!vttDetails && _statsLegacyRollups) {
+    const sources = dateKeys
+      ? dateKeys.map(key => _statsLegacyRollups[key]).filter(Boolean)
+      : [_statsLegacyRollups['*']].filter(Boolean);
+    vttDetails = sources.length ? mergeVttRollDetails(sources) : { byCharacter: {}, relevantLogs: 0 };
+    _statsVttDetailCache.set(detailKey, vttDetails);
+  }
   if (!vttDetails) {
     const names = new Map();
     for (const [charId, char] of Object.entries(_statsData?.chars || {})) {
@@ -978,7 +986,8 @@ function _statsRowsFor(dateKeys) {
     // Pour « Jets & moyennes », le journal complet est la source canonique des
     // actions : une attaque ou un sort lancé vaut exactement 1, même en zone.
     // Les compteurs persistés restent utilisés ailleurs pour leurs totaux métier.
-    const actionCombat = _statsVttLogsLoaded ? {
+    const hasCompleteVttDetails = _statsVttLogsLoaded || !!_statsLegacyRollups;
+    const actionCombat = hasCompleteVttDetails ? {
       attacks: num(loggedCombat.attackActions),
       attackRolls: num(loggedCombat.attackRolls),
       attackRollTotal: num(loggedCombat.attackRollTotal),
@@ -987,7 +996,7 @@ function _statsRowsFor(dateKeys) {
       crits: num(loggedCombat.crits),
       fumbles: num(loggedCombat.fumbles),
     } : combat;
-    const actionExtrasSource = _statsVttLogsLoaded ? loggedCombat : combat;
+    const actionExtrasSource = hasCompleteVttDetails ? loggedCombat : combat;
     const actionExtras = {
       rolls: num(actionExtrasSource.supplementalRolls),
       trackedRolls: num(actionExtrasSource.supplementalRolls),
@@ -997,7 +1006,7 @@ function _statsRowsFor(dateKeys) {
       crits: num(actionExtrasSource.supplementalCrits),
       fumbles: num(actionExtrasSource.supplementalFumbles),
     };
-    const combatActionCount = _statsVttLogsLoaded ? num(loggedCombat.canonicalActions) : null;
+    const combatActionCount = hasCompleteVttDetails ? num(loggedCombat.canonicalActions) : null;
     const actionAverages = aggregateActionAverages(skillAverages, actionCombat, actionExtras);
     return {
       id, name: c.name || '?',
@@ -1012,6 +1021,83 @@ function _statsRowsFor(dateKeys) {
   }).filter(r => r.sRolls > 0 || r.combat.attacks > 0 || r.combat.attacksTaken > 0 || r.combat.dmgTaken > 0 || r.combat.heal > 0 || r.combat.spellsCast > 0 || r.emotes.length);
   _statsRowsCache.set(detailKey, rows);
   return rows;
+}
+
+const STATS_ROLLUP_VERSION = 2;
+
+function _statsCompactRollupValue(value) {
+  if (typeof value === 'number') return value === 0 ? undefined : value;
+  if (typeof value === 'boolean') return value ? true : undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const compact = {};
+  for (const [key, child] of Object.entries(value)) {
+    const next = _statsCompactRollupValue(child);
+    if (next !== undefined && (typeof next !== 'object' || Object.keys(next).length)) compact[key] = next;
+  }
+  return Object.keys(compact).length ? compact : undefined;
+}
+
+function _statsBuildLegacyRollups(logs) {
+  _statsLegacyRollups = null;
+  _statsVttLogs = Array.isArray(logs) ? logs : [];
+  _statsVttLogsLoaded = true;
+  _statsVttDetailCache = new Map();
+  _statsRowsCache = new Map();
+
+  _statsRowsFor(null);
+  for (const key of _statsAllSessionKeys()) _statsRowsFor([key]);
+
+  const scopes = {};
+  for (const [key, detail] of _statsVttDetailCache) {
+    // Les combinaisons mission sont recalculables par fusion des séances ; on ne
+    // persiste que campagne (*) et scopes unitaires.
+    if (key === '*' || !key.includes('|')) {
+      const compact = _statsCompactRollupValue(detail);
+      if (compact) scopes[key] = compact;
+    }
+  }
+  return scopes;
+}
+
+function _statsMergeLegacyScopes(baseScopes = {}, nextScopes = {}) {
+  const merged = { ...baseScopes };
+  for (const [key, detail] of Object.entries(nextScopes || {})) {
+    merged[key] = mergeVttRollDetails([baseScopes?.[key], detail].filter(Boolean));
+  }
+  return merged;
+}
+
+function _statsLogTime(log) {
+  return vttLogTimeMs(log?.createdAt) ?? 0;
+}
+
+async function _statsPersistLegacyRollups(logs, {
+  baseScopes = {}, sourceThroughMs = 0, sourceBoundaryIds = [], sourceLogCount = 0,
+  applyCorrections = true,
+} = {}) {
+  const nextScopes = _statsBuildLegacyRollups(logs);
+  const scopes = _statsMergeLegacyScopes(baseScopes, nextScopes);
+  const maxLogTime = Math.max(sourceThroughMs, ...logs.map(_statsLogTime));
+  const boundaryIds = new Set(maxLogTime === sourceThroughMs ? sourceBoundaryIds : []);
+  logs.forEach(log => { if (_statsLogTime(log) === maxLogTime && log?.id) boundaryIds.add(log.id); });
+  await replaceDoc('statsRollups', 'main', {
+    version: STATS_ROLLUP_VERSION,
+    generatedAt: Date.now(),
+    sourceLogCount: Math.max(0, Number(sourceLogCount) || 0) + logs.length,
+    sourceThroughMs: maxLogTime,
+    sourceBoundaryIds: [...boundaryIds],
+    scopes,
+  });
+  if (applyCorrections) {
+    const corrected = await applyStatsLegacyRollup(scopes, STATS_ROLLUP_VERSION);
+    if (!corrected) throw new Error('Correction du rollup refusée');
+  }
+  _statsLegacyRollups = scopes;
+  _statsVttLogs = [];
+  _statsVttLogsLoaded = false;
+  _statsVttDetailCache = new Map();
+  _statsRowsCache = new Map();
+  return scopes;
 }
 
 function _statsNeedsVttBackfill(data) {
@@ -1068,7 +1154,7 @@ function _statsAggregateRows(rows = []) {
     }
     return total;
   }, { attacks: 0, crits: 0, fumbles: 0, attackRolls: 0, attackRollTotal: 0, attackResultRolls: 0, attackResultTotal: 0 });
-  const combatActionCount = _statsVttLogsLoaded
+  const combatActionCount = (_statsVttLogsLoaded || !!_statsLegacyRollups)
     ? rows.reduce((total, row) => total + _statsNum(row.combatActionCount), 0)
     : null;
   const skills = aggregateSkillAverages(rows);
@@ -2405,9 +2491,31 @@ function _statsRefreshEnrichedView(scope) {
 // les filtres, le défilement ou les tiroirs ouverts. Les handlers ajustent
 // `_statsScope` (séance/mission disparue) AVANT d'appeler cette fonction.
 async function _statsReloadAfterMutation() {
-  _statsData = (await loadStats()) || {};
+  // Chemin rapide : si la mutation a laissé le miroir mémoire à jour (ex.
+  // suppression de séance), on l'utilise directement — 0 relecture réseau. Sinon
+  // (cache invalidé) on relit le document une fois.
+  const cached = peekStats();
+  _statsData = cached || (await loadStats()) || {};
+  _statsLegacyRollups = null;
+  _statsVttLogs = [];
+  _statsVttLogsLoaded = false;
   _statsVttDetailCache = new Map();
   _statsRowsCache = new Map();
+  // Une suppression/correction invalide le résumé historique. Cette opération
+  // est rare : on le reconstruit immédiatement afin que la vue courante reste
+  // juste, puis les prochaines ouvertures ne reliront plus vttLog.
+  if (_statsNeedsVttBackfill(_statsData)) {
+    const logs = await loadCollection('vttLog').catch(() => null);
+    if (Array.isArray(logs)) {
+      try {
+        await _statsPersistLegacyRollups(logs);
+      } catch (error) {
+        console.warn('[stats] rollup non reconstruit après mutation', error);
+        _statsVttLogs = logs;
+        _statsVttLogsLoaded = true;
+      }
+    }
+  }
   // Si le scope courant (séance / mission) a disparu avec la suppression, on
   // retombe sur la campagne entière — sinon la vue resterait figée sur du vide.
   if (_statsScope) {
@@ -2426,6 +2534,61 @@ async function _statsReloadAfterMutation() {
   const y = window.scrollY;
   _statsRender(_statsScope);
   if (Math.abs(window.scrollY - y) > 1) window.scrollTo({ top: y, behavior: 'auto' });
+}
+
+// Construit / rouvre la modale « Gérer les statistiques ». Extrait de l'action
+// `_statsManage` pour pouvoir la ROUVRIR après une suppression (rester dans la
+// modale, liste à jour). openModal préserve le défilement interne quand la même
+// modale est déjà affichée.
+function _statsOpenManageModal() {
+  if (!STATE.isAdmin) return;
+  const dates = _statsAllSessionKeys();
+  const pendingDates = _statsUnlinkedDates(dates);
+  const linkedDates = dates.filter(d => _statsSessionIsLinked(d));
+  const missions = _statsMissionList();
+  const trackedChars = Object.keys(_statsData?.chars || {}).length;
+  const linkedGroups = new Set(Object.values(_statsData?.sessions || {}).map(s => s?.groupId || s?.group).filter(Boolean)).size;
+  const adventureName = _esc(STATE.adventure?.nom || 'Aventure courante');
+  const missRow = (m) => `<div class="stats-mng-row"><span class="stats-mng-lbl">🎯 ${_esc(m.name)}</span><button class="stats-mng-del" data-action="_statsDelMission" data-scope="${m.id}" data-name="${_esc(m.name)}">🗑 Supprimer</button></div>`;
+  const dateRow = (d) => {
+    const mi = _statsMissionOf(d), gr = _statsGroupOf(d), linked = _statsSessionIsLinked(d);
+    const label = linked
+      ? `🎯 ${_esc(mi || 'Mission liée')}${gr ? ` · 👥 ${_esc(gr)}` : ''}`
+      : (mi ? `<span class="stats-mng-incomplete">⚠ Ancien lien incomplet · ${_esc(mi)}</span>` : '<span class="stats-sb-none">Aucune mission associée</span>');
+    return `<div class="stats-mng-row${linked ? ' is-linked' : ' is-pending'}">
+      <span class="stats-mng-lbl">📅 ${_statsSessionLabel(d)} — ${label}</span>
+      <span class="stats-mng-acts">
+        <button class="stats-mng-link" data-action="_statsEditMission" data-scope="${d}">🔗 ${linked ? 'Modifier' : 'Relier'}</button>
+        <button class="stats-mng-del" data-action="_statsDelDate" data-scope="${d}" title="Supprimer uniquement les statistiques de cette séance" aria-label="Supprimer les statistiques de la séance du ${_statsSessionLabel(d)}">🗑 Supprimer</button>
+      </span>
+    </div>`;
+  };
+  const healthHtml = pendingDates.length
+    ? `<div class="stats-mng-health is-pending"><span class="stats-mng-health-icon">🔗</span><span><strong>${pendingDates.length} séance${pendingDates.length > 1 ? 's' : ''} à relier</strong><small>Ces statistiques existent, mais ne sont rattachées à aucune mission de la Trame.</small></span></div>`
+    : dates.length
+      ? `<div class="stats-mng-health is-ok"><span class="stats-mng-health-icon">✓</span><span><strong>Associations à jour</strong><small>Toutes les séances contenant des statistiques sont reliées à une mission.</small></span></div>`
+      : `<div class="stats-mng-health is-empty"><span class="stats-mng-health-icon">0</span><span><strong>Aucune séance datée</strong><small>Les séances à relier apparaîtront ici dès que des statistiques auront été enregistrées.</small></span></div>`;
+  openModal('⚙ Gérer les statistiques', `
+    <div class="stats-mng">
+      ${healthHtml}
+      <div class="stats-mng-info">
+        <strong>Les filtres de la page ne suppriment jamais de données.</strong>
+        <span>Ici, chaque suppression indique précisément son périmètre avant confirmation. Une même date peut contenir plusieurs séances : leur heure permet de les distinguer.</span>
+      </div>
+      ${pendingDates.length ? `<div class="stats-mng-sec stats-mng-sec--pending"><div class="stats-mng-hd"><span>À relier en priorité</span><b>${pendingDates.length}</b></div>${pendingDates.map(dateRow).join('')}</div>` : ''}
+      ${linkedDates.length ? `<details class="stats-mng-linked"${pendingDates.length ? '' : ' open'}>
+        <summary><span>Séances déjà reliées</span><b>${linkedDates.length}</b><span class="stats-mng-linked-caret">⌄</span></summary>
+        <div class="stats-mng-sec">${linkedDates.map(dateRow).join('')}</div>
+      </details>` : ''}
+      ${missions.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Supprimer toutes les stats d'une mission</div>${missions.map(missRow).join('')}</div>` : ''}
+      ${(!missions.length && !dates.length) ? '<div class="stats-mng-sec" style="color:var(--text-dim);font-size:.85rem">Aucune donnée datée pour le moment.</div>' : ''}
+      <div class="stats-mng-danger">
+        <div class="stats-mng-hd">⚠ Suppression globale</div>
+        <strong class="stats-mng-danger-title">${adventureName}</strong>
+        <p>Efface les statistiques de <b>${trackedChars} personnage${trackedChars > 1 ? 's' : ''}</b>, <b>${dates.length} séance${dates.length > 1 ? 's' : ''}</b>${missions.length ? ` et <b>${missions.length} mission${missions.length > 1 ? 's' : ''}</b>` : ''}${linkedGroups ? `, pour <b>${linkedGroups} groupe${linkedGroups > 1 ? 's' : ''}</b>` : ''}. Les personnages, missions, groupes, inventaires et scènes VTT sont conservés.</p>
+        <button class="stats-mng-reset" data-action="_statsResetAsk">🗑 Effacer toutes les statistiques de l'aventure…</button>
+      </div>
+    </div>`, { subtitle: 'Relier les séances aux missions · supprimer des données ciblées', accent: '#4f8cff' });
 }
 
 
@@ -4259,6 +4422,7 @@ const PAGES = {
       _statsAdventureId = adventureId;
       _statsVttLogs = [];
       _statsVttLogsLoaded = false;
+      _statsLegacyRollups = null;
       _statsVttDetailCache = new Map();
       _statsRowsCache = new Map();
       _statsEmoteUrl = new Map();
@@ -4275,6 +4439,7 @@ const PAGES = {
     const charsPromise = cachedChars ? Promise.resolve(cachedChars) : loadChars().catch(() => []);
     const questsPromise = cachedQuests ? Promise.resolve(cachedQuests) : loadCollection('quests').catch(() => []);
     const storyPromise = cachedStory ? Promise.resolve(cachedStory) : loadCollection('story').catch(() => []);
+    const rollupPromise = getDocDataSilent('statsRollups', 'main').catch(() => null);
 
     const data = await loadStats();
     if (revision !== _statsLoadRevision || !document.getElementById('stats-root')) return;
@@ -4295,11 +4460,52 @@ const PAGES = {
     // journal historique et les illustrations affinent ensuite cette vue.
     _statsRender(_statsScope);
 
-    const vttLogsPromise = _statsNeedsVttBackfill(_statsData)
-      ? loadCollection('vttLog')
-          .then(logs => ({ logs, loaded: true }))
-          .catch(() => ({ logs: [], loaded: false }))
-      : Promise.resolve({ logs: [], loaded: true });
+    const vttDetailsPromise = rollupPromise.then(async rollup => {
+      if (rollup?.version === STATS_ROLLUP_VERSION && rollup?.scopes) {
+        const cutoff = Math.max(0, Number(rollup.sourceThroughMs) || 0);
+        if (cutoff) {
+          const boundaryIds = new Set(rollup.sourceBoundaryIds || []);
+          const tail = await loadCollectionAfter('vttLog', {
+            field: 'createdAt',
+            value: new Date(cutoff),
+          });
+          const fresh = tail.filter(log => {
+            const time = _statsLogTime(log);
+            return time > cutoff || (time === cutoff && !boundaryIds.has(log.id));
+          });
+          if (!fresh.length) return { rollups: rollup.scopes, logs: [], loaded: false };
+          try {
+            const scopes = await _statsPersistLegacyRollups(fresh, {
+              baseScopes: rollup.scopes,
+              sourceThroughMs: cutoff,
+              sourceBoundaryIds: [...boundaryIds],
+              sourceLogCount: rollup.sourceLogCount,
+              applyCorrections: false,
+            });
+            return { rollups: scopes, logs: [], loaded: false };
+          } catch (error) {
+            console.warn('[stats] nouveaux journaux non compactés', error);
+            return { rollups: rollup.scopes, logs: [], loaded: false };
+          }
+        }
+        if (!_statsNeedsVttBackfill(_statsData)) {
+          return { rollups: rollup.scopes, logs: [], loaded: false };
+        }
+      }
+      if (!_statsNeedsVttBackfill(_statsData)) return { rollups: null, logs: [], loaded: false };
+      const logs = await loadCollection('vttLog').catch(() => null);
+      if (!Array.isArray(logs)) return { rollups: null, logs: [], loaded: false };
+
+      // Une seule lecture historique : elle produit un résumé compact par séance,
+      // réutilisé ensuite par tous les écrans et tous les appareils.
+      try {
+        const scopes = await _statsPersistLegacyRollups(logs);
+        return { rollups: scopes, logs: [], loaded: false };
+      } catch (error) {
+        console.warn('[stats] rollup historique non enregistré, repli sur le journal courant', error);
+        return { rollups: null, logs, loaded: true };
+      }
+    });
     // Ne pas attendre ces compléments ici : `navigate()` maintient toute la
     // page en `pointer-events:none` tant que cette fonction n'est pas terminée.
     // Le premier rendu est complet et interactif ; l'enrichissement remplace
@@ -4309,7 +4515,7 @@ const PAGES = {
       charsPromise,
       questsPromise,
       storyPromise,
-      vttLogsPromise,
+      vttDetailsPromise,
     ]).then(([emoteDoc, chars, quests, story, vttLogResult]) => {
       if (revision !== _statsLoadRevision || !document.getElementById('stats-root')) return;
       if (Array.isArray(chars) && chars.length) STATE.characters = chars;
@@ -4317,6 +4523,7 @@ const PAGES = {
       _statsStory = Array.isArray(story) ? story : [];
       _statsVttLogs = Array.isArray(vttLogResult?.logs) ? vttLogResult.logs : [];
       _statsVttLogsLoaded = vttLogResult?.loaded === true;
+      _statsLegacyRollups = vttLogResult?.rollups || null;
       _statsVttDetailCache = new Map();
       _statsRowsCache = new Map();
       _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
@@ -4437,56 +4644,7 @@ registerActions({
   _adminRepairVttData:           () => _adminRepairVttData(),
 
   // Statistiques : modale de gestion des données (MJ) — supprimer ciblé ou tout.
-  _statsManage: () => {
-    if (!STATE.isAdmin) return;
-    const dates = _statsAllSessionKeys();
-    const pendingDates = _statsUnlinkedDates(dates);
-    const linkedDates = dates.filter(d => _statsSessionIsLinked(d));
-    const missions = _statsMissionList();
-    const trackedChars = Object.keys(_statsData?.chars || {}).length;
-    const linkedGroups = new Set(Object.values(_statsData?.sessions || {}).map(s => s?.groupId || s?.group).filter(Boolean)).size;
-    const adventureName = _esc(STATE.adventure?.nom || 'Aventure courante');
-    const missRow = (m) => `<div class="stats-mng-row"><span class="stats-mng-lbl">🎯 ${_esc(m.name)}</span><button class="stats-mng-del" data-action="_statsDelMission" data-scope="${m.id}" data-name="${_esc(m.name)}">🗑 Supprimer</button></div>`;
-    const dateRow = (d) => {
-      const mi = _statsMissionOf(d), gr = _statsGroupOf(d), linked = _statsSessionIsLinked(d);
-      const label = linked
-        ? `🎯 ${_esc(mi || 'Mission liée')}${gr ? ` · 👥 ${_esc(gr)}` : ''}`
-        : (mi ? `<span class="stats-mng-incomplete">⚠ Ancien lien incomplet · ${_esc(mi)}</span>` : '<span class="stats-sb-none">Aucune mission associée</span>');
-      return `<div class="stats-mng-row${linked ? ' is-linked' : ' is-pending'}">
-        <span class="stats-mng-lbl">📅 ${_statsSessionLabel(d)} — ${label}</span>
-        <span class="stats-mng-acts">
-          <button class="stats-mng-link" data-action="_statsEditMission" data-scope="${d}">🔗 ${linked ? 'Modifier' : 'Relier'}</button>
-          <button class="stats-mng-del" data-action="_statsDelDate" data-scope="${d}" title="Supprimer uniquement les statistiques de cette séance" aria-label="Supprimer les statistiques de la séance du ${_statsSessionLabel(d)}">🗑 Supprimer</button>
-        </span>
-      </div>`;
-    };
-    const healthHtml = pendingDates.length
-      ? `<div class="stats-mng-health is-pending"><span class="stats-mng-health-icon">🔗</span><span><strong>${pendingDates.length} séance${pendingDates.length > 1 ? 's' : ''} à relier</strong><small>Ces statistiques existent, mais ne sont rattachées à aucune mission de la Trame.</small></span></div>`
-      : dates.length
-        ? `<div class="stats-mng-health is-ok"><span class="stats-mng-health-icon">✓</span><span><strong>Associations à jour</strong><small>Toutes les séances contenant des statistiques sont reliées à une mission.</small></span></div>`
-        : `<div class="stats-mng-health is-empty"><span class="stats-mng-health-icon">0</span><span><strong>Aucune séance datée</strong><small>Les séances à relier apparaîtront ici dès que des statistiques auront été enregistrées.</small></span></div>`;
-    openModal('⚙ Gérer les statistiques', `
-      <div class="stats-mng">
-        ${healthHtml}
-        <div class="stats-mng-info">
-          <strong>Les filtres de la page ne suppriment jamais de données.</strong>
-          <span>Ici, chaque suppression indique précisément son périmètre avant confirmation. Une même date peut contenir plusieurs séances : leur heure permet de les distinguer.</span>
-        </div>
-        ${pendingDates.length ? `<div class="stats-mng-sec stats-mng-sec--pending"><div class="stats-mng-hd"><span>À relier en priorité</span><b>${pendingDates.length}</b></div>${pendingDates.map(dateRow).join('')}</div>` : ''}
-        ${linkedDates.length ? `<details class="stats-mng-linked"${pendingDates.length ? '' : ' open'}>
-          <summary><span>Séances déjà reliées</span><b>${linkedDates.length}</b><span class="stats-mng-linked-caret">⌄</span></summary>
-          <div class="stats-mng-sec">${linkedDates.map(dateRow).join('')}</div>
-        </details>` : ''}
-        ${missions.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Supprimer toutes les stats d'une mission</div>${missions.map(missRow).join('')}</div>` : ''}
-        ${(!missions.length && !dates.length) ? '<div class="stats-mng-sec" style="color:var(--text-dim);font-size:.85rem">Aucune donnée datée pour le moment.</div>' : ''}
-        <div class="stats-mng-danger">
-          <div class="stats-mng-hd">⚠ Suppression globale</div>
-          <strong class="stats-mng-danger-title">${adventureName}</strong>
-          <p>Efface les statistiques de <b>${trackedChars} personnage${trackedChars > 1 ? 's' : ''}</b>, <b>${dates.length} séance${dates.length > 1 ? 's' : ''}</b>${missions.length ? ` et <b>${missions.length} mission${missions.length > 1 ? 's' : ''}</b>` : ''}${linkedGroups ? `, pour <b>${linkedGroups} groupe${linkedGroups > 1 ? 's' : ''}</b>` : ''}. Les personnages, missions, groupes, inventaires et scènes VTT sont conservés.</p>
-          <button class="stats-mng-reset" data-action="_statsResetAsk">🗑 Effacer toutes les statistiques de l'aventure…</button>
-        </div>
-      </div>`, { subtitle: 'Relier les séances aux missions · supprimer des données ciblées', accent: '#4f8cff' });
-  },
+  _statsManage: () => _statsOpenManageModal(),
   // Supprime les stats d'une séance (date) — ajuste les totaux campagne.
   _statsDelDate: async (btn) => {
     if (!STATE.isAdmin) return;
