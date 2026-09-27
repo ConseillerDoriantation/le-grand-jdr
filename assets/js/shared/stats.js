@@ -24,7 +24,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { db, doc, getDoc, setDoc, updateDoc, increment, deleteField, runTransaction } from '../config/firebase.js';
-import { getCurrentAdventureId } from '../data/firestore.js';
+import { getCurrentAdventureId, deleteFromCol } from '../data/firestore.js';
 import { buildCombatCorrectionDeltas } from './stats-corrections.js';
 import {
   statsSessionEntryForChar as _sessionEntryForChar,
@@ -35,6 +35,11 @@ import {
 function _statsRef() {
   const aid = getCurrentAdventureId();   // id canonique (même source que le VTT)
   return aid ? doc(db, `adventures/${aid}/stats/main`) : null;
+}
+
+async function _invalidateStatsRollup() {
+  if (!getCurrentAdventureId()) return;
+  await deleteFromCol('statsRollups', 'main').catch(() => {});
 }
 
 // Jour local YYYY-MM-DD. Les données historiques l'utilisent comme clé ; les
@@ -108,7 +113,7 @@ export async function loadStats() {
 export async function resetStats() {
   const ref = _statsRef();
   if (!ref) return false;
-  try { await setDoc(ref, {}, { merge: false }); _mem = {}; return true; }
+  try { await setDoc(ref, {}, { merge: false }); await _invalidateStatsRollup(); _mem = {}; return true; }
   catch { return false; }
 }
 
@@ -118,6 +123,7 @@ export async function deleteCharStats(charId) {
   if (!ref || !charId) return false;
   try {
     await updateDoc(ref, { [`chars.${charId}`]: deleteField() });
+    await _invalidateStatsRollup();
     if (_mem?.chars) delete _mem.chars[charId];
     return true;
   } catch { return false; }
@@ -143,6 +149,7 @@ export async function deleteCharDateStats(charId, dateKey) {
       [bucket.field]: { [dateKey]: deleteField() },
       vttLogCutoffs: { [dateKey]: Date.now() },
     } } }, { merge: true });
+    await _invalidateStatsRollup();
     _mem = null;
     return true;
   } catch { return false; }
@@ -187,10 +194,66 @@ export async function deleteDatesStats(dates) {
       return true;
     });
     if (!changed) return false;
-    _mem = null;   // forcera un re-fetch propre au prochain loadStats
+    await _invalidateStatsRollup();
+    // Applique la même suppression au miroir mémoire → la vue peut se rafraîchir
+    // SANS relecture réseau (évite un aller-retour Firestore et l'impression de
+    // lenteur). En cas d'imprévu on invalide le cache pour forcer un re-fetch propre.
+    if (_mem && typeof _mem === 'object') {
+      try { removeStatsSessionsFromData(_mem, sessionKeys, deletedAt); }
+      catch { _mem = null; }
+    }
     return true;
   } catch (error) {
     console.error('[stats] suppression de séance impossible', error);
+    return false;
+  }
+}
+
+// Miroir mémoire courant du doc stats (ou null si invalidé). Permet à l'UI de se
+// rafraîchir sans relecture réseau après une mutation qui garde le cache à jour.
+export function peekStats() { return _mem; }
+
+// Finalise la migration historique calculée depuis vttLog. Seuls les records
+// « plus gros coup » doivent être réécrits : les autres corrections restent dans
+// le rollup immuable et sont appliquées à l'affichage aux compteurs futurs.
+export async function applyStatsLegacyRollup(scopes = {}, version = 1) {
+  const ref = _statsRef();
+  if (!ref || !scopes || typeof scopes !== 'object') return false;
+  const patch = { legacyRollupVersion: version, legacyRollupAt: Date.now() };
+  const campaign = scopes['*']?.byCharacter || {};
+  for (const [charId, details] of Object.entries(campaign)) {
+    patch[`chars.${charId}.combat.biggestHit`] = Math.max(0, Number(details?.combat?.biggestHit) || 0);
+  }
+  for (const [scopeKey, detail] of Object.entries(scopes)) {
+    if (scopeKey === '*') continue;
+    for (const [charId, values] of Object.entries(detail?.byCharacter || {})) {
+      const char = _mem?.chars?.[charId];
+      const bucketField = char?.bySession?.[scopeKey] ? 'bySession' : 'byDate';
+      if (!char?.[bucketField]?.[scopeKey]) continue;
+      patch[`chars.${charId}.${bucketField}.${scopeKey}.combat.biggestHit`] = Math.max(0, Number(values?.combat?.biggestHit) || 0);
+    }
+  }
+  try {
+    await updateDoc(ref, patch);
+    if (_mem) {
+      _mem.legacyRollupVersion = version;
+      _mem.legacyRollupAt = patch.legacyRollupAt;
+      for (const [charId, details] of Object.entries(campaign)) {
+        const combat = ((_mem.chars ??= {})[charId] ??= {}).combat ??= {};
+        combat.biggestHit = Math.max(0, Number(details?.combat?.biggestHit) || 0);
+      }
+      for (const [scopeKey, detail] of Object.entries(scopes)) {
+        if (scopeKey === '*') continue;
+        for (const [charId, values] of Object.entries(detail?.byCharacter || {})) {
+          const char = _mem.chars?.[charId];
+          const bucket = char?.bySession?.[scopeKey] || char?.byDate?.[scopeKey];
+          if (bucket) (bucket.combat ??= {}).biggestHit = Math.max(0, Number(values?.combat?.biggestHit) || 0);
+        }
+      }
+    }
+    return true;
+  } catch (error) {
+    console.error('[stats] migration du rollup historique impossible', error);
     return false;
   }
 }
@@ -222,6 +285,7 @@ export async function correctDateCombatStats(charId, dateKey, values = {}) {
   if (!Object.keys(patch).length) return true;
   try {
     await updateDoc(ref, patch);
+    await _invalidateStatsRollup();
     _mem = null;
     return true;
   } catch {

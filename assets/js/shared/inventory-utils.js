@@ -73,6 +73,33 @@ export function getInventoryItemImage(item = {}, catalogItem = null) {
     || '';
 }
 
+/**
+ * Réconcilie les deux anciens champs de description de la boutique.
+ * Les articles « classique » utilisaient `effet`, les articles libres
+ * `description` ; certains anciens articles ont changé de template depuis.
+ */
+export function getShopItemEditableText(item = {}, field = 'description') {
+  if (field === 'effet') return item?.effet ?? item?.description ?? '';
+  if (field === 'description') return item?.description ?? item?.effet ?? '';
+  return item?.[field] ?? '';
+}
+
+/**
+ * Document lisible associé à un objet possédé. Le catalogue est prioritaire
+ * afin de ne pas dupliquer un livre potentiellement long dans chaque fiche.
+ * Le repli sur l'entrée d'inventaire conserve la compatibilité avec d'éventuels
+ * objets historiques ou personnalisés.
+ */
+export function getInventoryReadableDocument(item = {}, catalogItem = null) {
+  const html = String(catalogItem?.readableContent || item?.readableContent || '').trim();
+  const available = !!html || catalogItem?.hasReadableContent === true || item?.hasReadableContent === true;
+  if (!available) return null;
+  return {
+    title: String(catalogItem?.readableTitle || item?.readableTitle || item?.nom || 'Document').trim() || 'Document',
+    html,
+  };
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // SOURCE UNIQUE DE VÉRITÉ : item boutique → entrée d'inventaire.
 //
@@ -82,7 +109,9 @@ export function getInventoryItemImage(item = {}, catalogItem = null) {
 // — plus besoin de maintenir 3+ listes de champs synchronisées.
 //
 // Champs explicitement EXCLUS (méta boutique, non pertinents en inventaire) :
-//   id  (devient itemId)  ·  image  ·  dispo  ·  recipeMeta  ·  prix  ·  categorieId (conservé)
+//   id  (devient itemId)  ·  image  ·  dispo  ·  recipeMeta  ·  prix
+//   readableContent/readableTitle (lus depuis le catalogue, sans duplication)
+//   categorieId est conservé.
 // Tout le reste de l'item est conservé tel quel via spread.
 // ══════════════════════════════════════════════════════════════════════════════
 const _DEEP_CLONE_FIELDS = ['traits', 'degatsStats', 'actions'];
@@ -103,6 +132,8 @@ export function shopItemToInvEntry(item, opts = {}) {
   delete entry.dispo;     // stock boutique, sans rapport
   delete entry.recipeMeta;
   delete entry.prix;      // remplacé par prixAchat
+  delete entry.readableContent; // contenu potentiellement long : source unique catalogue
+  delete entry.readableTitle;
 
   // Clone profond des champs collection pour éviter le partage de référence
   _DEEP_CLONE_FIELDS.forEach(k => {

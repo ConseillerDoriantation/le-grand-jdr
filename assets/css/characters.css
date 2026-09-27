@@ -12036,6 +12036,24 @@ body .modal:has(.sh-admin-modal.is-combat-styles) {
   color: var(--text-dim);
   font-weight: 600;
 }
+.cs-v3 .inv-card-read {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: 1px solid rgba(157,111,255,.3);
+  border-radius: 999px;
+  background: rgba(157,111,255,.09);
+  color: #c7adff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cs-v3 .inv-card-read:hover {
+  border-color: rgba(157,111,255,.62);
+  background: rgba(157,111,255,.17);
+  color: #dfd1ff;
+}
 .cs-v3 .inv-equipped-badge {
   padding: 1px 5px;
   border-radius: 5px;
@@ -12846,6 +12864,55 @@ body .modal:has(.sh-admin-modal.is-combat-styles) {
   gap: 8px;
   padding-top: 13px;
   border-top: 1px solid var(--border);
+}
+.inv-detail-read { margin-right: auto; }
+
+/* Lecture d'un document possédé (livre, lettre, parchemin…). */
+.inv-reader {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.inv-reader-head {
+  padding: 16px 18px;
+  border: 1px solid rgba(157,111,255,.22);
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(157,111,255,.11), rgba(79,140,255,.04));
+}
+.inv-reader-kicker {
+  color: #b99aff;
+  font-size: .65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.inv-reader-head h2 {
+  margin: 5px 0 3px;
+  color: var(--text);
+  font-family: var(--font-display, 'Cinzel', serif);
+  font-size: 1.3rem;
+}
+.inv-reader-head p { margin: 0; color: var(--text-dim); font-size: .76rem; }
+.inv-reader-content {
+  max-height: min(62vh, 720px);
+  overflow: auto;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1, rgba(10,20,35,.72));
+  color: var(--text-soft);
+  font-size: .9rem;
+  line-height: 1.75;
+}
+.inv-reader-content > :first-child { margin-top: 0; }
+.inv-reader-content > :last-child { margin-bottom: 0; }
+.inv-reader-content img { max-width: 100%; height: auto; border-radius: 8px; }
+.inv-reader-footer { display: flex; justify-content: flex-end; }
+
+@media (max-width: 640px) {
+  .inv-reader-head { padding: 13px 14px; }
+  .inv-reader-content { padding: 16px 14px; max-height: 58vh; }
 }
 
 /* Inventaire - refonte d'onglet : controles, resume, cartes et liste. */

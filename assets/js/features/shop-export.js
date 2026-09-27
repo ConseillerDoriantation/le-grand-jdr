@@ -154,6 +154,7 @@ function _shopBuildExportData(catIds) {
             const fields = [
               'rarete','prix','dispo','image',
               'type','effet','description',
+              'readableTitle','readableContent',
               'degats','degatsStats','degatsStat','toucherStat','toucher','portee',
               'format','sousType',
               'slotArmure','typeArmure','slotBijou',
@@ -176,7 +177,8 @@ function _shopExportToCsv(data) {
   const cols = [
     'categorie','template','nom','type','rarete','degats','degatsStats','toucherStat',
     'portee','format','sousType','slotArmure','typeArmure','slotBijou','ca',
-    'for','dex','in','sa','co','ch','traits','effet','description','prix','dispo',
+    'for','dex','in','sa','co','ch','traits','effet','description',
+    'readableTitle','readableContent','prix','dispo',
   ];
   const esc = v => {
     const s = v === undefined || v === null ? '' : String(v);
@@ -227,6 +229,8 @@ function _shopExportToMd(data) {
       if (traits.length)    lines.push(`- **Traits** : ${traits.join(', ')}`);
       if (item.effet)       lines.push(`- **Effet** : ${item.effet}`);
       if (item.description) lines.push(`- **Description** : ${item.description}`);
+      if (item.readableTitle) lines.push(`- **Titre du document** : ${item.readableTitle}`);
+      if (item.readableContent) lines.push('', item.readableContent, '');
       const dispo = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
       lines.push(`- **Prix** : ${item.prix || 0} or · **Stock** : ${_getItemStockText(dispo)}`);
       lines.push('');

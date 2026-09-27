@@ -82,6 +82,7 @@ import {
   getInventoryItemValue,
   getInventoryItemResaleValue,
   getInventoryItemImage,
+  getInventoryReadableDocument,
 } from '../shared/inventory-utils.js';
 import { RARETE_NAMES, _rareteColor, _rareteLabel } from '../shared/rarity.js';
 import {
@@ -1991,6 +1992,7 @@ function renderCharInventaireV3(c, canEdit) {
     const prixAchat = getInventoryItemValue(it, catalogItem);
     const prixVente = getInventoryItemResaleValue(it, catalogItem);
     const image = getInventoryItemImage(it, catalogItem);
+    const readableDocument = getInventoryReadableDocument(it, catalogItem);
 
     // Effet principal : une seule information forte, le reste devient secondaire.
     const caTotal = (parseInt(it.ca) || 0) + (parseInt(it.caBonus) || 0);
@@ -2057,6 +2059,8 @@ function renderCharInventaireV3(c, canEdit) {
             ${rareName
               ? `<span class="inv-card-rare" style="color:${col}">${_rareteLabel(rareIdx)}</span>`
               : ''}
+            ${readableDocument && canEdit ? `<button class="inv-card-read" data-action="openInventoryReadableContent"
+              data-id="${_esc(c.id)}" data-indices="${allIdxB64}" title="Lire ${_esc(readableDocument.title)}">📖 Lire</button>` : ''}
             ${buildBadgesHtml}
           </div>
           ${currentBuildEquipmentHtml}

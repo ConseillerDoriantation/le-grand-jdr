@@ -1,5 +1,6 @@
 import { STATE } from '../core/state.js';
-import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol, batchUpdateInCol } from '../data/firestore.js';
+import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol, batchUpdateInCol, getDocDataSilent, saveDoc } from '../data/firestore.js';
+import { deleteField } from '../config/firebase.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 import { openModal, pushModal, updateModalContent, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -12,7 +13,9 @@ import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
-import { shopItemToInvEntry } from '../shared/inventory-utils.js';
+import { getShopItemEditableText, shopItemToInvEntry } from '../shared/inventory-utils.js';
+import { sanitizeRichTextHtml } from '../shared/rich-text.js';
+import { bindQuillEditors, getQuillHtml, markQuillSaved, quillEditorHtml } from '../shared/rich-text-quill.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry, inventoryHistoryEntries } from '../shared/inventory-history.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
 import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
@@ -139,6 +142,7 @@ const PRIX_VENTE_RATIO = 0.6; // 60%
 // ══════════════════════════════════════════════════════════════════════════════
 let _cats  = [];
 let _items = [];
+let _shopReadableDraft = null;
 let _shopSousTypes = [];
 let _shopCharactersScope = '';
 let _shopCharactersLoad = null;
@@ -3140,11 +3144,11 @@ async function removeShopAction(idx) {
 
 // Onglets disponibles par template (ordre = ordre d'affichage)
 const _SI_TABS = {
-  arme:      ['essentiel', 'bonus', 'traits', 'actions', 'meta'],
-  armure:    ['essentiel', 'bonus', 'traits', 'actions', 'meta'],
-  bijou:     ['essentiel', 'bonus', 'traits', 'actions', 'meta'],
-  classique: ['essentiel', 'actions', 'meta'],
-  libre:     ['essentiel', 'meta'],
+  arme:      ['essentiel', 'bonus', 'traits', 'actions', 'lecture', 'meta'],
+  armure:    ['essentiel', 'bonus', 'traits', 'actions', 'lecture', 'meta'],
+  bijou:     ['essentiel', 'bonus', 'traits', 'actions', 'lecture', 'meta'],
+  classique: ['essentiel', 'actions', 'lecture', 'meta'],
+  libre:     ['essentiel', 'lecture', 'meta'],
 };
 
 const _SI_TAB_DEF = {
@@ -3152,6 +3156,7 @@ const _SI_TAB_DEF = {
   bonus:     { label: 'Bonus',     icon: '✨' },
   traits:    { label: 'Traits',    icon: '🏷️' },
   actions:   { label: 'Actions',   icon: '⚡' },
+  lecture:   { label: 'Texte',      icon: '📖' },
   meta:      { label: 'Méta',      icon: '🔧' },
 };
 
@@ -3206,6 +3211,30 @@ function _siBuildTabContent(tab, tpl, item, tplKey) {
       </label>
     </div>
     <div id="si-actions-host">${_shopRenderActionsSection(item?.actions)}</div>`;
+  }
+  if (tab === 'lecture') {
+    const readableContent = sanitizeRichTextHtml(item?.readableContent || '');
+    return `<div class="si-readable-editor">
+      <div class="si-readable-intro">
+        <span aria-hidden="true">📖</span>
+        <div>
+          <strong>Contenu à découvrir après acquisition</strong>
+          <p>Ce texte n'est jamais affiché dans la boutique. Le joueur pourra l'ouvrir depuis l'inventaire du personnage qui possède l'objet.</p>
+        </div>
+      </div>
+      <label class="si-readable-title">
+        <span>Titre du document</span>
+        <input class="input-field" id="si-readable-title" value="${_esc(item?.readableTitle || '')}"
+          placeholder="Ex. Chroniques de Vaudral — Tome I">
+      </label>
+      ${quillEditorHtml({
+        id: 'si-readable-content',
+        html: readableContent,
+        placeholder: 'Écris ici l’histoire, la lettre, les notes ou le contenu du livre…',
+        minHeight: 300,
+      })}
+      <small class="si-readable-hint">Laisse le texte vide si l'objet ne doit rien contenir de lisible.</small>
+    </div>`;
   }
   if (tab === 'meta') {
     const recipeChk = item ? !(item?.recipeMeta?.hidden) : ['arme','armure','bijou'].includes(tplKey);
@@ -3265,6 +3294,7 @@ function _siBuildTabs(tpl, item, tplKey, activeTab = 'essentiel') {
 function setItemTab(name) {
   document.querySelectorAll('.si-tab').forEach(b => b.classList.toggle('is-active', b.dataset.tab === name));
   document.querySelectorAll('.si-panel').forEach(p => p.classList.toggle('is-active', p.dataset.panel === name));
+  if (name === 'lecture') bindQuillEditors(document.querySelector('.si-modal') || document).catch(() => {});
 }
 
 /** Mini "carte" live qui montre comment l'objet apparaîtra dans la boutique. */
@@ -3277,8 +3307,19 @@ function _siRefreshChip() {
   const col = rar ? (_rareteColor(rar) || 'var(--text)') : 'var(--text)';
   chip.innerHTML = `<span style="color:${col}">${_esc(nom)}</span>${rar?` <em style="color:${col};opacity:.7;font-size:.72rem;font-style:normal">· ${_esc(rar)}</em>`:''}`;
 }
-function openItemModal(itemId) {
-  const item   = itemId ? _items.find(i=>i.id===itemId) : null;
+async function openItemModal(itemId) {
+  const catalogItem = itemId ? _items.find(i=>i.id===itemId) : null;
+  const storedContent = itemId ? await getDocDataSilent('shopContent', itemId) : null;
+  _shopReadableDraft = {
+    itemId: itemId || '',
+    title: storedContent?.title || catalogItem?.readableTitle || '',
+    html: storedContent?.html || catalogItem?.readableContent || '',
+  };
+  const item = catalogItem ? {
+    ...catalogItem,
+    readableTitle: _shopReadableDraft.title,
+    readableContent: _shopReadableDraft.html,
+  } : null;
   _shopActionsCacheLoad(item?.actions || []);
   _shopEnsureSpellsModule().catch(() => {});
 
@@ -3391,7 +3432,7 @@ function _buildFieldsHtml(tpl,item) {
   _pendingAutocompletes.length = 0;
   let html=`<div class="sh-fields-grid">`;
   tpl.fields.forEach(f=>{
-    const val=item?.[f.id]??'';
+    const val = getShopItemEditableText(item, f.id);
     if(f.id==='prix'){
       const pv=Math.round((parseFloat(val)||0)*PRIX_VENTE_RATIO);
       html+=`<div class="form-group"><label>${f.label}</label>
@@ -3508,7 +3549,7 @@ function _buildFieldsHtml(tpl,item) {
       setTimeout(() => _shopPopulateSkillPicker(sb).catch(() => {}), 0);
     } else if(f.type==='textarea'){
       html+=`<div class="form-group sh-field-full"><label>${f.label}</label>
-        <textarea class="input-field" id="si-${f.id}" rows="2">${val}</textarea></div>`;
+        <textarea class="input-field" id="si-${f.id}" rows="2">${_esc(val)}</textarea></div>`;
     } else if(f.type==='trait_list'){
       const traitsArr = Array.isArray(item?.traits) ? item.traits : (item?.trait ? [item.trait] : []);
       const traitsJson = JSON.stringify(traitsArr).replace(/"/g,'&quot;');
@@ -3742,6 +3783,21 @@ async function saveShopItem(itemId) {
         : nextManualOrder(categoryItems),
     };
 
+    // Si l'onglet Texte n'a jamais été ouvert, Quill n'est pas chargé pour rien
+    // et le contenu catalogue existant est conservé tel quel.
+    const readableEditor = document.querySelector('[data-rtq-id="si-readable-content"]');
+    const readableTitle = document.getElementById('si-readable-title')?.value.trim() || '';
+    const readableContent = readableEditor?.classList.contains('ql-container')
+      ? getQuillHtml('si-readable-content')
+      : String(_shopReadableDraft?.itemId === (itemId || '') ? _shopReadableDraft.html : item?.readableContent || '');
+    const sanitizedReadableContent = sanitizeRichTextHtml(readableContent);
+    const readablePlainText = sanitizedReadableContent.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim();
+    const hasReadableContent = !!readablePlainText || /<(img|video|audio|iframe)\b/i.test(sanitizedReadableContent);
+    data.readableTitle = readableTitle;
+    data.hasReadableContent = hasReadableContent;
+    // Migration des anciens articles : le texte long quitte le document boutique.
+    if (itemId && item?.readableContent != null) data.readableContent = deleteField();
+
     tpl.fields.forEach(f=>{
       if(f.type==='dispo'){
         const infini=document.getElementById('si-dispo-infini')?.checked;
@@ -3787,6 +3843,12 @@ async function saveShopItem(itemId) {
       }
     });
 
+    // Migration douce des anciens articles : la boutique a historiquement
+    // alterné entre `effet` et `description`. Les deux restent synchronisés
+    // pour qu'un prochain changement de template ne vide plus le champ.
+    if (tplKey === 'classique') data.description = data.effet || '';
+    if (tplKey === 'libre') data.effet = data.description || '';
+
     if (tplKey === 'arme') {
       data.toucher = _legacyToucherTextFromData(data);
       data.stats = _legacyStatsTextFromData(data);
@@ -3829,11 +3891,23 @@ async function saveShopItem(itemId) {
       data.recipeMeta = { hidden: true };
     }
 
+    let savedItemId = itemId;
     if(itemId) await updateInCol('shop',itemId,data);
-    else await addToCol('shop',data);
+    else savedItemId = await addToCol('shop',data);
+
+    if (hasReadableContent) {
+      await saveDoc('shopContent', savedItemId, {
+        title: readableTitle || nom,
+        html: sanitizedReadableContent,
+        updatedAt: new Date().toISOString(),
+      });
+    } else if (item?.hasReadableContent || item?.readableContent) {
+      await deleteFromCol('shopContent', savedItemId);
+    }
 
     if (itemId) await _syncCharactersAfterItemUpdate(itemId, data);
 
+    markQuillSaved('si-readable-content');
     closeModalDirect(); showNotif('Article enregistré !','success'); renderShop();
   } catch (e) { notifySaveError(e); }
 }
@@ -3853,6 +3927,9 @@ async function _syncCharactersAfterItemUpdate(itemId, newData) {
   // garantir la cohérence des 4 paths (achat / butin take / butin add / sync).
   const SYNC_BLOCKLIST = new Set([
     'id', 'image', 'dispo', 'recipeMeta', 'prix', 'categorieId', 'newUntil', 'isNew',
+    // Les textes longs restent dans le catalogue et sont lus à la demande par
+    // l'inventaire : ne pas les dupliquer dans chaque document personnage.
+    'readableContent', 'readableTitle', 'hasReadableContent',
   ]);
   const SYNC_FIELDS = Object.keys(newData).filter(k => !SYNC_BLOCKLIST.has(k));
 

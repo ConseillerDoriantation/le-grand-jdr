@@ -9,10 +9,28 @@ import {
   combatAverages,
   mergeTrackedCombatStats,
   mergeTrackedSkillStats,
+  mergeVttRollDetails,
   normalizeSkillStats,
   statsAverage,
   topStatTies,
 } from '../assets/js/shared/stats-analysis.js';
+
+test('les résumés historiques fusionnent compteurs, drapeaux et records', () => {
+  const merged = mergeVttRollDetails([
+    {
+      relevantLogs: 4,
+      byCharacter: { c1: { combat: { attacks: 2, biggestHit: 8, hasDetails: true } } },
+    },
+    {
+      relevantLogs: 3,
+      byCharacter: { c1: { combat: { attacks: 1, biggestHit: 14, hasDetails: false } } },
+    },
+  ]);
+  assert.equal(merged.relevantLogs, 7);
+  assert.equal(merged.byCharacter.c1.combat.attacks, 3);
+  assert.equal(merged.byCharacter.c1.combat.biggestHit, 14);
+  assert.equal(merged.byCharacter.c1.combat.hasDetails, true);
+});
 
 test('les dégâts appliqués sont bornés aux PV réellement perdus', () => {
   assert.equal(appliedDamageAmount({ beforeHp: 42, afterHp: 0, rolledDamage: 2107 }), 42);
@@ -574,4 +592,59 @@ test('le journal réattribue les échecs critiques au bon personnage pour le MVP
 
   assert.equal(skillA.fumbles + combatA.fumbles, 2);
   assert.equal(combatB.fumbles, 0);
+});
+
+test('les anciennes attaques de zone ne restent pas classées comme tactiques', () => {
+  const details = aggregateVttRollDetails([{
+    id: 'log-a',
+    type: 'attack-multi',
+    sourceCharacterId: 'mage',
+    hitD20: 15,
+    hitTotal: 22,
+    targets: [{ hit: true, dmgTotal: 8 }],
+    statsDelta: { chars: { mage: { combat: { tacticalSpells: 1 } } } },
+    createdAt: new Date(2026, 8, 26, 18),
+  }]);
+
+  assert.equal(details.byCharacter.mage.combat.tacticalOvercounts, 1);
+  assert.equal(mergeTrackedCombatStats(
+    { attacks: 1, tacticalSpells: 4 },
+    details.byCharacter.mage.combat,
+  ).tacticalSpells, 3);
+});
+
+test('une action utilitaire historique conserve son compteur tactique', () => {
+  const details = aggregateVttRollDetails([{
+    id: 'log-u',
+    type: 'cast',
+    sourceCharacterId: 'mage',
+    statsKinds: { tactical: true },
+    statsDelta: { chars: { mage: { combat: { tacticalSpells: 1 } } } },
+    createdAt: new Date(2026, 8, 26, 18),
+  }]);
+
+  assert.equal(details.byCharacter.mage?.combat?.tacticalOvercounts || 0, 0);
+  assert.equal(mergeTrackedCombatStats(
+    { tacticalSpells: 4 },
+    details.byCharacter.mage?.combat || {},
+  ).tacticalSpells, 4);
+});
+
+test('un même identifiant d action tactique erroné est corrigé une seule fois', () => {
+  const shared = {
+    type: 'attack',
+    sourceCharacterId: 'mage',
+    statsActionId: 'same-action',
+    hitD20: 12,
+    hitTotal: 18,
+    hit: true,
+    dmgTotal: 5,
+    statsDelta: { chars: { mage: { combat: { tacticalSpells: 1 } } } },
+  };
+  const details = aggregateVttRollDetails([
+    { ...shared, id: 'log-1', createdAt: new Date(2026, 8, 26, 18) },
+    { ...shared, id: 'log-2', createdAt: new Date(2026, 8, 26, 18, 0, 1) },
+  ]);
+
+  assert.equal(details.byCharacter.mage.combat.tacticalOvercounts, 1);
 });

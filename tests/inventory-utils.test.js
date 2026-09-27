@@ -6,6 +6,9 @@ import {
   getInventoryItemValue,
   getInventoryItemResaleValue,
   getInventoryItemImage,
+  getInventoryReadableDocument,
+  getShopItemEditableText,
+  shopItemToInvEntry,
 } from '../assets/js/shared/inventory-utils.js';
 
 test('inventaireNeedsNorm : vrai dès qu’une entrée a qte > 1', () => {
@@ -58,4 +61,39 @@ test('image inventaire : image locale puis illustration du catalogue', () => {
   assert.equal(getInventoryItemImage({ image: 'local.webp' }, { image: 'shop.webp' }), 'local.webp');
   assert.equal(getInventoryItemImage({ itemId: 'x' }, { image: 'shop.webp' }), 'shop.webp');
   assert.equal(getInventoryItemImage({}, { imageUrl: 'shop-url.webp' }), 'shop-url.webp');
+});
+
+test('édition boutique : les anciens champs effet et description se remplacent mutuellement', () => {
+  assert.equal(getShopItemEditableText({ description: 'Ancien texte' }, 'effet'), 'Ancien texte');
+  assert.equal(getShopItemEditableText({ effet: 'Ancien effet' }, 'description'), 'Ancien effet');
+  assert.equal(getShopItemEditableText({ effet: 'Effet', description: 'Description' }, 'effet'), 'Effet');
+  assert.equal(getShopItemEditableText({ effet: 'Effet', description: 'Description' }, 'description'), 'Description');
+});
+
+test('lecture inventaire : le document du catalogue est disponible seulement pour un objet possédé', () => {
+  assert.deepEqual(
+    getInventoryReadableDocument(
+      { nom: 'Livre acheté', readableContent: '<p>Ancienne copie</p>' },
+      { readableTitle: 'Chroniques', readableContent: '<p>Version actuelle</p>' },
+    ),
+    { title: 'Chroniques', html: '<p>Version actuelle</p>' },
+  );
+  assert.deepEqual(
+    getInventoryReadableDocument(
+      { nom: 'Lettre achetée', itemId: 'lettre-1' },
+      { hasReadableContent: true, readableTitle: 'Lettre scellée' },
+    ),
+    { title: 'Lettre scellée', html: '' },
+  );
+  assert.equal(getInventoryReadableDocument({ nom: 'Objet vide' }, null), null);
+});
+
+test('un texte long reste dans le catalogue et ne gonfle pas chaque inventaire', () => {
+  const entry = shopItemToInvEntry({
+    id: 'livre-1', nom: 'Livre', prix: 12,
+    readableTitle: 'Le secret', readableContent: '<p>Une très longue histoire</p>',
+  });
+  assert.equal(entry.itemId, 'livre-1');
+  assert.equal(entry.readableTitle, undefined);
+  assert.equal(entry.readableContent, undefined);
 });
