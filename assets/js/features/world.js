@@ -1,9 +1,11 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // WORLD.JS — Guide (page renommée « Monde » → « Guide » ; id interne `world` conservé)
-// ✓ Sections de lore libres (texte riche, image optionnelle)
-// ✓ MJ : CRUD sections, réorganisation par drag & drop
-// ✓ Joueur : lecture seule, navigation par ancres
-// ✓ Firestore : world/main → { sections:[{id,titre,contenu,imageUrl,icone,visible}] }
+// ✓ Sections en texte enrichi ou en diaporama (bannière optionnelle), rangées par catégorie
+// ✓ Lecteur : sommaire repliable, recherche plein texte, plan « Sur cette page »,
+//   Précédent / Suivant ; barre « où je suis » sur mobile
+// ✓ MJ : CRUD sections / catégories, glisser-déposer, édition plein cadre (Ctrl+S)
+// ✓ Firestore : world/main → { categories:[…], sections:[{id,titre,contenu,imageUrl,icone,
+//   visible,categoryId,contentMode}] } ; diaporamas déportés dans worldPages/{id}
 // ══════════════════════════════════════════════════════════════════════════════
 import { getDocData } from '../data/firestore.js';
 import { tryDoc } from '../shared/crud.js';
@@ -17,7 +19,8 @@ import {
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import {
   freePageEditorHtml, bindFreePageEditor, getFreePageData,
-  renderFreePageHtml, hasFreePage, freePageToLegacyHtml, compressFreePageImages,
+  renderFreePageHtml, hasFreePage, freePageSearchText, compressFreePageImages,
+  hasUnsavedFreePageChanges,
 } from '../shared/free-page.js';
 import {
   worldPageFor, saveWorldPage, deleteWorldPage, setCachedWorldPage, onWorldPagesChange,
@@ -101,11 +104,10 @@ function _ensureWorldReactivity() {
   });
 }
 
-// Texte brut d'une section (deck déporté en priorité, sinon contenu legacy HTML).
+// Source texte d'une section, telle qu'affichée : contenu rich-text, ou texte des
+// diapos visibles et non protégées du deck (jamais le contenu legacy masqué).
 function _sectionPlainSource(s) {
-  if (_sectionContentMode(s) === 'rich') return s?.contenu || '';
-  const deck = worldPageFor(s?.id);
-  return hasFreePage(deck) ? freePageToLegacyHtml(deck) : (s?.contenu || '');
+  return _sectionContentMode(s) === 'rich' ? (s?.contenu || '') : freePageSearchText(worldPageFor(s?.id));
 }
 
 function _sectionContentMode(s) {
@@ -155,6 +157,20 @@ async function _load() {
 }
 
 const _save = () => tryDoc('world', 'main', { categories: STORE.categories, sections: STORE.sections });
+
+// Applique une mutation locale puis l'enregistre. tryDoc notifie déjà l'erreur ;
+// en cas d'échec l'état local est restauré → ni faux « enregistré », ni section
+// fantôme réécrite par la sauvegarde suivante. Les mutations remplacent les
+// entrées (jamais de modification en place) : la copie superficielle suffit.
+async function _commit(mutate) {
+  const before = { categories: STORE.categories, sections: STORE.sections };
+  STORE.categories = [...STORE.categories];
+  STORE.sections = [...STORE.sections];
+  mutate();
+  if (await _save()) return true;
+  Object.assign(STORE, before);
+  return false;
+}
 
 function _worldVisibleData() {
   const visibleCats = STORE.categories.filter(c => c.visible !== false || STATE.isAdmin);
@@ -258,10 +274,15 @@ const ICO = {
   right:   '<path d="M5 12h14M13 6l6 6-6 6"/>',
   up:      '<path d="M12 19V5M6 11l6-6 6 6"/>',
   list:    '<path d="M4 6h16M4 12h16M4 18h10"/>',
+  check:   '<path d="m5 12 5 5 9-10"/>',
 };
 const GRIP = `<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true">${
   [3, 8, 13].map(y => `<circle cx="3" cy="${y}" r="1.3"/><circle cx="7" cy="${y}" r="1.3"/>`).join('')}</svg>`;
 const _lockHtml = () => `<span class="world-lock" title="Masquée aux joueurs">${_svg(ICO.lock, 13)}</span>`;
+// Mini-bouton d'action MJ du sommaire (catégorie / section). data-stop-propagation :
+// l'entrée de section qui le contient porte elle-même une action (sélection).
+const _miniBtn = (action, attrs, icon, label, danger = false) => `<button type="button" data-action="${action}" ${attrs}
+  data-stop-propagation class="world-mini-btn${danger ? ' world-mini-btn--danger' : ''}" title="${label}" aria-label="${label}">${_svg(icon, 12)}</button>`;
 
 // ── Rendu principal ───────────────────────────────────────────────────────────
 async function renderWorld() {
@@ -342,8 +363,16 @@ async function renderWorld() {
 
   _bindNavKeyboard();
   if (STATE.isAdmin) _bindNavDrag();
-  _bindWorldContentEditor();
-  _refreshWorldToc();
+  document.getElementById('world-main-content')?.addEventListener('keydown', _onReaderKeydown);
+  _afterReaderRender();
+}
+
+// Ctrl+S dans l'éditeur texte ; le diaporama a déjà le sien (via data-free-page-save).
+function _onReaderKeydown(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
+  if (!e.target.closest?.('.world-editor--rich')) return;
+  e.preventDefault();
+  document.querySelector('#world-main-content [data-free-page-save]')?.click();
 }
 
 // ── Sommaire ──────────────────────────────────────────────────────────────────
@@ -382,12 +411,9 @@ function _renderCategoryGroup(cat, collapsed) {
       </button>
       ${STATE.isAdmin ? `
       <div class="world-cat-actions">
-        <button type="button" data-action="openWorldSectionModal" data-cat-id="${_esc(cat.id)}" data-stop-propagation
-          class="world-mini-btn" title="Ajouter une section ici" aria-label="Ajouter une section ici">${_svg(ICO.plus, 12)}</button>
-        <button type="button" data-action="openWorldCategoryModal" data-id="${_esc(cat.id)}" data-stop-propagation
-          class="world-mini-btn" title="Modifier la catégorie" aria-label="Modifier la catégorie">${_svg(ICO.pencil, 12)}</button>
-        <button type="button" data-action="deleteWorldCategory" data-id="${_esc(cat.id)}" data-stop-propagation
-          class="world-mini-btn world-mini-btn--danger" title="Supprimer la catégorie" aria-label="Supprimer la catégorie">${_svg(ICO.trash, 12)}</button>
+        ${_miniBtn('openWorldSectionModal', `data-cat-id="${_esc(cat.id)}"`, ICO.plus, 'Ajouter une section ici')}
+        ${_miniBtn('openWorldCategoryModal', `data-id="${_esc(cat.id)}"`, ICO.pencil, 'Modifier la catégorie')}
+        ${_miniBtn('deleteWorldCategory', `data-id="${_esc(cat.id)}"`, ICO.trash, 'Supprimer la catégorie', true)}
       </div>` : ''}
     </div>
     <div class="world-cat-sections">
@@ -417,10 +443,8 @@ function _renderNavItem(s) {
     ${isHidden ? _lockHtml() : ''}
     ${STATE.isAdmin ? `
     <div class="world-nav-actions">
-      <button type="button" data-action="openWorldSectionModal" data-id="${_esc(s.id)}" data-stop-propagation
-        class="world-mini-btn" title="Réglages de la section" aria-label="Réglages de la section">${_svg(ICO.pencil, 12)}</button>
-      <button type="button" data-action="deleteWorldSection" data-id="${_esc(s.id)}" data-stop-propagation
-        class="world-mini-btn world-mini-btn--danger" title="Supprimer" aria-label="Supprimer la section">${_svg(ICO.trash, 12)}</button>
+      ${_miniBtn('openWorldSectionModal', `data-id="${_esc(s.id)}"`, ICO.pencil, 'Réglages de la section')}
+      ${_miniBtn('deleteWorldSection', `data-id="${_esc(s.id)}"`, ICO.trash, 'Supprimer la section', true)}
     </div>` : ''}
   </div>`;
 }
@@ -496,8 +520,11 @@ function _renderSection(s, visibleSections = null) {
   const editing = _editingContentId === s.id;
   const slides = _sectionContentMode(s) === 'slides';
   const meta = _sectionMeta(s);
-  return `<article class="world-section-panel${isHidden ? ' is-hidden' : ''}${s.imageUrl ? ' has-cover' : ''}">
-    ${s.imageUrl ? `
+  const cover = s.imageUrl && !editing;
+  // data-free-page-shell : Ctrl+S et l'état « non enregistré » du diaporama
+  // retrouvent le bouton Enregistrer de l'en-tête.
+  return `<article class="world-section-panel${isHidden ? ' is-hidden' : ''}${cover ? ' has-cover' : ''}"${editing ? ' data-free-page-shell' : ''}>
+    ${cover ? `
       <div class="world-section-cover">
         <img src="${_esc(s.imageUrl)}" alt="">
       </div>` : ''}
@@ -516,15 +543,7 @@ function _renderSection(s, visibleSections = null) {
           ${meta ? `<div class="world-section-meta">${_esc(meta)}</div>` : ''}
           ${isHidden ? `<span class="world-hidden-badge">${_svg(ICO.lock, 12)} Masquée aux joueurs</span>` : ''}
         </div>
-        ${STATE.isAdmin && !editing ? `
-        <div class="world-section-actions">
-          <button type="button" data-action="worldEditContent" data-id="${_esc(s.id)}"
-            class="pill primary">${_svg(ICO.pencil, 13)} ${slides ? 'Modifier le diaporama' : 'Modifier le texte'}</button>
-          <button type="button" data-action="openWorldSectionModal" data-id="${_esc(s.id)}"
-            class="pill">${_svg(ICO.sliders, 13)} Réglages</button>
-          <button type="button" data-action="deleteWorldSection" data-id="${_esc(s.id)}"
-            class="pill world-pill-icon world-pill-danger" title="Supprimer la section" aria-label="Supprimer la section">${_svg(ICO.trash, 14)}</button>
-        </div>` : ''}
+        ${STATE.isAdmin ? `<div class="world-section-actions">${_sectionActionsHtml(s, { editing, slides })}</div>` : ''}
       </div>
     </header>
 
@@ -551,39 +570,59 @@ function _renderSectionBody(s) {
   return `<div class="world-empty-copy">Aucun contenu.${STATE.isAdmin ? ' <span>Utilise « Modifier le diaporama » pour composer cette section.</span>' : ''}</div>`;
 }
 
+// Actions MJ de l'en-tête : lecture (modifier / réglages / supprimer) ou édition
+// (annuler / enregistrer), toujours au même endroit — hors de portée du toast et
+// de la bulle de messagerie, collés en bas à droite de l'écran.
+function _sectionActionsHtml(s, { editing, slides }) {
+  const id = _esc(s.id);
+  if (editing) return `
+    ${slides ? '<span class="world-editor-status" data-free-page-save-status>Tout est enregistré</span>' : ''}
+    <button type="button" class="pill" data-action="worldCancelContent">Annuler</button>
+    <button type="button" class="pill primary" data-action="worldSaveContent" data-id="${id}"
+      data-free-page-save title="Enregistrer (Ctrl+S)">${_svg(ICO.check, 13)} Enregistrer</button>`;
+  return `
+    <button type="button" class="pill primary" data-action="worldEditContent" data-id="${id}">${_svg(ICO.pencil, 13)} ${slides ? 'Modifier le diaporama' : 'Modifier le texte'}</button>
+    <button type="button" class="pill" data-action="openWorldSectionModal" data-id="${id}">${_svg(ICO.sliders, 13)} Réglages</button>
+    <button type="button" class="pill world-pill-icon world-pill-danger" data-action="deleteWorldSection" data-id="${id}"
+      title="Supprimer la section" aria-label="Supprimer la section">${_svg(ICO.trash, 14)}</button>`;
+}
+
 function _renderContentEditor(s) {
-  if (_sectionContentMode(s) === 'rich') {
-    return `<div class="world-content-editor world-content-editor--rich">
-      ${richTextEditorHtml({
+  const rich = _sectionContentMode(s) === 'rich';
+  return `<div class="world-editor${rich ? ' world-editor--rich' : ''}">${rich
+    ? richTextEditorHtml({
         id: `world-rich-${s.id}`,
         html: _contentToHtml(s.contenu || ''),
         placeholder: 'Rédige le contenu de cette section…',
         minHeight: 360,
-      })}
-      <div class="world-content-editor-bar">
-        <button type="button" class="pill" data-action="worldCancelContent">Annuler</button>
-        <button type="button" class="pill primary" data-action="worldSaveContent" data-id="${_esc(s.id)}">Enregistrer le texte</button>
-      </div>
-    </div>`;
-  }
-  const deck = worldPageFor(s.id);
-  return `<div class="world-content-editor">
-    ${freePageEditorHtml({ id: `world-page-${s.id}`, page: deck })}
-    <div class="world-content-editor-bar">
-      <button type="button" class="pill" data-action="worldCancelContent">Annuler</button>
-      <button type="button" class="pill primary" data-action="worldSaveContent" data-id="${_esc(s.id)}">Enregistrer le contenu</button>
-    </div>
-  </div>`;
+      })
+    : freePageEditorHtml({ id: `world-page-${s.id}`, page: worldPageFor(s.id) })}</div>`;
 }
 
-// Monte l'éditeur free-page fraîchement injecté dans le lecteur (si édition).
-function _bindWorldContentEditor() {
-  if (!_editingContentId) return;
+// Après chaque rendu du lecteur : monte l'éditeur éventuel, bascule le plein cadre
+// d'édition (sommaire et plan masqués) et recalcule le plan « Sur cette page ».
+let _richInitialHtml = null;   // contenu de départ de l'éditeur texte (détection « non enregistré »)
+function _afterReaderRender() {
   const host = document.getElementById('world-main-content');
-  if (!host) return;
-  const section = STORE.sections.find(s => s.id === _editingContentId);
-  if (_sectionContentMode(section) === 'rich') bindRichTextEditors(host);
-  else bindFreePageEditor(host);
+  document.querySelector('.world-atlas')?.classList.toggle('is-editing', !!_editingContentId);
+  _richInitialHtml = null;
+  if (host && _editingContentId) {
+    const section = STORE.sections.find(s => s.id === _editingContentId);
+    if (_sectionContentMode(section) === 'rich') {
+      bindRichTextEditors(host);
+      _richInitialHtml = getRichTextHtml(`world-rich-${_editingContentId}`);
+    } else {
+      bindFreePageEditor(host);
+    }
+  }
+  _refreshWorldToc();
+}
+
+function _hasUnsavedContent() {
+  const host = document.getElementById('world-main-content');
+  if (!_editingContentId || !host) return false;
+  if (_richInitialHtml !== null) return getRichTextHtml(`world-rich-${_editingContentId}`) !== _richInitialHtml;
+  return hasUnsavedFreePageChanges(host);
 }
 
 function _renderSectionPager(s, visibleSections) {
@@ -664,8 +703,7 @@ function _renderReader(section) {
   const main = document.getElementById('world-main-content');
   if (!main || !section) return;
   main.innerHTML = _renderSection(section);
-  _bindWorldContentEditor();
-  _refreshWorldToc();
+  _afterReaderRender();
 }
 
 function selectWorldSection(id) {
@@ -698,24 +736,21 @@ function worldEditContent(id) {
   _editingContentId = id;
   STORE.activeId = id;
   _renderReader(STORE.sections.find(s => s.id === id));
+  worldScrollTo('world-main-content');
 }
 
-function worldCancelContent() {
+async function worldCancelContent() {
+  if (_hasUnsavedContent() && !await confirmModal('Abandonner les modifications non enregistrées ?')) return;
   _editingContentId = null;
   _renderReader(STORE.sections.find(s => s.id === STORE.activeId));
 }
 
 async function worldSaveContent(id) {
   const section = STORE.sections.find(s => s.id === id);
+  if (!section) return showNotif('Section introuvable.', 'error');
   if (_sectionContentMode(section) === 'rich') {
-    if (!section) return showNotif('Section introuvable.', 'error');
-    section.contenu = getRichTextHtml(`world-rich-${id}`);
-    try {
-      await _save();
-    } catch (e) {
-      console.error('[world rich content save]', e);
-      return showNotif('Le texte n\'a pas pu être enregistré.', 'error');
-    }
+    const contenu = getRichTextHtml(`world-rich-${id}`);
+    if (!await _commit(() => { STORE.sections = STORE.sections.map(x => x.id === id ? { ...x, contenu } : x); })) return;
     _editingContentId = null;
     showNotif('Texte enregistré.', 'success');
     renderWorld();
@@ -739,7 +774,7 @@ async function worldSaveContent(id) {
   setCachedWorldPage(id, fit.page);
   _editingContentId = null;
   if (fit.shrunk) showNotif('Images recompressées pour tenir dans la limite Firestore.', 'info');
-  showNotif('Contenu enregistré.', 'success');
+  showNotif('Diaporama enregistré.', 'success');
   renderWorld();
 }
 
@@ -782,9 +817,8 @@ async function _onSectionsReordered() {
   });
   // Sécurité : conserver d'éventuelles sections non rendues (catégorie masquée côté admin = improbable)
   STORE.sections.forEach(s => { if (!next.find(n => n.id === s.id)) next.push(s); });
-  STORE.sections = next;
-  await _save();
-  renderWorld();
+  await _commit(() => { STORE.sections = next; });
+  renderWorld();   // aussi en cas d'échec : remet le sommaire dans l'ordre enregistré
 }
 
 // ── Modal création / édition section ─────────────────────────────────────────
@@ -793,16 +827,8 @@ function openWorldSectionModal(id = null, presetCatId = null) {
   if (!STORE.categories.length) { showNotif('Crée d\'abord une catégorie.', 'error'); return; }
   const selCatId = s?.categoryId || presetCatId || STORE.categories[0]?.id;
   const catOptions = STORE.categories.map(c =>
-    `<option value="${c.id}" ${c.id===selCatId?'selected':''}>${_esc(c.icone||'📁')} ${_esc(c.nom||'Catégorie')}</option>`
+    `<option value="${_esc(c.id)}" ${c.id === selCatId ? 'selected' : ''}>${_esc(c.icone || '📁')} ${_esc(c.nom || 'Catégorie')}</option>`
   ).join('');
-
-  const iconGrid = ICONES.map(ic => `
-    <button type="button" id="wi-icon-${ic}" data-action="_selectWorldIcon" data-id="${ic}"
-      style="width:34px;height:34px;border-radius:8px;font-size:1.1rem;cursor:pointer;
-      border:2px solid ${(s?.icone||'📖')===ic?'var(--gold)':'var(--border)'};
-      background:${(s?.icone||'📖')===ic?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
-      transition:all .1s;display:flex;align-items:center;justify-content:center">${ic}</button>
-  `).join('');
 
   const selCat  = STORE.categories.find(c => c.id === selCatId);
   const bgStyle = s?.imageUrl ? `background-image:url('${_esc(s.imageUrl).replace(/'/g,'%27')}')` : '';
@@ -845,9 +871,8 @@ function openWorldSectionModal(id = null, presetCatId = null) {
     </div>
 
     <!-- ════ BODY ════ -->
-    <div class="mn-body">
-      <input type="hidden" id="wi-id" value="${s?.id||''}">
-      <input type="hidden" id="wi-icon" value="${s?.icone||'📖'}">
+    <div class="mn-body world-modal-body">
+      <input type="hidden" id="wi-id" value="${_esc(s?.id || '')}">
 
       <div class="mn-row">
         <label class="mn-label" for="wi-categorie">Catégorie</label>
@@ -856,7 +881,7 @@ function openWorldSectionModal(id = null, presetCatId = null) {
 
       <div class="mn-field">
         <label class="mn-label">Icône <span class="mn-label-hint">affichée dans la navigation</span></label>
-        <div style="display:flex;flex-wrap:wrap;gap:.3rem">${iconGrid}</div>
+        ${_iconPickerHtml('wi', s?.icone || '📖')}
       </div>
 
       <div class="mn-field">
@@ -874,20 +899,15 @@ function openWorldSectionModal(id = null, presetCatId = null) {
         <p class="mn-hint world-content-mode-hint">Le changement de mode conserve les deux versions du contenu.</p>
       </div>
 
-      <label style="display:flex;align-items:center;gap:.6rem;
-        padding:.55rem .75rem;background:rgba(255,107,107,.06);border:1px solid rgba(255,107,107,.18);
-        border-radius:8px;cursor:pointer;font-size:.84rem;color:var(--text-muted)">
-        <input type="checkbox" id="wi-hidden" ${s?.visible===false?'checked':''} style="accent-color:#ff6b6b">
-        <span>🔒 Masquée aux joueurs</span>
-      </label>
+      ${_hiddenToggleHtml('wi-hidden', s?.visible === false, 'Masquée aux joueurs')}
     </div>
 
     <!-- ════ FOOTER ════ -->
     <div class="mn-footer">
       <span class="mn-footer-hint">📖 Visible par tous les membres de l'aventure</span>
-      <div style="display:flex;gap:.5rem">
-        <button class="btn btn-outline btn-sm" data-action="_worldClose">Annuler</button>
-        <button class="btn btn-gold" data-action="saveWorldSection">${s ? 'Enregistrer' : 'Créer la section'}</button>
+      <div class="world-modal-actions">
+        <button type="button" class="pill" data-action="_worldClose">Annuler</button>
+        <button type="button" class="pill primary" data-action="saveWorldSection">${s ? 'Enregistrer' : 'Créer la section'}</button>
       </div>
     </div>
 
@@ -926,15 +946,30 @@ function _worldSyncEyebrow() {
   eye.textContent = `${c?.icone || '📁'} ${c?.nom || 'Catégorie'}`;
 }
 
-function _selectWorldIcon(ic) {
-  ICONES.forEach(i => {
-    const btn = document.getElementById(`wi-icon-${i}`);
-    if (!btn) return;
-    btn.style.borderColor = i === ic ? 'var(--gold)' : 'var(--border)';
-    btn.style.background  = i === ic ? 'rgba(232,184,75,.12)' : 'var(--bg-elevated)';
+// Sélecteur d'icône + case « masquée » communs aux modales section (wi) et catégorie (wc).
+function _iconPickerHtml(prefix, selected) {
+  return `<div class="world-icon-grid" role="group" aria-label="Icône">
+    <input type="hidden" id="${prefix}-icon" value="${_esc(selected)}">
+    ${ICONES.map(ic => `<button type="button" class="world-icon-choice${ic === selected ? ' is-selected' : ''}"
+      data-action="worldPickIcon" data-id="${ic}" aria-pressed="${ic === selected}">${ic}</button>`).join('')}
+  </div>`;
+}
+
+function worldPickIcon(btn) {
+  const grid = btn.closest('.world-icon-grid');
+  grid?.querySelectorAll('.world-icon-choice').forEach(b => {
+    b.classList.toggle('is-selected', b === btn);
+    b.setAttribute('aria-pressed', String(b === btn));
   });
-  const inp = document.getElementById('wi-icon');
-  if (inp) inp.value = ic;
+  const input = grid?.querySelector('input[type="hidden"]');
+  if (input) input.value = btn.dataset.id;
+}
+
+function _hiddenToggleHtml(id, checked, label) {
+  return `<label class="world-hidden-toggle">
+    <input type="checkbox" id="${id}"${checked ? ' checked' : ''}>
+    <span>${_svg(ICO.lock, 13)} ${label}</span>
+  </label>`;
 }
 
 async function saveWorldSection() {
@@ -956,21 +991,18 @@ async function saveWorldSection() {
   let imageUrl = existing?.imageUrl || '';
   if (typeof cropResult === 'string') imageUrl = cropResult;
   else if (cropResult === null)       imageUrl = '';
-  _wiCropper?.destroy(); _wiCropper = null;
 
   // Le contenu n'est plus édité ici (diapo via « Modifier le contenu ») : on
   // préserve l'éventuel contenu legacy HTML jusqu'à sa migration en diapo.
   const contenu = existing?.contenu || '';
   const section = { id, titre, icone, contenu, imageUrl, visible: !hidden, categoryId, contentMode };
 
-  if (isNew) {
-    STORE.sections.push(section);
-  } else {
-    const idx = STORE.sections.findIndex(s => s.id === id);
-    if (idx >= 0) STORE.sections[idx] = section;
-  }
-
-  await _save();
+  const ok = await _commit(() => {
+    const idx = STORE.sections.findIndex(x => x.id === id);
+    if (idx >= 0) STORE.sections[idx] = section; else STORE.sections.push(section);
+  });
+  if (!ok) return;   // modale gardée ouverte (recadrage compris) pour réessayer
+  _wiCropper?.destroy(); _wiCropper = null;
   STORE.activeId = id;
   closeModal();
   showNotif(isNew ? 'Section créée !' : 'Section mise à jour !', 'success');
@@ -979,11 +1011,10 @@ async function saveWorldSection() {
 
 async function deleteWorldSection(id) {
   if (!await confirmModal('Supprimer cette section définitivement ?')) return;
-  STORE.sections = STORE.sections.filter(s => s.id !== id);
-  if (STORE.activeId === id) STORE.activeId = STORE.sections[0]?.id || null;
+  if (!await _commit(() => { STORE.sections = STORE.sections.filter(s => s.id !== id); })) return;
+  if (STORE.activeId === id) STORE.activeId = null;   // renderWorld reprend la 1re visible
   if (_editingContentId === id) _editingContentId = null;
-  deleteWorldPage(id);   // nettoie le doc dédié (best-effort)
-  await _save();
+  deleteWorldPage(id);   // nettoie le doc dédié (best-effort), une fois la section retirée
   showNotif('Section supprimée.', 'success');
   renderWorld();
 }
@@ -992,55 +1023,24 @@ async function deleteWorldSection(id) {
 function openWorldCategoryModal(id = null) {
   const c = id ? STORE.categories.find(cat => cat.id === id) : null;
 
-  const iconGrid = ICONES.map(ic => `
-    <button type="button" id="wc-icon-${ic}" data-action="_selectWorldCatIcon" data-id="${ic}"
-      style="width:34px;height:34px;border-radius:8px;font-size:1.1rem;cursor:pointer;
-      border:2px solid ${(c?.icone||'📁')===ic?'var(--gold)':'var(--border)'};
-      background:${(c?.icone||'📁')===ic?'rgba(232,184,75,.12)':'var(--bg-elevated)'};
-      transition:all .1s;display:flex;align-items:center;justify-content:center">${ic}</button>
-  `).join('');
-
   openModal(c ? `✏️ Modifier la catégorie — ${c.nom||''}` : '+ Nouvelle catégorie', `
-    <input type="hidden" id="wc-id" value="${c?.id||''}">
-    <input type="hidden" id="wc-icon" value="${c?.icone||'📁'}">
-
-    <div class="form-group">
-      <label>Icône</label>
-      <div style="display:flex;flex-wrap:wrap;gap:.3rem">${iconGrid}</div>
-    </div>
-
-    <div class="form-group">
-      <label>Nom de la catégorie</label>
-      <input class="input-field" id="wc-nom" value="${_esc(c?.nom||'')}"
-        placeholder="Géographie, Histoire, Factions…">
-    </div>
-
-    <label style="display:flex;align-items:center;gap:.6rem;margin-bottom:1rem;
-      padding:.55rem .75rem;background:rgba(255,107,107,.06);border:1px solid rgba(255,107,107,.18);
-      border-radius:8px;cursor:pointer;font-size:.84rem;color:var(--text-muted)">
-      <input type="checkbox" id="wc-hidden" ${c?.visible===false?'checked':''}
-        style="accent-color:#ff6b6b">
-      <span>🔒 Masquée aux joueurs (cache aussi ses sections)</span>
-    </label>
-
-    <div style="display:flex;gap:.5rem">
-      <button class="btn btn-gold" style="flex:1" data-action="saveWorldCategory">
-        ${c ? 'Enregistrer' : 'Créer la catégorie'}
-      </button>
-      <button class="btn btn-outline btn-sm" data-action="_worldClose">Annuler</button>
+    <div class="world-modal-body">
+      <input type="hidden" id="wc-id" value="${_esc(c?.id || '')}">
+      <div class="mn-field">
+        <span class="mn-label">Icône</span>
+        ${_iconPickerHtml('wc', c?.icone || '📁')}
+      </div>
+      <div class="mn-field">
+        <label class="mn-label" for="wc-nom">Nom de la catégorie</label>
+        <input class="input-field" id="wc-nom" value="${_esc(c?.nom || '')}" placeholder="Géographie, Histoire, Factions…" autocomplete="off">
+      </div>
+      ${_hiddenToggleHtml('wc-hidden', c?.visible === false, 'Masquée aux joueurs (cache aussi ses sections)')}
+      <div class="world-modal-actions">
+        <button type="button" class="pill" data-action="_worldClose">Annuler</button>
+        <button type="button" class="pill primary" data-action="saveWorldCategory">${c ? 'Enregistrer' : 'Créer la catégorie'}</button>
+      </div>
     </div>
   `);
-}
-
-function _selectWorldCatIcon(ic) {
-  ICONES.forEach(i => {
-    const btn = document.getElementById(`wc-icon-${i}`);
-    if (!btn) return;
-    btn.style.borderColor = i === ic ? 'var(--gold)' : 'var(--border)';
-    btn.style.background  = i === ic ? 'rgba(232,184,75,.12)' : 'var(--bg-elevated)';
-  });
-  const inp = document.getElementById('wc-icon');
-  if (inp) inp.value = ic;
 }
 
 async function saveWorldCategory() {
@@ -1052,13 +1052,11 @@ async function saveWorldCategory() {
   const hidden = document.getElementById('wc-hidden')?.checked || false;
   const category = { id, nom, icone, visible: !hidden };
 
-  if (isNew) {
-    STORE.categories.push(category);
-  } else {
+  const ok = await _commit(() => {
     const idx = STORE.categories.findIndex(c => c.id === id);
-    if (idx >= 0) STORE.categories[idx] = category;
-  }
-  await _save();
+    if (idx >= 0) STORE.categories[idx] = category; else STORE.categories.push(category);
+  });
+  if (!ok) return;
   closeModal();
   showNotif(isNew ? 'Catégorie créée !' : 'Catégorie mise à jour !', 'success');
   renderWorld();
@@ -1077,12 +1075,14 @@ async function deleteWorldCategory(id) {
     : `Supprimer « ${cat.nom} » ?`;
   if (!await confirmModal(msg)) return;
 
-  STORE.categories = STORE.categories.filter(c => c.id !== id);
-  if (orphans.length) {
-    if (!fallback) { fallback = { ...DEFAULT_CAT }; STORE.categories.unshift(fallback); }
-    STORE.sections = STORE.sections.map(s => s.categoryId === id ? { ...s, categoryId: fallback.id } : s);
-  }
-  await _save();
+  const ok = await _commit(() => {
+    STORE.categories = STORE.categories.filter(c => c.id !== id);
+    if (orphans.length) {
+      if (!fallback) { fallback = { ...DEFAULT_CAT }; STORE.categories.unshift(fallback); }
+      STORE.sections = STORE.sections.map(s => s.categoryId === id ? { ...s, categoryId: fallback.id } : s);
+    }
+  });
+  if (!ok) return;
   showNotif('Catégorie supprimée.', 'success');
   renderWorld();
 }
@@ -1107,11 +1107,10 @@ registerActions({
   worldCancelContent:     ()    => worldCancelContent(),
   worldSaveContent:       (btn) => worldSaveContent(btn.dataset.id),
   saveWorldSection:       ()    => saveWorldSection(),
-  _selectWorldIcon:       (btn) => _selectWorldIcon(btn.dataset.id),
+  worldPickIcon:          (btn) => worldPickIcon(btn),
   openWorldCategoryModal: (btn) => openWorldCategoryModal(btn.dataset.id || undefined),
   saveWorldCategory:      ()    => saveWorldCategory(),
   deleteWorldCategory:    (btn) => deleteWorldCategory(btn.dataset.id),
-  _selectWorldCatIcon:    (btn) => _selectWorldCatIcon(btn.dataset.id),
   _worldSyncEyebrow:      ()    => _worldSyncEyebrow(),
   _worldClose:            ()    => closeModal(),
 });

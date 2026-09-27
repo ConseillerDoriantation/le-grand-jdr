@@ -2065,8 +2065,12 @@ body.is-modal-open { overflow:hidden; }
   align-items:center;
   gap:.55rem;
   max-width:min(520px, calc(100vw - 3rem));
+  /* Masqué = hors jeu : sinon le toast invisible (opacity 0) captait encore les
+     clics en bas d'écran (boutons, bottom nav mobile). */
+  visibility:hidden;
+  pointer-events:none;
 }
-.notif.show { transform:translateY(0) scale(1); opacity:1; }
+.notif.show { transform:translateY(0) scale(1); opacity:1; visibility:visible; pointer-events:auto; }
 .notif.success { background:rgba(53,211,153,0.16); border:1px solid rgba(53,211,153,0.28); color:#67e7b4; }
 .notif.error { background:rgba(255,107,122,0.16); border:1px solid rgba(255,107,122,0.28); color:#ff9aa5; }
 .notif.warning { background:rgba(242,200,107,0.16); border:1px solid rgba(242,200,107,0.3); color:#f2c86b; }
