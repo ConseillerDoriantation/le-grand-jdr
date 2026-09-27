@@ -41,7 +41,7 @@ import {
   addSort, editSort, clearSpellHost,
 } from './characters/spells.js';
 
-import { toggleCharElement } from './characters/combat.js';
+import { toggleCharElement, setFavoriteElement } from './characters/combat.js';
 import {
   renderCharLedger,
   _csV3LedgerSaveField, _csV3LedgerSaveAmount,
@@ -1634,16 +1634,24 @@ function renderCharCombatV3(c, canEdit) {
       const col = t.color || '#9ca3af';
       const cls = on ? 'elem-chip on' : 'elem-chip';
       const style = `--elem-bg:${col}22;--elem-bd:${col}66;--elem-c:${col}`;
-      const handler = canEdit ? `data-action="toggleCharElement" data-id="${c.id}" data-elem="${t.id}"` : '';
-      const fav = on && c.favoriteElement === t.id ? ' <span title="Élément favori (défaut au VTT)">★</span>' : '';
-      return `<span class="${cls}" data-elem-id="${_esc(t.id)}" style="${style}" ${handler}>${_esc(t.icon || '')} ${_esc(t.label)}${fav}</span>`;
+      // Accorder/retirer un élément = MJ seul ; choisir son favori = joueur (fiche éditable).
+      const handler = canEdit && STATE.isAdmin ? `data-action="toggleCharElement" data-id="${c.id}" data-elem="${t.id}"` : '';
+      const isFav = on && c.favoriteElement === t.id;
+      const fav = !on ? ''
+        : canEdit
+          ? `<button type="button" class="elem-fav${isFav ? ' is-on' : ''}" data-action="setFavoriteElement" data-id="${c.id}" data-elem="${_esc(t.id)}" aria-pressed="${isFav}" title="${isFav ? 'Retirer le favori' : 'Élément favori : mis par défaut au VTT'}">${isFav ? '★' : '☆'}</button>`
+          : (isFav ? '<span class="elem-fav is-on" title="Élément favori (défaut au VTT)">★</span>' : '');
+      return `<span class="${cls}${handler ? '' : ' is-static'}" data-elem-id="${_esc(t.id)}" style="${style}" ${handler}>${_esc(t.icon || '')} ${_esc(t.label)}${fav}</span>`;
     }).join('');
+    const favHint = canEdit && charElems.length
+      ? '<div class="elem-hint">☆ = élément favori, sélectionné par défaut pour tes actions au VTT.</div>' : '';
     elemsHtml = `<div class="elem-card">
       <div class="elem-card-head">
         Éléments maîtrisés
         ${STATE.isAdmin ? `<button class="section-action" style="float:right" data-action="openDamageTypesAdmin" title="Gérer les types (admin)">⚙️</button>` : ''}
       </div>
       <div class="elem-row">${elemChips || '<span style="font-size:.72rem;color:var(--text-dim);font-style:italic">Aucun type magique défini.</span>'}</div>
+      ${favHint}
     </div>`;
   }
 
@@ -2510,6 +2518,7 @@ registerActions({
   openCombatStylesAdmin:    ()      => openCombatStylesAdmin(),
   openDamageTypesAdmin:     ()      => openDamageTypesAdmin(),
   toggleCharElement:        (btn)   => toggleCharElement(btn.dataset.id, btn.dataset.elem),
+  setFavoriteElement:       (btn)   => setFavoriteElement(btn.dataset.id, btn.dataset.elem),
 
   // Maîtrises
   addMaitrise:              ()      => addMaitrise(),

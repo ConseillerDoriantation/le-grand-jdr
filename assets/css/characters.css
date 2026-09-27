@@ -11665,6 +11665,14 @@ body .modal:has(.sh-admin-modal.is-combat-styles) {
   color: var(--elem-c);
 }
 .cs-v3 .elem-chip:hover { transform: translateY(-1px); }
+.cs-v3 .elem-chip.is-static { cursor: default; }
+.cs-v3 .elem-chip.is-static:hover { transform: none; }
+.cs-v3 .elem-fav {
+  margin: 0 -4px 0 2px; padding: 0 3px; border: 0; background: transparent;
+  font-size: .85rem; line-height: 1; color: var(--text-dim); cursor: pointer;
+}
+.cs-v3 .elem-fav:hover, .cs-v3 .elem-fav.is-on { color: var(--gold); }
+.cs-v3 .elem-hint { margin-top: 6px; font-size: .62rem; color: var(--text-dim); }
 
 /* Combat — Maîtrises */
 .cs-v3 .mait-grid {
