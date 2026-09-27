@@ -19,7 +19,7 @@ import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
 import { resolveSpellModifierStat, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationSelection, normalizeInvocationStats } from '../../shared/invocation-stats.js';
-import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispCircleSize, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
+import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
 import { computeSheetLines, renderSheetLines } from '../../shared/spell-sheet-lines.js';
 import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 
@@ -2571,12 +2571,6 @@ const RESONANCE_CATALOG = [
     blockers:(ct,s)=>[
       ...((ct.Invocation||0)>0 ? ['Invocation (→ Sentinelle)'] : []),
       ...(s.afflictionMode==='laceration' ? ['mode Lacération'] : []),
-    ] },
-  { id:'zone_elargie', icon:'🌐', color:'#4f8cff', name:'Zone élargie',
-    effet:'Grande zone d’effet plaçable',
-    ingredients:(ct)=>[
-      { label:'Amplification', ok:(ct.Amplification||0)>0 },
-      { label:'Dispersion',    ok:(ct.Dispersion||0)>0 },
     ] },
   { id:'arme_invoquee', icon:'⚔️', color:'#e8b84b', name:'Arme invoquée',
     effet:'Invoque une arme élémentaire',
@@ -5658,7 +5652,9 @@ function _sanitizeAbsorbedComboFields(s) {
   const comboIds = new Set(_activeCombos(s).map(c => c.id));
   const clearEnchant = comboIds.has('arme_invoquee');
   const clearAffliction = comboIds.has('regeneration') || comboIds.has('sentinelle');
-  const clearAmpMode = comboIds.has('zone_elargie');
+  // Amplification + Dispersion = zones répétées (modèle v2) : pas de mode déplacement.
+  const ampCounts = _runeCounts(s);
+  const clearAmpMode = (ampCounts.Amplification || 0) > 0 && (ampCounts.Dispersion || 0) > 0;
 
   if (clearEnchant) {
     s.enchantMode = 'dmg';

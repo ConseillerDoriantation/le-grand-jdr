@@ -3763,7 +3763,8 @@ function _vttSpellMods(s) {
   // Sentinelle = Affliction (toute branche) + Invocation → la branche est absorbée,
   // pas de Lacération directe du lanceur (l'affliction est portée par la sentinelle).
   const isSentinelle = nbAff > 0 && nbInv > 0;
-  const isZoneElargie = nbAmp > 0 && nbDisp > 0;
+  // Amplification + Dispersion = zones répétées (modèle v2), jamais un déplacement.
+  const isAmpDisp = nbAmp > 0 && nbDisp > 0;
   const isArmeInvoquee = nbEnch > 0 && nbInv > 0;
   // Enchantement mode État sur un allié : une Lacération éventuelle n'est PAS une
   // frappe directe (qui baisserait la CA de l'allié) — elle est PORTÉE par l'allié
@@ -3808,7 +3809,7 @@ function _vttSpellMods(s) {
     // Déplacement (rune Amplification en mode déplacement) : soi / pousse / attire.
     // Portée = 3N cases. Sous-mode dans s.deplacement.mode.
     // Avec Enchantement, l'Amplification BOOSTE l'effet (pas de déplacement) → désactivé.
-    deplacement: (!isZoneElargie && nbEnch === 0 && s.ampMode === 'deplacement' && nbAmp > 0)
+    deplacement: (!isAmpDisp && nbEnch === 0 && s.ampMode === 'deplacement' && nbAmp > 0)
       ? { mode: s.deplacement?.mode || 'self', cells: Math.max(1, 3 * nbAmp),
           // Échange de place (mode Soi uniquement, opt-in sur le sort).
           swap: (s.deplacement?.mode || 'self') === 'self' && !!s.deplacement?.swap }
