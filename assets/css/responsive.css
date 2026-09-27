@@ -333,14 +333,7 @@
     grid-template-columns: 1fr !important;
   }
 
-  /* Page monde : sidebar empilée, non collante, et plus aérée */
-  .world-shell { grid-template-columns: 1fr !important; gap: .8rem !important; }
-  .world-sidebar { position: static !important; top: auto !important; }
-  /* Sections : paddings resserrés + en-tête qui passe à la ligne */
-  .world-sec-head { padding: 1rem 1rem .55rem !important; }
-  .world-sec-headrow { flex-wrap: wrap; }
-  .world-sec-body { padding: 1rem 1rem 1.2rem !important; }
-  .world-content { padding: 1rem !important; }
+  /* Guide : responsive géré dans features.css (bloc « GUIDE (world.js) »). */
 
   /* Fiche perso : panneau gauche sur toute la largeur */
   .cs-shell { grid-template-columns: 1fr; }
@@ -707,7 +700,6 @@
 #main-content[data-page="collection"] .coll-page-header:not(:has(.coll-head-counter)) { display: none; }
 
 /* En-têtes métiers : même géométrie, sans effet de "hero" disparate. */
-#main-content[data-page="world"] .world-hero-panel,
 #main-content[data-page="agenda"] .ag-hero,
 #main-content[data-page="players"] .pp-hero,
 #main-content[data-page="bastion"] .bs-root-v2 .bs-hero {
@@ -720,21 +712,15 @@
   box-shadow: none !important;
 }
 
-#main-content[data-page="world"] .world-hero-panel::before,
 #main-content[data-page="agenda"] .ag-hero::before,
 #main-content[data-page="bastion"] .bs-hero::before { display: none !important; }
 
-#main-content[data-page="world"] .world-hero-copy,
 #main-content[data-page="agenda"] .ag-hero-text,
 #main-content[data-page="players"] .pp-hero-title-block,
 #main-content[data-page="bestiaire"] .bst-title-cluster,
 #main-content[data-page="recettes"] .rec-head-titles,
 #main-content[data-page="aventures"] .adv-command-main {
   display: none !important;
-}
-
-#main-content[data-page="world"] .world-hero-panel {
-  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 #main-content[data-page="agenda"] .ag-hero,
@@ -767,7 +753,6 @@
   gap: 0;
 }
 
-#main-content[data-page="world"] .world-hero-copy p,
 #main-content[data-page="agenda"] .ag-hero-sub,
 #main-content[data-page="players"] .pp-hero-subtitle,
 #main-content[data-page="bastion"] .bs-hero-desc,
@@ -780,16 +765,12 @@
   line-height: 1.35;
 }
 
-#main-content[data-page="world"] .world-stat,
 #main-content[data-page="players"] .pp-hero-stat {
   min-height: 38px;
   padding: 6px 8px;
   border-radius: 7px;
 }
-#main-content[data-page="world"] .world-stat span { display: none; }
-#main-content[data-page="world"] .world-stat strong,
 #main-content[data-page="players"] .pp-hero-stat-num { font-size: 1rem; }
-#main-content[data-page="world"] .world-stat small,
 #main-content[data-page="players"] .pp-hero-stat-lbl { margin-top: 2px; font-size: .52rem; }
 
 #main-content[data-page="players"] .pp-hero { margin-bottom: 12px !important; }
@@ -841,7 +822,6 @@
 #main-content[data-page="recettes"] .rec-eyebrow,
 #main-content[data-page="bestiaire"] .bst-kicker,
 #main-content[data-page="aventures"] .adv-kicker,
-#main-content[data-page="world"] .world-kicker,
 #main-content[data-page="agenda"] .ag-eyebrow,
 #main-content[data-page="players"] .pp-hero-eyebrow,
 #main-content[data-page="bastion"] .bs-hero-eyebrow {
@@ -854,7 +834,6 @@
 @media (max-width: 768px) {
   #main-content[data-page] { --app-page-gutter: 0px; }
 
-  #main-content[data-page="world"] .world-hero-panel,
   #main-content[data-page="agenda"] .ag-hero,
   #main-content[data-page="players"] .pp-hero-band,
   #main-content[data-page="bastion"] .bs-root-v2 .bs-hero,
@@ -864,9 +843,6 @@
     align-items: flex-start;
   }
 
-  #main-content[data-page="world"] .world-hero-panel { grid-template-columns: 1fr auto; }
-  #main-content[data-page="world"] .world-stat-grid { grid-template-columns: repeat(4, minmax(56px, 1fr)); }
-  #main-content[data-page="world"] .world-hero-actions,
   #main-content[data-page="agenda"] .ag-hero-actions,
   #main-content[data-page="bastion"] .bs-hero-actions { justify-content: flex-start; }
 }
