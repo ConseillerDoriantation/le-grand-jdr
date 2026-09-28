@@ -1,5 +1,6 @@
 import { getCurrentAdventureId, getDocData, saveDoc } from '../data/firestore.js';
 import { normalizeWeaponTechnique } from './weapon-techniques.js';
+import { normalizeWeaponDefaults } from './weapon-family.js';
 export { normalizeWeaponTechnique } from './weapon-techniques.js';
 
 // ══════════════════════════════════════════════
@@ -45,6 +46,7 @@ export const DEFAULT_WEAPON_FORMATS = [
 export function normalizeWeaponFormat(format = {}) {
   return {
     ...format,
+    defaults: normalizeWeaponDefaults(format.defaults),
     techniques: Array.isArray(format.techniques)
       ? format.techniques.map(normalizeWeaponTechnique).filter(t => t.label)
       : [],
