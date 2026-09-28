@@ -305,7 +305,11 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       const condLbl = isWeak ? _weakLbl(aff.element) : lib.label;
       const round = VS.session?.combat?.round ?? 0;
       const isConsumed = !!lib.effects?.consumedByAttackAgainst;
-      const dur = opt.mods?.concentration ? 10 : (opt.classicDuration > 0
+      // Contrôle total (cantAct : Étourdi, Paralysé…) : durée de l'état, jamais
+      // prolongée par Concentration ni Durée (sinon une cible perd 10 tours).
+      const dur = lib.effects?.cantAct
+        ? (Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0 ? lib.defaultDuration : 1)
+        : opt.mods?.concentration ? 10 : (opt.classicDuration > 0
         ? opt.classicDuration : (
         Number.isFinite(lib.defaultDuration) && lib.defaultDuration > 0
           ? lib.defaultDuration : 2

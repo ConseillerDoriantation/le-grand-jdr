@@ -1332,11 +1332,14 @@ function _initCanvas(container) {
   VS.layers.fog   = _asLayer(new K.Group({ listening: false }), frontLayer); // masque de brouillard
   VS.layers.mapFg = _asLayer(new K.Group({ listening: false }), frontLayer);
   VS.layers.ping  = _asLayer(new K.Group({ listening: false }), frontLayer);
+  // Aides de placement (lumière posée…) : au-dessus du brouillard et des décors,
+  // sinon les cases à choisir disparaissent justement dans les zones sombres.
+  VS.layers.overlay = _asLayer(new K.Group({ listening: true }), frontLayer);
   backLayer.add(VS.layers.bg, VS.layers.map);
   if (STATE.isAdmin) {
-    frontLayer.add(VS.layers.fog, VS.layers.walls, VS.layers.mapFg, VS.layers.ping);
+    frontLayer.add(VS.layers.fog, VS.layers.walls, VS.layers.mapFg, VS.layers.ping, VS.layers.overlay);
   } else {
-    frontLayer.add(VS.layers.walls, VS.layers.mapFg, VS.layers.fog, VS.layers.ping);
+    frontLayer.add(VS.layers.walls, VS.layers.mapFg, VS.layers.fog, VS.layers.ping, VS.layers.overlay);
   }
   VS.stage.add(backLayer, VS.layers.grid, VS.layers.draw, VS.layers.token, frontLayer);
   fogInit(VS.stage, VS.layers, CELL);
@@ -4328,6 +4331,9 @@ function _selfClear() {
   _selfCells = [];
   _selfCtx = null;
   VS.layers.grid?.batchDraw();
+  VS.layers.overlay?.batchDraw();
+  const container = VS.stage?.container?.();
+  if (container) container.style.cursor = '';
 }
 
 // Échange lanceur↔cible : chacun doit tenir dans la grille à la place de l'autre
@@ -4508,42 +4514,70 @@ async function _vttLightCast(src, opt, targetName, effectLbl) {
 function _startLightPlacement(srcId, opt) {
   _zoneClear(); _selfClear();
   _clearHL();
-  const src = VS.tokens[srcId]?.data; if (!src || !VS.layers.grid || !VS.activePage) return;
+  const layer = VS.layers.overlay || VS.layers.grid;
+  const src = VS.tokens[srcId]?.data; if (!src || !layer || !VS.activePage) return;
   const range = Math.max(1, parseInt(opt.portee) || 1);
+  const radius = opt.lightRadius || 3;
   _selfCtx = { srcId, cells: range, opt, swapIds: new Set(), lightIds: new Set() };
   const K = window.Konva;
   const { cols, rows } = VS.activePage;
-  for (let dc = -range; dc <= range; dc++) for (let dr = -range; dr <= range; dr++) {
-    if (Math.abs(dc) + Math.abs(dr) > range) continue;
-    const c = src.col + dc, r = src.row + dr;
-    if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
-    const rect = new K.Rect({
-      x: c * CELL, y: r * CELL, width: CELL, height: CELL,
-      fill: 'rgba(249,215,28,0.22)', stroke: 'rgba(249,215,28,0.75)', strokeWidth: 1.5, listening: true,
-    });
-    const tc = c, tr = r;
-    rect.on('click', async e => { if (e.evt.button !== 0) return; e.cancelBubble = true; await _vttPlaceLight(tc, tr); });
-    rect.on('contextmenu', e => { e.evt.preventDefault(); });
-    VS.layers.grid.add(rect);
-    _selfCells.push(rect);
-  }
-  // Tokens à portée (lanceur compris) : le clic est capté par handleTokenAction.
+  // Tokens à portée (lanceur compris) : surlignés en or, le clic est capté par
+  // handleTokenAction (calque des tokens). Leurs cases ne captent donc pas le clic.
+  const tokenCells = new Set();
   Object.values(VS.tokens).forEach(e => {
     const d = e?.data;
     if (!d || d.pageId !== src.pageId || (d.visible === false && !STATE.isAdmin)) return;
     if (Math.abs(d.col - src.col) + Math.abs(d.row - src.row) > range) return;
     const od = _tokenDims(d);
+    for (let x = 0; x < od.w; x++) for (let y = 0; y < od.h; y++) tokenCells.add(`${d.col + x},${d.row + y}`);
     const rect = new K.Rect({
       x: d.col * CELL, y: d.row * CELL, width: od.w * CELL, height: od.h * CELL,
-      fill: 'rgba(232,184,75,0.30)', stroke: 'rgba(232,184,75,0.9)', strokeWidth: 2, listening: false,
+      fill: 'rgba(232,184,75,0.28)', stroke: '#e8b84b', strokeWidth: 3, cornerRadius: 6, listening: false,
     });
-    VS.layers.grid.add(rect);
+    layer.add(rect);
     _selfCells.push(rect);
     _selfCtx.lightIds.add(d.id);
   });
-  VS.layers.grid.batchDraw();
+  // Aperçu au survol : case ciblée + rayon de la lumière qui sera posée.
+  const preview = new K.Group({ listening: false, visible: false });
+  const previewHalo = new K.Circle({ radius: radius * CELL, fill: 'rgba(249,215,28,0.10)', stroke: 'rgba(249,215,28,0.9)', strokeWidth: 2, dash: [10, 6] });
+  const previewCell = new K.Rect({ width: CELL, height: CELL, fill: 'rgba(249,215,28,0.55)', stroke: '#fde047', strokeWidth: 3 });
+  const previewIcon = new K.Text({ text: '💡', fontSize: CELL * 0.55, width: CELL, height: CELL, align: 'center', verticalAlign: 'middle' });
+  preview.add(previewHalo, previewCell, previewIcon);
+  _selfCells.push(preview);
+  for (let dc = -range; dc <= range; dc++) for (let dr = -range; dr <= range; dr++) {
+    if (Math.abs(dc) + Math.abs(dr) > range) continue;
+    const c = src.col + dc, r = src.row + dr;
+    if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
+    const onToken = tokenCells.has(`${c},${r}`);
+    const rect = new K.Rect({
+      x: c * CELL, y: r * CELL, width: CELL, height: CELL,
+      fill: 'rgba(249,215,28,0.30)', stroke: 'rgba(253,224,71,0.95)', strokeWidth: 1.5,
+      listening: !onToken,
+    });
+    if (!onToken) {
+      const tc = c, tr = r;
+      rect.on('mouseenter', () => {
+        previewHalo.position({ x: (tc + 0.5) * CELL, y: (tr + 0.5) * CELL });
+        previewCell.position({ x: tc * CELL, y: tr * CELL });
+        previewIcon.position({ x: tc * CELL, y: tr * CELL });
+        preview.visible(true); layer.batchDraw();
+        VS.stage?.container() && (VS.stage.container().style.cursor = 'pointer');
+      });
+      rect.on('mouseleave', () => {
+        preview.visible(false); layer.batchDraw();
+        VS.stage?.container() && (VS.stage.container().style.cursor = '');
+      });
+      rect.on('click tap', async e => { if (e.evt.button > 0) return; e.cancelBubble = true; await _vttPlaceLight(tc, tr); });
+      rect.on('contextmenu', e => { e.evt.preventDefault(); });
+    }
+    layer.add(rect);
+    _selfCells.push(rect);
+  }
+  layer.add(preview);
+  layer.batchDraw();
   _showSelfHud();
-  showNotif(`💡 Clic sur une case (lumière posée) ou sur un token (+${_VTT_LIGHT_TOKEN_BONUS_M} m d'éclairage) · ≤ ${range} case${range > 1 ? 's' : ''}`, 'info');
+  showNotif(`💡 Clic sur une case jaune (lumière posée, rayon ${radius}) ou sur un token doré (+${_VTT_LIGHT_TOKEN_BONUS_M} m d'éclairage) · ≤ ${range} case${range > 1 ? 's' : ''}`, 'info');
 }
 
 // Bonus d'éclairage d'une lumière posée sur un token : 3 m (en cases, arrondi haut).
@@ -10934,15 +10968,23 @@ async function _vttRollAttack() {
 
       // ── États consommés au 1er coup (Marqué, etc.) : retire ceux dont
       //    l'effet `consumedByAttackAgainst` est activé après que les bonus
-      //    de dégâts aient été appliqués. Persistance immédiate.
+      //    de dégâts aient été appliqués. Faiblesse (`consumedByElementHit`) :
+      //    consommée par le 1er coup (même demi-dégâts) portant son élément.
+      //    Persistance immédiate.
       const _consumedNotes = [];
-      if (hit && !isTechniqueSplash) {
+      if ((hit || halfDmg) && !isTechniqueSplash) {
+        const hitTypes = new Set(rawDamagePieces.filter(p => p.amount > 0).map(p => p.damageTypeId));
+        const isConsumedNow = c => {
+          const eff = CONDITION_BY_ID[c.id]?.effects;
+          return (hit && !!eff?.consumedByAttackAgainst)
+            || (!!eff?.consumedByElementHit && !!c.element && hitTypes.has(c.element));
+        };
         const curConds = curTgtData.conditions || [];
         const remaining = [];
         for (const c of curConds) {
           const lib = CONDITION_BY_ID[c.id];
-          if (lib?.effects?.consumedByAttackAgainst) {
-            _consumedNotes.push(`${lib.icon || '🎯'} ${lib.label} consommé`);
+          if (isConsumedNow(c)) {
+            _consumedNotes.push(`${lib?.icon || '🎯'} ${c.element ? _weaknessLabel(c.element) : lib?.label} consommé${c.element ? 'e' : ''}`);
           } else {
             remaining.push(c);
           }
@@ -10952,7 +10994,7 @@ async function _vttRollAttack() {
             // _syncDownedCondition peut avoir ajouté Inconscient entre-temps :
             // repartir de l'état le plus récent et ne retirer que les effets consommés.
             const currentConditions = curTgtData.conditions || [];
-            const nextConditions = currentConditions.filter(c => !CONDITION_BY_ID[c.id]?.effects?.consumedByAttackAgainst);
+            const nextConditions = currentConditions.filter(c => !isConsumedNow(c));
             await updateDoc(_tokRef(curTgtData.id), { conditions: nextConditions }).catch(() => {});
           });
         }
