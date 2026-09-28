@@ -105,6 +105,7 @@ function _afflictionStateId(s = {}) {
     || s.afflictionStateId
     || s.afflictionConditionId
     || (s.afflictionMode === 'etat' ? (s.classicStateId || '') : '')
+    || (s.afflictionMode === 'faiblesse' ? 'faiblesse' : '')
     || '';
 }
 
@@ -1171,10 +1172,10 @@ export function _buildSortResume(s, c) {
     lines.push({ icon:'🎯', label:`${nbCibles} cibles différentes`, detail: dispDetail });
   }
 
-  // Lumière (élément lumineux + Concentration) : source portée ou posée.
+  // Lumière (élément lumineux + Concentration) : posée au sol ou sur un token.
   if (_isLightSpell(s)) {
     lines.push({ icon:'💡', label:`Lumière · rayon ${lightSpellRadius(s)} cases`,
-      detail: `${s.lightMode === 'place' ? 'Source posée à portée' : 'Portée par le lanceur'} · tant que la concentration tient` });
+      detail: 'Posée au sol, ou sur un token (+3 m d’éclairage) · tant que la concentration tient' });
   }
 
   // Zone (Amplification ou manuelle)
@@ -1331,10 +1332,7 @@ export function _buildSortResume(s, c) {
     const nbCib   = _calcSortCibles(s);
     const cibleStr = nbCib === 1 ? 'sur 1 ennemi' : `sur ${nbCib} ennemis`;
 
-    if (mode === 'faiblesse') {
-      lines.push({ icon:'💢', label:`Affliction · Faiblesse ${s.noyau || '(élément du sort)'}`,
-                   detail: `${cibleStr} · JS ${statLbl} DD ${dd} · dégâts ×2 de cet élément (2 tours)` });
-    } else if (mode === 'etat') {
+    if (mode === 'etat') {
       // Mode État : on affiche l'état appliqué, PAS la formule DoT
       const lbl = etat ? `${etat.icon || ''} ${etat.label}` : '⚠ Aucun état choisi';
       lines.push({ icon:'⛓', label:`Affliction · État : ${lbl}`,

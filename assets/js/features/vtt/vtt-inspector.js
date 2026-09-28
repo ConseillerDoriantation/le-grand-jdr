@@ -539,7 +539,7 @@ export function _renderInspectorImpl(t) {
                    : bf.type === 'range_bonus' ? `+${bf.bonus} c`
                    : bf.type === 'ca' ? `${bf.bonus >= 0 ? '+' : ''}${bf.bonus} CA`
                    : bf.type === 'dmg_reduction' ? `−${bf.value} dégâts/coup`
-                   : bf.type === 'spell_light' ? `💡 rayon ${bf.radius} c`
+                   : bf.type === 'spell_light' ? (bf.bonus ? `💡 éclairage +${bf.bonus} c` : `💡 rayon ${bf.radius} c`)
                    : bf.type === 'dmg_weakness' ? `×2 ${(VS.damageTypes || []).find(t => t.id === bf.element)?.label || 'élément'}`
                    : bf.type === 'dot' || bf.type === 'regen' ? `${bf.formula} / tour`
                    : bf.type === 'shield_reactive' ? `${bf.charges || 1} charge · ${bf.tier}`
@@ -582,7 +582,11 @@ export function _renderInspectorImpl(t) {
         </span>` : '';
     const glossaryBtn = `<button class="vtt-cond-guide-open" data-vtt-fn="_vttConditionGlossary" title="Comprendre tous les états">📖 Glossaire</button>`;
     const rows = _activeConds.map((cond, i) => {
-      const lib = CONDITION_BY_ID[cond.id] || { label: cond.id, icon: '❓', color: '#888', desc: '' };
+      const baseLib = CONDITION_BY_ID[cond.id] || { label: cond.id, icon: '❓', color: '#888', desc: '' };
+      // Faiblesse : l'élément visé fait partie du nom (« Faiblesse Feu »).
+      const lib = cond.element
+        ? { ...baseLib, label: `${baseLib.label} ${getDamageTypeById(VS.damageTypes, cond.element)?.label || ''}`.trim() }
+        : baseLib;
       const dur = cond.expiresAtRound != null && _r > 0
         ? `${cond.expiresAtRound - _r + 1}t`
         : (cond.expiresAtRound != null ? 'fin' : '∞');

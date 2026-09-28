@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, getAfflictionMode, withElementWeaknesses, isLightSpell, lightSpellRadius, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
+import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, getAfflictionMode, getAfflictionEtatId, withElementWeaknesses, isLightSpell, lightSpellRadius, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
 
 const sort = (runes = [], extra = {}) => ({ runes, ...extra });
 
@@ -121,10 +121,14 @@ test('Protection multi-modes : coupée quand un combo absorbe Protection', () =>
   assert.deepEqual(getProtectionModes(sort(['Protection', 'Protection', 'Affliction'], base)), ['soin', 'soin']);
 });
 
-test('Affliction Faiblesse : exige 2 runes, sinon DoT', () => {
-  assert.equal(getAfflictionMode(sort(['Affliction'], { afflictionMode: 'faiblesse' })), 'dot');
-  assert.equal(getAfflictionMode(sort(['Affliction', 'Affliction'], { afflictionMode: 'faiblesse' })), 'faiblesse');
-  assert.equal(getAfflictionMode(sort(['Affliction'], { afflictionMode: 'etat' })), 'etat');
+test('Affliction Faiblesse : ancien mode lu comme l’état « faiblesse »', () => {
+  const legacy = sort(['Affliction'], { afflictionMode: 'faiblesse' });
+  assert.equal(getAfflictionMode(legacy), 'etat');
+  assert.equal(getAfflictionEtatId(legacy), 'faiblesse');
+  const etat = sort(['Affliction'], { afflictionMode: 'etat', afflictionEtatId: 'stunned' });
+  assert.equal(getAfflictionMode(etat), 'etat');
+  assert.equal(getAfflictionEtatId(etat), 'stunned');
+  assert.equal(getAfflictionMode(sort(['Affliction'])), 'dot');
 });
 
 test('Faiblesse d\'élément : ×2, annule une résistance, ne perce pas une immunité', () => {

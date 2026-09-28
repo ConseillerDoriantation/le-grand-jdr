@@ -41,13 +41,16 @@ export function lightSpellRadius(spell = {}) {
 }
 
 // ── Affliction : mode effectif ──
-// « faiblesse » (dégâts ×2 de l'élément du sort) exige 2 runes Affliction ; en
-// dessous, le sort retombe sur le DoT par défaut (pas d'effet fantôme).
-export const AFFLICTION_WEAKNESS_MIN_RUNES = 2;
+// L'ancien mode « faiblesse » est devenu un état (id 'faiblesse') : les sorts
+// enregistrés avec afflictionMode 'faiblesse' sont lus comme un état Faiblesse.
+export const AFFLICTION_WEAKNESS_ETAT_ID = 'faiblesse';
 export function getAfflictionMode(spell = {}) {
   const mode = spell?.afflictionMode || 'dot';
-  if (mode === 'faiblesse' && runeCount(spell, 'Affliction') < AFFLICTION_WEAKNESS_MIN_RUNES) return 'dot';
-  return mode;
+  return mode === 'faiblesse' ? 'etat' : mode;
+}
+export function getAfflictionEtatId(spell = {}) {
+  if (spell?.afflictionMode === 'faiblesse') return AFFLICTION_WEAKNESS_ETAT_ID;
+  return spell?.afflictionEtatId || '';
 }
 
 /**

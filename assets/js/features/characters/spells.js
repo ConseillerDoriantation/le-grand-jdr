@@ -41,7 +41,6 @@ function _sortSheetState(s) {
     deplMode:   _deplModeEdit || s?.deplacement?.mode || 'self',
     deplSwap:   _deplSwapEdit,
     isLight:    _isLightSpell(s || {}),
-    lightMode:  _lightModeEdit,
     afflMode:   getAfflictionMode(s || {}),
     enchMode:   s?.enchantMode || 'etat',
     zoneShape:  _zoneShapeEdit || 'rect',
@@ -124,19 +123,13 @@ function buildLineCtx(lines, s, c) {
         const am = getAfflictionMode(s || {});
         if (l.sentinelle) ctx.affl = { value: 'Portée par la sentinelle', text: true, source: 'Combo Sentinelle · stationnaire', color: '#a16207' };
         else if (am === 'dot') ctx.affl = { value: _calcAfflictionDot(s), source: _autoSourceAfflictionDot(s), color: '#e8894b' };
-        else if (am === 'faiblesse') ctx.affl = {
-          value: `💢 Faiblesse ${s?.noyau || '(élément du sort)'}`, text: true,
-          source: `Sur échec · JS DD ${11 + 2 * ((counts.Affliction || 1) - 1)} · dégâts ×2 de cet élément · 2 tours`,
-          color: '#f59e0b',
-          note: s?.noyauTypeId ? 'Annule une résistance à cet élément ; sans effet contre une immunité ou une absorption.' : '⚠ Choisis un élément (noyau) : la faiblesse porte sur l’élément du sort.',
-        };
         else if (am === 'etat') {
           // Nom + effet de l'état infligé (crucial pour les joueurs qui lisent le sort).
           const id = _spellAfflictionStateId(s);
           const meta = id ? _spellConditionMeta(id, { label: s.afflictionEtatLabel, icon: s.afflictionEtatIcon }) : null;
           const dd = 11 + 2 * ((counts.Affliction || 1) - 1);
           ctx.affl = {
-            value: meta ? `${meta.icon || ''} ${meta.label}`.trim() : 'État à choisir',
+            value: meta ? `${meta.icon || ''} ${meta.label}${id === 'faiblesse' ? ` ${s?.noyau || '(élément du sort)'}` : ''}`.trim() : 'État à choisir',
             text: true,
             source: `Infligé sur échec · JS DD ${dd} · 2 tours`,
             color: meta?.color || '#a855f7',
@@ -167,9 +160,8 @@ function buildLineCtx(lines, s, c) {
         break;
       }
       case 'light': {
-        const place = _lightModeEdit === 'place';
         ctx.light = { value: `Lumière · rayon ${lightSpellRadius(s || {})} cases`, text: true,
-          source: `${place ? 'Posée sur une case à portée' : 'Portée par le lanceur'} · tant que la concentration tient · +2 cases / Amplification`,
+          source: 'Au lancement : posée au sol, ou sur un token (+3 m d’éclairage) · tant que la concentration tient · +2 cases / Amplification',
           color: '#f9d71c' };
         break;
       }
@@ -248,8 +240,7 @@ let _sortAllowedNoyauIds = null;
 let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] = primaire (compat soin/suggestions/VTT).
 let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
-let _deplSwapEdit = false;
-let _lightModeEdit = 'self'; // sort Lumière : 'self' (portée par le lanceur) | 'place' (posée à portée)   // déplacement Soi : échange de place lanceur ↔ cible autorisé
+let _deplSwapEdit = false;   // déplacement Soi : échange de place lanceur ↔ cible autorisé
 let _actionModeEdit = 'reaction';
 let _protModesEdit = [];   // mode de chaque rune Protection (multi-modes) — [0] = _protModeEdit
 let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin'|'mana') — source fiable (≠ DOM périmé)
@@ -429,6 +420,7 @@ function _spellAfflictionStateId(s = {}) {
     || s.afflictionStateId
     || s.afflictionConditionId
     || (s.afflictionMode === 'etat' ? (s.classicStateId || '') : '')
+    || (s.afflictionMode === 'faiblesse' ? 'faiblesse' : '')
     || '';
 }
 
@@ -1886,9 +1878,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
         : 'Réduction de CA de la cible (Lacération)',
     });
   } else if (hasAfflictionDebuff && !activeIds.has('regeneration')) {
-    if (afflictionMode === 'faiblesse') {
-      chips.push({ icon:'💢', val:`Faiblesse ${s.noyau || ''}`.trim(), color:'#f59e0b', lbl:'Dégâts ×2 de l’élément du sort sur l’ennemi (Affliction)' });
-    } else if (afflictionMode === 'etat') {
+    if (afflictionMode === 'etat') {
       // Mode État : on affiche TOUJOURS un chip état, jamais DoT
       const stateId = _spellAfflictionStateId(s);
       const etat = _spellConditionMeta(stateId, {
@@ -1973,7 +1963,7 @@ function _renderSortCard(s, i, openIdx, canEdit, armeDeg, c, cats = [], pmDelta 
   if (nbCibles > 1) chips.push({ icon:'🎯', val:`×${nbCibles}`, color:'#4f8cff', lbl:'Nombre de cibles', dim:true });
   const zone  = _calcSortZone(s);
   if (zone)  chips.push({ icon:'📐', val:`${zone.w}×${zone.h}c`, color:'#b47fff', lbl:'Zone d\'effet (cases)', dim:true });
-  if (_isLightSpell(s)) chips.push({ icon:'💡', val:`${lightSpellRadius(s)}c`, color:'#f9d71c', lbl: s.lightMode === 'place' ? 'Source de lumière posée à portée' : 'Lumière portée par le lanceur', dim:true });
+  if (_isLightSpell(s)) chips.push({ icon:'💡', val:`${lightSpellRadius(s)}c`, color:'#f9d71c', lbl: 'Lumière posée au sol ou sur un token (+3 m d’éclairage)', dim:true });
   const depl  = _calcSortDeplacement(s);
   if (depl) {
     const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
@@ -3291,7 +3281,6 @@ export async function openSortModal(idx, s) {
   _sortTypesEdit  = new Set(typesInit);
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
   _deplSwapEdit   = !!s?.deplacement?.swap;
-  _lightModeEdit  = s?.lightMode === 'place' ? 'place' : 'self';
   _invImageEdit   = s?.invocation?.image || '';
   _invOriginal    = (s?.invocation && typeof s.invocation === 'object') ? s.invocation : null;
 
@@ -3597,12 +3586,12 @@ export async function openSortModal(idx, s) {
             class="cs-slot-btn ${(s?.afflictionMode||'dot')==='dot'?'selected':''}">🩸 DoT</button>
           <button type="button" id="s-affliction-mode-etat"
             data-action="_selectAfflictionMode" data-val="etat"
-            class="cs-slot-btn ${s?.afflictionMode==='etat'?'selected':''}">⛓ État</button>
+            class="cs-slot-btn ${getAfflictionMode(s || {})==='etat'?'selected':''}">⛓ État</button>
           <button type="button" id="s-affliction-mode-laceration"
             data-action="_selectAfflictionMode" data-val="laceration"
             class="cs-slot-btn ${s?.afflictionMode==='laceration'?'selected':''}">🩸 Lacération</button>
         </div>
-        <input type="hidden" id="s-affliction-mode" value="${s?.afflictionMode||'dot'}">
+        <input type="hidden" id="s-affliction-mode" value="${getAfflictionMode(s || {})}">
       </div>
 
       <!-- Slot legacy conservé en hidden pour rétro-compat des sorts existants -->
@@ -3622,12 +3611,12 @@ export async function openSortModal(idx, s) {
       </div>
 
       <!-- État mode : liste déroulante -->
-      <div id="s-affliction-etat-block" class="form-group" style="${s?.afflictionMode==='etat'?'':'display:none'}">
+      <div id="s-affliction-etat-block" class="form-group" style="${getAfflictionMode(s || {})==='etat'?'':'display:none'}">
         <label>État infligé sur échec <span style="color:var(--text-dim);font-weight:400;font-size:.7rem">— appliqué avec sa durée par défaut</span></label>
         <select class="input-field" id="s-affliction-etat">
           <option value="">— Aucun (effet libre uniquement) —</option>
         </select>
-        <input type="hidden" id="s-affliction-etat-saved" value="${s?.afflictionEtatId||''}">
+        <input type="hidden" id="s-affliction-etat-saved" value="${s ? _spellAfflictionStateId(s) : ''}">
       </div>
 
       <!-- Lacération mode : frappe l'attaque de base + réduit la CA de la cible -->
@@ -4800,11 +4789,6 @@ function _deplPayload(mode) {
   return mode === 'self' && _deplSwapEdit ? { mode, swap: true } : { mode };
 }
 
-function _selectLightMode(val) {
-  _lightModeEdit = val === 'place' ? 'place' : 'self';
-  _updateSortPreview();
-}
-
 function _selectDeplSwap(val) {
   _deplSwapEdit = val === 'swap';
   _updateSortPreview();
@@ -5295,7 +5279,6 @@ function _selectAfflictionMode(mode) {
   document.getElementById('s-affliction-mode-dot')?.classList.toggle('selected', mode === 'dot');
   document.getElementById('s-affliction-mode-etat')?.classList.toggle('selected', mode === 'etat');
   document.getElementById('s-affliction-mode-laceration')?.classList.toggle('selected', mode === 'laceration');
-  // 'faiblesse' : aucun bloc de réglage (l'élément du sort suffit).
   const dotBlock = document.getElementById('s-affliction-dot-block');
   const etatBlock = document.getElementById('s-affliction-etat-block');
   const lacBlock = document.getElementById('s-affliction-laceration-block');
@@ -5488,7 +5471,6 @@ function _buildSortFromDOM() {
     zoneH: null,
     dureeBase: dureeBase >= 2 ? dureeBase : null,
     deplacement: _deplPayload(deplMode),
-    lightMode: _lightModeEdit === 'place' ? 'place' : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
     // Portée + stats overrides : doivent être lus du DOM pour que la preview live
@@ -6035,7 +6017,6 @@ export async function saveSort(idx, btn = null) {
       zoneH: null,
       dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
       deplacement: _deplPayload(deplMode),
-    lightMode: _lightModeEdit === 'place' ? 'place' : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
       // Portée override : 0 ou vide = utilise la portée de l'arme par défaut (côté VTT)
@@ -6189,7 +6170,6 @@ function _buildSortFromForm(idx, prevList = []) {
     zoneW: null, zoneH: null,
     dureeBase:  dureeBaseRaw >= 2 ? dureeBaseRaw : null,
     deplacement: _deplPayload(deplMode),
-    lightMode: _lightModeEdit === 'place' ? 'place' : null,
     ampMode: document.getElementById('s-amp-mode')?.value || 'zone',
     zoneShape: ZONE_SHAPES.includes(_zoneShapeEdit) ? _zoneShapeEdit : 'rect',
     portee:     (() => {
@@ -6310,7 +6290,6 @@ registerActions({
   _selectDeplMode:        (btn) => _selectDeplMode(btn.dataset.val),
   _selectProtModeAt:      (btn) => _selectProtModeAt(btn.dataset.val),
   _selectDeplSwap:        (btn) => _selectDeplSwap(btn.dataset.val),
-  _selectLightMode:       (btn) => _selectLightMode(btn.dataset.val),
   _selectActionMode:      (btn) => _selectActionMode(btn.dataset.val),
   _selectProtMode:        (btn) => _selectProtMode(btn.dataset.val),
   _selectAmpMode:         (btn) => _selectAmpMode(btn.dataset.val),

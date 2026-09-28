@@ -119,6 +119,10 @@ export const CONDITION_DEFAULT_LIBRARY = [
     desc:'L\'allié gagne un bonus de dégâts d\'attaque, renforcé par les runes Puissance du sort.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
     effects:{ dmgDealtBonus:'1d4' } },
+  { id:'faiblesse',     label:'Faiblesse',   icon:'💢', color:'#f59e0b',
+    desc:'La cible subit des dégâts doublés de l\'élément du sort qui l\'a affligée (annule une résistance à cet élément, sans percer immunité ni absorption).',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
+    effects:{} },
   // ── Actions de base (posées par les actions Esquiver / Se cacher / Se désengager) ──
   { id:'dodge',         label:'Esquive',     icon:'🤸', color:'#38bdf8',
     desc:'Jusqu\'au début de ton prochain tour : désavantage aux attaques contre toi (si tu vois l\'attaquant).',

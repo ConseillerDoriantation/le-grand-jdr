@@ -204,7 +204,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     targetName: tgtNames,
     optLabel: opt.label || 'Affliction',
     mode, dd: aff.dd, statLabel: statShortStr,
-    effectLbl: mode === 'faiblesse'
+    effectLbl: mode === 'etat' && aff.etatId === 'faiblesse'
                ? `💢 ${_weakLbl(aff.element)}`
                : mode === 'etat' && aff.etatId && CONDITION_BY_ID[aff.etatId]
                ? `${CONDITION_BY_ID[aff.etatId].icon} ${CONDITION_BY_ID[aff.etatId].label}`
@@ -251,7 +251,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     // Permet au MJ et aux joueurs de voir le résultat du jet, le mod utilisé
     // et la résolution (résistance vs application de l'effet).
     const _effectLbl = (() => {
-      if (mode === 'faiblesse') return `💢 ${_weakLbl(aff.element)}`;
+      if (mode === 'etat' && aff.etatId === 'faiblesse') return `💢 ${_weakLbl(aff.element)}`;
       if (mode === 'etat' && aff.etatId && CONDITION_BY_ID[aff.etatId]) {
         const l = CONDITION_BY_ID[aff.etatId];
         return `${l.icon} ${l.label}`;
@@ -283,28 +283,6 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       return;
     }
 
-    // ── Mode "Faiblesse" : dégâts ×2 de l'élément du sort (buff, durée du sort) ──
-    // Une seule faiblesse par élément sur la cible : la nouvelle remplace l'ancienne.
-    if (mode === 'faiblesse') {
-      if (!aff.element) {
-        showNotif(`⚠️ Sort "${opt.label}" en mode Faiblesse sans élément — rien n'est appliqué`, 'warning');
-        return;
-      }
-      const newBuff = { ...shared, type: 'dmg_weakness', element: aff.element, icon: '💢' };
-      const previousBuffs = td.buffs || [];
-      const nextBuffs = [...previousBuffs.filter(b => !(b.type === 'dmg_weakness' && b.element === aff.element)), newBuff];
-      _vttPatchTokenOptimistically(tid, { buffs: nextBuffs });
-      try {
-        await updateDoc(_tokRef(tid), { buffs: nextBuffs });
-        showNotif(`💢 ${tgtName} subit ${_weakLbl(aff.element)} · ${rollStr} (échec)`, 'success');
-      } catch (err) {
-        _vttPatchTokenOptimistically(tid, { buffs: previousBuffs });
-        console.error('[VTT] Faiblesse non appliquée :', err);
-        showNotif(`⚠️ ${tgtName} : échec d'application de la faiblesse (${err?.message || err})`, 'error');
-      }
-      return;
-    }
-
     // ── Mode "État" : applique l'état choisi avec sa durée par défaut ──
     if (mode === 'etat') {
       // Diagnostic clair si l'état est mal configuré
@@ -317,6 +295,14 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
         showNotif(`⚠️ État "${aff.etatId}" introuvable en BDD — vérifier les réglages`, 'error');
         return;
       }
+      // Faiblesse : porte l'élément du sort (dégâts ×2 de cet élément), une par élément.
+      const isWeak = aff.etatId === 'faiblesse';
+      if (isWeak && !aff.element) {
+        showNotif(`⚠️ Sort "${opt.label}" : Faiblesse sans élément (noyau) — rien n'est appliqué`, 'warning');
+        return;
+      }
+      const sameCond = c => c.id === aff.etatId && (!isWeak || c.element === aff.element);
+      const condLbl = isWeak ? _weakLbl(aff.element) : lib.label;
       const round = VS.session?.combat?.round ?? 0;
       const isConsumed = !!lib.effects?.consumedByAttackAgainst;
       const dur = opt.mods?.concentration ? 10 : (opt.classicDuration > 0
@@ -330,8 +316,8 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
       const pendingDuration = (round === 0 && !isConsumed && dur > 0) ? dur : null;
       const existingConds = await _vttConditionsBeforeStateApplication({ ...td, id: tid }, lib);
-      if (existingConds.some(c => c.id === aff.etatId)) {
-        showNotif(`${lib.icon} ${tgtName} portait déjà ${lib.label}`, 'info');
+      if (existingConds.some(sameCond)) {
+        showNotif(`${lib.icon} ${tgtName} portait déjà ${condLbl}`, 'info');
         return;
       }
       const newCond = {
@@ -343,6 +329,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
         saveStat: lib.defaultSaveStat || aff.saveStat || null,
         expiresAtRound,
         ...(pendingDuration != null ? { pendingDuration } : {}),
+        ...(isWeak ? { element: aff.element } : {}),
       };
       // Surface l'erreur si l'update Firestore échoue (permissions, etc.)
       const previous = td.conditions || [];
@@ -350,7 +337,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
         const newConds = [...existingConds, newCond];
         _vttPatchTokenOptimistically(tid, { conditions: newConds });
         await updateDoc(_tokRef(tid), { conditions: newConds });
-        showNotif(`${lib.icon} ${tgtName} subit ${lib.label} · ${rollStr} (échec)`, 'success');
+        showNotif(`${lib.icon} ${tgtName} subit ${condLbl} · ${rollStr} (échec)`, 'success');
       } catch (err) {
         _vttPatchTokenOptimistically(tid, { conditions: previous });
         console.error('[VTT] État non appliqué :', err);

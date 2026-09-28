@@ -231,11 +231,11 @@ test('Protection : mode Réduction sans réglage de formule', () => {
   assert.ok(l.segment.opts.some(o => o[0] === 'reduction'));
 });
 
-test('Sort Lumière : ligne Lumière (Sur soi / Posée) à la place de la zone', () => {
-  const s = { types: ['utilitaire'], counts: { Concentration: 1, Amplification: 2 }, isLight: true, lightMode: 'place' };
+test('Sort Lumière : ligne Lumière (sans choix de mode) à la place de la zone', () => {
+  const s = { types: ['utilitaire'], counts: { Concentration: 1, Amplification: 2 }, isLight: true };
   assert.equal(line(s, 'amp'), undefined);
   assert.equal(line(s, 'shape'), undefined);
   const l = line(s, 'light');
-  assert.equal(l.segment.key, 'lightMode');
-  assert.equal(l.segment.cur, 'place');
+  assert.ok(l);
+  assert.equal(l.segment, undefined);
 });

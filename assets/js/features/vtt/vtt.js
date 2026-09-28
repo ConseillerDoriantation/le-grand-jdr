@@ -38,7 +38,7 @@ import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nea
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm, getProtectionCAOverride, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
@@ -2256,6 +2256,12 @@ function _buildShape(t) {
       return;
     }
 
+    // Sort Lumière en placement : clic sur un token doré = lumière portée par ce token.
+    if (_selfCtx?.lightIds?.has(t.id)) {
+      _vttLightOnToken(t.id);
+      return;
+    }
+
     // Déplacement "Soi" avec échange autorisé : clic sur un token doré = échange.
     if (_selfCtx?.swapIds?.has(t.id)) {
       _selfSwapWith(t.id);
@@ -3669,12 +3675,20 @@ function _vttApplyProtectionBuffs(srcId, targetIds, opt) {
 function _weaknessLabel(elementId) {
   return `Faiblesse ${getDamageTypeById(VS.damageTypes, elementId)?.label || 'élément'}`;
 }
+// Sources : état « faiblesse » (porte l'élément du sort) + anciens buffs dmg_weakness.
 function _tokenWeaknessTypes(tokenData) {
   const round = VS.session?.combat?.round ?? 0;
-  return (tokenData?.buffs || [])
-    .filter(b => b?.type === 'dmg_weakness' && b.element
-      && (b.expiresAtRound == null || round === 0 || round <= b.expiresAtRound))
-    .map(b => b.element);
+  const alive = x => x?.element && (x.expiresAtRound == null || round === 0 || round <= x.expiresAtRound);
+  return [
+    ...(tokenData?.conditions || []).filter(c => c?.id === 'faiblesse' && alive(c)),
+    ...(tokenData?.buffs || []).filter(b => b?.type === 'dmg_weakness' && alive(b)),
+  ].map(x => x.element);
+}
+// Libellé d'un état d'Affliction (« 💢 Faiblesse Feu » pour la faiblesse, sinon icône + nom).
+function _afflEtatLabel(etatId, elementId) {
+  if (etatId === 'faiblesse') return `💢 ${_weaknessLabel(elementId)}`;
+  const lib = CONDITION_BY_ID[etatId];
+  return lib ? `${lib.icon} ${lib.label}` : '⛓ État';
 }
 
 // Libellé court des buffs de Protection d'une option (« +4 CA · −2 dégâts »).
@@ -3995,8 +4009,9 @@ function _vttSpellMods(s) {
           const mode = getAfflictionMode(s);
           let saveStat = 'constitution';
           let conditionLib = null;
-          if (mode === 'etat' && s.afflictionEtatId) {
-            conditionLib = CONDITION_BY_ID[s.afflictionEtatId] || null;
+          const etatId = mode === 'etat' ? getAfflictionEtatId(s) : '';
+          if (etatId) {
+            conditionLib = CONDITION_BY_ID[etatId] || null;
             if (conditionLib?.defaultSaveStat) saveStat = conditionLib.defaultSaveStat;
           }
           // Legacy : si un ancien sort a explicitement afflictionSaveStat, on respecte
@@ -4013,7 +4028,7 @@ function _vttSpellMods(s) {
             nbAff,
             nbP,
             dotFormula,
-            etatId:   s.afflictionEtatId || null,
+            etatId:   etatId || null,
             saveStat,
           };
         })() : null,
@@ -4424,6 +4439,8 @@ async function _selfMoveTo(col, row) {
 // ══ Sorts Lumière ═══════════════════════════════════════════════════════════
 // Lumières actives fournies au brouillard : buffs « spell_light » portés par un
 // token (suivent ses déplacements) + zones de sort posées avec `lightRadius`.
+// Sur un token, la lumière AJOUTE `bonus` cases à son éclairage actuel : sa vision
+// partagée pour un personnage joueur, 0 pour une créature / un PNJ.
 function _vttSpellLights(page, tokens) {
   if (!page) return [];
   const round = VS.session?.combat?.round ?? 0;
@@ -4432,7 +4449,13 @@ function _vttSpellLights(page, tokens) {
   for (const entry of Object.values(tokens || {})) {
     const t = entry?.data;
     if (!t || t.pageId !== page.id) continue;
-    const radius = (t.buffs || []).reduce((m, b) => (b?.type === 'spell_light' && alive(b)) ? Math.max(m, Number(b.radius) || 0) : m, 0);
+    const lights = (t.buffs || []).filter(b => b?.type === 'spell_light' && alive(b));
+    if (!lights.length) continue;
+    const bonus = lights.reduce((sum, b) => sum + (Number(b.bonus) || 0), 0);
+    const legacy = lights.reduce((m, b) => Math.max(m, Number(b.radius) || 0), 0);   // anciens buffs « sur soi »
+    const sharesVision = t.visible !== false && (t.type === 'player' || (!t.type && !!t.characterId));
+    const base = sharesVision && !fogHasUnlimitedVision(page, t) ? fogVisionRadiusCells(page, t) : 0;
+    const radius = Math.max(legacy, bonus > 0 ? base + bonus : 0);
     if (radius > 0) {
       const d = _tokenDims(t);
       out.push({ x: t.col + d.w / 2, y: t.row + d.h / 2, radius });
@@ -4446,38 +4469,48 @@ function _vttSpellLights(page, tokens) {
   return out;
 }
 
-// Lumière portée par le lanceur : buff « spell_light » (durée du sort, rompu avec
-// la concentration comme les autres effets liés au sort).
-async function _vttCastSelfLight(srcId, opt) {
-  const src = VS.tokens[srcId]?.data; if (!src) return;
-  if (!(await _vttSpendSpellPm(src, opt))) return;
+// Jet de cast d'un sort Lumière (réussite dès 2) : un 1 naturel = échec critique,
+// sort raté mais coût payé. Publie le log « cast » (réussite ou échec) dans le chat.
+async function _vttLightCast(src, opt, targetName, effectLbl) {
+  if (!(await _vttSpendSpellPm(src, opt))) return false;
   await _vttStartSpellCooldown(src, opt);
-  const newBuff = { ..._buffShared(opt, srcId), type: 'spell_light', radius: opt.lightRadius || 3, icon: '💡' };
-  const previous = src.buffs || [];
-  const buffs = [...previous.filter(b => !(b.type === 'spell_light' && b.sortLabel === opt.label)), newBuff];
-  src.buffs = buffs;
-  _patchShape(srcId);
-  try {
-    await updateDoc(_tokRef(srcId), { buffs });
-  } catch (err) {
-    src.buffs = previous;
-    _patchShape(srcId);
-    console.error('[VTT] Lumière non appliquée', err);
-    showNotif('Lumière refusée par Firestore', 'error');
-    return;
-  }
-  await _vttApplyCasterConcentration(srcId, opt);
-  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
-  showNotif(`💡 ${opt.label} : lumière de ${opt.lightRadius || 3} cases autour de ${_live(src).displayName ?? src.name}`, 'success');
+  let d20 = Math.floor(Math.random() * 20) + 1;
+  const luck = await _consumeLuckyReroll(src.id, src, d20, d20 === 1);
+  if (luck) d20 = luck.d20;
+  const fumble = d20 === 1;
+  const crit = !fumble && d20 >= Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+  const statsDelta = _applyCastStatsDelta(src, opt, { natural: d20, result: d20, crit, fumble });
+  const lS = _live(src);
+  const costLbl = opt.pmCost > 0 ? `, ${opt.pmCost} ${_RES_LABEL[opt.costRes || 'pm'] || 'PM'} perdus` : '';
+  void _publishCombatLog({
+    ..._statsLogMeta(opt),
+    type: 'cast',
+    ...(_hasStatsDelta(statsDelta) ? { statsDelta } : {}),
+    ..._vttLogSourceFields(src),
+    authorId: STATE.user?.uid || null,
+    authorName: STATE.profile?.pseudo || STATE.profile?.prenom || '?',
+    casterName: lS.displayName ?? src.name,
+    characterImage: _combatLogImage(lS.displayImage),
+    targetName,
+    optLabel: opt.label, pmCost: opt.pmCost,
+    castD20: d20, castIsCrit: crit, castIsFumble: fumble, ...(fumble ? { castEC: true } : {}),
+    castEffect: fumble
+      ? `💔 Échec critique (d20 = 1) — sort raté${costLbl}`
+      : `🎲 ${d20}${crit ? ' 💥 RC' : ''} · ${effectLbl}`,
+    createdAt: serverTimestamp(),
+  }).catch(() => {});
+  if (fumble) showNotif(`💔 Échec critique ! ${opt.label} raté${costLbl ? ` — ${costLbl.slice(2)}` : ''}`, 'error');
+  return !fumble;
 }
 
-// Lumière posée : choix d'une case à portée (réutilise le HUD/les cases du déplacement « soi »).
+// Lumière : choix d'une case au sol (source posée) ou d'un token (éclairage +3 m)
+// à portée. Réutilise le HUD/les cases du déplacement « soi ».
 function _startLightPlacement(srcId, opt) {
   _zoneClear(); _selfClear();
   _clearHL();
   const src = VS.tokens[srcId]?.data; if (!src || !VS.layers.grid || !VS.activePage) return;
   const range = Math.max(1, parseInt(opt.portee) || 1);
-  _selfCtx = { srcId, cells: range, opt, swapIds: new Set() };
+  _selfCtx = { srcId, cells: range, opt, swapIds: new Set(), lightIds: new Set() };
   const K = window.Konva;
   const { cols, rows } = VS.activePage;
   for (let dc = -range; dc <= range; dc++) for (let dr = -range; dr <= range; dr++) {
@@ -4494,10 +4527,28 @@ function _startLightPlacement(srcId, opt) {
     VS.layers.grid.add(rect);
     _selfCells.push(rect);
   }
+  // Tokens à portée (lanceur compris) : le clic est capté par handleTokenAction.
+  Object.values(VS.tokens).forEach(e => {
+    const d = e?.data;
+    if (!d || d.pageId !== src.pageId || (d.visible === false && !STATE.isAdmin)) return;
+    if (Math.abs(d.col - src.col) + Math.abs(d.row - src.row) > range) return;
+    const od = _tokenDims(d);
+    const rect = new K.Rect({
+      x: d.col * CELL, y: d.row * CELL, width: od.w * CELL, height: od.h * CELL,
+      fill: 'rgba(232,184,75,0.30)', stroke: 'rgba(232,184,75,0.9)', strokeWidth: 2, listening: false,
+    });
+    VS.layers.grid.add(rect);
+    _selfCells.push(rect);
+    _selfCtx.lightIds.add(d.id);
+  });
   VS.layers.grid.batchDraw();
   _showSelfHud();
-  showNotif(`💡 Clic sur une case pour poser la lumière (≤ ${range} case${range > 1 ? 's' : ''})`, 'info');
+  showNotif(`💡 Clic sur une case (lumière posée) ou sur un token (+${_VTT_LIGHT_TOKEN_BONUS_M} m d'éclairage) · ≤ ${range} case${range > 1 ? 's' : ''}`, 'info');
 }
+
+// Bonus d'éclairage d'une lumière posée sur un token : 3 m (en cases, arrondi haut).
+const _VTT_LIGHT_TOKEN_BONUS_M = 3;
+const _vttLightTokenBonusCells = () => Math.max(1, Math.ceil(_VTT_LIGHT_TOKEN_BONUS_M / CELL_M));
 
 async function _vttPlaceLight(col, row) {
   if (!_selfCtx) return;
@@ -4505,15 +4556,44 @@ async function _vttPlaceLight(col, row) {
   const src = VS.tokens[srcId]?.data;
   _selfClear();
   if (!src) return;
-  if (!(await _vttSpendSpellPm(src, opt))) return;
-  await _vttStartSpellCooldown(src, opt);
+  const radius = opt.lightRadius || 3;
+  if (!(await _vttLightCast(src, opt, 'Case au sol', `💡 Lumière posée · rayon ${radius} cases`))) return;
   const id = await _vttPlaceSpellZone(srcId, opt,
     { x: (col + 0.5) * CELL, y: (row + 0.5) * CELL, wPx: CELL, hPx: CELL },
-    { lightRadius: opt.lightRadius || 3, casterId: srcId, sortLabel: opt.label || '' });
+    { lightRadius: radius, casterId: srcId, sortLabel: opt.label || '' });
   if (!id) { showNotif('Lumière non posée (Firestore)', 'error'); return; }
   await _vttApplyCasterConcentration(srcId, opt);
   fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
-  showNotif(`💡 ${opt.label} : lumière de ${opt.lightRadius || 3} cases posée`, 'success');
+  showNotif(`💡 ${opt.label} : lumière de ${radius} cases posée`, 'success');
+}
+
+// Lumière sur un token : buff « spell_light » (+3 m d'éclairage, suit le token,
+// durée du sort, rompu avec la concentration du lanceur). Un même sort du même
+// lanceur remplace sa lumière précédente sur ce token.
+async function _vttLightOnToken(tgtId) {
+  if (!_selfCtx?.lightIds?.has(tgtId)) return;
+  const { srcId, opt } = _selfCtx;
+  const src = VS.tokens[srcId]?.data, tgt = VS.tokens[tgtId]?.data;
+  _selfClear();
+  if (!src || !tgt) return;
+  const tgtName = _live(tgt).displayName ?? tgt.name;
+  const bonus = _vttLightTokenBonusCells();
+  if (!(await _vttLightCast(src, opt, tgtName, `💡 +${_VTT_LIGHT_TOKEN_BONUS_M} m d'éclairage`))) return;
+  const newBuff = { ..._buffShared(opt, srcId), type: 'spell_light', bonus, icon: '💡' };
+  const previous = tgt.buffs || [];
+  const buffs = [...previous.filter(b => !(b.type === 'spell_light' && b.sortLabel === opt.label && b.casterId === srcId)), newBuff];
+  _vttPatchTokenOptimistically(tgtId, { buffs });
+  try {
+    await updateDoc(_tokRef(tgtId), { buffs });
+  } catch (err) {
+    _vttPatchTokenOptimistically(tgtId, { buffs: previous });
+    console.error('[VTT] Lumière non appliquée', err);
+    showNotif('Lumière refusée par Firestore', 'error');
+    return;
+  }
+  await _vttApplyCasterConcentration(srcId, opt);
+  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+  showNotif(`💡 ${opt.label} : +${_VTT_LIGHT_TOKEN_BONUS_M} m d'éclairage pour ${tgtName}`, 'success');
 }
 
 function _selfMoveCancel() { _selfClear(); showNotif('Déplacement annulé', 'info'); _vttReturnToActions(); }
@@ -4526,10 +4606,10 @@ function _showSelfHud() {
   hud.className = 'vtt-mt-hud';
   hud.innerHTML = `
     <div class="vtt-mt-hud-header">
-      <span>🏃 ${_esc(opt.label || 'Déplacement')}</span>
+      <span>${opt.isLight ? '💡' : '🏃'} ${_esc(opt.label || 'Déplacement')}</span>
       <span class="vtt-mt-hud-count" style="color:#4f8cff;background:rgba(79,140,255,.12);border-color:rgba(79,140,255,.35)">↔ ${_selfCtx.cells} case${_selfCtx.cells > 1 ? 's' : ''} max</span>
     </div>
-    <div class="vtt-zone-hint">Clic sur une case${_selfCtx.swapIds?.size ? ' ou un token doré (échange)' : ''} · <kbd>Échap</kbd> = annuler</div>
+    <div class="vtt-zone-hint">Clic sur une case${_selfCtx.lightIds ? ' ou un token doré (lumière portée)' : _selfCtx.swapIds?.size ? ' ou un token doré (échange)' : ''} · <kbd>Échap</kbd> = annuler</div>
     <div class="vtt-mt-hud-actions">
       <button class="vtt-mt-btn-cancel" data-vtt-fn="_selfMoveCancel">✕ Annuler</button>
     </div>`;
@@ -5186,12 +5266,11 @@ function _buildSpellOption(s, ctx) {
   // (jamais une zone ni un déplacement).
   if (isLightSpell(s, damageTypeEmitsLight(getDamageTypeById(VS.damageTypes, s.noyauTypeId)))) {
     const lightRadius = lightSpellRadius(s);
-    const lightMode = s.lightMode === 'place' ? 'place' : 'self';
     return { ...common, label, icon: '💡',
-      dice: `Lumière · rayon ${lightRadius}c · ${lightMode === 'place' ? 'posée' : 'sur soi'}`,
+      dice: `Lumière · rayon ${lightRadius}c · posée ou sur un token`,
       zoneW: 0, zoneH: 0, zoneShape: null, nbCibles: 1,
       targetSelf: true,   // pas de cible à viser : lancé depuis le lanceur
-      isUtil: true, isLight: true, lightRadius, lightMode, halfOnMiss: false };
+      isUtil: true, isLight: true, lightRadius, halfOnMiss: false };
   }
 
   // Sort de déplacement (rune Amplification mode Déplacement) : aucun dégât, pas d'attaque.
@@ -5246,11 +5325,11 @@ function _buildSpellOption(s, ctx) {
     const aff = mods.affliction;
     const aTypeObj = aff.element ? getDamageTypeById(VS.damageTypes, aff.element) : null;
     return { ...common,
-      icon: aff.mode === 'etat' ? '⛓' : aff.mode === 'faiblesse' ? '💢' : '🩸', label,
+      icon: aff.etatId === 'faiblesse' ? '💢' : aff.mode === 'etat' ? '⛓' : '🩸', label,
       dice: aff.mode === 'dot'
             ? `${aff.dotFormula}/tour`
-            : aff.mode === 'faiblesse'
-              ? `Faiblesse ${aTypeObj?.label || 'élément'}`
+            : aff.etatId === 'faiblesse'
+              ? _weaknessLabel(aff.element)
               : (aff.etatId && CONDITION_BY_ID[aff.etatId]?.label || 'État'),
       isAffliction: true,
       afflictionMode: aff.mode,
@@ -6262,11 +6341,8 @@ function _vttSpellPills(o, { includeTraits = true } = {}) {
   } else if (o.isAffliction) {
     const elemIcon = o.afflictionElementIcon || '💀';
     const elemCol  = o.afflictionElementColor || '#ef4444';
-    if (o.afflictionMode === 'faiblesse') {
-      pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">💢 ${_esc(_weaknessLabel(o.afflictionElement))}</span>`);
-    } else if (o.afflictionMode === 'etat' && o.afflictionEtatId) {
-      const lib = CONDITION_BY_ID[o.afflictionEtatId];
-      const lbl = lib ? `${lib.icon} ${lib.label}` : '⛓ État';
+    if (o.afflictionMode === 'etat' && o.afflictionEtatId) {
+      const lbl = _esc(_afflEtatLabel(o.afflictionEtatId, o.afflictionElement));
       pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${lbl}</span>`);
     } else {
       pills.push(`<span class="vtt-aopt-pill" style="color:${elemCol};border-color:${elemCol}66;background:${elemCol}1a">${elemIcon} ${_esc(_effectDisplay(o, o.afflictionDotFormula || '1d4'))} / tour</span>`);
@@ -7517,10 +7593,9 @@ function _vttPickOpt(srcId, tgtId, idx) {
   // INTÉGRÉ à la modale d'attaque (sélecteur en haut), plus de modale séparée.
   // On laisse donc tomber jusqu'à la modale finale (élément par défaut résolu là).
 
-  // Sort Lumière : sur soi (buff lumineux) ou posé sur une case à portée.
+  // Sort Lumière : posé sur une case ou sur un token à portée.
   if (opt.isLight && !_mtPending) {
-    if (opt.lightMode === 'place') _startLightPlacement(srcId, opt);
-    else _vttCastSelfLight(srcId, opt);
+    _startLightPlacement(srcId, opt);
     return;
   }
 
@@ -7696,16 +7771,13 @@ function _vttPickOpt(srcId, tgtId, idx) {
   if (isAffCast) {
     const statLbl = (_STAT_SH[opt.afflictionSaveStat] || opt.afflictionSaveStat || 'Con').toUpperCase();
     const dd = opt.afflictionDD;
-    const isWeak = opt.afflictionMode === 'faiblesse';
-    const isEtat = !isWeak && opt.afflictionMode === 'etat' && opt.afflictionEtatId;
-    const etat = isEtat ? CONDITION_BY_ID[opt.afflictionEtatId] : null;
-    const lead = isWeak
-      ? `<code>💢 ${_esc(_weaknessLabel(opt.afflictionElement))}</code>`
-      : isEtat
-      ? `<code>${etat ? `${etat.icon} ${_esc(etat.label)}` : 'État'}</code>`
+    const isEtat = opt.afflictionMode === 'etat' && opt.afflictionEtatId;
+    const isWeak = isEtat && opt.afflictionEtatId === 'faiblesse';
+    const lead = isEtat
+      ? `<code>${_esc(_afflEtatLabel(opt.afflictionEtatId, opt.afflictionElement))}</code>`
       : `<code>🩸 ${_esc(opt.afflictionDotFormula || '')}</code>`;
     utilBlock = _atkRow({ c:'var(--crimson)', icon:opt.icon, label:'Sur échec du JS',
-      formulaHtml:_mkCell(lead, 0, (isEtat || isWeak) ? [] : ['par tour'], 'var(--crimson)') });
+      formulaHtml:_mkCell(lead, 0, isEtat ? [] : ['par tour'], 'var(--crimson)') });
     utilNotes.push(['save', `🛡 JS ${statLbl} DD ${dd}`]);
     if (isWeak) utilNotes.push(['weak', `💢 dégâts ×2 de cet élément`]);
     else if (!isEtat) utilNotes.push(['weak', `🩸 DoT ${_esc(opt.afflictionDotFormula || '')}/tour`]);
@@ -8758,7 +8830,6 @@ async function _zoneValidate(finalize = true) {
   const _afflHasEffect = opt.isAffliction && (
     (opt.afflictionMode === 'dot' && String(opt.afflictionDotFormula || '').trim())
     || (opt.afflictionMode === 'etat' && opt.afflictionEtatId)
-    || (opt.afflictionMode === 'faiblesse' && opt.afflictionElement)
   );
   // Sorts à effet INSTANTANÉ (dégâts, soin, CA, enchant, régén, affliction-avec-effet) :
   // ils appliquent leur effet aux cibles de la zone et ne laissent PAS de marqueur.
@@ -9784,16 +9855,20 @@ async function _vttRollAttack() {
       showNotif(`⚔️ ${wrBuff.weaponName} équipée (${armDice})`, 'success');
     }
 
-    // ── Enchantement : jet de d20 pour Réussite / Échec critique ────────────
-    // Un enchantement (buff allié) ne vise pas une CA, mais on lance quand même
-    // un d20 :
+    // ── Sorts sans jet d'attaque : d20 pour Réussite / Échec critique ────────
+    // Enchantement, Protection (CA / réduction), utilitaires, régénération : pas
+    // de CA visée (réussite dès 2), mais on lance quand même un d20 visible :
     //  • Échec critique (1 naturel) → le sort ÉCHOUE, le mana est tout de même perdu.
     //  • Réussite critique (20 nat, ou seuil abaissé par la rune Chance) → signalée.
     // (avantage/désavantage du lanceur pris en compte, relance chanceuse sur un 1.)
     let _enchD20 = null, _enchRC = false;
     // Réussite automatique (mjAutoHit) : pas de d20 → ni échec critique (buff raté,
     // objet consommé pour rien) ni réussite critique. L'enchantement s'applique.
-    if (opt.isEnchant && !opt.autoHit) {
+    // Exclus : afflictions (la cible fait déjà son JS), bouclier réactif (lancé
+    // depuis le chat) et actions d'objet hors enchantement (une potion ne rate pas).
+    const _needsCastD20 = opt.isEnchant
+      || ((opt.isCaSort || opt.isUtil) && !opt.isAffliction && !opt.mods?.bouclierReactif && !opt._itemAction);
+    if (_needsCastD20 && !opt.autoHit) {
       let eMode = mode;
       const eCondMods = _conditionsAttackMods(src, null, opt);
       if (eMode === 'normal') {
@@ -9897,11 +9972,8 @@ async function _vttRollAttack() {
       const _STAT_LBL = { force:'For', dexterite:'Dex', constitution:'Con', intelligence:'Int', sagesse:'Sag', charisme:'Cha' };
       if (opt.isAffliction) {
         const statLbl = (_STAT_LBL[opt.afflictionSaveStat] || opt.afflictionSaveStat || 'Con').toUpperCase();
-        if (opt.afflictionMode === 'faiblesse') {
-          castEffect = `💢 ${_weaknessLabel(opt.afflictionElement)} · JS ${statLbl} DD ${opt.afflictionDD}`;
-        } else if (opt.afflictionMode === 'etat' && opt.afflictionEtatId) {
-          const lib = CONDITION_BY_ID[opt.afflictionEtatId];
-          castEffect = `${lib ? `${lib.icon} ${lib.label}` : 'État'} · JS ${statLbl} DD ${opt.afflictionDD}`;
+        if (opt.afflictionMode === 'etat' && opt.afflictionEtatId) {
+          castEffect = `${_afflEtatLabel(opt.afflictionEtatId, opt.afflictionElement)} · JS ${statLbl} DD ${opt.afflictionDD}`;
         } else {
           castEffect = `🩸 DoT ${opt.afflictionDotFormula}/tour · JS ${statLbl} DD ${opt.afflictionDD}`;
         }
@@ -9918,9 +9990,9 @@ async function _vttRollAttack() {
         } else if (opt.enchantFormula) {
           castEffect = `⚔️ +${opt.enchantFormula} / arme alliée`;
         }
-        // Résultat du jet de cast (RC/EC) devant l'effet.
-        if (_enchD20 != null) castEffect = `🎲 ${_enchD20}${_enchRC ? ' 💥 RC' : ''} · ${castEffect}`;
       }
+      // Résultat du jet de cast (RC/EC) devant l'effet.
+      if (_enchD20 != null) castEffect = `🎲 ${_enchD20}${_enchRC ? ' 💥 RC' : ''} · ${castEffect}`;
 
       // Log "cast" générique : sauté pour les afflictions (déjà loggées via
       // 'affliction-cast' AVANT, suivi du save log et de l'application).
@@ -10817,18 +10889,17 @@ async function _vttRollAttack() {
           }
           // Set Lourd : réduction plate par coup (sur des dégâts positifs uniquement —
           // une absorption rend des PV et ne doit pas être rognée).
-          // Réduction de sort (buff de Protection) : la plus forte des deux s'applique,
-          // sans cumul avec le set Lourd.
+          // Réduction : set Lourd + sort de Protection (cumulés), 1 dégât minimum.
+          // Entre plusieurs sorts de réduction, seul le plus fort compte.
           if (dmgTotal > 0) {
             const setReduction = tgtChar ? (getArmorSetData(tgtChar).modifiers.damageReduction || 0) : 0;
             const _buffRed = _tokenDamageReduction(curTgtData);
-            const useBuff = _buffRed.value > setReduction;
-            const reduction = useBuff ? _buffRed.value : setReduction;
+            const reduction = setReduction + _buffRed.value;
             if (reduction > 0) {
               const beforeSet = dmgTotal;
               dmgTotal = Math.max(1, dmgTotal - reduction);
               dmgReduction = beforeSet - dmgTotal;
-              dmgReductionLabel = useBuff ? _buffRed.label : 'Set Lourd';
+              dmgReductionLabel = [setReduction > 0 ? 'Set Lourd' : '', _buffRed.value > 0 ? _buffRed.label : ''].filter(Boolean).join(' + ');
             }
           }
           // Borne haute = hpMax pour qu'une absorption ne soigne pas au-delà du max.

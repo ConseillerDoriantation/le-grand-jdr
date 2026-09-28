@@ -24,12 +24,11 @@ export const ACTION_RUNE = 'Déclenchement';
  * @property {boolean} [protSplit]  - répartition autorisée (aucun combo n'absorbe Protection)
  * @property {string} [ampMode]    - 'zone' | 'deplacement'  (défaut 'zone')
  * @property {boolean} [deplSwap] - déplacement Soi : échange de place autorisé
- * @property {string} [afflMode]   - 'dot' | 'etat' | 'laceration' | 'faiblesse' (défaut 'dot')
+ * @property {string} [afflMode]   - 'dot' | 'etat' | 'laceration' (défaut 'dot')
  * @property {string} [enchMode]   - 'dmg' | 'etat'          (défaut 'etat')
  * @property {string} [zoneShape]  - 'rect' | 'cross' | 'cone' | 'ring' | 'line' (défaut 'rect')
  * @property {string} [actionMode] - 'reaction' | 'action_bonus' (défaut 'reaction')
  * @property {boolean} [isLight]   - sort Lumière (élément lumineux + Concentration, sans rune d'effet)
- * @property {string} [lightMode]  - 'self' | 'place' (défaut 'self')
  */
 
 /**
@@ -160,7 +159,6 @@ export function computeSheetLines(state = {}) {
     } else {
       // Faiblesse (dégâts ×2 de l'élément du sort) : débloquée à 2 runes Affliction.
       const afflOpts = [['dot', 'DoT', '#e8894b'], ['etat', 'État', '#a855f7'], ['laceration', 'Lacér.', '#ff5a7e']];
-      if ((counts.Affliction || 0) >= 2) afflOpts.push(['faiblesse', 'Faibl.', '#f59e0b']);
       line.segment = { key: 'afflMode', cur: afflMode, hiddenId: 's-affliction-mode', opts: afflOpts };
       if (afflMode === 'etat') { line.select = { hiddenId: 's-affliction-etat', label: 'État', saveStatId: 's-affliction-save-stat' }; line.inlineSlots = ['s-affliction-etat']; }   // juste le <select>, compact
       else if (afflMode === 'dot') line.override = { fieldId: 's-affliction-dot-formula' };
@@ -173,9 +171,8 @@ export function computeSheetLines(state = {}) {
   // 6 · Zone (Amplification = TAILLE, forme au choix) + Dispersion (= nombre de poses)
   // Sort Lumière : l'Amplification règle le rayon → ligne dédiée à la place de la zone.
   if (state.isLight) {
-    const lightMode = state.lightMode === 'place' ? 'place' : 'self';
-    lines.push({ slot: 'zone', id: 'light', icon: '💡',
-      segment: { key: 'lightMode', cur: lightMode, opts: [['self', 'Sur soi', '#f9d71c'], ['place', 'Posée', '#f59e0b']] } });
+    // Pas de choix en forge : le joueur choisit au lancement (case au sol ou token).
+    lines.push({ slot: 'zone', id: 'light', icon: '💡' });
   } else if (hasAmp && !hasEnchant) {
     lines.push({ slot: 'zone', id: 'amp', icon: ampMode === 'zone' ? '🌐' : '↔️',
       segment: { key: 'ampMode', cur: ampMode, hiddenId: 's-amp-mode', opts: [['zone', 'Zone', '#4f8cff'], ['deplacement', 'Dépl.', '#f59e42']] } });
@@ -233,7 +230,6 @@ const SEG_ACTION = {
   ampMode:   '_selectAmpMode',
   deplMode:  '_selectDeplMode',
   deplSwap:  '_selectDeplSwap',
-  lightMode: '_selectLightMode',
   zoneShape: '_selectZoneShape',
   actionMode:'_selectActionMode',
 };

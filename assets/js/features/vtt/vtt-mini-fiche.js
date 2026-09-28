@@ -963,7 +963,7 @@ function _vttSpellChips(s, c) {
   // Sort Lumière : l'Amplification règle le rayon de la lumière (pas une zone).
   const _isLight = isLightSpell(s, damageTypeEmitsLight(getDamageTypeById(VS.damageTypes, s.noyauTypeId)));
   if (_isLight) {
-    chips.push({ icon:'💡', val:`Lumière ${lightSpellRadius(s)}c`, color:'#f9d71c', lbl:s.lightMode === 'place' ? 'Source de lumière posée à portée' : 'Lumière portée par le lanceur' });
+    chips.push({ icon:'💡', val:`Lumière ${lightSpellRadius(s)}c`, color:'#f9d71c', lbl:'Lumière posée au sol ou sur un token (+3 m d’éclairage)' });
   } else if (isClassic && (parseInt(s.zoneW) || 0) > 0 && (parseInt(s.zoneH) || 0) > 0) {
     chips.push({ icon:_zoneIcon(s.zoneShape), val:`${parseInt(s.zoneW)}×${parseInt(s.zoneH)} cases`, color:'#b47fff', lbl:_zoneLbl(s.zoneShape), dim:true });
   } else if (nbAmp > 0 && s.ampMode !== 'deplacement' && !_enchNoZone) {
