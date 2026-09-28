@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  hasWeaponDefaults,
   missingWeaponFamilies,
+  normalizeWeaponDefaults,
+  weaponDefaultsSummary,
   resolveWeaponFamily,
   weaponFamilyLabels,
   weaponHands,
@@ -61,4 +64,16 @@ test('les styles reconnaissent le type d’arme, l’ancien libellé et le manie
   const anyWeapon = [{ id: 'armed', condPrincipale: ['*'] }, { id: 'none', condPrincipale: [''] }];
   assert.equal(detectCombatStyle(character({ 'Main principale': sword }), anyWeapon, families)?.id, 'armed');
   assert.equal(detectCombatStyle(character({}), anyWeapon, families)?.id, 'none');
+});
+
+test('défauts d’un type d’arme : normalisés, bornés et résumés', () => {
+  const sword = normalizeWeaponDefaults({ degats: '1d6 ', degatsStats: ['force', 'force', 'x'], toucherStat: 'force', portee: '1', mains: '1 main' });
+  assert.deepEqual(sword, { mains: '1 main', degats: '1d6', degatsStats: ['force'], toucherStat: 'force', portee: '1', caBonus: 0 });
+  assert.equal(weaponDefaultsSummary(sword, k => ({ force: 'For' })[k] || k), '1d6 + For · toucher For · portée 1 · 1 main');
+  const shield = normalizeWeaponDefaults({ caBonus: '2', mains: 'bizarre' });
+  assert.equal(shield.caBonus, 2);
+  assert.equal(shield.mains, '');
+  assert.equal(hasWeaponDefaults(shield), true);
+  assert.equal(hasWeaponDefaults(undefined), false);
+  assert.equal(normalizeWeaponDefaults({ caBonus: 99 }).caBonus, 10);
 });

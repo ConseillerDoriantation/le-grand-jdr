@@ -11,7 +11,7 @@ import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort, getDefaultCharForUser } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
-import { WEAPON_HANDS_OPTIONS, resolveWeaponFamily, weaponHandsLabel } from '../shared/weapon-family.js';
+import { WEAPON_HANDS_OPTIONS, hasWeaponDefaults, normalizeWeaponDefaults, resolveWeaponFamily, weaponHandsLabel } from '../shared/weapon-family.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
 import { getShopItemEditableText, shopItemToInvEntry } from '../shared/inventory-utils.js';
@@ -3484,7 +3484,7 @@ function _buildFieldsHtml(tpl,item) {
       const current = resolveWeaponFamily(_weaponFormats, item || {})?.label || val;
       const known = _weaponFormats.some(o => o.label === current);
       html+=`<div class="form-group"><label>${f.label}</label>
-        <select class="input-field sh-modal-select" id="si-${f.id}">
+        <select class="input-field sh-modal-select" id="si-${f.id}" data-sh-action="weaponTypeDefaults" data-sh-on="change">
           <option value="">— Choisir —</option>
           ${!known && current ? `<option value="${_esc(current)}" selected>${_esc(current)} (ancien)</option>` : ''}
           ${_weaponFormats.map(o=>`<option value="${_esc(o.label)}" ${current===o.label?'selected':''}>${_esc(o.label)}</option>`).join('')}
@@ -3694,6 +3694,43 @@ function updateShopDegatsStat(i, val) {
 }
 function removeShopDegatsStat(i) {
   const arr = _shopDegatsStatsGet(); arr.splice(i,1); _shopDegatsStatsSet(arr); _shopDegatsStatsRender(arr);
+}
+
+// ── Pré-remplissage par type d'arme ─────────────────────────────────────────
+// Applique les défauts du type choisi aux champs VIDES, ou encore égaux à ce
+// qu'un type précédent avait pré-rempli (data-type-default) : une valeur saisie
+// à la main n'est jamais écrasée.
+function applyWeaponTypeDefaults(select) {
+  const family = _weaponFormats.find(f => f.label === select?.value);
+  if (!family || !hasWeaponDefaults(family.defaults)) return;
+  const d = normalizeWeaponDefaults(family.defaults);
+  const filled = [];
+  const fill = (el, value, label) => {
+    if (!el || value === '' || value == null) return;
+    const current = String(el.value ?? '');
+    const untouched = current === '' || (el.dataset.typeDefault != null && el.dataset.typeDefault === current)
+      || (el.type === 'number' && (parseInt(current, 10) || 0) === 0);
+    if (!untouched) return;
+    el.value = String(value);
+    el.dataset.typeDefault = String(value);
+    filled.push(label);
+  };
+  fill(document.getElementById('si-degats'), d.degats, 'dégâts');
+  fill(document.getElementById('si-toucherStat'), d.toucherStat, 'toucher');
+  fill(document.getElementById('si-portee'), d.portee, 'portée');
+  fill(document.getElementById('si-mains'), d.mains, 'maniement');
+  if (d.caBonus) fill(document.getElementById('si-caBonus'), d.caBonus, 'CA');
+  const hidden = document.getElementById('si-degats-stats-data');
+  if (hidden && d.degatsStats.length) {
+    const current = hidden.value || '[]';
+    if (current === '[]' || current === hidden.dataset.typeDefault) {
+      _shopDegatsStatsSet(d.degatsStats);
+      _shopDegatsStatsRender(d.degatsStats);
+      hidden.dataset.typeDefault = hidden.value;
+      filled.push('stats de dégâts');
+    }
+  }
+  if (filled.length) showNotif(`📋 ${family.label} : ${filled.join(', ')} pré-rempli${filled.length > 1 ? 's' : ''}`, 'info');
 }
 
 function toggleDispoInfini(cb){
@@ -4714,6 +4751,7 @@ Object.assign(shHandlers, {
   traitRemove:    (el) => removeShopTrait(parseInt(el.dataset.idx)),
   degatsAdd:      () => addShopDegatsStat(),
   degatsUpdate:   (el) => updateShopDegatsStat(parseInt(el.dataset.idx), el.value),
+  weaponTypeDefaults: (el) => applyWeaponTypeDefaults(el),
   degatsRemove:   (el) => removeShopDegatsStat(parseInt(el.dataset.idx)),
   skillAdd:       () => addSkillBonus(),
   skillRemove:    (el) => removeSkillBonus(el.dataset.skill),

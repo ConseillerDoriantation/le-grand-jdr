@@ -86,3 +86,38 @@ export function missingWeaponFamilies(formats = [], items = []) {
       weapons: group.count,
     }));
 }
+
+// ── Valeurs par défaut d'un type d'arme ──
+// Pré-remplissage de la boutique : l'arme créée reste entièrement modifiable.
+const _STAT_KEYS = ['force', 'dexterite', 'constitution', 'intelligence', 'sagesse', 'charisme'];
+
+export function normalizeWeaponDefaults(raw = {}) {
+  const d = raw && typeof raw === 'object' ? raw : {};
+  const stats = (Array.isArray(d.degatsStats) ? d.degatsStats : []).filter(k => _STAT_KEYS.includes(k));
+  const ca = parseInt(d.caBonus, 10);
+  return {
+    mains: WEAPON_HANDS_OPTIONS.includes(d.mains) ? d.mains : '',
+    degats: String(d.degats || '').replace(/\s+/g, '').slice(0, 30),
+    degatsStats: [...new Set(stats)].slice(0, 3),
+    toucherStat: _STAT_KEYS.includes(d.toucherStat) ? d.toucherStat : '',
+    portee: String(d.portee || '').trim().slice(0, 30),
+    caBonus: Number.isFinite(ca) ? Math.max(-10, Math.min(10, ca)) : 0,
+  };
+}
+
+export function hasWeaponDefaults(raw = {}) {
+  const d = normalizeWeaponDefaults(raw);
+  return !!(d.mains || d.degats || d.degatsStats.length || d.toucherStat || d.portee || d.caBonus);
+}
+
+/** Résumé court (« 1d6 + For · toucher For · portée 1 · CA +2 »). */
+export function weaponDefaultsSummary(raw = {}, statShort = key => key) {
+  const d = normalizeWeaponDefaults(raw);
+  const parts = [];
+  if (d.degats) parts.push([d.degats, ...d.degatsStats.map(statShort)].join(' + '));
+  if (d.toucherStat) parts.push(`toucher ${statShort(d.toucherStat)}`);
+  if (d.portee) parts.push(`portée ${d.portee}`);
+  if (d.mains) parts.push(d.mains);
+  if (d.caBonus) parts.push(`CA ${d.caBonus > 0 ? '+' : ''}${d.caBonus}`);
+  return parts.join(' · ');
+}

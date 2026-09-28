@@ -7,13 +7,13 @@ import { loadDamageTypes, saveDamageTypes, damageTypeEmitsLight } from '../../sh
 import { CONDITION_DEFAULT_LIBRARY, loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
-import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus } from '../../shared/char-stats.js';
+import { computeEquipStatsBonus, getMod, getMaitriseBonus as _getMaitriseBonus, statShort } from '../../shared/char-stats.js';
 import { openCharacterRulesAdmin } from '../../shared/character-rules.js';
 import { openEquipmentSlotsAdmin, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { openArmorSetsAdmin } from '../../shared/armor-set-settings.js';
 import { openSpellSystemAdmin } from '../../shared/spell-system.js';
 import { defaultCombatStyles, detectCombatStyle as detectCombatStyleRule, normalizeCombatStyles } from '../../shared/combat-styles.js';
-import { missingWeaponFamilies, resolveWeaponFamily, weaponHandsLabel } from '../../shared/weapon-family.js';
+import { WEAPON_HANDS_OPTIONS, hasWeaponDefaults, missingWeaponFamilies, normalizeWeaponDefaults, resolveWeaponFamily, weaponDefaultsSummary, weaponHandsLabel } from '../../shared/weapon-family.js';
 import { DEFAULT_UNARMED, isWeaponLikeItem, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, resolveEquippedInventoryIndices, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
 export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits };
 
@@ -360,6 +360,62 @@ function _wfMigrationPanel(formats) {
     </div>`;
 }
 
+// ── Valeurs par défaut d'un type d'arme (pré-remplissage boutique) ──
+function _editWeaponFormatDefaults(i) {
+  const format = _weaponFormats?.[i];
+  if (!format) return;
+  const d = normalizeWeaponDefaults(format.defaults);
+  const statOpts = (sel, empty) => `${empty ? `<option value="">${empty}</option>` : ''}${_TECH_STAT_OPTIONS.map(([v, l]) =>
+    `<option value="${v}" ${sel === v ? 'selected' : ''}>${l}</option>`).join('')}`;
+  openModal('', `
+    <div class="sh-admin-modal is-formats">
+      <div class="sh-admin-head">
+        <button class="wf-tech-back" data-action="_backToWeaponFormats" title="Retour aux types d’arme">←</button>
+        <div class="sh-admin-head-ico">📋</div>
+        <div class="sh-admin-head-title">
+          <h2>Défauts · ${_esc(format.label)}</h2>
+          <small>Pré-remplis dans la boutique quand tu choisis ce type ; tout reste modifiable sur l’arme.</small>
+        </div>
+        <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
+      </div>
+      <div class="sh-admin-body">
+        <div class="tech-builder-grid">
+          <label><span>Dégâts</span><input id="wfd-degats" value="${_esc(d.degats)}" maxlength="30" placeholder="1d6"></label>
+          <label><span>Stat de dégâts</span><select id="wfd-stat1">${statOpts(d.degatsStats[0] || '', 'Aucune')}</select></label>
+          <label><span>2e stat (optionnel)</span><select id="wfd-stat2">${statOpts(d.degatsStats[1] || '', 'Aucune')}</select></label>
+          <label><span>Stat de toucher</span><select id="wfd-toucher">${statOpts(d.toucherStat, 'Aucune')}</select></label>
+          <label><span>Portée</span><input id="wfd-portee" value="${_esc(d.portee)}" maxlength="30" placeholder="1, 1m50, 18/54…"></label>
+          <label><span>Maniement</span><select id="wfd-mains"><option value="">Non défini</option>${WEAPON_HANDS_OPTIONS.map(v => `<option value="${v}" ${d.mains === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+          <label><span>Bonus de CA</span><input type="number" id="wfd-ca" min="-10" max="10" value="${d.caBonus || 0}"></label>
+        </div>
+        <small class="tech-builder-note">Le pré-remplissage ne touche que les champs vides (ou encore remplis par un autre type) : une valeur saisie à la main n’est jamais écrasée.</small>
+      </div>
+      <div class="sh-admin-footer">
+        <button class="btn btn-outline btn-sm" data-action="_backToWeaponFormats">Retour</button>
+        <div class="sh-admin-footer-spacer"></div>
+        <button class="btn btn-gold" data-action="_saveWeaponFormatDefaults" data-idx="${i}">Enregistrer</button>
+      </div>
+    </div>`);
+}
+
+async function _saveWeaponFormatDefaults(i) {
+  const formats = [...(_weaponFormats || [])];
+  if (!formats[i]) return;
+  const val = id => document.getElementById(id)?.value || '';
+  const degats = val('wfd-degats').trim();
+  if (degats && !/^\d*d\d+(?:[+-]\d+)?$/i.test(degats.replace(/\s+/g, ''))) {
+    showNotif('Formule de dégâts invalide (exemple : 1d6).', 'error'); return;
+  }
+  formats[i] = { ...formats[i], defaults: normalizeWeaponDefaults({
+    degats, degatsStats: [val('wfd-stat1'), val('wfd-stat2')].filter(Boolean),
+    toucherStat: val('wfd-toucher'), portee: val('wfd-portee'), mains: val('wfd-mains'), caBonus: val('wfd-ca'),
+  }) };
+  await saveWeaponFormats(formats);
+  _weaponFormats = formats;
+  showNotif(`Défauts de « ${formats[i].label} » enregistrés.`, 'success');
+  _renderWeaponFormatsModal(formats);
+}
+
 async function _importWeaponFamilies() {
   const formats = [...(_weaponFormats || [])];
   const missing = missingWeaponFamilies(formats, _wfShopWeapons);
@@ -433,6 +489,10 @@ export function _renderWeaponFormatsModal(formats) {
                 <button class="wf-tech-open" data-action="_editWeaponFormatTechniques" data-idx="${i}"
                   title="Configurer les techniques de ce type">
                   🎯 ${f.techniques?.length || 0} technique${(f.techniques?.length || 0) > 1 ? 's' : ''}
+                </button>
+                <button class="wf-tech-open" data-action="_editWeaponFormatDefaults" data-idx="${i}"
+                  title="${_esc(weaponDefaultsSummary(f.defaults, statShort) || 'Valeurs pré-remplies à la création d’une arme de ce type')}">
+                  📋 ${hasWeaponDefaults(f.defaults) ? 'Défauts ✓' : 'Défauts'}
                 </button>
                 ${magPill(f.isMagic, i)}
                 <button class="sh-admin-del-btn" data-action="_deleteWeaponFormat" data-idx="${i}" title="Supprimer">🗑️</button>
@@ -1661,6 +1721,8 @@ registerActions({
   _csAddCond:               (btn) => _csAddCond(btn.dataset.container, btn.dataset.sel),
   _toggleWeaponFormatMagic: (btn) => _toggleWeaponFormatMagic(Number(btn.dataset.idx)),
   _importWeaponFamilies:    ()    => _importWeaponFamilies(),
+  _editWeaponFormatDefaults:(btn) => _editWeaponFormatDefaults(Number(btn.dataset.idx)),
+  _saveWeaponFormatDefaults:(btn) => _saveWeaponFormatDefaults(Number(btn.dataset.idx)),
   _convertShopWeapons:      ()    => _convertShopWeapons(),
   _editWeaponFormatTechniques: (btn) => _editWeaponFormatTechniques(Number(btn.dataset.idx)),
   _wfTechniqueDraftField:   (el)  => _wfTechniqueDraftField(el),
