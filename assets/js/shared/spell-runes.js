@@ -50,7 +50,18 @@ export function getAfflictionMode(spell = {}) {
 }
 export function getAfflictionEtatId(spell = {}) {
   if (spell?.afflictionMode === 'faiblesse') return AFFLICTION_WEAKNESS_ETAT_ID;
-  return spell?.afflictionEtatId || '';
+  return spellConditionId(spell?.afflictionEtatId || '');
+}
+
+// États retirés des sorts (réservés MJ / capacités) : un sort déjà forgé qui les
+// utilise bascule sur l'état de sort qui les absorbe. Rage n'est pas redirigée :
+// les objets/capacités (potion de rage…) passent par le même chemin.
+export const SPELL_CONDITION_REMAP = {
+  paralyzed: 'stunned', incapacitated: 'stunned', unconscious: 'stunned', petrified: 'stunned',
+  grappled: 'restrained', frightened: 'blinded',
+};
+export function spellConditionId(id = '') {
+  return SPELL_CONDITION_REMAP[id] || id || '';
 }
 
 /**

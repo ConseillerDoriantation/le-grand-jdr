@@ -584,8 +584,10 @@ export function _renderInspectorImpl(t) {
     const rows = _activeConds.map((cond, i) => {
       const baseLib = CONDITION_BY_ID[cond.id] || { label: cond.id, icon: '❓', color: '#888', desc: '' };
       // Faiblesse : l'élément visé fait partie du nom (« Faiblesse Feu »).
+      // Provoqué : le porteur de l'aggro aussi (« Provoqué → Brom »).
       const lib = cond.element
         ? { ...baseLib, label: `${baseLib.label} ${getDamageTypeById(VS.damageTypes, cond.element)?.label || ''}`.trim() }
+        : cond.aggroName ? { ...baseLib, label: `${baseLib.label} → ${cond.aggroName}` }
         : baseLib;
       const dur = cond.expiresAtRound != null && _r > 0
         ? `${cond.expiresAtRound - _r + 1}t`

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, getAfflictionMode, getAfflictionEtatId, withElementWeaknesses, isLightSpell, lightSpellRadius, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
+import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, getAfflictionMode, getAfflictionEtatId, spellConditionId, withElementWeaknesses, isLightSpell, lightSpellRadius, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
 
 const sort = (runes = [], extra = {}) => ({ runes, ...extra });
 
@@ -129,6 +129,15 @@ test('Affliction Faiblesse : ancien mode lu comme l’état « faiblesse »', ()
   assert.equal(getAfflictionMode(etat), 'etat');
   assert.equal(getAfflictionEtatId(etat), 'stunned');
   assert.equal(getAfflictionMode(sort(['Affliction'])), 'dot');
+});
+
+test('États retirés des sorts : redirigés vers l’état qui les absorbe (Rage exclue)', () => {
+  assert.equal(getAfflictionEtatId(sort(['Affliction'], { afflictionMode: 'etat', afflictionEtatId: 'paralyzed' })), 'stunned');
+  assert.equal(spellConditionId('grappled'), 'restrained');
+  assert.equal(spellConditionId('frightened'), 'blinded');
+  assert.equal(spellConditionId('rage'), 'rage');
+  assert.equal(spellConditionId('marked'), 'marked');
+  assert.equal(spellConditionId(''), '');
 });
 
 test('Faiblesse d\'élément : ×2, annule une résistance, ne perce pas une immunité', () => {

@@ -38,7 +38,7 @@ import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nea
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, spellConditionId, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm, getProtectionCAOverride, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
@@ -1332,11 +1332,14 @@ function _initCanvas(container) {
   VS.layers.fog   = _asLayer(new K.Group({ listening: false }), frontLayer); // masque de brouillard
   VS.layers.mapFg = _asLayer(new K.Group({ listening: false }), frontLayer);
   VS.layers.ping  = _asLayer(new K.Group({ listening: false }), frontLayer);
+  // Aides de placement (lumière posée…) : au-dessus du brouillard et des décors,
+  // sinon les cases à choisir disparaissent justement dans les zones sombres.
+  VS.layers.overlay = _asLayer(new K.Group({ listening: true }), frontLayer);
   backLayer.add(VS.layers.bg, VS.layers.map);
   if (STATE.isAdmin) {
-    frontLayer.add(VS.layers.fog, VS.layers.walls, VS.layers.mapFg, VS.layers.ping);
+    frontLayer.add(VS.layers.fog, VS.layers.walls, VS.layers.mapFg, VS.layers.ping, VS.layers.overlay);
   } else {
-    frontLayer.add(VS.layers.walls, VS.layers.mapFg, VS.layers.fog, VS.layers.ping);
+    frontLayer.add(VS.layers.walls, VS.layers.mapFg, VS.layers.fog, VS.layers.ping, VS.layers.overlay);
   }
   VS.stage.add(backLayer, VS.layers.grid, VS.layers.draw, VS.layers.token, frontLayer);
   fogInit(VS.stage, VS.layers, CELL);
@@ -3844,7 +3847,7 @@ function _vttSpellMods(s) {
         },
       };
     }
-    const stateId = s.classicStateId || s.enchantEtatId || s.afflictionEtatId || null;
+    const stateId = spellConditionId(s.classicStateId || s.enchantEtatId || s.afflictionEtatId || '') || null;
     if (!stateId) return null;
     const friendly = s.classicTarget === 'ally' || s.classicTarget === 'self';
     return {
@@ -3958,12 +3961,12 @@ function _vttSpellMods(s) {
         } : null,
     // Enchantement mode État : applique l'état choisi directement à l'allié
     enchantEtatId: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
-      ? (s.enchantEtatId || null) : null,
+      ? (spellConditionId(s.enchantEtatId) || null) : null,
     // Multi-états : 1 par rune Enchantement (le 1er garde ses réglages fins, les
     // suivants sont auto-modulés par Puissance/Amplification). Limité à nbEnch.
     enchantEtatIds: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? ((Array.isArray(s.enchantEtatIds) && s.enchantEtatIds.length
-          ? s.enchantEtatIds : [s.enchantEtatId]).filter(Boolean).slice(0, nbEnch))
+          ? s.enchantEtatIds : [s.enchantEtatId]).map(spellConditionId).filter(Boolean).slice(0, nbEnch))
       : [],
     enchantStatePower: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? nbP : 0,
@@ -4328,6 +4331,9 @@ function _selfClear() {
   _selfCells = [];
   _selfCtx = null;
   VS.layers.grid?.batchDraw();
+  VS.layers.overlay?.batchDraw();
+  const container = VS.stage?.container?.();
+  if (container) container.style.cursor = '';
 }
 
 // Échange lanceur↔cible : chacun doit tenir dans la grille à la place de l'autre
@@ -4508,42 +4514,70 @@ async function _vttLightCast(src, opt, targetName, effectLbl) {
 function _startLightPlacement(srcId, opt) {
   _zoneClear(); _selfClear();
   _clearHL();
-  const src = VS.tokens[srcId]?.data; if (!src || !VS.layers.grid || !VS.activePage) return;
+  const layer = VS.layers.overlay || VS.layers.grid;
+  const src = VS.tokens[srcId]?.data; if (!src || !layer || !VS.activePage) return;
   const range = Math.max(1, parseInt(opt.portee) || 1);
+  const radius = opt.lightRadius || 3;
   _selfCtx = { srcId, cells: range, opt, swapIds: new Set(), lightIds: new Set() };
   const K = window.Konva;
   const { cols, rows } = VS.activePage;
-  for (let dc = -range; dc <= range; dc++) for (let dr = -range; dr <= range; dr++) {
-    if (Math.abs(dc) + Math.abs(dr) > range) continue;
-    const c = src.col + dc, r = src.row + dr;
-    if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
-    const rect = new K.Rect({
-      x: c * CELL, y: r * CELL, width: CELL, height: CELL,
-      fill: 'rgba(249,215,28,0.22)', stroke: 'rgba(249,215,28,0.75)', strokeWidth: 1.5, listening: true,
-    });
-    const tc = c, tr = r;
-    rect.on('click', async e => { if (e.evt.button !== 0) return; e.cancelBubble = true; await _vttPlaceLight(tc, tr); });
-    rect.on('contextmenu', e => { e.evt.preventDefault(); });
-    VS.layers.grid.add(rect);
-    _selfCells.push(rect);
-  }
-  // Tokens à portée (lanceur compris) : le clic est capté par handleTokenAction.
+  // Tokens à portée (lanceur compris) : surlignés en or, le clic est capté par
+  // handleTokenAction (calque des tokens). Leurs cases ne captent donc pas le clic.
+  const tokenCells = new Set();
   Object.values(VS.tokens).forEach(e => {
     const d = e?.data;
     if (!d || d.pageId !== src.pageId || (d.visible === false && !STATE.isAdmin)) return;
     if (Math.abs(d.col - src.col) + Math.abs(d.row - src.row) > range) return;
     const od = _tokenDims(d);
+    for (let x = 0; x < od.w; x++) for (let y = 0; y < od.h; y++) tokenCells.add(`${d.col + x},${d.row + y}`);
     const rect = new K.Rect({
       x: d.col * CELL, y: d.row * CELL, width: od.w * CELL, height: od.h * CELL,
-      fill: 'rgba(232,184,75,0.30)', stroke: 'rgba(232,184,75,0.9)', strokeWidth: 2, listening: false,
+      fill: 'rgba(232,184,75,0.28)', stroke: '#e8b84b', strokeWidth: 3, cornerRadius: 6, listening: false,
     });
-    VS.layers.grid.add(rect);
+    layer.add(rect);
     _selfCells.push(rect);
     _selfCtx.lightIds.add(d.id);
   });
-  VS.layers.grid.batchDraw();
+  // Aperçu au survol : case ciblée + rayon de la lumière qui sera posée.
+  const preview = new K.Group({ listening: false, visible: false });
+  const previewHalo = new K.Circle({ radius: radius * CELL, fill: 'rgba(249,215,28,0.10)', stroke: 'rgba(249,215,28,0.9)', strokeWidth: 2, dash: [10, 6] });
+  const previewCell = new K.Rect({ width: CELL, height: CELL, fill: 'rgba(249,215,28,0.55)', stroke: '#fde047', strokeWidth: 3 });
+  const previewIcon = new K.Text({ text: '💡', fontSize: CELL * 0.55, width: CELL, height: CELL, align: 'center', verticalAlign: 'middle' });
+  preview.add(previewHalo, previewCell, previewIcon);
+  _selfCells.push(preview);
+  for (let dc = -range; dc <= range; dc++) for (let dr = -range; dr <= range; dr++) {
+    if (Math.abs(dc) + Math.abs(dr) > range) continue;
+    const c = src.col + dc, r = src.row + dr;
+    if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
+    const onToken = tokenCells.has(`${c},${r}`);
+    const rect = new K.Rect({
+      x: c * CELL, y: r * CELL, width: CELL, height: CELL,
+      fill: 'rgba(249,215,28,0.30)', stroke: 'rgba(253,224,71,0.95)', strokeWidth: 1.5,
+      listening: !onToken,
+    });
+    if (!onToken) {
+      const tc = c, tr = r;
+      rect.on('mouseenter', () => {
+        previewHalo.position({ x: (tc + 0.5) * CELL, y: (tr + 0.5) * CELL });
+        previewCell.position({ x: tc * CELL, y: tr * CELL });
+        previewIcon.position({ x: tc * CELL, y: tr * CELL });
+        preview.visible(true); layer.batchDraw();
+        VS.stage?.container() && (VS.stage.container().style.cursor = 'pointer');
+      });
+      rect.on('mouseleave', () => {
+        preview.visible(false); layer.batchDraw();
+        VS.stage?.container() && (VS.stage.container().style.cursor = '');
+      });
+      rect.on('click tap', async e => { if (e.evt.button > 0) return; e.cancelBubble = true; await _vttPlaceLight(tc, tr); });
+      rect.on('contextmenu', e => { e.evt.preventDefault(); });
+    }
+    layer.add(rect);
+    _selfCells.push(rect);
+  }
+  layer.add(preview);
+  layer.batchDraw();
   _showSelfHud();
-  showNotif(`💡 Clic sur une case (lumière posée) ou sur un token (+${_VTT_LIGHT_TOKEN_BONUS_M} m d'éclairage) · ≤ ${range} case${range > 1 ? 's' : ''}`, 'info');
+  showNotif(`💡 Clic sur une case jaune (lumière posée, rayon ${radius}) ou sur un token doré (+${_VTT_LIGHT_TOKEN_BONUS_M} m d'éclairage) · ≤ ${range} case${range > 1 ? 's' : ''}`, 'info');
 }
 
 // Bonus d'éclairage d'une lumière posée sur un token : 3 m (en cases, arrondi haut).
@@ -9356,6 +9390,10 @@ async function _vttRollAttack() {
     closeModalDirect();
     return;
   }
+  // Provoqué : l'attaque doit inclure le porteur de l'aggro. Modale laissée
+  // ouverte : le joueur/MJ peut annuler et viser la bonne cible.
+  const _tauntMsg = _vttTauntBlockMessage(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
+  if (_tauntMsg) { showNotif(_tauntMsg, 'error'); return; }
   const mode     = document.getElementById('atk-mode')?.value || 'normal';
   const bonusHit     = parseInt(document.getElementById('atk-bonus-hit')?.value)||0;
   const bonusDmg     = parseInt(document.getElementById('atk-bonus-dmg')?.value)||0;
@@ -10680,6 +10718,23 @@ async function _vttRollAttack() {
       }
     }
 
+    // ── Affaibli : malus de dégâts sur les coups réussis de l'attaquant ──
+    // Un seul malus (le plus fort état actif), 1 dégât minimum. Soins exclus.
+    let weakenDetail = null;
+    if (!opt.isHeal && !isFumble && sharedDmgTotalHit > 0) {
+      const weak = _activeConditionsOf(src).find(({ lib }) => lib?.effects?.dmgDealtMalus);
+      if (weak) {
+        const formula = weak.cond.dmgDealtMalusFormula || String(weak.lib.effects.dmgDealtMalus);
+        const det = _rollDiceDetailed(formula);
+        const cut = Math.min(Math.max(0, det.total), sharedDmgTotalHit - 1);
+        if (cut > 0) {
+          sharedDmgTotalHit -= cut;
+          weakenDetail = { formula, rolls: det.rolls, mod: det.mod, sides: det.sides, total: cut, label: weak.lib.label, icon: weak.lib.icon };
+          buffDmgNotes.push(`${weak.lib.icon || '🥀'} −${cut} (${weak.lib.label})`);
+        }
+      }
+    }
+
     const sourceWritesDone = Promise.all([_deductAllCosts(), _consumeItem(), _markActionUsed()])
       .then(() => null, error => error);
 
@@ -10934,15 +10989,23 @@ async function _vttRollAttack() {
 
       // ── États consommés au 1er coup (Marqué, etc.) : retire ceux dont
       //    l'effet `consumedByAttackAgainst` est activé après que les bonus
-      //    de dégâts aient été appliqués. Persistance immédiate.
+      //    de dégâts aient été appliqués. Faiblesse (`consumedByElementHit`) :
+      //    consommée par le 1er coup (même demi-dégâts) portant son élément.
+      //    Persistance immédiate.
       const _consumedNotes = [];
-      if (hit && !isTechniqueSplash) {
+      if ((hit || halfDmg) && !isTechniqueSplash) {
+        const hitTypes = new Set(rawDamagePieces.filter(p => p.amount > 0).map(p => p.damageTypeId));
+        const isConsumedNow = c => {
+          const eff = CONDITION_BY_ID[c.id]?.effects;
+          return (hit && !!eff?.consumedByAttackAgainst)
+            || (!!eff?.consumedByElementHit && !!c.element && hitTypes.has(c.element));
+        };
         const curConds = curTgtData.conditions || [];
         const remaining = [];
         for (const c of curConds) {
           const lib = CONDITION_BY_ID[c.id];
-          if (lib?.effects?.consumedByAttackAgainst) {
-            _consumedNotes.push(`${lib.icon || '🎯'} ${lib.label} consommé`);
+          if (isConsumedNow(c)) {
+            _consumedNotes.push(`${lib?.icon || '🎯'} ${c.element ? _weaknessLabel(c.element) : lib?.label} consommé${c.element ? 'e' : ''}`);
           } else {
             remaining.push(c);
           }
@@ -10952,7 +11015,7 @@ async function _vttRollAttack() {
             // _syncDownedCondition peut avoir ajouté Inconscient entre-temps :
             // repartir de l'état le plus récent et ne retirer que les effets consommés.
             const currentConditions = curTgtData.conditions || [];
-            const nextConditions = currentConditions.filter(c => !CONDITION_BY_ID[c.id]?.effects?.consumedByAttackAgainst);
+            const nextConditions = currentConditions.filter(c => !isConsumedNow(c));
             await updateDoc(_tokRef(curTgtData.id), { conditions: nextConditions }).catch(() => {});
           });
         }
@@ -11037,6 +11100,9 @@ async function _vttRollAttack() {
                 saveStat: technique.conditionSaveStat || lib.defaultSaveStat || null,
                 expiresAtRound: round > 0 && !consumed ? round + duration - 1 : null,
                 ...(round === 0 && !consumed ? { pendingDuration: duration } : {}),
+                // Provoqué par une technique : l'attaquant porte l'aggro.
+                ...(lib.effects?.tauntLock ? { aggroTokenId: srcId, aggroName: lS.displayName ?? src.name } : {}),
+                ...(lib.effects?.dmgDealtMalus ? { dmgDealtMalusFormula: String(lib.effects.dmgDealtMalus) } : {}),
               }];
               _vttPatchTokenOptimistically(curTgtData.id, { conditions });
               await updateDoc(_tokRef(curTgtData.id), { conditions }).catch(error => {
@@ -11323,6 +11389,7 @@ async function _vttRollAttack() {
         buffDmgBonus: buffDmgBonus || 0,
         buffDmgNotes: buffDmgNotes.length ? buffDmgNotes : null,
         buffDmgDetail: buffDmgDetail || null,
+        weakenDetail: weakenDetail || null,
         dmgRollsDetail: sharedDmgRollsDetail || null,
         critRollsDetail: sharedCritRollsDetail || null,
         ..._diceLogFields('dmg', sharedDmgRollsDetail),
@@ -11383,6 +11450,7 @@ async function _vttRollAttack() {
         buffDmgBonus: buffDmgBonus || 0,
         buffDmgNotes: buffDmgNotes.length ? buffDmgNotes : null,
         buffDmgDetail: buffDmgDetail || null,
+        weakenDetail: weakenDetail || null,
         condDmgNotes: r.condDmgNotes?.length ? r.condDmgNotes : null,
         condDmgDetails: r.condDmgDetails?.length ? r.condDmgDetails : null,
         consumedNotes: r.consumedNotes?.length ? r.consumedNotes : null,
@@ -13876,6 +13944,30 @@ function _hasConditionEffect(token, effectKey) {
 }
 
 /** Helper : retourne la liste des états actifs sur un token (objets {cond, lib}). */
+/**
+ * Provoqué : message de refus si `srcId` est provoqué et que l'action offensive
+ * ne vise pas le porteur de l'aggro (null = autorisé). Actions de soutien, sur
+ * soi ou sans autre cible : toujours autorisées. Porteur absent de la scène ou
+ * à 0 PV : la provocation ne bloque plus rien.
+ */
+function _vttTauntBlockMessage(srcId, targetIds = [], opt = {}) {
+  if (opt?.isHeal || opt?.isEnchant || opt?.isCaSort || opt?.isRegen || opt?.isLight || opt?.isInvocation || opt?.isDeplacement) return null;
+  const others = targetIds.filter(id => id && id !== srcId);
+  if (!others.length) return null;
+  const src = VS.tokens[srcId]?.data; if (!src) return null;
+  for (const { cond, lib } of _activeConditionsOf(src)) {
+    if (!lib?.effects?.tauntLock || !cond.aggroTokenId) continue;
+    const holder = VS.tokens[cond.aggroTokenId]?.data;
+    if (!holder || holder.pageId !== src.pageId) continue;
+    if (holder.hp != null && Number(holder.hp) <= 0) continue;
+    if (others.includes(cond.aggroTokenId)) continue;
+    const srcName = _live(src).displayName ?? src.name;
+    const holderName = _live(holder).displayName ?? holder.name;
+    return `${lib.icon || '😡'} ${srcName} est provoqué : son attaque doit viser ${holderName}.`;
+  }
+  return null;
+}
+
 export function _activeConditionsOf(token) {
   const round = VS.session?.combat?.round ?? 0;
   const out = [];

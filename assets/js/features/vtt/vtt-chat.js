@@ -780,6 +780,11 @@ export function _renderChatLogImpl(msgs) {
       } else if (m.buffDmgBonus) {
         rows.push(_row(`Enchantement`, `<strong>+${m.buffDmgBonus}</strong>`, { op: '✨' }));
       }
+      // Affaibli (état de l'attaquant) : malus retiré du coup réussi.
+      if (m.weakenDetail) {
+        const wd = m.weakenDetail;
+        rows.push(_row(`${_esc(wd.label || 'Affaibli')} ${_dice(wd, wd.formula || wd.total)}`, `<strong>−${wd.total}</strong>`, { op: wd.icon || '🥀' }));
+      }
 
       for (const technique of _techniques(m)) {
         if (technique.triggered === false) {

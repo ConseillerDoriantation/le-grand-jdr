@@ -2,17 +2,17 @@ import { getDocData, saveDoc } from '../data/firestore.js';
 
 export const CONDITION_DEFAULT_LIBRARY = [
   { id:'blinded',       label:'Aveuglé',     icon:'🌫️', color:'#6b7280',
-    desc:'Ne peut pas voir, échec auto aux tests de Vue. Ses attaques : désavantage. Attaques contre lui : avantage.',
-    defaultSaveStat:'constitution', defaultDC:11,
-    effects:{ attackBy:'dis', attackAgainst:'adv' } },
+    desc:'Vue brouillée : désavantage à ses attaques. (Miroir de Guidé.)',
+    defaultSaveStat:'constitution', defaultDC:11, defaultDuration:2,
+    effects:{ attackBy:'dis' } },
   { id:'charmed',       label:'Charmé',      icon:'💖', color:'#ec4899',
     desc:'Ne peut pas attaquer le charmeur ni le viser par un effet nuisible. Avantage social pour le charmeur.',
     defaultSaveStat:'sagesse',     defaultDC:11,
     effects:{} },
   { id:'taunted',       label:'Provoqué',    icon:'😡', color:'#ef4444',
-    desc:'Provoqué par la source : doit l\'attaquer en priorité et ne peut viser volontairement une autre cible tant qu\'elle est à portée. Arbitré par le MJ.',
+    desc:'L\'aggro est fixée sur un porteur (le lanceur ou l\'allié qu\'il désigne) : ses attaques doivent viser ce porteur, toute attaque qui ne l\'inclut pas est refusée. Sans effet si le porteur est à 0 PV ou absent de la scène.',
     defaultSaveStat:'charisme',    defaultDC:11, defaultDuration:2,
-    effects:{} },
+    effects:{ tauntLock:true } },
   { id:'deafened',      label:'Assourdi',    icon:'🔇', color:'#94a3b8',
     desc:'Ne peut pas entendre, échec auto aux tests basés sur l\'Ouïe.',
     defaultSaveStat:'constitution', defaultDC:11,
@@ -34,28 +34,28 @@ export const CONDITION_DEFAULT_LIBRARY = [
     defaultSaveStat:null,           defaultDC:null,
     effects:{ attackBy:'adv', attackAgainst:'dis' } },
   { id:'paralyzed',     label:'Paralysé',    icon:'⚡', color:'#fbbf24',
-    desc:'Neutralisé, ne peut bouger ni parler. Échec auto JS Force/Dex. Avantage aux attaques. CaC à ≤1,50m = critique.',
-    defaultSaveStat:'constitution', defaultDC:11,
+    desc:'Neutralisé, ne peut bouger ni parler. Échec auto JS Force/Dex. Avantage aux attaques. CaC à ≤1,50m = critique. Contrôle total : 1 tour, jamais prolongé (Concentration / Durée).',
+    defaultSaveStat:'constitution', defaultDC:11, defaultDuration:1,
     effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, meleeCritOnHit:true } },
   { id:'petrified',     label:'Pétrifié',    icon:'🗿', color:'#78716c',
-    desc:'Transformé en pierre. Neutralisé, vitesse 0. Résistance à tous les dégâts (50%).',
-    defaultSaveStat:'constitution', defaultDC:11,
+    desc:'Transformé en pierre. Neutralisé, vitesse 0. Résistance à tous les dégâts (50%). Contrôle total : 1 tour, jamais prolongé (Concentration / Durée).',
+    defaultSaveStat:'constitution', defaultDC:11, defaultDuration:1,
     effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, dmgReductionPct:50 } },
   { id:'prone',         label:'À terre',     icon:'🛌', color:'#a78bfa',
     desc:'Désavantage à ses attaques. Avantage aux attaques au CaC ≤1,50m, désavantage à distance. Se relever coûte ½ mouvement.',
     defaultSaveStat:null,           defaultDC:null,
     effects:{ attackBy:'dis', attackAgainstMelee:'adv', attackAgainstRanged:'dis' } },
   { id:'restrained',    label:'Entravé',     icon:'⛓️', color:'#dc2626',
-    desc:'Vitesse 0. Désavantage à ses attaques et JS Dextérité. Avantage aux attaques contre lui.',
-    defaultSaveStat:'force',       defaultDC:11,
-    effects:{ movementMod:0, attackBy:'dis', attackAgainst:'adv' } },
+    desc:'Immobilisé : vitesse 0. Peut toujours attaquer et lancer des sorts.',
+    defaultSaveStat:'force',       defaultDC:11, defaultDuration:2,
+    effects:{ movementMod:0 } },
   { id:'slowed',        label:'Ralenti',     icon:'🐌', color:'#64748b',
-    desc:'Vitesse réduite de moitié (−2 cases de déplacement). −2 à la CA et aux JS de Dextérité. Ne peut pas effectuer de réaction. À son tour : une seule action (action OU action bonus, pas les deux) et une seule attaque. JS Sagesse en fin de tour pour y mettre fin (arbitré par le MJ).',
+    desc:'−2 cases de déplacement. (Miroir d\'Accéléré.)',
     defaultSaveStat:'sagesse',     defaultDC:11, defaultDuration:2,
     effects:{ movementBonus:-2 } },
   { id:'stunned',       label:'Étourdi',     icon:'💫', color:'#06b6d4',
-    desc:'Neutralisé, ne peut bouger. Échec auto JS Force/Dex. Avantage aux attaques contre lui.',
-    defaultSaveStat:'constitution', defaultDC:11,
+    desc:'Perd son tour : aucune action ni déplacement. Échec auto JS Force/Dex. Avantage aux attaques contre lui. Contrôle total : 1 tour, jamais prolongé (Concentration / Durée).',
+    defaultSaveStat:'constitution', defaultDC:11, defaultDuration:1,
     effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true } },
   { id:'unconscious',   label:'Inconscient', icon:'😵', color:'#0f172a',
     desc:'Neutralisé, à terre, lâche ses objets. Échec auto JS Force/Dex. Avantage aux attaques. CaC ≤1,50m = critique.',
@@ -66,9 +66,9 @@ export const CONDITION_DEFAULT_LIBRARY = [
     defaultSaveStat:'constitution', defaultDC:11, defaultDuration:2,
     effects:{ cantCastSpells:true } },
   { id:'marked',        label:'Marqué',      icon:'🎯', color:'#f43f5e',
-    desc:'Avantage aux attaques contre la cible et +1d6 dégâts subis. L\'effet se consomme dès qu\'un coup touche.',
+    desc:'Avantage aux attaques contre la cible et +2d6 dégâts subis. L\'effet se consomme dès qu\'un coup touche.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:null,
-    effects:{ attackAgainst:'adv', dmgTakenBonus:'1d6', consumedByAttackAgainst:true } },
+    effects:{ attackAgainst:'adv', dmgTakenBonus:'2d6', consumedByAttackAgainst:true } },
   { id:'swift',         label:'Accéléré',    icon:'💨', color:'#38bdf8',
     desc:'L\'allié gagne +2 cases de déplacement, +1 par rune Amplification du sort d\'enchantement.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
@@ -116,13 +116,21 @@ export const CONDITION_DEFAULT_LIBRARY = [
       cantCastSpells:true, breakConcentration:true,
     } },
   { id:'empowered',     label:'Renforcé',    icon:'✨', color:'#e8b84b',
-    desc:'L\'allié gagne un bonus de dégâts d\'attaque, renforcé par les runes Puissance du sort.',
+    desc:'L\'allié inflige +(1 + Puissance)d4 +2 dégâts à chaque coup réussi. (Miroir d\'Affaibli.)',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
     effects:{ dmgDealtBonus:'1d4' } },
   { id:'faiblesse',     label:'Faiblesse',   icon:'💢', color:'#f59e0b',
-    desc:'La cible subit des dégâts doublés de l\'élément du sort qui l\'a affligée (annule une résistance à cet élément, sans percer immunité ni absorption).',
+    desc:'Le prochain coup de l\'élément du sort qui l\'a affligée inflige des dégâts doublés, puis la Faiblesse se consomme (2 tours max). Annule une résistance à cet élément, sans percer immunité ni absorption.',
     defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
-    effects:{} },
+    effects:{ consumedByElementHit:true } },
+  { id:'weakened',      label:'Affaibli',    icon:'🥀', color:'#a855f7',
+    desc:'Ses coups réussis infligent −(1 + Puissance)d4 dégâts (1 minimum). (Miroir de Renforcé.)',
+    defaultSaveStat:'constitution', defaultDC:11, defaultDuration:2,
+    effects:{ dmgDealtMalus:'1d4' } },
+  { id:'broken',        label:'Brisé',       icon:'🪞', color:'#7c3aed',
+    desc:'Volonté brisée : désavantage à tous ses jets de sauvegarde. Prépare les autres Afflictions.',
+    defaultSaveStat:'sagesse',     defaultDC:11, defaultDuration:2,
+    effects:{ saveDisadvantageStats:['force', 'dexterite', 'constitution', 'intelligence', 'sagesse', 'charisme'] } },
   // ── Actions de base (posées par les actions Esquiver / Se cacher / Se désengager) ──
   { id:'dodge',         label:'Esquive',     icon:'🤸', color:'#38bdf8',
     desc:'Jusqu\'au début de ton prochain tour : désavantage aux attaques contre toi (si tu vois l\'attaquant).',
@@ -140,8 +148,60 @@ export const CONDITION_DEFAULT_LIBRARY = [
 
 export const CONDITION_DEFAULT_IDS = new Set(CONDITION_DEFAULT_LIBRARY.map(c => c.id));
 const CONDITION_REMOVED_IDS = new Set(['poisoned', 'warded']);
-const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'allonge', 'chanceux', 'guided', 'distant_ward', 'melee_ward', 'focused', 'rage', 'empowered']);
-const CONDITION_NON_SPELL_DEFAULT_IDS = new Set(['dodge', 'hidden', 'disengaged']);
+// Un état = un levier. Enchantement (allié) et Affliction (ennemi) se répondent
+// en miroir : Guidé/Aveuglé, Renforcé/Affaibli, Accéléré/Ralenti, Garde/Marqué.
+const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'allonge', 'chanceux', 'guided', 'distant_ward', 'melee_ward', 'empowered']);
+// Hors sorts (pose MJ, capacités, créatures) : actions de base, états sans effet
+// en combat VTT, doublons d'un état de sort plus lisible, capacités de classe.
+const CONDITION_NON_SPELL_DEFAULT_IDS = new Set([
+  'dodge', 'hidden', 'disengaged',
+  'deafened', 'charmed', 'invisible',
+  'incapacitated', 'unconscious', 'paralyzed', 'petrified', 'grappled', 'frightened',
+  'focused', 'rage',
+]);
+
+// ── Équilibrage des états ──
+// Une bibliothèque sauvegardée par le MJ écrase les défauts. Quand l'équilibrage
+// change, les champs listés ici sont réimposés UNE fois aux lignes sauvegardées
+// avant cette version (le MJ peut ensuite les retoucher, la ligne passe à jour).
+// Patches cumulatifs : une ligne en retard reçoit toutes les valeurs actuelles.
+export const CONDITION_BALANCE_VERSION = 2;
+const CONDITION_BALANCE_PATCHES = {
+  marked:        { fields: ['desc'], effects: ['dmgTakenBonus'] },
+  faiblesse:     { fields: ['desc'], effects: ['consumedByElementHit'] },
+  stunned:       { fields: ['desc', 'defaultDuration'] },
+  paralyzed:     { fields: ['desc', 'defaultDuration'], spellUsage: true },
+  petrified:     { fields: ['desc', 'defaultDuration'], spellUsage: true },
+  blinded:       { fields: ['desc', 'defaultDuration'], effects: ['attackBy', 'attackAgainst'] },
+  restrained:    { fields: ['desc', 'defaultDuration'], effects: ['movementMod', 'attackBy', 'attackAgainst'] },
+  slowed:        { fields: ['desc'], effects: ['movementBonus'] },
+  taunted:       { fields: ['desc'], effects: ['tauntLock'] },
+  empowered:     { fields: ['desc'] },
+  deafened:      { spellUsage: true },
+  incapacitated: { spellUsage: true },
+  unconscious:   { spellUsage: true },
+  charmed:       { spellUsage: true },
+  invisible:     { spellUsage: true },
+  grappled:      { spellUsage: true },
+  frightened:    { spellUsage: true },
+  focused:       { spellUsage: true },
+  rage:          { spellUsage: true },
+};
+
+function applyBalancePatch(def, ov) {
+  if ((Number(ov.balanceVersion) || 0) >= CONDITION_BALANCE_VERSION) return ov;
+  const patch = CONDITION_BALANCE_PATCHES[def.id];
+  if (!patch) return ov;
+  const out = { ...ov, effects: { ...(ov.effects || {}) } };
+  (patch.fields || []).forEach(k => { out[k] = def[k] ?? null; });
+  // Clé absente du défaut = supprimée (jamais `undefined` : Firestore le refuse).
+  (patch.effects || []).forEach(k => {
+    if (def.effects && k in def.effects) out.effects[k] = def.effects[k];
+    else delete out.effects[k];
+  });
+  if (patch.spellUsage) out.spellUsage = null;   // → retombe sur l'usage par défaut
+  return out;
+}
 
 function normalizeSpellUsage(entry = {}, fallback = null) {
   const raw = entry.spellUsage;
@@ -159,7 +219,7 @@ function normalizeSpellUsage(entry = {}, fallback = null) {
 }
 
 function cloneCondition(c = {}) {
-  return { ...c, spellUsage: normalizeSpellUsage(c), effects: { ...(c.effects || {}) } };
+  return { ...c, spellUsage: normalizeSpellUsage(c), effects: { ...(c.effects || {}) }, balanceVersion: CONDITION_BALANCE_VERSION };
 }
 
 function normalizeCondition(entry = {}) {
@@ -174,6 +234,7 @@ function normalizeCondition(entry = {}) {
     defaultDuration: entry.defaultDuration || null,
     spellUsage: entry.spellUsage ? normalizeSpellUsage(entry) : null,
     effects: { ...(entry.effects || {}) },
+    balanceVersion: Number(entry.balanceVersion) || 0,
   };
 }
 
@@ -184,9 +245,11 @@ export function mergeConditionLibrary(library = []) {
   if (!rows.length) return CONDITION_DEFAULT_LIBRARY.map(cloneCondition);
   const byId = Object.fromEntries(rows.map(c => [c.id, c]));
   const merged = CONDITION_DEFAULT_LIBRARY.map(def => {
-    const ov = byId[def.id];
+    const ov = byId[def.id] ? applyBalancePatch(def, byId[def.id]) : null;
     const spellUsage = normalizeSpellUsage(ov || def, normalizeSpellUsage(def));
-    return ov ? { ...def, ...ov, spellUsage, effects: { ...def.effects, ...(ov.effects || {}) } } : cloneCondition(def);
+    return ov
+      ? { ...def, ...ov, spellUsage, effects: { ...def.effects, ...(ov.effects || {}) }, balanceVersion: CONDITION_BALANCE_VERSION }
+      : cloneCondition(def);
   });
   rows.forEach(c => {
     if (!CONDITION_DEFAULT_IDS.has(c.id)) {
