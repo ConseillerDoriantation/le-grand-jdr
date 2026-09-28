@@ -4,10 +4,9 @@ import { deleteField } from '../config/firebase.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 import { openModal, pushModal, updateModalContent, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
-import { RARETE_NAMES, _rareteColor, _rareteStars, buildRaretePicker, pickRarete, loadRarities, openRaritiesAdmin } from '../shared/rarity.js';
+import { RARETE_NAMES, _rareteColor, buildRaretePicker, pickRarete, loadRarities, openRaritiesAdmin } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes, loadingHtml, eyeIcon } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
-import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort, getDefaultCharForUser } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
@@ -27,7 +26,7 @@ import {
 } from './shop-export.js';
 import {
   ITEM_STATS, ITEM_STAT_BY_KEY,
-  _parseLegacyStats, _formatStatBonuses, _legacyStatsTextFromData,
+  _parseLegacyStats, _legacyStatsTextFromData,
   _formatDegatsStatsText, _legacyToucherTextFromData,
   _getRareteNum, _getItemStatFilterKeys,
 } from './shop-item-stats.js';
@@ -147,20 +146,20 @@ let _shopReadableDraft = null;
 let _shopSousTypes = [];
 let _shopCharactersScope = '';
 let _shopCharactersLoad = null;
-// Index local des objets visibles : recherches et filtres sans lecture Firestore.
-let _shopSearchIndex = [];
+// Index local id → texte normalisé : recherches et filtres sans lecture Firestore.
+let _shopSearchText = new Map();
 function _setShopCharId(id = '') {
   setShopCharId(id);
 }
 let _weaponFormats = [];
-let _view  = 'home';   // 'home' | 'items'
+let _view  = 'home';   // 'home' (tous les articles) | 'items' (une catégorie)
 let _shopSection = 'shop'; // shop | atelier | artisan
 let _artisanNeedsReset = false;
 let _activeCat = null;
 let _page = 1;
 let _pendingTargetShopItemId = null;
 let _pendingTargetShopMode = '';
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 24; // divisible par 2, 3, 4 et 6 colonnes
 
 // Filtres actifs (multi-sélection)
 let _filterSearch = '';
@@ -184,37 +183,34 @@ function toggleFav(id) {
   const f = _getFavs();
   if (f.has(id)) f.delete(id); else f.add(id);
   lsJson.set(_favKey(), [...f]);
-  // Si l'Atelier est ouvert (modale), on le rafraîchit ; sinon on re-render la boutique.
+  // Atelier ouvert : on le rafraîchit ; catalogue : résultats + compteurs seulement.
   if (document.getElementById('atelier-items-col')) _renderAtelier();
+  else if (document.getElementById('sh-items-results')) _refreshSmartFiltersFromCache();
   else renderShop();
 }
 const SMART_KINDS = ['fav', 'payable', 'boost', 'upgrade', 'new'];
 const CHAR_SMART_KINDS = new Set(['payable', 'boost', 'upgrade']);
 
-// ── Tweaks utilisateur (lot 7) : préférences d'affichage persistées en LS ──
-// Layout : 'sidebar' (catégories à gauche) | 'tabs' (catégories en pastilles
-// horizontales sous le header) — utile sur petits écrans ou par préférence.
-// Densité : 'confort' (défaut) | 'compact' (padding réduit, plus d'items vus).
-// Card    : 'horizontal' (défaut) | 'showcase' (vertical, image dominante).
-const _TWEAKS_DEFAULTS = { layout: 'sidebar', density: 'confort', card: 'horizontal', columns: 'auto' };
-const _TWEAKS_LS_KEY = 'shop_tweaks';
-let _shopTweaks = (() => {
-  try { return { ..._TWEAKS_DEFAULTS, ...(JSON.parse(localStorage.getItem(_TWEAKS_LS_KEY) || '{}')) }; }
-  catch { return { ..._TWEAKS_DEFAULTS }; }
+// ── Préférences d'affichage (localStorage, propres à ce navigateur) ──
+// Vue : 'grille' (cartes) | 'liste' (tableau dense). Reprend l'ancien réglage
+// « Liste » des tweaks s'il existait. Le panneau Filtres garde son état ouvert.
+function _lsGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
+function _lsSet(key, val) { try { localStorage.setItem(key, val); } catch {} }
+let _shopView = (() => {
+  const v = _lsGet('shop_view');
+  if (v === 'grille' || v === 'liste') return v;
+  try { return JSON.parse(_lsGet('shop_tweaks') || '{}')?.card === 'liste' ? 'liste' : 'grille'; }
+  catch { return 'grille'; }
 })();
-function _shopTweaksApply() {
-  const b = document.body;
-  if (!b) return;
-  b.classList.toggle('shop-layout-tabs',     _shopTweaks.layout  === 'tabs');
-  b.classList.toggle('shop-density-compact', _shopTweaks.density === 'compact');
-  b.classList.toggle('shop-card-showcase',   _shopTweaks.card    === 'showcase');
-  b.classList.toggle('shop-card-list',       _shopTweaks.card    === 'liste');
-  ['1', '2', '3', '4', '5'].forEach(n => b.classList.toggle(`shop-cols-${n}`, _shopTweaks.columns === n));
-}
-function _shopTweaksSave() {
-  try { localStorage.setItem(_TWEAKS_LS_KEY, JSON.stringify(_shopTweaks)); } catch {}
-  _shopTweaksApply();
-}
+let _filtersOpen = _lsGet('shop_filters_open') === '1';
+
+// Menus déroulants <details> de l'en-tête (Gérer, personnage) : fermés au clic
+// extérieur et dès qu'une option est choisie.
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('.shc-manage[open], .sh-char-picker[open]').forEach(d => {
+    if (!d.contains(e.target) || e.target.closest('.shc-manage-opt')) d.open = false;
+  });
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CHARGEMENT
@@ -257,18 +253,6 @@ async function loadShopCharacters() {
 // ══════════════════════════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
-function _catGradient(nom) {
-  const g = [
-    'background:linear-gradient(135deg,#1a1f3a,#2d3561)',
-    'background:linear-gradient(135deg,#1a2f1a,#2d5230)',
-    'background:linear-gradient(135deg,#2f1a1a,#523030)',
-    'background:linear-gradient(135deg,#1a2a2f,#1d4a52)',
-    'background:linear-gradient(135deg,#2a1a2f,#4a2052)',
-    'background:linear-gradient(135deg,#2f2a1a,#524a20)',
-  ];
-  return g[(nom||'').charCodeAt(0) % g.length];
-}
-
 function _catEmoji(nom) {
   const n = (nom||'').toLowerCase();
   if (n.includes('arme'))                          return '⚔️';
@@ -317,17 +301,24 @@ function _animateCount(el, from, to, duration = 400) {
 // ══════════════════════════════════════════════════════════════════════════════
 // RENDER PRINCIPAL
 // ══════════════════════════════════════════════════════════════════════════════
-function _renderShopAdminToolbar() {
+// Menu MJ « Gérer » de l'en-tête (remplace l'ancienne barre de 6 boutons).
+function _renderManageMenu() {
   if (!STATE.isAdmin) return '';
-  return `<div class="sh-catalog-admin" role="toolbar" aria-label="Gestion de la Boutique">
-    <span class="sh-catalog-admin-label">Gestion</span>
-    <button class="btn btn-outline btn-sm" data-sh-action="openCatModal" title="Créer une catégorie">📁 Catégorie</button>
-    <button class="btn btn-outline btn-sm" data-sh-action="openItemModal" title="Créer un article">＋ Article</button>
-    <button class="btn btn-outline btn-sm" data-sh-action="openWeaponFmts" title="Gérer les types d'arme et leurs techniques">⚙️ Types d’arme</button>
-    <button class="btn btn-outline btn-sm" data-sh-action="openRarities" title="Gérer les raretés">★ Raretés</button>
-    <button class="btn btn-outline btn-sm" data-sh-action="openUpgradeStg" title="Tarifs et plafonds des améliorations">⚙️ Améliorations</button>
-    <button class="btn btn-outline btn-sm" data-sh-action="openExport" title="Exporter / Importer la boutique">⬆️ Export</button>
-  </div>`;
+  const opt = (action, label, title) =>
+    `<button type="button" class="shc-manage-opt" role="menuitem" data-sh-action="${action}" title="${title}">${label}</button>`;
+  return `<details class="shc-manage">
+    <summary class="shc-btn" aria-label="Gérer la boutique">Gérer <span class="shc-caret" aria-hidden="true">⌄</span></summary>
+    <div class="shc-manage-menu" role="menu">
+      ${opt('openItemModal', '＋ Nouvel article', 'Créer un article')}
+      ${opt('openCatModal', '📁 Nouvelle catégorie', 'Créer une catégorie')}
+      <hr>
+      ${opt('openWeaponFmts', '⚔️ Types d’arme', 'Gérer les types d’arme et leurs techniques')}
+      ${opt('openRarities', '★ Raretés', 'Gérer les raretés')}
+      ${opt('openUpgradeStg', '⚙️ Améliorations', 'Tarifs et plafonds des améliorations')}
+      <hr>
+      ${opt('openExport', '⬆️ Export / Import', 'Exporter ou importer la boutique')}
+    </div>
+  </details>`;
 }
 
 export async function renderShop() {
@@ -341,7 +332,7 @@ export async function renderShop() {
     if (item) {
       _shopSection = 'shop';
       _view = 'items';
-      _activeCat = item.categorieId || '__uncategorized__';
+      _activeCat = _cats.some(c => c.id === item.categorieId) ? item.categorieId : '__uncategorized__';
       _filterSearch = '';
       _filterTags.clear();
       _smartFilters.clear();
@@ -356,9 +347,11 @@ export async function renderShop() {
       _pendingTargetShopMode = targetMode;
     }
   }
-  // Un joueur ne peut pas rester sur une catégorie devenue masquée.
-  if (_view === 'items' && !STATE.isAdmin && _cats.find(c => c.id === _activeCat)?.masquee) {
-    _view = 'home'; _activeCat = null;
+  // Un joueur ne peut pas rester sur une catégorie devenue masquée (ni personne
+  // sur une catégorie supprimée entre-temps).
+  if (_view === 'items' && _activeCat !== '__uncategorized__') {
+    const cat = _cats.find(c => c.id === _activeCat);
+    if (!cat || (!STATE.isAdmin && cat.masquee)) { _view = 'home'; _activeCat = null; }
   }
   const content = document.getElementById('main-content');
   if (!content) return;
@@ -366,16 +359,11 @@ export async function renderShop() {
   let html = `<div class="sh-page sh-page--v2">`;
   const visibleShopItems = _visibleItems();
   const visibleShopCats = _visibleCats();
-  const activeCategory = _activeCat === '__uncategorized__'
-    ? { nom: 'Articles non classés' }
-    : _cats.find(cat => cat.id === _activeCat);
   const pageContext = _shopSection === 'atelier'
     ? 'Composer et comparer un équipement avant achat'
     : _shopSection === 'artisan'
       ? 'Améliorer, sertir et recycler son équipement'
-      : _view === 'items' && activeCategory
-        ? activeCategory.nom
-        : `${visibleShopItems.length} article${visibleShopItems.length !== 1 ? 's' : ''} · ${visibleShopCats.length} catégorie${visibleShopCats.length !== 1 ? 's' : ''}`;
+      : `${visibleShopItems.length} article${visibleShopItems.length !== 1 ? 's' : ''} · ${visibleShopCats.length} catégorie${visibleShopCats.length !== 1 ? 's' : ''}`;
 
   // ── Char-strip riche (avatar + select + or proéminent) ──
   const activeChar = _getActiveShopChar();
@@ -435,8 +423,8 @@ export async function renderShop() {
           <div class="sh-topbar-tools">
             <div class="sh-topbar-character">${charStripHtml}</div>
             ${_shopSection === 'shop' ? `
-              <button class="btn btn-outline btn-sm" data-sh-action="openShopHistory" title="Historique des objets achetés et vendus">🧾 Historique</button>
-              <button class="btn btn-outline btn-sm sh-tweaks-btn" data-sh-action="openTweaks" title="Affichage : disposition, densité et colonnes" aria-label="Options d’affichage">⚙️</button>
+              <button type="button" class="shc-btn" data-sh-action="openShopHistory" title="Historique des objets achetés et vendus" aria-label="Historique">🧾<span class="shc-btn-lbl">Historique</span></button>
+              ${_renderManageMenu()}
             ` : ''}
           </div>
         </div>
@@ -465,25 +453,11 @@ export async function renderShop() {
         ? _renderAtelierPage()
         : _shopSection === 'artisan'
           ? `<div class="sh-artisan-page" id="sh-artisan-page" aria-live="polite">${loadingHtml('Préparation de l\'artisan…')}</div>`
-          : `
-            ${_renderShopAdminToolbar()}
-            ${_shopTweaks.layout === 'tabs' ? _renderCatTabsBar() : ''}
-            <div class="sh-layout">
-              <div class="sh-sidebar-col">
-                ${_renderSidebarTop()}
-                ${_renderSidebar()}
-              </div>
-              <div class="sh-main">
-                ${_renderNoCharBanner()}
-                ${_view === 'home' ? _renderHome() : _renderItemsView()}
-              </div>
-            </div>
-          `}
+          : _renderCatalog()}
     </div>
   </div>`;
 
   content.innerHTML = html;
-  _shopTweaksApply();
   if (_shopSection === 'shop') {
     unmountArtisanPage();
     _mountSortables();
@@ -504,77 +478,6 @@ export async function renderShop() {
   }
 }
 
-/** Popup Tweaks d'affichage — segmented controls × 3. */
-function openTweaksPopup() {
-  const labels = { layout: 'Disposition', density: 'Densité', card: 'Présentation des articles', columns: 'Articles par ligne' };
-  const seg = (key, options) => `<div class="sh-tw-seg" data-tw-key="${key}" role="group" aria-label="${labels[key] || 'Préférence'}">
-    ${options.map(o => `<button type="button" class="sh-tw-seg-btn ${_shopTweaks[key]===o.v?'on':''}"
-      data-sh-action="setTweak" data-tw-key="${key}" data-tw-val="${o.v}"
-      aria-pressed="${_shopTweaks[key] === o.v}">${o.lbl}</button>`).join('')}
-  </div>`;
-  openModal('', `
-  <div class="sh-admin-modal is-cat">
-    <div class="sh-admin-head">
-      <div class="sh-admin-head-ico">⚙️</div>
-      <div class="sh-admin-head-title">
-        <h2>Affichage de la boutique</h2>
-        <small>Préférences locales (sauvegardées sur ce navigateur).</small>
-      </div>
-      <button class="sh-admin-close" data-sh-action="closeModal" title="Fermer">✕</button>
-    </div>
-
-    <div class="sh-admin-body">
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">📐 Layout</div>
-        ${seg('layout', [
-          { v:'sidebar', lbl:'Sidebar' },
-          { v:'tabs',    lbl:'Tabs' },
-        ])}
-        <p class="sh-admin-section-hint" style="margin-top:8px">Catégories à gauche (sidebar) ou en pastilles horizontales (tabs).</p>
-      </div>
-
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">📏 Densité</div>
-        ${seg('density', [
-          { v:'confort', lbl:'Confort' },
-          { v:'compact', lbl:'Compact' },
-        ])}
-        <p class="sh-admin-section-hint" style="margin-top:8px">Compact : moins d'espacement, plus d'articles à l'écran.</p>
-      </div>
-
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🎴 Carte article</div>
-        ${seg('card', [
-          { v:'horizontal', lbl:'Horizontale' },
-          { v:'showcase',   lbl:'Vitrine' },
-          { v:'liste',      lbl:'Liste' },
-        ])}
-        <p class="sh-admin-section-hint" style="margin-top:8px">Horizontale : image à gauche · Vitrine : image en haut · Liste : tableau dense facon tableur (ignore « articles par ligne »).</p>
-      </div>
-
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">▦ Articles par ligne</div>
-        ${seg('columns', [
-          { v:'auto', lbl:'Auto' },
-          { v:'1',    lbl:'1' },
-          { v:'2',    lbl:'2' },
-          { v:'3',    lbl:'3' },
-          { v:'4',    lbl:'4' },
-          { v:'5',    lbl:'5' },
-        ])}
-        <p class="sh-admin-section-hint" style="margin-top:8px">Auto conserve le comportement responsive. Un nombre fixe force la grille sur desktop et tablette.</p>
-      </div>
-    </div>
-
-    <div class="sh-admin-footer">
-      <button class="btn btn-outline btn-sm" data-sh-action="resetTweaks">↺ Réinitialiser</button>
-      <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-gold btn-sm" data-sh-action="closeModal">Fermer</button>
-    </div>
-  </div>
-  `);
-}
-
 function _renderNoCharBanner() {
   if (_getActiveShopChar()) return '';
   const hasAnyChar = _getShopChars().length > 0;
@@ -587,247 +490,224 @@ function _renderNoCharBanner() {
   </div>`;
 }
 
-function _renderSidebarTop() {
-  // Le sélecteur de personnage est désormais dans la topbar (sh-char-strip).
-  // On garde la fonction pour compat mais elle ne rend plus rien.
-  return '';
+// ══════════════════════════════════════════════════════════════════════════════
+// CATALOGUE — rail des catégories + barre d'outils + résultats.
+// « Tout » (_view 'home', _activeCat null) et une catégorie partagent le même
+// rendu : seule la base d'articles change.
+// ══════════════════════════════════════════════════════════════════════════════
+const _SVG_GRID = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+const _SVG_LIST = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+const _SVG_FILTER = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12l-4.6 5.3v4.6L6.6 14.3V8.3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+
+function _catInfo(catId) {
+  if (!catId) return { id: null, nom: 'Tous les articles' };
+  if (catId === '__uncategorized__') return { id: catId, nom: 'Non classé', emoji: '📦', template: 'classique' };
+  return _cats.find(c => c.id === catId) || null;
 }
 
-/** Layout `tabs` : barre horizontale des catégories sous le header.
- *  Remplace visuellement la sidebar (qui sera cachée en CSS). */
-function _renderCatTabsBar() {
-  const cats = _visibleCats();
-  const totalItems = _visibleItems().length;
-  const orphaned = _items.filter(i => !_cats.find(c => c.id === i.categorieId));
-  return `<div class="sh-cat-tabs-bar">
-    <button class="sh-cat-tab ${_view==='home'?'active':''}" data-sh-action="goHome">
-      🏠 <span class="sh-cat-tab-name">Toutes</span>
-      <span class="sh-cat-tab-count">${totalItems}</span>
-    </button>
-    ${cats.map(cat => {
-      const count = _items.filter(i => i.categorieId === cat.id).length;
-      const active = _view === 'items' && _activeCat === cat.id;
-      return `<button class="sh-cat-tab ${active?'active':''}" data-sh-action="goCat" data-id="${cat.id}"
-        ${cat.masquee ? 'style="opacity:.6"' : ''}>
-        ${cat.emoji || _catEmoji(cat.nom)} <span class="sh-cat-tab-name">${_esc(cat.nom)}</span>
-        <span class="sh-cat-tab-count">${count}</span>
-      </button>`;
-    }).join('')}
-    ${orphaned.length ? `<button class="sh-cat-tab ${_view==='items' && _activeCat==='__uncategorized__'?'active':''}"
-      data-sh-action="goCat" data-id="__uncategorized__">
-      📦 <span class="sh-cat-tab-name">Non classé</span>
-      <span class="sh-cat-tab-count">${orphaned.length}</span>
-    </button>` : ''}
+function _renderRail() {
+  const items = _visibleItems();
+  const countBy = new Map();
+  items.forEach(i => countBy.set(i.categorieId, (countBy.get(i.categorieId) || 0) + 1));
+  const orphans = items.filter(i => !_cats.some(c => c.id === i.categorieId)).length;
+  const link = ({ id = null, nom, ico, count, masked = false, sortable = false }) => {
+    const active = id ? (_view === 'items' && _activeCat === id) : _view === 'home';
+    return `<button type="button" class="shc-rail-link${active ? ' is-active' : ''}${masked ? ' is-masked' : ''}${sortable ? ' sh-sortable-item' : ''}"
+      data-sh-action="${id ? 'goCat' : 'goHome'}"${id ? ` data-id="${_esc(id)}" data-cat-id="${_esc(id)}"` : ''}${active ? ' aria-current="page"' : ''}>
+      <span class="shc-rail-ico" aria-hidden="true">${ico}</span>
+      <span class="shc-rail-name">${_esc(nom)}</span>
+      ${masked ? `<span class="shc-rail-eye" title="Masquée aux joueurs">${eyeIcon(true)}</span>` : ''}
+      <span class="shc-rail-count">${count}</span>
+    </button>`;
+  };
+  return `<nav class="shc-rail" aria-label="Catégories de la boutique">
+    ${link({ nom: 'Tout', ico: '<svg class="shc-rail-svg"><use href="./assets/img/icons.svg#icon-bag"/></svg>', count: items.length })}
+    <div class="shc-rail-list${STATE.isAdmin ? ' sh-sortable' : ''}" id="sh-cat-rail">
+      ${_visibleCats().map(cat => link({
+        id: cat.id, nom: cat.nom, ico: _esc(cat.emoji || _catEmoji(cat.nom)),
+        count: countBy.get(cat.id) || 0, masked: !!cat.masquee, sortable: STATE.isAdmin,
+      })).join('')}
+    </div>
+    ${orphans ? link({ id: '__uncategorized__', nom: 'Non classé', ico: '📦', count: orphans }) : ''}
+  </nav>`;
+}
+
+// État calculé une fois par rendu (en-tête, filtres et résultats le partagent).
+function _catalogState() {
+  const base = _getBaseItems(_activeCat);
+  const items = _getFilteredItems(_activeCat);
+  const organizeAll = _isManualOrganizeMode();
+  const total = items.length;
+  const pages = organizeAll ? 1 : Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const p = organizeAll ? 1 : Math.max(1, Math.min(_page, pages));
+  const slice = organizeAll ? items : items.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
+  const hasFilters = Boolean(_norm(_filterSearch) || _filterTags.size || _smartFilters.size);
+  return { base, items, organizeAll, total, pages, p, slice, hasFilters, groups: _buildTagGroups(base) };
+}
+
+function _catalogMetaText(st) {
+  const n = st.base.length;
+  let txt = `${n} article${n !== 1 ? 's' : ''}`;
+  if (st.hasFilters && st.total !== n) txt += ` · ${st.total} affiché${st.total !== 1 ? 's' : ''}`;
+  if (st.organizeAll && n > 1) txt += ' · glisser pour réordonner';
+  return txt;
+}
+
+function _renderCatalog() {
+  const st = _catalogState();
+  return `<div class="shc">
+    ${_renderRail()}
+    <section class="shc-main" aria-label="Articles">
+      ${_renderNoCharBanner()}
+      ${_renderCatalogHead(st)}
+      <div class="shc-smart" id="sh-smart" role="group" aria-label="Suggestions personnalisées">${_renderSmartChips()}</div>
+      <div class="shc-filters" id="sh-filters"${_filtersOpen && st.groups.length ? '' : ' hidden'}>${_renderFilterGroups(st.groups)}</div>
+      <div class="shc-active" id="sh-active-filters">${_renderActiveFilters(st.groups)}</div>
+      <div class="shc-results" id="sh-items-results">${_renderResultsHtml(st)}</div>
+    </section>
   </div>`;
 }
 
-// ── Hero : suggestions personnalisées ──────────────────────────────────────
-// Ces raccourcis parlent au joueur ; les critères propres aux objets restent
-// dans le bloc « Affiner l'équipement » de la catégorie.
-function _renderSmartBar(baseItems = _getCachedVisibleItems()) {
-  const base = Array.isArray(baseItems) ? baseItems : _getCachedVisibleItems();
-  const SMART_META = [
-    { k:'fav',     ico:'⭐', lbl:'Mes favoris',                cls:'fav'     },
-    { k:'payable', ico:'💰', lbl:'Je peux me payer',         cls:'payable' },
-    { k:'boost',   ico:'⚡', lbl:'Booste ma stat principale', cls:'boost'   },
-    { k:'upgrade', ico:'⬆️', lbl:'Mieux que mon équipement',  cls:'upgrade' },
-    { k:'new',     ico:'✨', lbl:'Nouveautés',                 cls:'new'     },
-  ];
-  const activeChar = _getActiveShopChar();
+function _renderCatalogHead(st) {
+  const cat = _catInfo(_activeCat) || _catInfo(null);
+  const isRealCat = _view === 'items' && cat.id && cat.id !== '__uncategorized__';
+  const edit = STATE.isAdmin;
+  const ico = cat.id
+    ? _esc(cat.emoji || _catEmoji(cat.nom))
+    : '<svg class="shc-title-svg"><use href="./assets/img/icons.svg#icon-bag"/></svg>';
+  const sortOpt = (v, l) => `<option value="${v}"${_filterSort === v ? ' selected' : ''}>${l}</option>`;
+  const viewBtn = (v, label, svg) => `<button type="button" class="shc-view-btn${_shopView === v ? ' is-on' : ''}"
+    data-sh-action="setView" data-view="${v}" aria-pressed="${_shopView === v}" title="${label}" aria-label="${label}">${svg}</button>`;
+  return `<div class="shc-head">
+    <div class="shc-title">
+      <span class="shc-title-ico" aria-hidden="true">${ico}</span>
+      <div class="shc-title-txt">
+        <h2>${_esc(cat.nom)}${cat.masquee ? ` <span class="shc-title-eye" title="Masquée aux joueurs">${eyeIcon(true)}</span>` : ''}</h2>
+        <span class="shc-title-meta" id="sh-category-meta" role="status" aria-live="polite">${_catalogMetaText(st)}</span>
+      </div>
+      ${edit && isRealCat ? `<div class="shc-title-admin">
+        <button type="button" class="shc-icon-btn" data-sh-action="openCatModal" data-id="${_esc(cat.id)}" title="Modifier la catégorie" aria-label="Modifier la catégorie">✏️</button>
+        <button type="button" class="shc-icon-btn" data-sh-action="deleteCat" data-id="${_esc(cat.id)}" title="Supprimer la catégorie" aria-label="Supprimer la catégorie">🗑️</button>
+      </div>` : ''}
+    </div>
+    <div class="shc-tools">
+      <div class="shc-search">
+        <svg class="shc-search-ico" aria-hidden="true"><use href="./assets/img/icons.svg#icon-search"/></svg>
+        <input type="search" id="sh-search" class="shc-search-input"
+          placeholder="${_view === 'home' ? 'Rechercher un objet, un effet, un trait…' : `Rechercher dans ${_esc(cat.nom)}…`}"
+          value="${_esc(_filterSearch)}" data-sh-action="search" data-sh-on="input"
+          autocomplete="off" aria-label="Rechercher dans la boutique" aria-controls="sh-items-results">
+        <button type="button" class="shc-search-clear" data-sh-action="clearSearch" aria-label="Effacer la recherche"${_filterSearch ? '' : ' hidden'}>✕</button>
+      </div>
+      <select class="input-field shc-sort" data-sh-action="setSort" data-sh-on="change" aria-label="Trier les articles">
+        ${sortOpt('ordre', _view === 'home' ? 'Par catégorie' : 'Ordre manuel')}
+        ${sortOpt('recommande', 'Recommandé pour moi')}
+        ${sortOpt('nom', 'Nom (A → Z)')}
+        ${sortOpt('prix_asc', 'Prix croissant')}
+        ${sortOpt('prix_desc', 'Prix décroissant')}
+        ${sortOpt('rarete', 'Rareté')}
+      </select>
+      ${_renderFilterToggle(st.groups)}
+      <div class="shc-view" role="group" aria-label="Affichage des articles">
+        ${viewBtn('grille', 'Grille', _SVG_GRID)}${viewBtn('liste', 'Liste', _SVG_LIST)}
+      </div>
+      ${edit ? `<button type="button" class="shc-btn is-primary" data-sh-action="openItemModal" title="Créer un article${isRealCat ? ' dans cette catégorie' : ''}">＋ Article</button>` : ''}
+    </div>
+  </div>`;
+}
+
+// ── Suggestions personnalisées (favoris, budget, progression) ─────────────────
+// Parlent au joueur ; les critères propres aux objets restent dans « Filtres ».
+const SMART_META = [
+  { k: 'fav',     ico: '★',  lbl: 'Favoris',             tip: 'Articles marqués ☆ en favori' },
+  { k: 'payable', ico: '🪙', lbl: 'Abordable',           tip: 'Articles que ton personnage peut payer' },
+  { k: 'boost',   ico: '⚡', lbl: 'Booste ma stat',      tip: 'Articles qui augmentent la stat principale du personnage' },
+  { k: 'upgrade', ico: '▲',  lbl: 'Meilleur que l’équipé', tip: 'Meilleurs que l’objet équipé au même emplacement (stat principale ou CA)' },
+  { k: 'new',     ico: '✨', lbl: 'Nouveautés',          tip: 'Ajouts récents du MJ' },
+];
+
+function _renderSmartChips() {
+  const base = _getBaseItems(_activeCat);
+  const ctx = _shopSmartCtx();
   const chips = SMART_META.map(m => {
-    const unavailable = CHAR_SMART_KINDS.has(m.k) && !activeChar;
+    const unavailable = CHAR_SMART_KINDS.has(m.k) && !ctx.char;
     const on = !unavailable && _smartFilters.has(m.k);
-    const n  = unavailable ? "—" : _shopSmartCount(m.k, base);
-    return `<button class="sh-smart-chip ${m.cls} ${on?'on':''}"
-      data-sh-action="toggleSmart" data-smart="${m.k}" ${unavailable ? "disabled" : ""}
-      title="${_esc(m.lbl)}">
-      <span class="sh-smart-ico">${m.ico}</span>
-      <span class="sh-smart-lbl">${_esc(m.lbl)}</span>
-      <span class="sh-smart-count">${n}</span>
+    const n = unavailable ? 0 : base.filter(it => _shopItemMatchesSmart(it, m.k, ctx)).length;
+    const lbl = m.k === 'boost' && ctx.char && ITEM_STAT_BY_KEY[ctx.primary] ? `Booste ${ITEM_STAT_BY_KEY[ctx.primary].short}` : m.lbl;
+    return `<button type="button" class="shc-chip shc-chip--${m.k}${on ? ' is-on' : ''}"
+      data-sh-action="toggleSmart" data-smart="${m.k}" aria-pressed="${on}"${unavailable || (!n && !on) ? ' disabled' : ''}
+      title="${_esc(unavailable ? 'Sélectionne un personnage' : m.tip)}">
+      <span class="shc-chip-ico" aria-hidden="true">${m.ico}</span>${_esc(lbl)}<span class="shc-chip-n">${unavailable ? '—' : n}</span>
     </button>`;
   }).join('');
-  const context = activeChar?.nom ? `Pour ${_esc(activeChar.nom)}` : 'Suggestions rapides';
-  return `<div class="sh-smart-bar">
-    <div class="sh-smart-bar-heading">
-      <span class="sh-smart-bar-lbl">${context}</span>
-      <small>Favoris, budget et progression</small>
+  return `<span class="shc-bar-lbl">${ctx.char?.nom ? `Pour ${_esc(ctx.char.nom)}` : 'Suggestions'}</span>${chips}`;
+}
+
+function _renderFilterToggle(groups) {
+  if (!groups.length) return '';
+  const n = _filterTags.size;
+  return `<button type="button" class="shc-chip shc-filter-toggle${n ? ' has-active' : ''}" id="sh-filter-toggle"
+    data-sh-action="toggleFilters" aria-expanded="${_filtersOpen}" aria-controls="sh-filters">
+    ${_SVG_FILTER}Filtres${n ? `<span class="shc-chip-n">${n}</span>` : ''}<span class="shc-caret" aria-hidden="true">⌄</span>
+  </button>`;
+}
+
+function _renderFilterGroups(groups) {
+  return groups.map(g => `<div class="shc-fgroup">
+    <span class="shc-fgroup-lbl">${_esc(g.label)}</span>
+    <div class="shc-fgroup-tags">
+      ${g.tags.map(t => {
+        const on = _filterTags.has(t.value);
+        return `<button type="button" class="shc-tag${on ? ' is-on' : ''}" style="--tag:${_esc(t.color)}"
+          data-tag-value="${_esc(t.value)}" data-sh-action="toggleTag" data-tag="${_esc(t.value)}" aria-pressed="${on}">${_esc(t.label)}</button>`;
+      }).join('')}
     </div>
-    <div class="sh-smart-chips">${chips}</div>
-    ${_smartFilters.size ? `<button class="sh-smart-reset" data-sh-action="resetSmart" title="Retirer toutes les suggestions actives">✕ Effacer</button>` : ''}
-  </div>`;
+  </div>`).join('');
 }
 
-function _renderSidebar() {
-  const cats       = _visibleCats();
-  const totalItems = _visibleItems().length;
-  const orphaned   = _items.filter(i => !_cats.find(c => c.id === i.categorieId));
-
-  return `
-    <aside class="sh-sidebar">
-      <div class="sh-sidebar-section">
-        <button class="sh-side-link ${_view === 'home' ? 'active' : ''}" data-sh-action="goHome">
-          <span class="sh-side-link-icon">🏠</span>
-          <span class="sh-side-link-text">
-            <strong>Toutes les catégories</strong>
-            <small>${cats.length} catégorie${cats.length!==1?'s':''} • ${totalItems} article${totalItems!==1?'s':''}</small>
-          </span>
-        </button>
-      </div>
-
-      <div class="sh-sidebar-section">
-        <div class="sh-sidebar-label">Catégories</div>
-        <div class="sh-side-list">
-          ${cats.map(cat => {
-            const count = _items.filter(i => i.categorieId === cat.id).length;
-            const active = _view === 'items' && _activeCat === cat.id;
-            const tpl = TEMPLATES[cat.template || 'classique'];
-            // Gradient coloré pour la pastille emoji (style maquette)
-            const catBg = _catGradient(cat.nom).replace(/^background:/, '');
-            return `
-              <button class="sh-side-link ${active ? 'active' : ''}" data-sh-action="goCat" data-id="${cat.id}"${cat.masquee ? ' style="opacity:.6"' : ''}>
-                <span class="sh-side-link-icon" style="--cat-bg:${catBg}">${cat.emoji || _catEmoji(cat.nom)}</span>
-                <span class="sh-side-link-text">
-                  <strong>${cat.nom}${cat.masquee ? ` <span title="Masquée aux joueurs">${eyeIcon(true)}</span>` : ''}</strong>
-                  <small>${tpl?.label || 'Type'} • ${count} article${count > 1 ? 's' : ''}</small>
-                </span>
-              </button>
-            `;
-          }).join('')}
-          ${orphaned.length > 0 ? `
-            <button class="sh-side-link ${_view === 'items' && _activeCat === '__uncategorized__' ? 'active' : ''}"
-              data-sh-action="goCat" data-id="__uncategorized__" style="opacity:.8">
-              <span class="sh-side-link-icon">📦</span>
-              <span class="sh-side-link-text">
-                <strong>Non classé</strong>
-                <small>${orphaned.length} article${orphaned.length > 1 ? 's' : ''} sans catégorie</small>
-              </span>
-            </button>
-          ` : ''}
-        </div>
-      </div>
-    </aside>
-  `;
+// Filtres actifs rappelés en pastilles retirables (utile panneau replié).
+function _renderActiveFilters(groups) {
+  if (!_filterTags.size) return '';
+  const labelOf = new Map(groups.flatMap(g => g.tags.map(t => [t.value, t.label])));
+  return [..._filterTags].map(v => `<button type="button" class="shc-active-chip" data-sh-action="toggleTag" data-tag="${_esc(v)}" title="Retirer ce filtre">
+      ${_esc(labelOf.get(v) || v.split(':').slice(1).join(':'))}<span aria-hidden="true">✕</span>
+    </button>`).join('')
+    + '<button type="button" class="shc-link" data-sh-action="resetFilters">Tout effacer</button>';
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// VUE HOME
-// ══════════════════════════════════════════════════════════════════════════════
-function _renderHome() {
-  // Recherche globale et suggestions réunies dans un même panneau.
-  const searchBar = `
-    <div class="sh-hero sh-discovery sh-discovery--home">
-      <div class="sh-hero-row">
-        <div class="sh-hero-search">
-          <span class="sh-hero-search-ico">🔍</span>
-          <input type="search" id="sh-home-search" class="sh-hero-search-input"
-            placeholder="Rechercher une arme, une potion, un effet…"
-            value="${_filterSearch||''}"
-            data-sh-action="search" data-sh-on="input"
-            autocomplete="off" aria-label="Rechercher dans la boutique" aria-controls="sh-home-results">
-          <button type="button" class="sh-hero-search-clear" data-sh-action="clearSearch"
-            aria-label="Effacer la recherche" ${_filterSearch ? '' : 'hidden'}>✕</button>
-        </div>
-      </div>
-      ${_renderSmartBar(_getCachedVisibleItems())}
-    </div>
-    <div id="sh-home-results">`;
-
-  return searchBar + _renderHomeResults() + `</div>`;
-}
-
-function _renderHomeResults() {
-  if (_norm(_filterSearch) || _smartFilters.size > 0) return _renderHomeSearchResults();
-
-  const cats     = _visibleCats();
-  const orphaned = _items.filter(i => !_cats.find(c => c.id === i.categorieId));
-
-  if (cats.length === 0 && orphaned.length === 0) {
-    return `<div class="empty-state"><div class="icon">🛒</div>
-      <p>La boutique est vide.</p>
-      ${STATE.isAdmin?'<p style="font-size:0.82rem;margin-top:0.5rem;color:var(--text-dim)">Crée une catégorie pour commencer.</p>':''}</div>`;
-  }
-  let html = `<div class="sh-cat-grid ${STATE.isAdmin?'sh-sortable':''}">`;
-  const edit = STATE.isAdmin;
-  cats.forEach(cat => {
-    const count = _items.filter(i => i.categorieId === cat.id).length;
-    const tpl   = TEMPLATES[cat.template||'classique'];
-    html += `<div class="sh-cat-card ${edit?'sh-sortable-item':''}" data-cat-id="${cat.id}" data-sh-action="goCat" data-id="${cat.id}"
-      data-sh-key-card="category" tabindex="0" role="button" aria-label="Ouvrir la catégorie ${_esc(cat.nom)}"${cat.masquee?' style="opacity:.6"':''}>
-      <div class="sh-cat-img" style="${cat.image?`background-image:url('${cat.image}')`:_catGradient(cat.nom)}">
-        <div class="sh-cat-img-overlay"></div>
-        ${!cat.image?`<div class="sh-cat-img-emoji">${cat.emoji||_catEmoji(cat.nom)}</div>`:''}
-        ${tpl?`<span class="sh-cat-tpl-badge">${tpl.label}</span>`:''}
-      </div>
-      <div class="sh-cat-body">
-        <div class="sh-cat-name-row">
-          <div class="sh-cat-name">${cat.nom}${cat.masquee?` <span title="Masquée aux joueurs">${eyeIcon(true)}</span>`:''}</div>
-          ${edit?`<div class="sh-card-admin-inline" data-sh-action="stop">
-            <button class="btn-icon" title="Modifier la catégorie" aria-label="Modifier la catégorie" data-sh-action="openCatModal" data-id="${cat.id}">✏️</button>
-            <button class="btn-icon" title="Supprimer la catégorie" aria-label="Supprimer la catégorie" data-sh-action="deleteCat" data-id="${cat.id}">🗑️</button>
-          </div>`:''}
-        </div>
-        <div class="sh-cat-meta">${count} article${count!==1?'s':''}</div>
-      </div>
-    </div>`;
-  });
-
-  // Carte virtuelle "Non classé" pour les articles sans catégorie valide
-  if (orphaned.length > 0) {
-    const n = orphaned.length;
-    html += `<div class="sh-cat-card" data-sh-action="goCat" data-id="__uncategorized__"
-      data-sh-key-card="category" tabindex="0" role="button" aria-label="Ouvrir les articles non classés" style="opacity:.85">
-      <div class="sh-cat-img" style="background:linear-gradient(135deg,#2a2a3e,#1a1a2a)">
-        <div class="sh-cat-img-overlay"></div>
-        <div class="sh-cat-img-emoji">📦</div>
-        <span class="sh-cat-tpl-badge" style="background:rgba(255,165,0,.25);color:#ffb347">Non classé</span>
-      </div>
-      <div class="sh-cat-body">
-        <div class="sh-cat-name-row">
-          <div class="sh-cat-name">Non classé</div>
-        </div>
-        <div class="sh-cat-meta">${n} article${n!==1?'s':''} sans catégorie</div>
-      </div>
+function _renderResultsHtml(st) {
+  if (!st.slice.length) {
+    if (st.hasFilters) {
+      return `<div class="shc-empty">
+        <p>Aucun article ne correspond à ces critères.</p>
+        <button type="button" class="shc-btn" data-sh-action="resetFilters">Réinitialiser la recherche et les filtres</button>
+      </div>`;
+    }
+    const emptyShop = _view === 'home';
+    return `<div class="shc-empty">
+      <p>${emptyShop ? 'La boutique est vide.' : 'Aucun article dans cette catégorie.'}</p>
+      ${STATE.isAdmin ? `<button type="button" class="shc-btn is-primary" data-sh-action="${emptyShop && !_cats.length ? 'openCatModal' : 'openItemModal'}">${emptyShop && !_cats.length ? '📁 Créer une catégorie' : '＋ Ajouter un article'}</button>` : ''}
     </div>`;
   }
-
-  html += `</div>`;
-  return html;
+  const ctx = _cardCtx();
+  const opts = { showCat: _view === 'home', sortable: STATE.isAdmin && _view === 'items' };
+  const body = _shopView === 'liste'
+    ? _renderItemList(st.slice, ctx, opts)
+    : `<div class="shc-grid${opts.sortable ? ' sh-sortable' : ''}" id="sh-items-grid">${st.slice.map(it => _renderCard(it, ctx, opts)).join('')}</div>`;
+  return body + _renderPagination(st.p, st.pages);
 }
 
-function _renderHomeSearchResults() {
-  const search = _norm(_filterSearch);
-  let matched = _shopSearchIndex
-    .filter(entry => _searchIncludes(entry.text, search))
-    .map(entry => entry.item);
-  // Smart filters s'appliquent aussi à la recherche home transverse
-  matched = _shopApplySmart(matched);
-  matched.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity:'base' }));
-
-  if (matched.length === 0) {
-    return emptyStateHtml('🔍', 'Aucun objet ne correspond à la recherche et aux filtres actifs.');
-  }
-
-  const total = matched.length;
-  const pages = Math.ceil(total / PAGE_SIZE);
-  const p     = Math.max(1, Math.min(_page, pages));
-  const slice = matched.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
-
-  let html = `<div id="sh-home-count" role="status" aria-live="polite" style="margin-bottom:.75rem;color:var(--text-dim);font-size:.85rem">
-    ${total} résultat${total>1?'s':''} dans toutes les catégories
-  </div>`;
-  html += _renderMixedItemGrid(slice);
-
-  if (pages > 1) {
-    html += `<div class="sh-pagination">`;
-    if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
-    const st=Math.max(1,p-2), en=Math.min(pages,p+2);
-    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span class="sh-dim-pill">…</span>':''}`;
-    for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
-    if(en<pages) html+=`${en<pages-1?'<span class="sh-dim-pill">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
-    if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
-    html += `</div>`;
-  }
-  return html;
+function _renderPagination(p, pages) {
+  if (pages <= 1) return '';
+  const btn = (n, label = n) => `<button type="button" class="shc-page${n === p ? ' is-on' : ''}" data-sh-action="page" data-page="${n}"${n === p ? ' aria-current="page"' : ''}>${label}</button>`;
+  const gap = '<span class="shc-page-gap" aria-hidden="true">…</span>';
+  const st = Math.max(1, p - 2), en = Math.min(pages, p + 2);
+  let html = p > 1 ? btn(p - 1, '← Précédent') : '';
+  if (st > 1) html += btn(1) + (st > 2 ? gap : '');
+  for (let i = st; i <= en; i++) html += btn(i);
+  if (en < pages) html += (en < pages - 1 ? gap : '') + btn(pages);
+  if (p < pages) html += btn(p + 1, 'Suivant →');
+  return `<nav class="shc-pages" aria-label="Pagination">${html}</nav>`;
 }
 
 /**
@@ -880,18 +760,14 @@ function _resolveItemTemplate(item) {
   const cat = _cats.find(c => c.id === item?.categorieId);
   return cat?.template || 'classique';
 }
-function _renderMixedItemGrid(items) {
-  if (_shopTweaks.card === 'liste') return _renderItemList(items);
-  return `<div class="sh-item-grid">` +
-    items.map((item, i) => _renderItemCard(item, _resolveItemTemplate(item), i)).join('') +
-    `</div>`;
-}
 
 // ══════════════════════════════════════════════════════════════════════════════
-// VUE ARTICLES — filtres dynamiques multi-tags + recherche temps réel
+// FILTRAGE — recherche temps réel + suggestions + tags, sans lecture Firestore
 // ══════════════════════════════════════════════════════════════════════════════
+// catId null = tous les articles visibles (vue « Tout »).
 function _getBaseItems(catId) {
   const items = _visibleItems();
+  if (!catId) return items;
   return catId === '__uncategorized__'
     ? items.filter(i => !_cats.find(c => c.id === i.categorieId))
     : items.filter(i => i.categorieId === catId);
@@ -914,14 +790,7 @@ function _itemSearchText(item = {}) {
 }
 
 function _rebuildShopSearchIndex() {
-  _shopSearchIndex = _visibleItems().map(item => ({
-    item,
-    text: _itemSearchText(item),
-  }));
-}
-
-function _getCachedVisibleItems() {
-  return _shopSearchIndex.map(entry => entry.item);
+  _shopSearchText = new Map(_items.map(item => [item.id, _itemSearchText(item)]));
 }
 
 function _getFilteredItems(catId) {
@@ -930,7 +799,7 @@ function _getFilteredItems(catId) {
   // 🔎 Recherche
   const search = _norm(_filterSearch);
   if (search) {
-    items = items.filter(i => _searchIncludes(_itemSearchText(i), search));
+    items = items.filter(i => _searchIncludes(_shopSearchText.get(i.id) ?? _itemSearchText(i), search));
   }
 
   // ⚡ Smart filters (cumulables en AND)
@@ -966,7 +835,14 @@ function _getFilteredItems(catId) {
   if (!_filterSort || _filterSort === 'ordre') {
     // Toujours recalculer l'ordre manuel : les retours du cache Firestore et
     // les mises à jour partielles ne garantissent pas l'ordre du tableau reçu.
-    items = [...items].sort(compareManualOrder);
+    // Vue « Tout » : regroupé par catégorie (ordre des catégories), puis manuel.
+    if (catId) {
+      items = [...items].sort(compareManualOrder);
+    } else {
+      const catRank = new Map(_cats.map((c, i) => [c.id, i]));
+      const rank = it => catRank.has(it.categorieId) ? catRank.get(it.categorieId) : _cats.length;
+      items = [...items].sort((a, b) => rank(a) - rank(b) || compareManualOrder(a, b));
+    }
   } else {
     // Pour le tri "Recommandé", on précalcule les scores (évite N appels au getter)
     let recoScores = null;
@@ -1002,119 +878,10 @@ function _getFilteredItems(catId) {
   return items;
 }
 
+// Réorganisation manuelle (MJ) : dans une catégorie, en « Ordre manuel » →
+// tous les articles sont affichés (pas de pagination) pour pouvoir les glisser.
 function _isManualOrganizeMode() {
-  return STATE.isAdmin && (!_filterSort || _filterSort === 'ordre');
-}
-
-function _renderItemsView() {
-  const isUncategorized = _activeCat === '__uncategorized__';
-  const cat = isUncategorized
-    ? { id: '__uncategorized__', nom: 'Non classé', emoji: '📦', template: 'classique' }
-    : _cats.find(c => c.id === _activeCat);
-  if (!cat) return '';
-  const tplCat = TEMPLATES[cat.template || 'classique'];
-
-  let items = _getFilteredItems(_activeCat);
-  const search = _norm(_filterSearch);
-
-  const total = items.length;
-  const organizeAll = _isManualOrganizeMode();
-  const pages = organizeAll ? 1 : Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const p     = organizeAll ? 1 : Math.max(1, Math.min(_page, pages));
-  const slice = organizeAll ? items : items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
-  const allItems  = _getBaseItems(_activeCat);
-  const tagGroups = _buildTagGroups(allItems);
-  const hasFilters = Boolean(search || _filterTags.size > 0 || _smartFilters.size > 0);
-
-  const totalCat = allItems.length;
-  let html = `
-  <div class="sh-main-head sh-main-head--category">
-    <div class="sh-main-head-body">
-      <div class="sh-main-head-icon">${cat.emoji || _catEmoji(cat.nom)}</div>
-      <div style="min-width:0;flex:1">
-        <div class="sh-main-kicker">${tplCat?.label || 'Catégorie'}</div>
-        <div class="sh-main-title">${_esc(cat.nom)}</div>
-        <div class="sh-main-meta" id="sh-category-meta" data-total="${totalCat}" data-hidden="${cat.masquee ? '1' : '0'}">${totalCat} article${totalCat!==1?'s':''}${hasFilters && total !== totalCat ? ` · ${total} filtré${total!==1?'s':''}` : ''}${cat.masquee ? ` · ${eyeIcon(true)} Masquée aux joueurs` : ''}</div>
-      </div>
-    </div>
-  </div>
-  <div class="sh-hero sh-discovery sh-discovery--category">
-    <div class="sh-discovery-toolbar">
-      <div class="sh-hero-search">
-        <span class="sh-hero-search-ico">🔍</span>
-        <input type="search" id="sh-search" class="sh-hero-search-input"
-          placeholder="Rechercher dans ${_esc(cat.nom)}…"
-          value="${_filterSearch||''}"
-          data-sh-action="search" data-sh-on="input"
-          autocomplete="off" aria-label="Rechercher dans cette catégorie" aria-controls="sh-items-results">
-        <button type="button" class="sh-hero-search-clear" data-sh-action="clearSearch"
-          aria-label="Effacer la recherche" ${_filterSearch ? '' : 'hidden'}>✕</button>
-      </div>
-      <label class="sh-discovery-sort">
-        <span>Trier</span>
-        <select class="input-field sh-sort-select" data-sh-action="setSort" data-sh-on="change" aria-label="Trier les articles">
-          <option value="ordre"      ${_filterSort==='ordre'?'selected':''}>Ordre manuel</option>
-          <option value="recommande" ${_filterSort==='recommande'?'selected':''}>⭐ Recommandé pour moi</option>
-          <option value="nom"        ${_filterSort==='nom'?'selected':''}>Nom (A→Z)</option>
-          <option value="prix_asc"   ${_filterSort==='prix_asc'?'selected':''}>Prix ↑</option>
-          <option value="prix_desc"  ${_filterSort==='prix_desc'?'selected':''}>Prix ↓</option>
-          <option value="rarete"     ${_filterSort==='rarete'?'selected':''}>Rareté</option>
-        </select>
-      </label>
-      <div class="sh-filter-actions">
-        <span id="sh-count" role="status" aria-live="polite">${total} article${total!==1?'s':''}</span>
-        <span id="sh-order-mode" class="sh-order-mode" ${organizeAll ? '' : 'hidden'} title="Tous les articles sont affichés pour permettre leur réorganisation">
-          ↕ Organisation · tous affichés
-        </span>
-        <button id="sh-clear-btn" class="sh-filter-clear" data-sh-action="resetFilters"
-          ${hasFilters ? '' : 'hidden'}>✕ Tout effacer</button>
-        ${STATE.isAdmin ? `<button class="btn btn-gold btn-sm" data-sh-action="openItemModal">+ Article</button>` : ''}
-      </div>
-    </div>
-    ${_renderSmartBar(allItems)}
-    ${tagGroups.length > 0 ? `
-    <div class="sh-filter-groups sh-filter-groups--always">
-      ${tagGroups.map(group => `
-      <div class="sh-filter-group sh-filter-group--${group.key}">
-        <span class="sh-filter-label">${group.label}</span>
-        <div class="sh-filter-tags">
-        ${group.tags.map(tag => {
-          const active = _filterTags.has(tag.value);
-          return `<button class="sh-filter-chip"
-            data-tag-value="${tag.value.replace(/"/g,'&quot;')}"
-            data-tag-color="${tag.color}"
-            data-sh-action="toggleTag" data-tag="${tag.value.replace(/"/g,'&quot;')}"
-            style="border:1px solid ${active ? tag.color : 'var(--border)'};
-            background:${active ? tag.color+'22' : 'var(--bg-elevated)'};
-            color:${active ? tag.color : 'var(--text-dim)'};
-            transition:all .15s;font-weight:${active?'600':'400'}">${tag.label}</button>`;
-        }).join('')}
-        </div>
-      </div>`).join('')}
-    </div>` : ''}
-  </div>
-  <div id="sh-items-results">`;
-
-  if (slice.length === 0) {
-    html += `<div class="empty-state"><div class="icon">📦</div>
-      <p>${hasFilters ? 'Aucun résultat pour ces filtres.' : 'Aucun article dans cette catégorie.'}</p>
-      ${!hasFilters && STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="margin-top:.75rem" data-sh-action="openItemModal">+ Ajouter</button>` : ''}</div>`;
-  } else {
-    html += _renderItemGrid(cat, slice);
-  }
-
-  if (pages > 1) {
-    html += `<div class="sh-pagination">`;
-    if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
-    const start=Math.max(1,p-2), end=Math.min(pages,p+2);
-    if(start>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${start>2?'<span class="sh-dim-pill">…</span>':''}`;
-    for(let i=start;i<=end;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
-    if(end<pages) html+=`${end<pages-1?'<span class="sh-dim-pill">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
-    if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
-    html += `</div>`;
-  }
-  html += `</div>`;
-  return html;
+  return STATE.isAdmin && _view === 'items' && (!_filterSort || _filterSort === 'ordre');
 }
 
 // Type d'arme affiché/filtré : le format EST le type d'arme. Une ancienne arme
@@ -1320,11 +1087,6 @@ function _shopApplySmart(items) {
   return items.filter(it => active.every(k => _shopItemMatchesSmart(it, k, ctx)));
 }
 
-function _shopSmartCount(kind, baseItems) {
-  const ctx = _shopSmartCtx();
-  return baseItems.filter(it => _shopItemMatchesSmart(it, kind, ctx)).length;
-}
-
 // Avatar coloré du personnage actif — pour le char-strip
 function _shopCharAvatarColor(c) {
   const palette = { blue:'#4f8cff', arcane:'#9d6fff', crimson:'#ff5a7e', gold:'#e8b84b', emerald:'#22c38e', ember:'#ff9544' };
@@ -1350,16 +1112,8 @@ function _getActiveShopChar() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// CARDS ARTICLES
+// PRÉSENTATION D'UN ARTICLE — helpers partagés carte / ligne / fiche détail
 // ══════════════════════════════════════════════════════════════════════════════
-function _renderItemGrid(cat, items) {
-  if (_shopTweaks.card === 'liste') return _renderItemList(items);
-  // Chaque item utilise SON template (item.template), pas celui de la catégorie.
-  return `<div class="sh-item-grid ${STATE.isAdmin?'sh-sortable':''}" id="sh-items-grid">` +
-    items.map((item,i) => _renderItemCard(item, _resolveItemTemplate(item), i)).join('') +
-    `</div>`;
-}
-
 function _statVisual(statKey) {
   const key = _normalizeStatKey(statKey);
 
@@ -1403,370 +1157,259 @@ function _getItemTraits(item) {
   return [];
 }
 
-function _getItemTypeLabel(item, tplKey) {
-  if (tplKey === 'arme') return item.sousType || 'Arme';
-  if (tplKey === 'armure') {
-    const parts = [item.slotArmure, item.typeArmure].filter(Boolean);
-    return parts.join(' · ') || 'Armure';
-  }
-  if (tplKey === 'bijou') return item.slotBijou || 'Bijou';
-  return item.type || 'Objet';
+// Contexte commun à tous les articles d'un rendu (calculé une seule fois).
+function _cardCtx() {
+  return { ..._shopSmartCtx(), favs: _getFavs() };
 }
 
-function _getItemFormatLabel(item, tplKey, cat) {
-  if (tplKey === 'arme') return item.format || cat?.nom || 'Arme';
-  if (tplKey === 'armure') return cat?.nom || 'Armure';
-  if (tplKey === 'bijou') return cat?.nom || 'Bijou';
-  return cat?.nom || 'Objet';
+// Stock : null = illimité (champ vide ou négatif).
+function _itemDispo(item) {
+  const raw = item.dispo !== undefined && item.dispo !== null && item.dispo !== '' ? parseInt(item.dispo) : null;
+  return raw == null || Number.isNaN(raw) || raw < 0 ? null : raw;
 }
 
-function _renderFactRow(label, value) {
-  if (!value) return '';
-  return `
-    <div class="sh-item-fact">
-      <span class="sh-item-fact-label">${_esc(label)}</span>
-      <span class="sh-item-fact-value">${_esc(value)}</span>
-    </div>
-  `;
-}
-
-function _renderFactRowColored(label, value, color) {
-  if (!value) return '';
-  return `
-    <div class="sh-item-fact">
-      <span class="sh-item-fact-label">${_esc(label)}</span>
-      <span class="sh-item-fact-value" style="color:${color}">${_esc(value)}</span>
-    </div>
-  `;
-}
-
-// Bouton « Acheter » (et ses états) — partagé carte ↔ liste.
-function _buyBtnHtml(item, hasChar, epuise, tropCher, manque) {
-  if (!hasChar) return `<button class="btn sh-buy-btn sh-buy-btn--disabled" disabled title="Sélectionne un personnage">Choisir un personnage</button>`;
-  if (epuise)   return `<button class="btn sh-buy-btn sh-buy-btn--disabled" disabled title="Cet article est épuisé">Épuisé</button>`;
-  if (tropCher) return `<button class="btn sh-buy-btn sh-buy-btn--poor" disabled title="Il te manque ${manque} or">Pas assez d'or</button>`;
-  return `<button class="btn sh-buy-btn" data-sh-action="buyItem" data-id="${item.id}">🛒 Acheter</button>`;
-}
-
-function _renderItemCard(item, tplKey, itemIdx) {
+function _itemBuyState(item, ctx) {
   const prix = parseFloat(item.prix) || 0;
-  const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
-  const _dispoRaw = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
-  const dispo = (_dispoRaw != null && _dispoRaw < 0) ? null : _dispoRaw; // <0 = illimité → null
-  const epuise = dispo !== null && dispo === 0;
+  const dispo = _itemDispo(item);
+  const tropCher = !!ctx.char && prix > ctx.gold;
+  return { prix, dispo, epuise: dispo === 0, tropCher, manque: tropCher ? Math.ceil(prix - ctx.gold) : 0 };
+}
 
+function _itemRarity(item) {
+  const n = _getRareteNum(item.rarete);
+  const name = n ? (RARETE_NAMES[n] || '') : '';
+  return { n, name, color: n ? _rareteColor(name) : '' };
+}
+
+// Sous-titre : type d'arme + maniement, ou emplacement + type d'armure, ou type.
+function _itemTypeChips(item) {
+  const chips = [];
+  const weaponType = _itemWeaponType(item);
+  const hands = _itemWeaponHands(item);
+  if (weaponType)      chips.push(weaponType);
+  if (hands)           chips.push(hands);
+  if (item.slotArmure) chips.push(item.slotArmure);
+  if (item.typeArmure) chips.push(item.typeArmure);
+  if (item.slotBijou)  chips.push(item.slotBijou);
+  if (item.type && !chips.length) chips.push(item.type);
+  return chips;
+}
+
+// Caractéristiques clés (dégâts, toucher, portée, CA).
+function _itemFacts(item) {
+  const facts = [];
+  if (item.degats) {
+    const arr = _getDegatsStats(item);
+    facts.push({ lbl: 'Dégâts', val: `${item.degats}${arr.length ? ` + ${_formatDegatsStatsText(arr)}` : ''}`, cls: 'dmg' });
+  }
+  if (item.toucherStat) facts.push({ lbl: 'Toucher', val: _statShort(item.toucherStat), color: _statVisual(item.toucherStat).color });
+  if (item.portee) facts.push({ lbl: 'Portée', val: item.portee });
+  const ca = parseInt(item.ca) || 0;
+  if (ca) facts.push({ lbl: 'CA', val: `${ca > 0 ? '+' : ''}${ca}`, cls: 'ca' });
+  return facts;
+}
+
+// Pictogramme de repli quand l'article n'a pas d'image.
+function _itemGlyph(item, tplKey, cat) {
+  if (tplKey === 'arme') {
+    const t = _norm(`${item.nom || ''} ${_itemWeaponType(item)}`);
+    if (/bouclier/.test(t)) return '🛡️';
+    if (/focal|baton|baguette|sceptre|grimoire/.test(t)) return '🪄';
+    if (/\b(arc|arbalete|fronde)\b|distance/.test(t)) return '🏹';
+    if (/dague|poignard|couteau/.test(t)) return '🗡️';
+    if (/hache/.test(t)) return '🪓';
+    if (/marteau|masse/.test(t)) return '🔨';
+    return '⚔️';
+  }
+  if (tplKey === 'armure') return { 'Tête': '🪖', 'Pieds': '🥾' }[item.slotArmure] || '🛡️';
+  if (tplKey === 'bijou') return { 'Anneau': '💍', 'Amulette': '📿' }[item.slotBijou] || '🔮';
+  return cat?.emoji || _catEmoji(cat?.nom || item.type || '');
+}
+
+// Écarts vs l'objet équipé au même emplacement (stats + CA).
+function _itemDeltas(item, char) {
+  const slot = char ? _resolveSlotForItem(item) : null;
+  if (!slot) return { slot: null, diffs: [] };
+  const cur = (char.equipement || {})[slot] || null;
+  const diffs = [];
+  ITEM_STAT_META.forEach(m => {
+    let cb = 0, nb = 0;
+    try { cb = cur ? getItemStatBonus(cur, m.full) : 0; } catch {}
+    try { nb = getItemStatBonus(item, m.full); } catch {}
+    if (nb !== cb) diffs.push({ lbl: m.short, d: nb - cb });
+  });
+  const curCa  = (parseInt(cur?.ca) || 0) + (parseInt(cur?.caBonus) || 0);
+  const itemCa = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
+  if (itemCa !== curCa) diffs.push({ lbl: 'CA', d: itemCa - curCa });
+  return { slot, diffs };
+}
+
+function _fmtOr(n) {
+  return (Number(n) || 0).toLocaleString('fr-FR');
+}
+
+// Bouton « Acheter » et ses états — partagé carte ↔ liste. Un seul message
+// quand l'or manque (le prix passe aussi en rouge).
+function _buyBtnHtml(item, hasChar, st) {
+  if (!hasChar)    return `<button type="button" class="shc-buy" disabled title="Sélectionne un personnage pour acheter">Acheter</button>`;
+  if (st.epuise)   return `<button type="button" class="shc-buy" disabled title="Cet article est épuisé">Épuisé</button>`;
+  if (st.tropCher) return `<button type="button" class="shc-buy is-short" disabled title="Il te manque ${_fmtOr(st.manque)} or">Manque ${_fmtOr(st.manque)} or</button>`;
+  return `<button type="button" class="shc-buy" data-sh-action="buyItem" data-id="${item.id}">Acheter</button>`;
+}
+
+function _tryBtnHtml(item) {
+  return `<button type="button" class="shc-try" data-sh-action="openAtelier" data-id="${item.id}" title="Essayer dans l’Atelier" aria-label="Essayer dans l’Atelier">🪄</button>`;
+}
+
+function _adminItemBtns(item, st) {
+  return `${st.epuise ? `<button type="button" class="shc-icon-btn" data-sh-action="restockItem" data-id="${item.id}" title="Restocker +1" aria-label="Restocker +1">📦</button>` : ''}
+    <button type="button" class="shc-icon-btn" data-sh-action="toggleItemVis" data-id="${item.id}"
+      title="${item.masque ? 'Rendre visible aux joueurs' : 'Masquer aux joueurs'}" aria-label="${item.masque ? 'Rendre visible' : 'Masquer'}">${eyeIcon(!!item.masque)}</button>
+    <button type="button" class="shc-icon-btn" data-sh-action="openItemModal" data-id="${item.id}" title="Modifier l’article" aria-label="Modifier l’article">✏️</button>
+    <button type="button" class="shc-icon-btn" data-sh-action="deleteItem" data-id="${item.id}" title="Supprimer l’article" aria-label="Supprimer l’article">🗑️</button>`;
+}
+
+function _itemVisStyle(item) {
+  return item.image ? ` style="background-image:url('${_esc(item.image)}')"` : '';
+}
+
+// Variables CSS de couleur : --rar (rareté) et --tint (couleur de catégorie,
+// sinon rareté) pour le fond de la vignette sans image.
+function _itemColorVars(rar, cat) {
+  const tint = cat?.couleur || rar.color;
+  return [rar.color && `--rar:${_esc(rar.color)}`, tint && `--tint:${_esc(tint)}`].filter(Boolean).join(';');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CARTE ARTICLE (vue grille)
+// ══════════════════════════════════════════════════════════════════════════════
+function _renderCard(item, ctx, { showCat = false, sortable = false } = {}) {
+  const tplKey = _resolveItemTemplate(item);
   const cat = _cats.find(c => c.id === item.categorieId);
   const edit = STATE.isAdmin;
-
-  const rareteNum = _getRareteNum(item.rarete);
-  const rareteStarsHtml = rareteNum ? _rareteStars(rareteNum) : '';
-  const rareteName = rareteNum ? (RARETE_NAMES[rareteNum] || '') : '';
-  const rareteColor = rareteNum > 0 ? _rareteColor(RARETE_NAMES[rareteNum]) : '';
-
-  const activeChar = _getActiveShopChar();
-  const hasChar = !!activeChar;
-  const solde = calcOr(activeChar);
-  const tropCher = hasChar && prix > solde;
-  const manque = tropCher ? Math.ceil(prix - solde) : 0;
-
-  const statBonuses = _getStatBonusEntries(item);
-  // ── Deltas vs équipement actuel sur le slot équivalent ─────────────────
-  // Affiché uniquement si un perso est actif ET qu'un slot a été résolu.
-  let deltaHtml = '';
-  if (hasChar) {
-    const slot = _resolveSlotForItem(item);
-    if (slot) {
-      const cur = (activeChar.equipement || {})[slot] || null;
-      const diffs = [];
-      ITEM_STAT_META.forEach(m => {
-        let cb = 0, nb = 0;
-        try { cb = cur ? getItemStatBonus(cur, m.full) : 0; } catch {}
-        try { nb = getItemStatBonus(item, m.full); } catch {}
-        const d = nb - cb;
-        if (d !== 0) diffs.push(`<span class="sh-delta ${d>0?'pos':'neg'}">${m.short} ${d>0?'+':''}${d}</span>`);
-      });
-      const curCa  = (parseInt(cur?.ca) || 0) + (parseInt(cur?.caBonus) || 0);
-      const itemCa = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
-      if (itemCa || curCa) {
-        const d = itemCa - curCa;
-        if (d !== 0) diffs.push(`<span class="sh-delta ${d>0?'pos':'neg'}">CA ${d>0?'+':''}${d}</span>`);
-      }
-      if (diffs.length) {
-        // Format compact « INT ↑1 · CA ↓2 » sur une seule ligne
-        const compact = diffs.map(d => d.replace(/sh-delta pos">(\w+) \+(\d+)/, 'sh-delta pos">$1 ↑$2').replace(/sh-delta neg">(\w+) -(\d+)/, 'sh-delta neg">$1 ↓$2')).join('');
-        deltaHtml = `<div class="sh-item-deltas" title="Comparé à ton équipement actuel sur le slot ${_esc(slot)}">
-          <span class="sh-item-deltas-lbl">vs équipé</span>
-          ${compact}
-        </div>`;
-      }
-    }
-  }
-  const traits = _getItemTraits(item);
-  const traitsPreview = traits.slice(0, 2);
-  const hiddenTraitsCount = Math.max(0, traits.length - traitsPreview.length);
-
-  const typeLabel = _getItemTypeLabel(item, tplKey);
-  const formatLabel = _getItemFormatLabel(item, tplKey, cat);
-
-  const factRows = [];
-
-  if (tplKey === 'arme') {
-    const degatsStatsArr = _getDegatsStats(item);
-    const degatsTxt = item.degats
-      ? `${item.degats}${degatsStatsArr.length ? ` + ${_formatDegatsStatsText(degatsStatsArr)}` : ''}`
-      : '';
-    const toucherTxt = item.toucherStat ? _statShort(item.toucherStat) : '';
-    const toucherColor = item.toucherStat ? _statVisual(item.toucherStat).color : 'var(--text)';
-    // « Type » d'arme déjà visible dans le sous-titre (format · sousType)
-    factRows.push(_renderFactRow('Dégâts', degatsTxt));
-    factRows.push(_renderFactRowColored('Toucher', toucherTxt, toucherColor));
-    factRows.push(_renderFactRow('Portée', item.portee || ''));
-  }
-
-  if (tplKey === 'armure') {
-    // « Emplacement » et « Type » déjà visibles dans le sous-titre, on ne garde
-    // que la CA (info utile non dupliquée).
-    factRows.push(_renderFactRow('CA', item.ca ? `+${parseInt(item.ca) || 0}` : ''));
-  }
-
-  if (tplKey === 'bijou') {
-    // « Slot bijou » déjà visible dans le sous-titre — pas de fact row redondante.
-  }
-
-  // Note : pour classique/libre, la description est rendue dans son
-  // propre bloc `.sh-item-desc` plus bas (pas dans factRows) pour avoir
-  // un styling discret (italique léger, pas en gras) qui prend moins
-  // de place visuelle sur la carte.
-
-  const buyBtnHtml = _buyBtnHtml(item, hasChar, epuise, tropCher, manque);
-
-  // ── Données enrichies style maquette ─────────────────────────────────
-  // Sous-titre type : Format · Type d'arme · Slot armure/bijou
-  const typeChips = [];
-  // Type d'arme (format ou, pour une ancienne arme, type saisi) + maniement.
-  if (_itemWeaponType(item))  typeChips.push(_itemWeaponType(item));
-  if (_itemWeaponHands(item)) typeChips.push(_itemWeaponHands(item));
-  if (item.slotArmure) typeChips.push(item.slotArmure);
-  if (item.typeArmure) typeChips.push(item.typeArmure);
-  if (item.slotBijou)  typeChips.push(item.slotBijou);
-  if (item.type && !typeChips.length) typeChips.push(item.type);
-  const typeLine = typeChips.length
-    ? typeChips.map(_esc).join(' <span class="sh-item-type-sep">·</span> ')
-    : _esc(cat?.nom || '');
-
-  // Stock badge sur l'image
-  const stockTxt = dispo == null ? '∞ Illimité' : dispo === 0 ? 'Épuisé' : `${dispo} dispo`;
-  const stockCls = dispo === 0 ? 'empty' : (dispo != null && dispo < 3) ? 'limited' : '';
-
-  // « Déjà possédé » : check si le perso actif a cet article dans son inventaire
-  // (match par itemId quand disponible — précis pour les items boutique).
-  const ownedCount = hasChar && Array.isArray(activeChar.inventaire)
-    ? activeChar.inventaire.filter(inv => inv?.itemId && inv.itemId === item.id).length
+  const st = _itemBuyState(item, ctx);
+  const rar = _itemRarity(item);
+  const fav = ctx.favs.has(item.id);
+  const owned = ctx.char && Array.isArray(ctx.char.inventaire)
+    ? ctx.char.inventaire.filter(inv => inv?.itemId && inv.itemId === item.id).length
     : 0;
-  const ownedBadge = ownedCount > 0
-    ? `<span class="sh-item-owned-badge" title="Tu possèdes déjà ×${ownedCount} de cet article">✓ ${ownedCount > 1 ? '×'+ownedCount : 'Possédé'}</span>`
-    : '';
+  const { slot, diffs } = _itemDeltas(item, ctx.char);
+  const typeChips = _itemTypeChips(item);
+  const facts = _itemFacts(item);
+  const traits = _getItemTraits(item);
+  const desc = (tplKey === 'classique' || tplKey === 'libre') ? (item.effet || item.description || '') : '';
+  const nom = item.nom || '?';
 
-  // Image gradient depuis la couleur de la catégorie (sinon fallback hash)
-  const imgBg = item.image
-    ? `background-image:url('${item.image}');background-size:cover;background-position:center`
-    : (cat?.couleur
-        ? `background:linear-gradient(135deg, ${cat.couleur}33, ${cat.couleur}11)`
-        : _catGradient(item.nom || ''));
+  const stock = st.dispo == null ? ''
+    : st.dispo === 0 ? '<span class="shc-stock is-out">Épuisé</span>'
+    : `<span class="shc-stock${st.dispo < 3 ? ' is-low' : ''}">${st.dispo < 3 ? `Plus que ${st.dispo}` : `${st.dispo} en stock`}</span>`;
+
+  const kicker = [
+    rar.n ? `<span class="shc-rar">${'★'.repeat(rar.n)} ${_esc(rar.name)}</span>` : '',
+    showCat && cat ? `<span class="shc-card-cat">${_esc(cat.nom)}</span>` : '',
+  ].filter(Boolean).join('');
+
+  const tags = [
+    ..._getStatBonusEntries(item).map(b => `<span class="shc-bonus" style="--stat:${b.color}">${_esc(b.short)} ${b.val > 0 ? '+' : ''}${b.val}</span>`),
+    ...traits.slice(0, 2).map(t => `<span class="shc-trait" title="${_esc(t)}">${_esc(t)}</span>`),
+    traits.length > 2 ? `<span class="shc-trait is-more" title="${_esc(traits.slice(2).join(' · '))}">+${traits.length - 2}</span>` : '',
+  ].join('');
 
   return `
-    <article class="sh-item-card sh-item-card--detailed ${epuise ? 'sh-item-epuise' : ''} ${edit ? 'sh-sortable-item' : ''}"
+    <article class="shc-card${st.epuise ? ' is-out' : ''}${edit && item.masque ? ' is-masked' : ''}${sortable ? ' sh-sortable-item' : ''}"
+      style="${_itemColorVars(rar, cat)}"
       data-item-id="${item.id}" data-sh-action="openDetail" data-id="${item.id}"
-      data-sh-key-card="item" tabindex="0" role="button" aria-label="Ouvrir ${_esc(item.nom || 'cet article')}"
-      ${rareteColor ? `style="--item-accent:${rareteColor}"` : ''}
-    >
-      <div class="sh-item-img" style="${imgBg}">
-        <div class="sh-item-img-overlay"></div>
-        ${rareteNum ? `<span class="sh-item-img-rarity" title="${_esc(rareteName)}">${'★'.repeat(rareteNum)}</span>` : ''}
-        <span class="sh-item-img-stock ${stockCls}">${_esc(stockTxt)}</span>
-        ${ownedBadge}
-        <button class="sh-item-fav ${_isFav(item.id)?'is-fav':''}" data-sh-action="toggleFav" data-id="${item.id}"
-          title="${_isFav(item.id)?'Retirer des favoris':'Ajouter aux favoris'}" aria-label="Favori">${_isFav(item.id)?'★':'☆'}</button>
+      data-sh-key-card="item" tabindex="0" role="button" aria-label="Ouvrir ${_esc(nom)}">
+      <div class="shc-card-vis${item.image ? ' has-img' : ''}"${_itemVisStyle(item)}>
+        ${item.image ? '' : `<span class="shc-card-glyph" aria-hidden="true">${_esc(_itemGlyph(item, tplKey, cat))}</span>`}
+        <button type="button" class="shc-card-fav${fav ? ' is-on' : ''}" data-sh-action="toggleFav" data-id="${item.id}"
+          aria-pressed="${fav}" title="${fav ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favori">${fav ? '★' : '☆'}</button>
+        ${stock}
+        ${owned ? `<span class="shc-owned" title="Tu en possèdes déjà ×${owned}">✓ ${owned > 1 ? `×${owned}` : 'Possédé'}</span>` : ''}
+        ${edit ? `<div class="shc-card-admin" data-sh-action="stop">${_adminItemBtns(item, st)}</div>` : ''}
       </div>
-
-      <div class="sh-item-body" data-sh-action="openDetail" data-id="${item.id}">
-        <div class="sh-item-row1">
-          <div class="sh-item-name-wrap">
-            <span class="sh-item-name">${edit && item.masque ? `<span title="Masqué aux joueurs">${eyeIcon(true)}</span> ` : ''}${_esc(item.nom || '?')}</span>
-            <span class="sh-item-type">${typeLine}</span>
-          </div>
-          ${rareteNum ? `<span class="sh-item-rare-pill" style="color:${rareteColor};border-color:${rareteColor};background:${rareteColor}1a">${_esc(rareteName)}</span>` : ''}
-        </div>
-
-        ${factRows.filter(Boolean).length ? `
-          <div class="sh-item-facts">
-            ${factRows.join('')}
-          </div>
-        ` : ''}
-
-        ${statBonuses.length ? `
-          <div class="sh-item-bonus-row">
-            ${statBonuses.map(stat => `
-              <span class="sh-item-bonus-chip"
-                style="border-color:${stat.color}55;background:${stat.color}18;color:${stat.color}">
-                ${_esc(`${stat.short} ${stat.val > 0 ? '+' : ''}${stat.val}`)}
-              </span>
-            `).join('')}
-          </div>
-        ` : ''}
-
-        ${traitsPreview.length ? `
-          <ul class="sh-item-traits-list sh-item-traits-list--compact">
-            ${traitsPreview.map(t => `<li class="sh-item-trait-line">${_esc(t)}</li>`).join('')}
-            ${hiddenTraitsCount ? `<li class="sh-item-traits-more">+${hiddenTraitsCount}</li>` : ''}
-          </ul>
-        ` : ''}
-
-        ${(tplKey === 'classique' || tplKey === 'libre') && (item.effet || item.description)
-          ? `<div class="sh-item-desc">${_esc(item.effet || item.description || '')}</div>`
-          : ''}
-
-        ${deltaHtml}
-
-        <div class="sh-item-footer">
-          <div class="sh-item-pricing">
-            <div class="sh-item-price-main">🪙 ${prix} or</div>
-            <div class="sh-item-price-sub">Revente ${prixVente} or</div>
-            ${tropCher && !epuise ? `<div class="sh-item-missing-line">Il te manque ${manque} or</div>` : ''}
-          </div>
-
-          <div class="sh-item-actions-inline" data-sh-action="stop">
-            ${hasChar ? `<button class="sh-try-cta" data-sh-action="openAtelier" data-id="${item.id}" title="Essayer dans l'Atelier" aria-label="Essayer dans l'Atelier">🪄 Essayer</button>` : ''}
-            ${buyBtnHtml}
-          </div>
+      <div class="shc-card-body">
+        ${kicker ? `<div class="shc-card-kicker">${kicker}</div>` : ''}
+        <div class="shc-card-name">${edit && item.masque ? `<span class="shc-masked-eye" title="Masqué aux joueurs">${eyeIcon(true)}</span>` : ''}${_esc(nom)}</div>
+        ${typeChips.length ? `<div class="shc-card-type">${typeChips.map(_esc).join(' · ')}</div>` : ''}
+        ${facts.length ? `<dl class="shc-facts">${facts.map(f => `<div class="shc-fact"><dt>${f.lbl}</dt><dd${f.color ? ` style="color:${f.color}"` : ''}>${_esc(f.val)}</dd></div>`).join('')}</dl>` : ''}
+        ${desc ? `<p class="shc-card-desc">${_esc(desc)}</p>` : ''}
+        ${tags ? `<div class="shc-card-tags">${tags}</div>` : ''}
+        ${diffs.length ? `<div class="shc-delta" title="Comparé à ton équipement actuel (${_esc(slot)})">
+          <span class="shc-delta-lbl">vs équipé</span>
+          ${diffs.map(x => `<b class="${x.d > 0 ? 'is-up' : 'is-down'}">${_esc(x.lbl)} ${x.d > 0 ? '▲' : '▼'}${Math.abs(x.d)}</b>`).join('')}
+        </div>` : ''}
+      </div>
+      <div class="shc-card-foot">
+        <span class="shc-price${st.tropCher && !st.epuise ? ' is-short' : ''}"><b>${_fmtOr(st.prix)}</b> or</span>
+        <div class="shc-card-cta" data-sh-action="stop">
+          ${slot ? _tryBtnHtml(item) : ''}
+          ${_buyBtnHtml(item, !!ctx.char, st)}
         </div>
       </div>
-
-      ${edit ? `
-        <div class="sh-item-actions" data-sh-action="stop">
-          ${epuise ? `<button class="btn-icon sh-restock-btn" title="Restocker +1 (MJ)" aria-label="Restocker"
-            data-sh-action="restockItem" data-id="${item.id}">📦</button>` : ''}
-          <button class="btn-icon" title="${item.masque ? 'Rendre visible aux joueurs' : 'Masquer aux joueurs'}" aria-label="${item.masque ? 'Rendre visible' : 'Masquer'}"
-            data-sh-action="toggleItemVis" data-id="${item.id}">${item.masque ? eyeIcon(true) : eyeIcon(false)}</button>
-          <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" data-sh-action="openItemModal" data-id="${item.id}">✏️</button>
-          <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" data-sh-action="deleteItem" data-id="${item.id}">🗑️</button>
-        </div>
-      ` : ''}
-    </article>
-  `;
+    </article>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// VUE LISTE — affichage « tableur » : 1 ligne par article, colonnes alignées.
-// Activée par le tweak card='liste'. Réutilise les mêmes helpers que la carte.
-// Le header est HORS du conteneur sortable (#sh-items-grid) pour ne pas
+// VUE LISTE — tableau dense : 1 ligne par article, colonnes alignées.
+// L'en-tête est HORS du conteneur sortable (#sh-items-grid) pour ne pas
 // décaler les index de drag.
 // ══════════════════════════════════════════════════════════════════════════════
-function _renderItemList(items) {
-  const edit = STATE.isAdmin;
-  const head = `<div class="sh-list-head" aria-hidden="true">
-    <span></span><span></span>
-    <span>Article</span>
-    <span>Détails</span>
-    <span>Rareté</span>
-    <span>Dispo</span>
-    <span>Prix</span>
-    <span class="sh-lh-actions">Actions</span>
-  </div>`;
-  return `<div class="sh-list-wrap">
-    ${head}
-    <div class="sh-item-list ${edit ? 'sh-sortable' : ''}" id="sh-items-grid">
-      ${items.map((item, i) => _renderItemRow(item, _resolveItemTemplate(item), i)).join('')}
+function _renderItemList(items, ctx, opts = {}) {
+  return `<div class="shc-list${STATE.isAdmin ? ' shc-list--admin' : ''}">
+    <div class="shc-row shc-row--head" aria-hidden="true">
+      <span></span><span>Article</span><span>Caractéristiques</span><span>Rareté</span><span>Stock</span><span>Prix</span><span></span>
+    </div>
+    <div class="shc-list-body${opts.sortable ? ' sh-sortable' : ''}" id="sh-items-grid">
+      ${items.map(item => _renderItemRow(item, ctx, opts)).join('')}
     </div>
   </div>`;
 }
 
-function _renderItemRow(item, tplKey, itemIdx) {
-  const prix = parseFloat(item.prix) || 0;
-  const prixVente = Math.round(prix * PRIX_VENTE_RATIO);
-  const _dispoRaw = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
-  const dispo = (_dispoRaw != null && _dispoRaw < 0) ? null : _dispoRaw;
-  const epuise = dispo !== null && dispo === 0;
-
-  const cat  = _cats.find(c => c.id === item.categorieId);
+function _renderItemRow(item, ctx, { showCat = false, sortable = false } = {}) {
+  const tplKey = _resolveItemTemplate(item);
+  const cat = _cats.find(c => c.id === item.categorieId);
   const edit = STATE.isAdmin;
+  const st = _itemBuyState(item, ctx);
+  const rar = _itemRarity(item);
+  const fav = ctx.favs.has(item.id);
+  const slot = ctx.char ? _resolveSlotForItem(item) : null;
+  const typeLine = [..._itemTypeChips(item), ...(showCat && cat ? [cat.nom] : [])].map(_esc).join(' · ');
+  const nom = item.nom || '?';
 
-  const rareteNum   = _getRareteNum(item.rarete);
-  const rareteName  = rareteNum ? (RARETE_NAMES[rareteNum] || '') : '';
-  const rareteColor = rareteNum > 0 ? _rareteColor(RARETE_NAMES[rareteNum]) : '';
+  const info = [
+    ..._itemFacts(item).map(f => `<span class="shc-row-fact"><i>${f.lbl}</i> ${_esc(f.val)}</span>`),
+    ..._getStatBonusEntries(item).map(b => `<span class="shc-bonus" style="--stat:${b.color}">${_esc(b.short)} ${b.val > 0 ? '+' : ''}${b.val}</span>`),
+  ];
+  const desc = (tplKey === 'classique' || tplKey === 'libre') ? (item.effet || item.description || '') : '';
+  if (desc) info.push(`<span class="shc-row-desc">${_esc(desc)}</span>`);
 
-  const activeChar = _getActiveShopChar();
-  const hasChar    = !!activeChar;
-  const solde      = calcOr(activeChar);
-  const tropCher   = hasChar && prix > solde;
-  const manque     = tropCher ? Math.ceil(prix - solde) : 0;
-  const buyBtnHtml = _buyBtnHtml(item, hasChar, epuise, tropCher, manque);
-
-  // Sous-titre type (format · sousType · slot…)
-  const typeChips = [];
-  // Type d'arme (format ou, pour une ancienne arme, type saisi) + maniement.
-  if (_itemWeaponType(item))  typeChips.push(_itemWeaponType(item));
-  if (_itemWeaponHands(item)) typeChips.push(_itemWeaponHands(item));
-  if (item.slotArmure) typeChips.push(item.slotArmure);
-  if (item.typeArmure) typeChips.push(item.typeArmure);
-  if (item.slotBijou)  typeChips.push(item.slotBijou);
-  if (item.type && !typeChips.length) typeChips.push(item.type);
-  const typeLine = typeChips.length
-    ? typeChips.map(_esc).join(' · ')
-    : _esc(cat?.nom || '');
-
-  // Colonne « Détails » : dégâts / CA + bonus de stats + effet (classique/libre)
-  const infoBits = [];
-  if (tplKey === 'arme' && item.degats) {
-    const dStats = _getDegatsStats(item);
-    infoBits.push(`<span class="sh-lr-key">⚔ ${_esc(item.degats)}${dStats.length ? ` +${_esc(_formatDegatsStatsText(dStats))}` : ''}</span>`);
-  }
-  if (tplKey === 'armure' && item.ca) infoBits.push(`<span class="sh-lr-key">🛡 +${parseInt(item.ca) || 0}</span>`);
-  _getStatBonusEntries(item).slice(0, 4).forEach(s =>
-    infoBits.push(`<span class="sh-item-bonus-chip" style="border-color:${s.color}55;background:${s.color}18;color:${s.color}">${s.short} ${s.val > 0 ? '+' : ''}${s.val}</span>`));
-  if ((tplKey === 'classique' || tplKey === 'libre') && (item.effet || item.description))
-    infoBits.push(`<span class="sh-lr-desc">${_esc(item.effet || item.description || '')}</span>`);
-
-  const stockTxt = dispo == null ? '∞' : dispo === 0 ? 'Épuisé' : `${dispo}`;
-  const stockCls = dispo === 0 ? 'empty' : (dispo != null && dispo < 3) ? 'limited' : '';
-
-  const imgBg = item.image
-    ? `background-image:url('${item.image}');background-size:cover;background-position:center`
-    : (cat?.couleur
-        ? `background:linear-gradient(135deg, ${cat.couleur}33, ${cat.couleur}11)`
-        : _catGradient(item.nom || ''));
+  const stock = st.dispo == null ? '<span class="shc-row-stock">∞</span>'
+    : `<span class="shc-row-stock${st.dispo === 0 ? ' is-out' : st.dispo < 3 ? ' is-low' : ''}">${st.dispo === 0 ? 'Épuisé' : st.dispo}</span>`;
 
   return `
-    <div class="sh-list-row ${epuise ? 'sh-item-epuise' : ''} ${edit ? 'sh-sortable-item' : ''}"
+    <div class="shc-row${st.epuise ? ' is-out' : ''}${edit && item.masque ? ' is-masked' : ''}${sortable ? ' sh-sortable-item' : ''}"
+      style="${_itemColorVars(rar, cat)}"
       data-item-id="${item.id}" data-sh-action="openDetail" data-id="${item.id}"
-      data-sh-key-card="item" tabindex="0" role="button" aria-label="Ouvrir ${_esc(item.nom || 'cet article')}"
-      ${rareteColor ? `style="--item-accent:${rareteColor}"` : ''}>
-      <button class="sh-list-fav ${_isFav(item.id) ? 'is-fav' : ''}" data-sh-action="toggleFav" data-id="${item.id}"
-        title="${_isFav(item.id) ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favori">${_isFav(item.id) ? '★' : '☆'}</button>
-      <span class="sh-list-thumb" style="${imgBg}">${item.image ? '' : (cat?.emoji || _catEmoji(cat?.nom || item.type || ''))}</span>
-      <div class="sh-list-name">
-        <span class="sh-list-name-txt">${edit && item.masque ? `<span title="Masqué aux joueurs">${eyeIcon(true)}</span> ` : ''}${_esc(item.nom || '?')}</span>
-        <span class="sh-list-type">${typeLine}</span>
-      </div>
-      <div class="sh-list-info">${infoBits.join('')}</div>
-      <div class="sh-list-rare">${rareteNum
-        ? `<span class="sh-item-rare-pill" style="color:${rareteColor};border-color:${rareteColor};background:${rareteColor}1a">${_esc(rareteName)}</span>`
-        : '<span class="sh-list-dash">—</span>'}</div>
-      <div class="sh-list-dispo"><span class="sh-list-stock ${stockCls}">${_esc(stockTxt)}</span></div>
-      <div class="sh-list-price">
-        <span class="sh-list-price-main">🪙 ${prix}</span>
-        <span class="sh-list-price-sub">rev. ${prixVente}</span>
-      </div>
-      <div class="sh-list-actions" data-sh-action="stop">
-        ${hasChar ? `<button class="sh-try-cta sh-try-cta--icon" data-sh-action="openAtelier" data-id="${item.id}" title="Essayer dans l'Atelier" aria-label="Essayer dans l'Atelier">🪄</button>` : ''}
-        ${buyBtnHtml}
-        ${edit ? `
-          <button class="btn-icon" title="${item.masque ? 'Rendre visible aux joueurs' : 'Masquer aux joueurs'}" aria-label="${item.masque ? 'Rendre visible' : 'Masquer'}"
-            data-sh-action="toggleItemVis" data-id="${item.id}">${item.masque ? eyeIcon(true) : eyeIcon(false)}</button>
-          <button class="btn-icon" title="Modifier l'article" aria-label="Modifier l'article" data-sh-action="openItemModal" data-id="${item.id}">✏️</button>
-          <button class="btn-icon" title="Supprimer l'article" aria-label="Supprimer l'article" data-sh-action="deleteItem" data-id="${item.id}">🗑️</button>
-        ` : ''}
-      </div>
+      data-sh-key-card="item" tabindex="0" role="button" aria-label="Ouvrir ${_esc(nom)}">
+      <span class="shc-row-thumb${item.image ? ' has-img' : ''}"${_itemVisStyle(item)}>
+        ${item.image ? '' : `<span aria-hidden="true">${_esc(_itemGlyph(item, tplKey, cat))}</span>`}
+        <button type="button" class="shc-card-fav${fav ? ' is-on' : ''}" data-sh-action="toggleFav" data-id="${item.id}"
+          aria-pressed="${fav}" title="${fav ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favori">${fav ? '★' : '☆'}</button>
+      </span>
+      <span class="shc-row-name">
+        <b>${edit && item.masque ? `<span class="shc-masked-eye" title="Masqué aux joueurs">${eyeIcon(true)}</span>` : ''}${_esc(nom)}</b>
+        ${typeLine ? `<small>${typeLine}</small>` : ''}
+      </span>
+      <span class="shc-row-info">${info.join('')}</span>
+      <span class="shc-row-rar">${rar.n ? `<span class="shc-rar">${'★'.repeat(rar.n)} ${_esc(rar.name)}</span>` : '<span class="shc-row-dash">—</span>'}</span>
+      ${stock}
+      <span class="shc-price${st.tropCher && !st.epuise ? ' is-short' : ''}"><b>${_fmtOr(st.prix)}</b> or</span>
+      <span class="shc-row-actions" data-sh-action="stop">
+        ${slot ? _tryBtnHtml(item) : ''}
+        ${_buyBtnHtml(item, !!ctx.char, st)}
+        ${edit ? _adminItemBtns(item, st) : ''}
+      </span>
     </div>`;
 }
 
@@ -1930,36 +1573,12 @@ function openShopItemDetail(itemId) {
   const item = _items.find(i => i.id === itemId);
   if (!item) return;
   const cat    = _cats.find(c => c.id === item.categorieId);
-  const prix   = parseFloat(item.prix) || 0;
+  const ctx    = _cardCtx();
+  const { prix, dispo, epuise, tropCher, manque } = _itemBuyState(item, ctx);
   const prixV  = Math.round(prix * PRIX_VENTE_RATIO);
-  const dispo  = item.dispo !== undefined && item.dispo !== '' ? parseInt(item.dispo) : null;
-  const epuise = dispo !== null && dispo === 0;
-  const traitsArr = Array.isArray(item.traits) ? item.traits
-    : (item.trait ? item.trait.split(',').map(t=>t.trim()).filter(Boolean) : []);
-  const statBonuses = _formatStatBonuses(item);
-  const activeChar = _getActiveShopChar();
+  const traitsArr = _getItemTraits(item);
+  const activeChar = ctx.char;
   const hasChar = !!activeChar;
-  const solde = calcOr(activeChar);
-  const tropCher = hasChar && prix > solde;
-  const manque = tropCher ? Math.ceil(prix - solde) : 0;
-
-  const rows = [];
-  if (_itemWeaponType(item))  rows.push(['Type d’arme', _itemWeaponType(item)]);
-  if (_itemWeaponHands(item)) rows.push(['Maniement', _itemWeaponHands(item)]);
-
-  if (item.degats) {
-    const arr = _getDegatsStats(item);
-    rows.push(['Dégâts', `${item.degats}${arr.length ? ' + ' + _formatDegatsStatsText(arr) : ''}`]);
-  }
-  if (item.toucherStat) rows.push(['Toucher', _statShort(item.toucherStat)]);
-  if (item.portee)      rows.push(['Portée', item.portee]);
-  if (item.slotArmure)  rows.push(['Emplacement', item.slotArmure]);
-  if (item.typeArmure)  rows.push(['Type armure', item.typeArmure]);
-  if (item.ca > 0)      rows.push(['CA bonus', `+${item.ca}`]);
-  if (item.slotBijou)   rows.push(['Emplacement', item.slotBijou]);
-  if (item.type)        rows.push(['Type', item.type]);
-  if (item.effet)       rows.push(['Effet', item.effet]);
-  if (statBonuses.length) rows.push(['Bonus stats', statBonuses.join(', ')]);
 
   const compareSlot   = hasChar ? _resolveSlotForItem(item) : null;
   const comparePanel  = compareSlot ? _renderComparePanel(activeChar, item, compareSlot) : '';
@@ -1968,45 +1587,23 @@ function openShopItemDetail(itemId) {
     ? (parseFloat(activeChar.inventaire?.[equippedHere.sourceInvIndex]?.prixVente) || 0)
     : 0;
   const canSellCurrent = !!equippedHere && Number.isInteger(equippedHere.sourceInvIndex) && equippedHere.sourceInvIndex >= 0;
-  const equippedItemName = equippedHere?.nom || activeChar.inventaire?.[equippedHere?.sourceInvIndex]?.nom || '';
+  const equippedItemName = equippedHere?.nom || activeChar?.inventaire?.[equippedHere?.sourceInvIndex]?.nom || '';
 
-  const rareNum = _getRareteNum(item.rarete);
-  const rareCol = rareNum > 0 ? _rareteColor(RARETE_NAMES[rareNum]) : '';
-  const rareName = rareNum > 0 ? (RARETE_NAMES[rareNum] || '') : '';
+  const rar = _itemRarity(item);
+  const rareNum = rar.n, rareCol = rar.color, rareName = rar.name;
   const tplKey = _resolveItemTemplate(item);
   const tplLabel = TEMPLATES[tplKey]?.label || '';
 
-  // Sous-titre type (format · sousType · slot…)
-  const typeChips = [];
-  // Type d'arme (format ou, pour une ancienne arme, type saisi) + maniement.
-  if (_itemWeaponType(item))  typeChips.push(_itemWeaponType(item));
-  if (_itemWeaponHands(item)) typeChips.push(_itemWeaponHands(item));
-  if (item.slotArmure) typeChips.push(item.slotArmure);
-  if (item.typeArmure) typeChips.push(item.typeArmure);
-  if (item.slotBijou)  typeChips.push(item.slotBijou);
-  if (item.type && !typeChips.length) typeChips.push(item.type);
+  const typeChips = _itemTypeChips(item);
   const typeLine = typeChips.length ? typeChips.map(_esc).join(' · ') : _esc(cat?.nom || '');
-
-  // Facts (kv)
-  const facts = [];
-  if (item.degats) {
-    const arr = _getDegatsStats(item);
-    facts.push(['Dégâts', `${item.degats}${arr.length ? ' + ' + _formatDegatsStatsText(arr) : ''}`, 'dmg']);
-  }
-  if (item.toucherStat) facts.push(['Toucher', _statShort(item.toucherStat)]);
-  if (item.portee)      facts.push(['Portée', item.portee]);
-  if (item.ca > 0)      facts.push(['CA', `+${item.ca}`, 'ca']);
-
-  // Bonus chips
+  const facts = _itemFacts(item);
   const bonusEntries = _getStatBonusEntries(item);
   const descTxt = item.effet || item.description || '';
 
-  // Background image
-  const imgBg = item.image
-    ? `background-image:url('${item.image}');background-size:cover;background-position:center`
-    : (cat?.couleur
-        ? `background:linear-gradient(135deg, ${cat.couleur}33, ${cat.couleur}11)`
-        : _catGradient(item.nom || ''));
+  // Visuel : image, sinon pictogramme sur fond teinté (catégorie ou rareté).
+  const heroAttrs = item.image
+    ? `class="sh-detail-hero" style="background-image:url('${_esc(item.image)}');background-size:cover;background-position:center"`
+    : `class="sh-detail-hero sh-detail-hero--glyph" style="${_itemColorVars(rar, cat)}"`;
 
   // Footer buttons
   let actionBtn;
@@ -2015,9 +1612,9 @@ function openShopItemDetail(itemId) {
   } else if (epuise) {
     actionBtn = `<button class="btn btn-outline btn-sm" disabled title="Cet article est épuisé">Épuisé</button>`;
   } else if (tropCher) {
-    actionBtn = `<button class="btn btn-outline btn-sm sh-buy-btn--poor" disabled title="Il te manque ${manque} or">Pas assez d'or</button>`;
+    actionBtn = `<button class="btn btn-outline btn-sm" disabled title="Il te manque ${_fmtOr(manque)} or">Manque ${_fmtOr(manque)} or</button>`;
   } else {
-    actionBtn = `<button class="btn btn-gold btn-sm" data-sh-action="buyFromDetail" data-id="${item.id}">🛒 Acheter pour ${prix} or</button>`;
+    actionBtn = `<button class="btn btn-gold btn-sm" data-sh-action="buyFromDetail" data-id="${item.id}">🛒 Acheter pour ${_fmtOr(prix)} or</button>`;
   }
 
   // pushModal (et non openModal) : si une modale est déjà ouverte (ex. historique),
@@ -2026,7 +1623,8 @@ function openShopItemDetail(itemId) {
   pushModal('', `
   <div class="sh-detail">
     <!-- HERO image avec étoiles + stock -->
-    <div class="sh-detail-hero" style="${imgBg}">
+    <div ${heroAttrs}>
+      ${item.image ? '' : `<span class="sh-detail-glyph" aria-hidden="true">${_esc(_itemGlyph(item, tplKey, cat))}</span>`}
       <div class="sh-detail-hero-fade"></div>
       ${rareNum ? `<span class="sh-detail-stars" title="${_esc(rareName)}">${'★'.repeat(rareNum)}</span>` : ''}
       <span class="sh-detail-stock ${epuise?'is-empty':(dispo!==null && dispo<3?'is-limited':'is-ok')}">${
@@ -2045,21 +1643,21 @@ function openShopItemDetail(itemId) {
           <div class="sh-detail-sub">${typeLine}${tplLabel?` <span class="sh-detail-tpl">${_esc(tplLabel)}</span>`:''}</div>
         </div>
         <div class="sh-detail-price-block">
-          <div class="sh-detail-price-main">🪙 ${prix} or</div>
-          <div class="sh-detail-price-sub">Revente ${prixV} or</div>
-          ${tropCher && !epuise ? `<div class="sh-detail-price-warn">Il te manque ${manque} or</div>` : ''}
+          <div class="sh-detail-price-main">🪙 ${_fmtOr(prix)} or</div>
+          <div class="sh-detail-price-sub">Revente ${_fmtOr(prixV)} or</div>
+          ${tropCher && !epuise ? `<div class="sh-detail-price-warn">Il te manque ${_fmtOr(manque)} or</div>` : ''}
         </div>
       </div>
 
       ${facts.length ? `<div class="sh-detail-facts">
-        ${facts.map(([l,v,c])=>`<div class="sh-detail-fact ${c||''}">
-          <span class="sh-detail-fact-lbl">${_esc(l)}</span>
-          <span class="sh-detail-fact-val">${_esc(v)}</span>
+        ${facts.map(f => `<div class="sh-detail-fact ${f.cls || ''}">
+          <span class="sh-detail-fact-lbl">${_esc(f.lbl)}</span>
+          <span class="sh-detail-fact-val"${f.color ? ` style="color:${f.color}"` : ''}>${_esc(f.val)}</span>
         </div>`).join('')}
       </div>` : ''}
 
       ${bonusEntries.length ? `<div class="sh-detail-bonus">
-        ${bonusEntries.map(b=>`<span class="sh-item-bonus-chip" style="border-color:${b.color}55;background:${b.color}18;color:${b.color}">${b.short} ${b.val>0?'+':''}${b.val}</span>`).join('')}
+        ${bonusEntries.map(b => `<span class="shc-bonus" style="--stat:${b.color}">${b.short} ${b.val > 0 ? '+' : ''}${b.val}</span>`).join('')}
       </div>` : ''}
 
       ${traitsArr.length ? `<div class="sh-detail-traits">
@@ -2080,8 +1678,9 @@ function openShopItemDetail(itemId) {
         <button class="btn btn-outline btn-sm sh-detail-sell-current"
           title="Vendre l'objet équipé sur ${_esc(compareSlot)}${equippedItemName ? ` : ${_esc(equippedItemName)}` : ''}"
           data-sh-action="sellEquip" data-slot="${_esc(compareSlot)}">
-          💰 Vendre équipé${sellPrice ? ` (+${sellPrice} or)` : ''}
+          💰 Vendre équipé${sellPrice ? ` (+${_fmtOr(sellPrice)} or)` : ''}
         </button>` : ''}
+      ${compareSlot ? `<button class="btn btn-outline btn-sm" data-sh-action="tryFromDetail" data-id="${item.id}" title="Essayer dans l’Atelier">🪄 Essayer</button>` : ''}
       ${actionBtn}
     </div>
   </div>
@@ -2477,33 +2076,34 @@ export async function sellInvItemFromShop(charId, invIndex, opts = {}) {
 // ══════════════════════════════════════════════════════════════════════════════
 function shopGoHome()     { _view='home';  _activeCat=null; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
 export function shopGoCat(catId) { _view='items'; _activeCat=catId; _page=1; _filterSearch=''; _filterTags.clear(); renderShop(); }
-function shopPage(p)      { _page=p; renderShop(); }
+function shopPage(p) {
+  _page = p;
+  _updateResults();
+  document.querySelector('.shc-main')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
 
 // ── Fonctions de filtre ───────────────────────────────────────────────────────
 function shopSetSort(val) {
   _filterSort = val;
-  localStorage.setItem('shop_sort', val);
+  _lsSet('shop_sort', val);
   _page = 1;
-  if (_view === 'items') _updateItemsOnly();
-  else renderShop();
+  _updateResults();
 }
 
 export function shopFilterSearch(val) {
   _filterSearch = val;
   _page = 1;
-  if (_view === 'items') _updateItemsOnly();
-  else _updateHomeOnly();
+  _updateResults();
   _syncShopSearchChrome();
 }
 
 function _syncShopSearchChrome() {
-  const input = document.getElementById(_view === 'items' ? 'sh-search' : 'sh-home-search');
-  const clear = input?.closest('.sh-hero-search')?.querySelector('.sh-hero-search-clear');
+  const clear = document.querySelector('.shc-search-clear');
   if (clear) clear.hidden = !_filterSearch;
 }
 
 function shopClearSearch() {
-  const input = document.getElementById(_view === 'items' ? 'sh-search' : 'sh-home-search');
+  const input = document.getElementById('sh-search');
   if (input) input.value = '';
   shopFilterSearch('');
   requestAnimationFrame(() => input?.focus({ preventScroll: true }));
@@ -2511,10 +2111,13 @@ function shopClearSearch() {
 
 function _shopKeyboardQol(event) {
   if (STATE.currentPage !== 'shop' && !document.querySelector('.sh-page--v2')) return;
-  const search = event.target?.closest?.('#sh-home-search, #sh-search');
+  if (event.key === 'Escape') {
+    const menu = document.querySelector('.shc-manage[open], .sh-char-picker[open]');
+    if (menu) { menu.open = false; menu.querySelector('summary')?.focus(); return; }
+  }
+  const search = event.target?.closest?.('#sh-search');
   if (search && (event.key === 'Enter' || event.key === 'ArrowDown')) {
-    const scope = document.getElementById(_view === 'items' ? 'sh-items-results' : 'sh-home-results');
-    const first = scope?.querySelector('[data-sh-key-card="item"]');
+    const first = document.getElementById('sh-items-results')?.querySelector('[data-sh-key-card="item"]');
     if (!first) return;
     event.preventDefault();
     if (event.key === 'Enter') first.click();
@@ -2535,8 +2138,7 @@ function shopToggleTag(val) {
   if (_filterTags.has(val)) _filterTags.delete(val);
   else _filterTags.add(val);
   _page = 1;
-  if (_view === 'items') _updateItemsOnly();
-  else renderShop();
+  _updateResults();
 }
 
 function shopFilterReset() {
@@ -2544,99 +2146,59 @@ function shopFilterReset() {
   _filterTags.clear();
   _smartFilters.clear();
   _page = 1;
-  const inp = document.getElementById(_view === 'items' ? 'sh-search' : 'sh-home-search');
+  const inp = document.getElementById('sh-search');
   if (inp) inp.value = '';
-  if (_view === 'items') _refreshSmartFiltersFromCache();
-  else renderShop();
+  _syncShopSearchChrome();
+  _refreshSmartFiltersFromCache();
 }
 
-// ── Mise à jour partielle : grille + compteur + tags, sans toucher le champ texte ──
-function _updateItemsOnly() {
-  const isUncategorized = _activeCat === '__uncategorized__';
-  const cat = isUncategorized
-    ? { id: '__uncategorized__', nom: 'Non classé', template: 'classique' }
-    : _cats.find(c => c.id === _activeCat);
-  if (!cat) { renderShop(); return; }
+// Rend le focus à l'élément équivalent après un re-rendu partiel (clavier).
+function _refocus(selector) {
+  if (!selector) return;
+  requestAnimationFrame(() => document.querySelector(selector)?.focus({ preventScroll: true }));
+}
+function _focusKey() {
+  const el = document.activeElement;
+  if (el?.dataset?.smart) return `[data-smart="${el.dataset.smart}"]`;
+  if (el?.dataset?.shAction === 'toggleFav' && el.dataset.id) return `[data-sh-action="toggleFav"][data-id="${CSS.escape(el.dataset.id)}"]`;
+  return '';
+}
 
-  let items = _getFilteredItems(_activeCat);
-  const search = _norm(_filterSearch);
+// ── Mise à jour partielle : résultats + compteurs + filtres, sans toucher le
+// champ de recherche (la saisie garde le focus et le curseur).
+function _updateResults() {
+  const results = document.getElementById('sh-items-results');
+  if (!results) { renderShop(); return; }
+  const refocus = _focusKey();
+  const st = _catalogState();
 
-  const total  = items.length;
-  const organizeAll = _isManualOrganizeMode();
-  const pages  = organizeAll ? 1 : Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const p      = organizeAll ? 1 : Math.max(1, Math.min(_page, pages));
-  const slice  = organizeAll ? items : items.slice((p-1)*PAGE_SIZE, p*PAGE_SIZE);
-  const hasF   = Boolean(search || _filterTags.size > 0 || _smartFilters.size > 0);
+  const meta = document.getElementById('sh-category-meta');
+  if (meta) meta.textContent = _catalogMetaText(st);
 
-  const counter = document.getElementById('sh-count');
-  if (counter) counter.textContent = `${total} article${total!==1?'s':''}`;
-
-  const orderMode = document.getElementById('sh-order-mode');
-  if (orderMode) orderMode.hidden = !organizeAll;
-
-  const clearBtn = document.getElementById('sh-clear-btn');
-  if (clearBtn) clearBtn.hidden = !hasF;
-
-  const categoryMeta = document.getElementById('sh-category-meta');
-  if (categoryMeta) {
-    const totalCat = parseInt(categoryMeta.dataset.total) || _getBaseItems(_activeCat).length;
-    const hidden = categoryMeta.dataset.hidden === '1';
-    categoryMeta.innerHTML = `${totalCat} article${totalCat!==1?'s':''}${hasF && total !== totalCat ? ` · ${total} filtré${total!==1?'s':''}` : ''}${hidden ? ` · ${eyeIcon(true)} Masquée aux joueurs` : ''}`;
-  }
-
-  document.querySelectorAll('[data-tag-value]').forEach(btn => {
-    const v     = btn.dataset.tagValue;
-    const color = btn.dataset.tagColor || 'var(--text-dim)';
-    const active = _filterTags.has(v);
-    btn.style.borderColor = active ? color : 'var(--border)';
-    btn.style.background  = active ? color+'22' : 'var(--bg-elevated)';
-    btn.style.color       = active ? color : 'var(--text-dim)';
-    btn.style.fontWeight  = active ? '600' : '400';
+  const toggle = document.getElementById('sh-filter-toggle');
+  if (toggle) toggle.outerHTML = _renderFilterToggle(st.groups);
+  document.querySelectorAll('#sh-filters [data-tag-value]').forEach(btn => {
+    const on = _filterTags.has(btn.dataset.tagValue);
+    btn.classList.toggle('is-on', on);
+    btn.setAttribute('aria-pressed', String(on));
   });
+  const active = document.getElementById('sh-active-filters');
+  if (active) active.innerHTML = _renderActiveFilters(st.groups);
 
-  const grid = document.getElementById('sh-items-results');
-  if (!grid) { renderShop(); return; }
-
-  let html = '';
-  if (slice.length === 0) {
-    html = `<div class="empty-state"><div class="icon">📦</div>
-      <p>${hasF ? 'Aucun résultat pour ces filtres.' : 'Aucun article dans cette catégorie.'}</p>
-      ${!hasF && STATE.isAdmin ? `<button class="btn btn-gold btn-sm" style="margin-top:.75rem" data-sh-action="openItemModal">+ Ajouter</button>` : ''}</div>`;
-  } else {
-    html = _renderItemGrid(cat, slice);
-  }
-
-  if (pages > 1) {
-    html += `<div class="sh-pagination">`;
-    if (p>1) html += `<button class="sh-page-btn" data-sh-action="page" data-page="${p-1}">← Précédent</button>`;
-    const st=Math.max(1,p-2), en=Math.min(pages,p+2);
-    if(st>1) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="1">1</button>${st>2?'<span class="sh-dim-pill">…</span>':''}`;
-    for(let i=st;i<=en;i++) html+=`<button class="sh-page-btn ${i===p?'active':''}" data-sh-action="page" data-page="${i}">${i}</button>`;
-    if(en<pages) html+=`${en<pages-1?'<span class="sh-dim-pill">…</span>':''}<button class="sh-page-btn" data-sh-action="page" data-page="${pages}">${pages}</button>`;
-    if(p<pages) html+=`<button class="sh-page-btn" data-sh-action="page" data-page="${p+1}">Suivant →</button>`;
-    html += `</div>`;
-  }
-  grid.innerHTML = html;
+  results.innerHTML = _renderResultsHtml(st);
+  _refocus(refocus);
   // Le remplacement de innerHTML détruit l'ancien conteneur Sortable. Le
   // remonter à la frame suivante permet d'enchaîner les déplacements sans
   // recharger la page, y compris après le re-rendu déclenché par un drag.
   _scheduleSortablesMount();
 }
 
-// ── Mise à jour partielle vue home — résultats sans toucher le champ texte ──
-function _updateHomeOnly() {
-  const results = document.getElementById('sh-home-results');
-  if (!results) { renderShop(); return; }
-  results.innerHTML = _renderHomeResults();
-  _mountSortables();
-}
-
 function _refreshSmartFiltersFromCache() {
-  const smartBar = document.querySelector('.sh-hero .sh-smart-bar');
-  const baseItems = _view === 'items' ? _getBaseItems(_activeCat) : _getCachedVisibleItems();
-  if (smartBar) smartBar.outerHTML = _renderSmartBar(baseItems);
-  if (_view === 'home') _updateHomeOnly();
-  else _updateItemsOnly();
+  const refocus = _focusKey();
+  const smart = document.getElementById('sh-smart');
+  if (smart) smart.innerHTML = _renderSmartChips();
+  _updateResults();
+  _refocus(refocus);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2656,7 +2218,10 @@ function _scheduleSortablesMount() {
 function _installClickGuard() {
   if (_clickGuardInstalled) return;
   _clickGuardInstalled = true;
-  document.addEventListener('click', (e) => {
+  // Sur window (et non document) : la délégation data-sh-action écoute déjà
+  // document en capture ; window passe avant elle, sinon le clic qui suit le
+  // lâcher (Firefox) ouvrait la carte / la catégorie glissée.
+  window.addEventListener('click', (e) => {
     if (_dragBlockClick) { e.stopPropagation(); e.preventDefault(); }
   }, true);
 }
@@ -2672,7 +2237,7 @@ function _mountSortables() {
     prefix: 'sh',
     animation: 120,
     draggable: '.sh-sortable-item',
-    filter: 'button, a, input, select, textarea, .btn-icon, .sh-card-admin-inline, .sh-item-actions, .sh-list-actions',
+    filter: 'button, a, input, select, textarea, .shc-card-admin, .shc-card-cta, .shc-row-actions',
     onStart: () => { document.body.classList.add('sh-dragging'); _dragBlockClick = true; },
   };
   const finishDrag = () => {
@@ -2680,10 +2245,13 @@ function _mountSortables() {
     setTimeout(() => { _dragBlockClick = false; }, 350);
   };
 
-  const catGrid = document.querySelector('.sh-cat-grid.sh-sortable');
-  if (catGrid) {
-    _sortCats = makeSortable(catGrid, {
+  // Catégories : réordonnées en glissant les liens du rail (des <button> →
+  // pas de filtre « button » ici, le garde-clic évite l'ouverture au lâcher).
+  const catRail = document.getElementById('sh-cat-rail');
+  if (catRail?.classList.contains('sh-sortable')) {
+    _sortCats = makeSortable(catRail, {
       ...shOpts,
+      filter: '.shc-rail-eye',
       onEnd: async (evt) => {
         finishDrag();
         if (evt.oldIndex === evt.newIndex) return;
@@ -2696,6 +2264,7 @@ function _mountSortables() {
           _cats.forEach((cat, i) => { if (Number(cat.ordre) !== i) writes.push(updateInCol('shopCategories', cat.id, { ordre: i })); });
           await Promise.all(writes);
           _cats.forEach((cat, i) => { cat.ordre = i; });
+          if (_view === 'home') _updateResults(); // « Tout » est groupé par catégorie
         } catch (err) { notifySaveError(err); renderShop(); }
       },
     });
@@ -2738,7 +2307,7 @@ function _mountSortables() {
           reordered.forEach((item, ordre) => { item.ordre = ordre; });
           _items.sort(compareManualOrder);
           if (previousSort !== 'ordre') showNotif('Ordre manuel activé et enregistré.', 'success');
-          _updateItemsOnly();
+          _updateResults();
         } catch (err) { notifySaveError(err); renderShop(); }
       },
     });
@@ -4658,29 +4227,25 @@ Object.assign(shHandlers, {
     showNotif(masque ? 'Article masqué aux joueurs' : 'Article visible', masque ? 'info' : 'success');
     renderShop();
   },
-  // Tweaks d'affichage (lot 7)
-  openTweaks:     () => openTweaksPopup(),
-  setTweak:       (el) => {
-    const k = el.dataset.twKey, v = el.dataset.twVal;
-    if (!k || _shopTweaks[k] === v) return;
-    _shopTweaks[k] = v;
-    _shopTweaksSave();
-    // Refresh visuel des segmented dans la modale ouverte
-    document.querySelectorAll(`[data-tw-key="${k}"] .sh-tw-seg-btn`).forEach(b => {
-      const active = b.dataset.twVal === v;
-      b.classList.toggle('on', active);
-      b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  // Affichage : grille / liste (préférence locale) + panneau Filtres
+  setView:        (el) => {
+    const v = el.dataset.view;
+    if (!['grille', 'liste'].includes(v) || v === _shopView) return;
+    _shopView = v;
+    _lsSet('shop_view', v);
+    document.querySelectorAll('.shc-view-btn').forEach(b => {
+      const on = b.dataset.view === v;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-pressed', String(on));
     });
-    // Re-render du shop pour appliquer : layout (tabs/sidebar) et card=liste
-    // changent le MARKUP (pas juste du CSS) → re-render obligatoire.
-    if (k === 'layout' || k === 'card') renderShop();
+    _updateResults();
   },
-  resetTweaks:    () => {
-    _shopTweaks = { ..._TWEAKS_DEFAULTS };
-    _shopTweaksSave();
-    closeModalDirect();
-    renderShop();
-    setTimeout(openTweaksPopup, 50);
+  toggleFilters:  (el) => {
+    _filtersOpen = !_filtersOpen;
+    _lsSet('shop_filters_open', _filtersOpen ? '1' : '0');
+    const panel = document.getElementById('sh-filters');
+    if (panel) panel.hidden = !_filtersOpen;
+    el.setAttribute('aria-expanded', String(_filtersOpen));
   },
   openCatModal:   (el) => openCatModal(el.dataset.id || ''),
   openItemModal:  (el) => openItemModal(el.dataset.id || ''),
@@ -4733,6 +4298,7 @@ Object.assign(shHandlers, {
   deleteItem:     (el) => deleteShopItem(el.dataset.id),
   editFromDetail: (el) => { closeModalDirect(); openItemModal(el.dataset.id); },
   buyFromDetail:  (el) => { closeModalDirect(); buyItem(el.dataset.id); },
+  tryFromDetail:  (el) => { closeModalDirect(); shopOpenAtelier(el.dataset.id || ''); },
   sellEquip:      (el) => _sellCurrentEquipForShop(el.dataset.slot),
   // Stepper quantité achat
   qtyDown:        (el) => { const inp = el.nextElementSibling; inp?.stepDown(); inp?.dispatchEvent(new Event('input')); },

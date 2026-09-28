@@ -358,7 +358,6 @@
 
   /* Grilles spécifiques aux pages */
   .char-grid       { grid-template-columns: repeat(3, 1fr); }
-  .shop-grid,
   .npc-grid,
   .achievement-grid { grid-template-columns: 1fr; }
   .players-grid    { grid-template-columns: repeat(2, 1fr); }
