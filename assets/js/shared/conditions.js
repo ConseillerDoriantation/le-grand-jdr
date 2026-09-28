@@ -131,6 +131,11 @@ export const CONDITION_DEFAULT_LIBRARY = [
     desc:'Volonté brisée : désavantage à tous ses jets de sauvegarde. Prépare les autres Afflictions.',
     defaultSaveStat:'sagesse',     defaultDC:11, defaultDuration:2,
     effects:{ saveDisadvantageStats:['force', 'dexterite', 'constitution', 'intelligence', 'sagesse', 'charisme'] } },
+  // ── Contrecoup de technique (Coup sournois raté) ──
+  { id:'exposed',       label:'À découvert', icon:'🫣', color:'#fb7185',
+    desc:'S\'est exposé en ratant une frappe risquée : avantage aux attaques contre lui jusqu\'à la fin du round.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:1,
+    effects:{ attackAgainst:'adv' } },
   // ── Actions de base (posées par les actions Esquiver / Se cacher / Se désengager) ──
   { id:'dodge',         label:'Esquive',     icon:'🤸', color:'#38bdf8',
     desc:'Jusqu\'au début de ton prochain tour : désavantage aux attaques contre toi (si tu vois l\'attaquant).',
@@ -154,7 +159,7 @@ const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'allonge', 'chanceux
 // Hors sorts (pose MJ, capacités, créatures) : actions de base, états sans effet
 // en combat VTT, doublons d'un état de sort plus lisible, capacités de classe.
 const CONDITION_NON_SPELL_DEFAULT_IDS = new Set([
-  'dodge', 'hidden', 'disengaged',
+  'dodge', 'hidden', 'disengaged', 'exposed',
   'deafened', 'charmed', 'invisible',
   'incapacitated', 'unconscious', 'paralyzed', 'petrified', 'grappled', 'frightened',
   'focused', 'rage',

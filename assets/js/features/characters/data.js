@@ -422,6 +422,27 @@ const _WF_TECHNIQUE_PRESETS = {
     defenseBonus: 2, extraWeaponDice: 0, extraDamageFormula: '', extraDamageFlat: 2,
     addWeaponModifier: false, blastRadius: 0, onHitEffect: '',
   },
+  // Techniques de frappe par famille d'arme : un choix déclaré avant le jet, avec un coût.
+  dagger_sneak: {
+    icon: '🗡️', label: 'Coup sournois',
+    description: 'Exploite une ouverture : avec l’avantage, +2 dés d’arme. Si tu rates quand même, tu es à découvert.',
+    allowWithAbilities: false, requiresAdvantage: true, extraWeaponDice: 2, missSelfConditionId: 'exposed',
+  },
+  axe_momentum: {
+    icon: '🪓', label: 'Élan total',
+    description: 'Frappe à fond : critique sur 18–20, mais −2 au toucher et −2 CA si tu rates.',
+    allowWithAbilities: false, attackModifier: -2, critRangeBonus: 2, missSelfCaMalus: 2,
+  },
+  hammer_crush: {
+    icon: '🔨', label: 'Broyeur',
+    description: 'Écrase l’armure : ignore 20 % de la CA de la cible, au prix de 3 dégâts. Rentable contre les cibles blindées.',
+    allowWithAbilities: false, armorIgnorePct: 20, damageMalusFlat: 3,
+  },
+  sword_control: {
+    icon: '⚔️', label: 'Frappe maîtrisée',
+    description: 'Coup sûr : +2 au toucher, −2 dégâts.',
+    allowWithAbilities: false, attackModifier: 2, damageMalusFlat: 2,
+  },
 };
 
 const _TECH_STAT_OPTIONS = [
@@ -524,8 +545,21 @@ function _techniqueConfigCard(t, i, kind) {
           <label class="wf-tech-effect"><span>Effet affiché dans le résultat</span><input value="${_esc(t.onHitEffect || '')}" maxlength="160" placeholder="Ex. La cible lâche son arme" ${bind('onHitEffect')}></label>
         </details>
 
+        <details class="tech-builder-section" ${t.requiresAdvantage || t.critRangeBonus || t.armorIgnorePct || t.damageMalusFlat || t.missSelfCaMalus || t.missSelfConditionId ? 'open' : ''}>
+          <summary><span>5</span><div><b>Frappe et contrecoup</b><small>Critique, armure, coût en dégâts, risque en cas de raté.</small></div></summary>
+          <div class="tech-builder-grid">
+            <label><span>Critique élargi (crans)</span><input type="number" min="0" max="5" value="${t.critRangeBonus || 0}" title="2 = critique sur 18–20" ${bind('critRangeBonus')}></label>
+            <label><span>CA ignorée (%)</span><input type="number" min="0" max="100" value="${t.armorIgnorePct || 0}" ${bind('armorIgnorePct')}></label>
+            <label><span>Malus de dégâts</span><input type="number" min="0" max="99" value="${t.damageMalusFlat || 0}" ${bind('damageMalusFlat')}></label>
+            <label><span>Raté : malus de CA</span><input type="number" min="0" max="10" value="${t.missSelfCaMalus || 0}" ${bind('missSelfCaMalus')}></label>
+            <label><span>Raté : état sur soi</span><select ${bind('missSelfConditionId', 'change')}>${_techniqueOptions(conditionOptions, t.missSelfConditionId || '', 'Aucun')}</select></label>
+          </div>
+          <label class="wf-tech-check tech-builder-check"><input type="checkbox" ${t.requiresAdvantage ? 'checked' : ''} ${bind('requiresAdvantage', 'change')}><span><b>Avec l’avantage seulement</b><small>Sans avantage au moment du jet, la technique ne s’active pas et l’attaque reste normale.</small></span></label>
+          <small class="tech-builder-note">Le contrecoup s’applique au lanceur si l’attaque rate toutes ses cibles, jusqu’à la fin du round, en combat uniquement.</small>
+        </details>
+
         <details class="tech-builder-section">
-          <summary><span>5</span><div><b>Coût et limites</b><small>Ressource, usages et recharge.</small></div></summary>
+          <summary><span>6</span><div><b>Coût et limites</b><small>Ressource, usages et recharge.</small></div></summary>
           <div class="tech-builder-grid">
             <label><span>Ressource</span><select ${bind('resourceType', 'change')}>${_techniqueOptions([
               ['none', 'Aucune'], ['pm', 'Points de mana'], ['pv', 'Points de vie'], ['or', 'Or'],
@@ -596,6 +630,10 @@ function _renderWeaponFormatTechniquesEditor() {
           <button data-action="_addWeaponFormatTechnique" data-preset="blank">＋ Libre</button>
           <button data-action="_addWeaponFormatTechnique" data-preset="weak_spot">🎯 Point faible</button>
           <button data-action="_addWeaponFormatTechnique" data-preset="power">💥 Coup puissant</button>
+          <button data-action="_addWeaponFormatTechnique" data-preset="dagger_sneak">🗡️ Coup sournois</button>
+          <button data-action="_addWeaponFormatTechnique" data-preset="axe_momentum">🪓 Élan total</button>
+          <button data-action="_addWeaponFormatTechnique" data-preset="hammer_crush">🔨 Broyeur</button>
+          <button data-action="_addWeaponFormatTechnique" data-preset="sword_control">⚔️ Frappe maîtrisée</button>
         </div>
       </div>
       <div class="sh-admin-footer">

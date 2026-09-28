@@ -532,7 +532,11 @@ export function _renderChatLogImpl(msgs) {
     const techniqueBonus = Number.isFinite(storedBonus)
       ? Math.max(0, storedBonus)
       : _techniques(target).reduce((total, technique) => total + Math.max(0, parseInt(technique?.defenseBonus, 10) || 0), 0);
-    const withTechnique = value => Number.isFinite(Number(value)) ? Number(value) + techniqueBonus : value;
+    // Broyeur : la part de CA ignorée s'applique aussi à l'estimation du joueur.
+    const ignorePct = Math.min(100, _techniques(target).reduce((total, technique) => total + Math.max(0, parseInt(technique?.armorIgnorePct, 10) || 0), 0));
+    const withTechnique = value => Number.isFinite(Number(value))
+      ? Number(value) - Math.floor(Number(value) * ignorePct / 100) + techniqueBonus
+      : value;
     if (STATE.isAdmin) return realCA ?? '?';
     if (target.characterId) return realCA ?? '?';
     if (target.beastId) {
@@ -736,7 +740,15 @@ export function _renderChatLogImpl(msgs) {
       if (technique.defenseBonus > 0) {
         rows.push(_row(`${_esc(technique.icon || '🎯')} ${_esc(technique.label)} ${sub('difficulté')}`, `<strong>CA +${technique.defenseBonus}</strong>`, { op: '🎯', muted: true }));
       }
+      if (technique.armorIgnorePct > 0) {
+        rows.push(_row(`${_esc(technique.icon || '🔨')} ${_esc(technique.label)} ${sub('armure')}`, `<strong>CA −${technique.armorIgnorePct}%</strong>`, { op: '🎯', muted: true }));
+      }
+      if (technique.critRangeBonus > 0) {
+        rows.push(_row(`${_esc(technique.icon || '🪓')} ${_esc(technique.label)} ${sub('critique')}`, `<strong>${20 - technique.critRangeBonus}–20</strong>`, { op: '💥', muted: true }));
+      }
     }
+    // Contrecoup d'une technique ratée : visible même sans dégâts.
+    if (m.techniqueBacklash) rows.push(_row(_esc(m.techniqueBacklash), '', { op: '💢', muted: true }));
 
     // ── DÉGÂTS / SOIN ──
     if (m.hit || m.halfDmg || isHeal || m.targets?.some(t => t.hit || t.halfDmg)) {
@@ -785,6 +797,8 @@ export function _renderChatLogImpl(msgs) {
         const wd = m.weakenDetail;
         rows.push(_row(`${_esc(wd.label || 'Affaibli')} ${_dice(wd, wd.formula || wd.total)}`, `<strong>−${wd.total}</strong>`, { op: wd.icon || '🥀' }));
       }
+      // Coût de technique (Frappe maîtrisée, Broyeur) et contrecoup d'un raté.
+      if (m.techniqueDmgMalus > 0) rows.push(_row(`Coût de la technique`, `<strong>−${m.techniqueDmgMalus}</strong>`, { op: '⚖️', muted: true }));
 
       for (const technique of _techniques(m)) {
         if (technique.triggered === false) {
