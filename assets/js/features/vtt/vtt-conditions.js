@@ -130,11 +130,39 @@ export function _vttConditionAdd(tokenId) {
   `);
 }
 
+// Faiblesse : l'état porte un élément (dégâts ×2 de cet élément), à choisir.
+const _WEAK_ID = 'faiblesse';
+const _elementLabel = id => (VS.damageTypes || []).find(d => d.id === id)?.label || id || 'élément';
+const _condLabel = (lib, element) => element ? `${lib.label} ${_elementLabel(element)}` : lib.label;
+
+function _vttWeaknessElementPicker(tokenId) {
+  const lib = CONDITION_BY_ID[_WEAK_ID];
+  const types = VS.damageTypes || [];
+  openModal(`${lib?.icon || '💢'} Faiblesse : choisir l'élément`, types.length ? `
+    <div class="vtt-cond-picker">
+      ${types.map(d => `
+        <button class="vtt-cond-pick" style="--cond-c:${_esc(d.color || '#f59e0b')}"
+          data-vtt-fn="_vttConditionApply" data-vtt-args="${tokenId}|${_WEAK_ID}|${_esc(d.id)}">
+          <span class="vtt-cond-pick-ic">${d.icon || '💢'}</span>
+          <div class="vtt-cond-pick-body">
+            <div class="vtt-cond-pick-nom">Faiblesse ${_esc(d.label || d.id)}</div>
+            <div class="vtt-cond-pick-desc">Dégâts ×2 de cet élément</div>
+          </div>
+        </button>
+      `).join('')}
+    </div>` : '<div style="color:var(--text-dim)">Aucun type de dégâts configuré.</div>');
+}
+
 /** Applique l'état avec les défauts de la librairie (DC + stat préremplis),
- *  puis ouvre la modal d'édition pour ajuster source/durée si besoin. */
-export async function _vttConditionApply(tokenId, condId) {
+ *  puis ouvre la modal d'édition pour ajuster source/durée si besoin.
+ *  `element` : requis pour la Faiblesse (sinon on demande l'élément d'abord). */
+export async function _vttConditionApply(tokenId, condId, element = '') {
   const lib = CONDITION_BY_ID[condId]; if (!lib) return;
   const t = VS.tokens[tokenId]?.data; if (!t) return;
+  const isWeak = condId === _WEAK_ID;
+  if (isWeak && !element) { _vttWeaknessElementPicker(tokenId); return; }
+  element = isWeak ? String(element) : '';
+  const label = _condLabel(lib, element);
   // Immunité (fiche → onglet Capacités) : la cible ne subit pas l'état du tout.
   const _chApply = _resChar(t);
   if (Array.isArray(_chApply?.resistances) && _chApply.resistances.some(r => r.k === 'imm' && _etatResMatch(r, condId, lib))) {
@@ -142,10 +170,10 @@ export async function _vttConditionApply(tokenId, condId) {
     closeModalDirect();
     return;
   }
-  // Évite les doublons (même état déjà appliqué)
-  const existing = (t.conditions || []).some(c => c.id === condId);
+  // Évite les doublons (même état déjà appliqué ; Faiblesse : même élément)
+  const existing = (t.conditions || []).some(c => c.id === condId && (!isWeak || c.element === element));
   if (existing) {
-    showNotif(`${lib.icon} ${lib.label} déjà appliqué`, 'info');
+    showNotif(`${lib.icon} ${label} déjà appliqué`, 'info');
     closeModalDirect();
     return;
   }
@@ -169,6 +197,7 @@ export async function _vttConditionApply(tokenId, condId) {
     saveStat: lib.defaultSaveStat || null,
     expiresAtRound,
     ...(pendingDuration != null ? { pendingDuration } : {}),
+    ...(isWeak ? { element } : {}),
   };
   const baseConds = await _vttConditionsBeforeStateApplication({ ...t, id: tokenId }, lib);
   const newConds = [...baseConds, cond];
@@ -179,12 +208,12 @@ export async function _vttConditionApply(tokenId, condId) {
     await updateDoc(_tokRef(tokenId), { conditions: newConds });
   } catch (error) {
     _vttPatchTokenOptimistically(tokenId, { conditions: previous });
-    showNotif(`Impossible d'appliquer ${lib.label} : ${error?.message || error}`, 'error');
+    showNotif(`Impossible d'appliquer ${label} : ${error?.message || error}`, 'error');
     return;
   }
   const durLbl = isConsumed ? ' (1 coup)'
     : (expiresAtRound != null || pendingDuration != null) ? ` (${dur} tour${dur>1?'s':''})` : '';
-  showNotif(`${lib.icon} ${lib.label} appliqué${durLbl}`, 'success');
+  showNotif(`${lib.icon} ${label} appliqué${durLbl}`, 'success');
   _renderInspectorSoon?.();
 }
 
@@ -202,7 +231,7 @@ export async function _vttConditionRemove(tokenId, idx) {
     console.error('[VTT] État non retiré :', error);
   });
   const lib = CONDITION_BY_ID[removed.id];
-  if (lib) showNotif(`${lib.icon} ${lib.label} retiré`, 'info');
+  if (lib) showNotif(`${lib.icon} ${_condLabel(lib, removed.element)} retiré`, 'info');
 }
 
 // Une résistance d'état de la fiche correspond-elle à cet état posé ?
@@ -331,8 +360,16 @@ export function _vttConditionEdit(tokenId, idx) {
   const turnsLeft = cond.expiresAtRound != null && round > 0
     ? (cond.expiresAtRound - round + 1)
     : (cond.expiresAtRound != null ? 0 : '');
+  const elementField = cond.id === _WEAK_ID ? `
+      <div class="form-group">
+        <label>Élément (dégâts ×2)</label>
+        <select class="input-field" id="ce-element">
+          ${cond.element ? '' : '<option value="" selected>— À choisir —</option>'}
+          ${(VS.damageTypes || []).map(d => `<option value="${_esc(d.id)}" ${d.id === cond.element ? 'selected' : ''}>${d.icon || ''} ${_esc(d.label || d.id)}</option>`).join('')}
+        </select>
+      </div>` : '';
   openModal(`✏️ ${lib.icon} ${lib.label}`, `
-    <div class="vtt-cond-edit">
+    <div class="vtt-cond-edit">${elementField}
       <div class="form-group">
         <label>Source / Origine</label>
         <input class="input-field" id="ce-source" value="${_esc(cond.source||'')}" placeholder="Ex: Lacération de l'orc, gaz toxique…">
@@ -376,6 +413,8 @@ export async function _vttConditionEditSave(tokenId, idx) {
   const expiresAtRound = turns > 0 && round > 0 ? round + turns - 1 : null;
   const conds = [...(t.conditions || [])];
   conds[idx] = { ...cond, source, saveDC, saveStat: saveDC ? saveStat : null, expiresAtRound };
+  const element = document.getElementById('ce-element')?.value;
+  if (cond.id === _WEAK_ID && element) conds[idx].element = element;
   const previous = t.conditions || [];
   _vttPatchTokenOptimistically(tokenId, { conditions: conds });
   closeModalDirect();

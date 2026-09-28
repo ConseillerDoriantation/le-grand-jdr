@@ -751,6 +751,10 @@ export function _renderChatLogImpl(msgs) {
       const critRaw = _diceTotal(critDetail, m.critRaw2 ?? m.dmgRaw);
       const baseLabel = _formulaLabel(baseDetail, diceFormula);
       const finalEffectValue = m.dmgPre ?? m.dmgFull ?? m.dmgTotal ?? m.targets?.find(t => t?.dmgTotal != null)?.dmgTotal;
+      // Formule critique : affichée en tête du détail (règle appliquée), pas au milieu des jets.
+      if (m.isCrit && m.critFormula) {
+        rows.unshift(_row(`Formule critique ${sub(m.critFormula)}`, `<strong>${finalEffectValue ?? '?'}</strong>`, { op: '💥', muted: true }));
+      }
 
       if (m.isCrit) {
         if (baseDetail) {
@@ -759,9 +763,6 @@ export function _renderChatLogImpl(msgs) {
           rows.push(_row(`Base critique max ${sub(baseLabel)}`, `<strong>${m.critNormalMax}</strong>`, { op: '💥' }));
         }
         rows.push(_row(`Dés critiques ${critRoll}`, `<strong>${critRaw ?? '?'}</strong>`, { op: '💥' }));
-        if (m.critFormula) {
-          rows.push(_row(`Formule critique ${sub(m.critFormula)}`, `<strong>${finalEffectValue ?? '?'}</strong>`, { op: '∑', muted: true }));
-        }
       } else {
         rows.push(_row(`Dés de base ${baseRoll}`, `<strong>${baseRaw ?? m.dmgRaw ?? '?'}</strong>`, { op: isHeal ? healIco : '🎲' }));
       }
