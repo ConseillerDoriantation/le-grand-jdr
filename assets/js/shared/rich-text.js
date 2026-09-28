@@ -9,6 +9,8 @@
 // ══════════════════════════════════════════════
 
 import { _esc } from './html.js';
+import { promptModal } from './modal.js';
+import { showNotif } from './notifications.js';
 
 const COLORS = [
   { name: 'Défaut', value: 'initial' },
@@ -49,6 +51,33 @@ const TEXT_SIZES = [
   { name: 'Très grand', value: '1.45em', label: 'Très grand' },
 ];
 
+// Styles de paragraphe (éditeur complet) : les titres alimentent le plan de
+// lecture du Guide ; les encadrés sont des <blockquote> à variante de classe.
+const BLOCK_STYLES = [
+  { value: 'p',    name: 'Paragraphe',        label: 'Paragraphe' },
+  { value: 'h2',   name: 'Titre',             label: 'Titre' },
+  { value: 'h3',   name: 'Sous-titre',        label: 'Sous-titre' },
+  { value: 'note', name: 'Encadré note',      label: 'Encadré',   callout: '' },
+  { value: 'tip',  name: 'Encadré astuce',    label: 'Astuce',    callout: 'rte-callout-tip' },
+  { value: 'warn', name: 'Encadré attention', label: 'Attention', callout: 'rte-callout-warn' },
+];
+const CALLOUT_CLASSES = BLOCK_STYLES.map((s) => s.callout).filter(Boolean);
+
+const _alignIcon = (lines) => `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">${
+  lines.map(([x1, x2], i) => `<path d="M${x1} ${3 + i * 3.3}h${x2 - x1}"/>`).join('')}</svg>`;
+const ALIGNMENTS = [
+  { value: 'left',    name: 'Aligner à gauche', icon: _alignIcon([[2, 14], [2, 10], [2, 14], [2, 9]]) },
+  { value: 'center',  name: 'Centrer',          icon: _alignIcon([[2, 14], [4, 12], [2, 14], [5, 11]]) },
+  { value: 'right',   name: 'Aligner à droite', icon: _alignIcon([[2, 14], [6, 14], [2, 14], [7, 14]]) },
+  { value: 'justify', name: 'Justifier',        icon: _alignIcon([[2, 14], [2, 14], [2, 14], [2, 14]]) },
+];
+const LINK_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+
+// Popups détachés dans <body> (hors du overflow de la barre d'outils).
+const RICH_TEXT_POP_CLASSES = [
+  'rte-color-pop', 'rte-highlight-pop', 'rte-font-pop', 'rte-size-pop', 'rte-block-pop', 'rte-align-pop',
+];
+
 const DEFAULT_FONT_SENTINEL = 'rte-default-font';
 const DEFAULT_COMMAND_ATTR = 'data-rte-cmd';
 const POPUP_OFFSET = 4;
@@ -72,6 +101,7 @@ const RICH_TEXT_COMMAND_META = {
   h3: { title: 'Titre H3', html: 'H3', stateful: true },
   insertTable: { title: 'Insérer un tableau', html: '▦', stateful: false },
   insertHorizontalRule: { title: 'Séparateur horizontal', html: '—', stateful: false },
+  createLink: { title: 'Lien (ajouter, modifier ou retirer)', html: LINK_ICON, stateful: true },
   removeFormat: { title: 'Effacer la mise en forme', html: '⊘', stateful: false },
 };
 const DEFAULT_RICH_TEXT_TOOLBAR_GROUPS = [
@@ -218,12 +248,19 @@ export function richTextEditorHtml({ id, html = '', placeholder = '', minHeight 
   return `
     <div class="rte" data-rte-id="${safeId}">
       <div class="rte-toolbar" id="${safeId}-toolbar">
-        ${richTextCommandToolbarHtml({ groups: DEFAULT_RICH_TEXT_TOOLBAR_GROUPS.slice(0, 2) })}
+        ${richTextBlockStylePickerHtml({ id })}
+        <span class="rte-sep"></span>
+        ${richTextCommandToolbarHtml({ groups: [['bold', 'italic', 'underline', 'strikeThrough']] })}
         <span class="rte-sep"></span>
         ${richTextCommandToolbarHtml({ editorId: id, groups: [[{ type: 'color' }]], separatorClass: '' })}
         ${richTextHighlightPickerHtml({ id })}
         ${richTextFontPickerHtml({ id })}
         ${richTextTextSizePickerHtml({ id })}
+        <span class="rte-sep"></span>
+        ${richTextAlignPickerHtml({ id })}
+        ${richTextCommandToolbarHtml({ groups: [['insertUnorderedList', 'insertOrderedList']] })}
+        <span class="rte-sep"></span>
+        ${richTextCommandToolbarHtml({ groups: [['createLink', 'insertTable', 'insertHorizontalRule']] })}
         <span class="rte-sep"></span>
         ${richTextCommandToolbarHtml({ groups: [['removeFormat']], separatorClass: '' })}
       </div>
@@ -329,6 +366,35 @@ export function richTextTextSizePickerHtml({
   `;
 }
 
+// Menu « Style » : chaque entrée se prévisualise dans son propre style.
+function richTextBlockStylePickerHtml({ id, buttonClass = 'rte-btn' } = {}) {
+  const items = BLOCK_STYLES.map((style) =>
+    `<button type="button" class="rte-block-item rte-block-item--${style.value}" data-rte-block="${style.value}">${_esc(style.name)}</button>`
+  ).join('');
+  return `
+    <div class="rte-block">
+      <button type="button" class="${_esc(buttonClass)} rte-block-toggle" title="Style : paragraphe, titre ou encadré" aria-label="Style du paragraphe">
+        <span class="rte-block-label">Paragraphe</span>
+        <span class="rte-color-caret">▾</span>
+      </button>
+      <div class="rte-block-pop" data-rte-pop="${_esc(id)}">${items}</div>
+    </div>`;
+}
+
+function richTextAlignPickerHtml({ id, buttonClass = 'rte-btn' } = {}) {
+  const items = ALIGNMENTS.map((align) =>
+    `<button type="button" class="rte-align-item" data-rte-align="${align.value}" title="${_esc(align.name)}">${align.icon}<span>${_esc(align.name)}</span></button>`
+  ).join('');
+  return `
+    <div class="rte-align">
+      <button type="button" class="${_esc(buttonClass)} rte-align-toggle" title="Alignement" aria-label="Alignement">
+        <span class="rte-align-icon">${ALIGNMENTS[0].icon}</span>
+        <span class="rte-color-caret">▾</span>
+      </button>
+      <div class="rte-align-pop" data-rte-pop="${_esc(id)}">${items}</div>
+    </div>`;
+}
+
 function attrsHtml(attrs) {
   return Object.entries(attrs)
     .map(([name, value]) => {
@@ -354,7 +420,7 @@ function toggleRichTextPopup(pop, anchor) {
 
 function closeRichTextPopups(root, editorId = null, { remove = false } = {}) {
   const popups = [
-    ...Array.from(root?.querySelectorAll?.('.rte-color-pop, .rte-highlight-pop, .rte-font-pop, .rte-size-pop') || []),
+    ...Array.from(root?.querySelectorAll?.(RICH_TEXT_POP_CLASSES.map((c) => `.${c}`).join(', ')) || []),
     ...detachedRichTextPopups(editorId),
   ];
 
@@ -385,17 +451,13 @@ function removeDuplicateDetachedPopups(pop) {
 }
 
 function richTextPopupClass(pop) {
-  if (pop.classList.contains('rte-color-pop')) return 'rte-color-pop';
-  if (pop.classList.contains('rte-highlight-pop')) return 'rte-highlight-pop';
-  if (pop.classList.contains('rte-font-pop')) return 'rte-font-pop';
-  if (pop.classList.contains('rte-size-pop')) return 'rte-size-pop';
-  return '';
+  return RICH_TEXT_POP_CLASSES.find((c) => pop.classList.contains(c)) || '';
 }
 
 function detachedRichTextPopups(editorId = null) {
   const selector = editorId
     ? `body > [data-rte-pop="${CSS.escape(editorId)}"]`
-    : 'body > .rte-color-pop, body > .rte-highlight-pop, body > .rte-font-pop, body > .rte-size-pop';
+    : RICH_TEXT_POP_CLASSES.map((c) => `body > .${c}`).join(', ');
   return Array.from(document.querySelectorAll(selector));
 }
 
@@ -598,6 +660,14 @@ export function bindRichTextToolbar(id) {
     enableHighlight: true,
     enableFont: true,
     enableSize: true,
+    statefulCommands: [...RICH_TEXT_STATEFUL_COMMANDS, 'createLink'],
+    customCommands: {
+      // Asynchrone (modale) : gère lui-même sélection et état de la barre.
+      createLink: ({ editor: ed }) => {
+        void editRichTextLink(ed, controls.selection, controls.syncToolbarState);
+        return false;
+      },
+    },
   });
 
   bindRichTextListIndentation(editor, controls.signal);
@@ -608,7 +678,9 @@ export function bindRichTextToolbar(id) {
 
 // ── Toolbar complète avec police, couleur et indentation ─────────────────────
 
-function bindRichTextFontPicker({
+// Menu déroulant de la barre (police, taille, style, alignement) : même cycle
+// ouverture / application / fermeture, seul `apply(value)` diffère.
+function bindRichTextMenuPicker({
   root,
   toolbar,
   editor,
@@ -616,93 +688,48 @@ function bindRichTextFontPicker({
   selection,
   syncToolbarState,
   editorId,
-  onAfterFont = null,
+  toggleSelector,
+  popSelector,
+  itemAttr,
+  apply,
+  onAfter = null,
 }) {
-  const fontPop = detachRichTextPopup(root.querySelector('.rte-font-pop'));
-  if (!fontPop) return;
+  const pop = detachRichTextPopup(root.querySelector(popSelector));
+  if (!pop) return;
 
-  removeDuplicateDetachedPopups(fontPop);
+  removeDuplicateDetachedPopups(pop);
+  const dataKey = itemAttr.replace(/^data-/, '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
   toolbar.addEventListener('mousedown', (e) => {
-    const fontToggle = e.target.closest('.rte-font-toggle');
-    if (!fontToggle) return;
+    const toggle = e.target.closest(toggleSelector);
+    if (!toggle) return;
     selection.save();
     e.preventDefault();
     closeRichTextPopups(root, editorId);
-    toggleRichTextPopup(fontPop, fontToggle);
+    toggleRichTextPopup(pop, toggle);
   }, { signal });
 
-  fontPop.addEventListener('mousedown', (e) => {
-    const item = e.target.closest('[data-rte-font]');
+  pop.addEventListener('mousedown', (e) => {
+    const item = e.target.closest(`[${itemAttr}]`);
     if (!item) return;
     e.preventDefault();
 
-    const font = item.dataset.rteFont;
+    const value = item.dataset[dataKey];
     selection.restore();
-    applyRichTextFont(editor, font);
+    apply(value);
     selection.save();
     syncToolbarState?.();
-    onAfterFont?.(font);
+    onAfter?.(value);
   }, { signal });
-  fontPop.addEventListener('click', (event) => {
-    if (!event.target.closest('[data-rte-font]')) return;
+  pop.addEventListener('click', (event) => {
+    if (!event.target.closest(`[${itemAttr}]`)) return;
     event.preventDefault();
-    fontPop.classList.remove('show');
+    pop.classList.remove('show');
   }, { signal });
 
   bindRichTextPopupOutsideClose({
     root,
-    pop: fontPop,
-    signal,
-    isConnected: () => root.isConnected && toolbar.isConnected && editor.isConnected,
-  });
-}
-
-function bindRichTextTextSizePicker({
-  root,
-  toolbar,
-  editor,
-  signal,
-  selection,
-  syncToolbarState,
-  editorId,
-  onAfterSize = null,
-}) {
-  const sizePop = detachRichTextPopup(root.querySelector('.rte-size-pop'));
-  if (!sizePop) return;
-
-  removeDuplicateDetachedPopups(sizePop);
-
-  toolbar.addEventListener('mousedown', (e) => {
-    const sizeToggle = e.target.closest('.rte-size-toggle');
-    if (!sizeToggle) return;
-    selection.save();
-    e.preventDefault();
-    closeRichTextPopups(root, editorId);
-    toggleRichTextPopup(sizePop, sizeToggle);
-  }, { signal });
-
-  sizePop.addEventListener('mousedown', (e) => {
-    const item = e.target.closest('[data-rte-size]');
-    if (!item) return;
-    e.preventDefault();
-
-    const size = item.dataset.rteSize;
-    selection.restore();
-    applyRichTextTextSize(editor, size);
-    selection.save();
-    syncToolbarState?.();
-    onAfterSize?.(size);
-  }, { signal });
-  sizePop.addEventListener('click', (event) => {
-    if (!event.target.closest('[data-rte-size]')) return;
-    event.preventDefault();
-    sizePop.classList.remove('show');
-  }, { signal });
-
-  bindRichTextPopupOutsideClose({
-    root,
-    pop: sizePop,
+    pop,
     signal,
     isConnected: () => root.isConnected && toolbar.isConnected && editor.isConnected,
   });
@@ -1073,31 +1100,42 @@ export function bindRichTextEditorControls({
     onDisconnect: () => ac.abort(),
   });
 
+  const menu = { root: toolbar, toolbar, editor, signal, selection, syncToolbarState, editorId, onAfter: onAfterCommand };
   if (enableFont) {
-    bindRichTextFontPicker({
-      root: toolbar,
-      toolbar,
-      editor,
-      signal,
-      selection,
-      syncToolbarState,
-      editorId,
-      onAfterFont: onAfterCommand,
+    bindRichTextMenuPicker({
+      ...menu,
+      toggleSelector: '.rte-font-toggle',
+      popSelector: '.rte-font-pop',
+      itemAttr: 'data-rte-font',
+      apply: (font) => applyRichTextFont(editor, font),
     });
   }
 
   if (enableSize) {
-    bindRichTextTextSizePicker({
-      root: toolbar,
-      toolbar,
-      editor,
-      signal,
-      selection,
-      syncToolbarState,
-      editorId,
-      onAfterSize: onAfterCommand,
+    bindRichTextMenuPicker({
+      ...menu,
+      toggleSelector: '.rte-size-toggle',
+      popSelector: '.rte-size-pop',
+      itemAttr: 'data-rte-size',
+      apply: (size) => applyRichTextTextSize(editor, size),
     });
   }
+
+  // Style (titres / encadrés) et alignement : présents seulement dans la barre complète.
+  bindRichTextMenuPicker({
+    ...menu,
+    toggleSelector: '.rte-block-toggle',
+    popSelector: '.rte-block-pop',
+    itemAttr: 'data-rte-block',
+    apply: (value) => { if (applyRichTextBlockStyle(editor, value)) notifyRichTextChange(editor, 'formatBlock'); },
+  });
+  bindRichTextMenuPicker({
+    ...menu,
+    toggleSelector: '.rte-align-toggle',
+    popSelector: '.rte-align-pop',
+    itemAttr: 'data-rte-align',
+    apply: (value) => { if (applyRichTextAlign(editor, value)) notifyRichTextChange(editor, 'formatJustifyFull'); },
+  });
   bindRichTextTableControls({
     editor,
     toolbar,
@@ -1120,7 +1158,7 @@ export function bindRichTextEditorControls({
     });
   }
 
-  return { editor, toolbar, signal, abort: () => ac.abort(), syncToolbarState };
+  return { editor, toolbar, signal, selection, abort: () => ac.abort(), syncToolbarState };
 }
 
 // ── Commandes d'édition ──────────────────────────────────────────────────────
@@ -1136,6 +1174,7 @@ function updateRichTextToolbarState(editor, toolbar, {
 
   updateRichTextColorButtonState(editor, toolbar, range, hasEditorSelection);
   updateRichTextHighlightButtonState(editor, toolbar, range, hasEditorSelection);
+  updateRichTextBlockButtonState(editor, toolbar, range, hasEditorSelection);
   toolbar.querySelectorAll(`[${commandAttr}]`).forEach((btn) => {
     const cmd = btn.getAttribute(commandAttr);
     if (!statefulCommands.has(cmd)) return;
@@ -1144,6 +1183,23 @@ function updateRichTextToolbarState(editor, toolbar, {
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
+}
+
+function updateRichTextBlockButtonState(editor, toolbar, range, hasEditorSelection) {
+  const label = toolbar.querySelector('.rte-block-label');
+  if (label) {
+    const value = hasEditorSelection ? richTextBlockStyleAt(editor, range) : 'p';
+    label.textContent = BLOCK_STYLES.find((s) => s.value === value)?.label || 'Paragraphe';
+    label.closest('.rte-block-toggle')?.classList.toggle('rte-block-toggle--active', value !== 'p');
+  }
+  const icon = toolbar.querySelector('.rte-align-icon');
+  if (icon) {
+    const align = hasEditorSelection ? richTextAlignAt(editor, range) : 'left';
+    if (icon.dataset.align !== align) {
+      icon.dataset.align = align;
+      icon.innerHTML = ALIGNMENTS.find((a) => a.value === align)?.icon || ALIGNMENTS[0].icon;
+    }
+  }
 }
 
 function updateRichTextHighlightButtonState(editor, toolbar, range, hasEditorSelection) {
@@ -1207,6 +1263,7 @@ function getRichTextNodeColor(editor, node) {
 }
 
 function isRichTextCommandActive(cmd, range) {
+  if (cmd === 'createLink') return !!elementFromNode(range.startContainer)?.closest?.('a');
   if (BLOCK_COMMAND_TAGS[cmd]) {
     return !!elementFromNode(range.startContainer)?.closest?.(BLOCK_COMMAND_TAGS[cmd]);
   }
@@ -1226,6 +1283,157 @@ export function execRichTextCommand(editor, cmd, value = null) {
   }
   document.execCommand(cmd, false, value);
   return true;
+}
+
+// ── Style de paragraphe (titres / encadrés) ─────────────────────────────────
+
+function richTextBlockStyleAt(editor, range) {
+  const block = elementFromNode(range?.startContainer)?.closest?.('h2, h3, blockquote');
+  if (!block || !editor.contains(block)) return 'p';
+  if (block.tagName !== 'BLOCKQUOTE') return block.tagName.toLowerCase();
+  return BLOCK_STYLES.find((s) => s.callout && block.classList.contains(s.callout))?.value || 'note';
+}
+
+function applyRichTextBlockStyle(editor, value) {
+  const style = BLOCK_STYLES.find((s) => s.value === value);
+  const range = getSelectionRange();
+  if (!style || !range || !nodeBelongsToEditor(editor, range.commonAncestorContainer)) return false;
+  const quote = elementFromNode(range.startContainer)?.closest?.('blockquote');
+  const inQuote = quote && editor.contains(quote) ? quote : null;
+
+  if ('callout' in style) {
+    if (!inQuote) toggleRichTextBlock(editor, 'blockquote', 'p');
+    const bq = inQuote || elementFromNode(getSelectionRange()?.startContainer)?.closest?.('blockquote');
+    if (!bq || !editor.contains(bq)) return false;
+    bq.classList.remove(...CALLOUT_CLASSES);
+    if (style.callout) bq.classList.add(style.callout);
+    if (!bq.classList.length) bq.removeAttribute('class');
+    return true;
+  }
+  // « Paragraphe » dans un encadré = sortir de l'encadré.
+  if (style.value === 'p' && inQuote) return toggleRichTextBlock(editor, 'blockquote', 'p');
+  document.execCommand('formatBlock', false, style.value);
+  return true;
+}
+
+// ── Alignement : text-align posé sur les blocs touchés par la sélection ──────
+// (pas execCommand('justify…') : Firefox y écrit un attribut align que la
+// sanitisation retire → l'alignement serait perdu à l'enregistrement).
+const RICH_TEXT_ALIGN_BLOCKS = 'p, h1, h2, h3, h4, li, td, th, blockquote, pre, div';
+
+function richTextBlocksInRange(editor, range) {
+  const blocks = new Set();
+  const add = (node) => {
+    const block = elementFromNode(node)?.closest?.(RICH_TEXT_ALIGN_BLOCKS);
+    if (block && block !== editor && editor.contains(block) && !block.classList.contains('rte-table-wrap')) blocks.add(block);
+  };
+  add(range.startContainer);
+  if (!range.collapsed) {
+    const walker = document.createTreeWalker(range.commonAncestorContainer, globalThis.NodeFilter?.SHOW_TEXT || 4);
+    while (walker.nextNode()) if (range.intersectsNode(walker.currentNode)) add(walker.currentNode);
+    add(range.endContainer);
+  }
+  return [...blocks];
+}
+
+function richTextAlignAt(editor, range) {
+  const block = range ? richTextBlocksInRange(editor, range)[0] : null;
+  const align = block ? getComputedStyle(block).textAlign : '';
+  return ALIGNMENTS.some((a) => a.value === align) ? align : 'left';
+}
+
+function applyRichTextAlign(editor, align) {
+  let blocks = richTextTableSelectedCells(editor);
+  if (!blocks.length) {
+    const range = getSelectionRange();
+    if (!range || !nodeBelongsToEditor(editor, range.commonAncestorContainer)) return false;
+    blocks = richTextBlocksInRange(editor, range);
+    if (!blocks.length) {
+      // Texte posé directement dans l'éditeur (contenu ancien) : on l'enveloppe d'abord.
+      document.execCommand('formatBlock', false, 'p');
+      const next = getSelectionRange();
+      blocks = next ? richTextBlocksInRange(editor, next) : [];
+    }
+  }
+  blocks.forEach((block) => {
+    block.style.textAlign = align === 'left' ? '' : align;
+    if (!block.getAttribute('style')) block.removeAttribute('style');
+  });
+  return blocks.length > 0;
+}
+
+// ── Liens ─────────────────────────────────────────────────────────────────────
+
+function normalizeRichTextLinkUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (/^(https?:|mailto:|tel:|#)/i.test(value)) return value;
+  if (/^[^\s@/]+@[^\s@/]+\.[a-z]{2,}$/i.test(value)) return `mailto:${value}`;
+  return `https://${value.replace(/^\/+/, '')}`;
+}
+
+function richTextLinkAt(editor, range) {
+  const anchor = elementFromNode(range?.startContainer)?.closest?.('a');
+  return anchor && editor.contains(anchor) ? anchor : null;
+}
+
+async function editRichTextLink(editor, selection, syncToolbarState) {
+  const current = getSelectionRange();
+  const range = current && nodeBelongsToEditor(editor, current.commonAncestorContainer) ? current.cloneRange() : null;
+  const anchor = range ? richTextLinkAt(editor, range) : null;
+  const raw = await promptModal('Adresse du lien. Laisse vide pour retirer le lien.', {
+    title: anchor ? 'Modifier le lien' : 'Ajouter un lien',
+    default: anchor?.getAttribute('href') || '',
+    placeholder: 'https://…',
+    confirmLabel: 'Appliquer',
+  });
+  // Instantané pris AVANT la modale : le focus rendu à l'éditeur à sa fermeture
+  // déplace le curseur (Chromium) et écrase la sélection mémorisée.
+  editor.focus({ preventScroll: true });
+  if (range) {
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } else {
+    selection.restore();
+  }
+  if (raw === null) return;
+
+  const url = normalizeRichTextLinkUrl(raw);
+  if (url && !isSafeRichTextUrl('href', url)) {
+    showNotif('Adresse de lien invalide.', 'error');
+    return;
+  }
+  if (!url) {
+    if (anchor) unwrapElement(anchor);
+    else document.execCommand('unlink', false, null);
+  } else if (anchor) {
+    anchor.setAttribute('href', url);
+    anchor.setAttribute('target', '_blank');
+    anchor.setAttribute('rel', 'noopener noreferrer');
+  } else if (getSelectionRange()?.collapsed !== false) {
+    // Pas de texte sélectionné : l'adresse devient le texte du lien. Insertion
+    // DOM directe (insertHTML de Chromium recopie des styles inline parasites).
+    const insertAt = getSelectionRange();
+    if (!insertAt) return;
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = url;
+    insertAt.insertNode(link);
+    placeCaretAfterNode(link);
+  } else {
+    document.execCommand('createLink', false, url);
+    editor.querySelectorAll('a[href]').forEach((a) => {
+      if (a.getAttribute('href') !== url) return;
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+    });
+  }
+  notifyRichTextChange(editor, 'insertLink');
+  selection.save();
+  syncToolbarState?.();
 }
 
 function getRichTextSelectionHighlight(editor, range) {

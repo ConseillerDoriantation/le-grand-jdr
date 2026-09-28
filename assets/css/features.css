@@ -6114,14 +6114,17 @@ body.ach-dragging * { cursor:grabbing !important; }
 }
 .world-sec-body.is-slides { padding-top: 24px; }
 
-/* Texte enrichi : colonne de lecture ~68 caractères */
+/* Texte enrichi : colonne de lecture ~68 caractères, centrée dans la carte →
+   un bloc centré par le MJ tombe au milieu, comme dans l'éditeur. */
 .world-section-content {
   max-width: 68ch;
+  margin-inline: auto;
   color: var(--text-soft);
   font-size: 1rem;
   line-height: 1.72;
 }
-.world-section-content > :first-child { margin-top: 0; }
+.world-section-content > :first-child,
+.world-editor--rich .rte-editor > :first-child { margin-top: 0; }
 .world-section-content > :last-child { margin-bottom: 0; }
 .world-section-content :is(h2, h3),
 .world-editor--rich .rte-editor :is(h2, h3) {
@@ -6135,7 +6138,8 @@ body.ach-dragging * { cursor:grabbing !important; }
 .world-section-content h3,
 .world-editor--rich .rte-editor h3 { margin: 1.2em 0 .4em; font-size: 1.125rem; }
 .world-section-content :is(h2, h3) { scroll-margin-top: 24px; }
-.world-section-content :is(strong, b) { color: var(--text); }
+.world-section-content :is(strong, b),
+.world-editor--rich .rte-editor :is(strong, b) { color: var(--text); }
 /* Citation = encadré (règle maison, avertissement…). `.rte-content` en plus :
    rich-text.css est chargé après ce fichier et stylise déjà la citation. */
 .rte-content.world-section-content blockquote,
@@ -6147,6 +6151,16 @@ body.ach-dragging * { cursor:grabbing !important; }
   background: color-mix(in srgb, var(--gold) 8%, transparent);
   color: var(--text);
   font-style: normal;
+}
+.rte-content.world-section-content blockquote.rte-callout-tip,
+.world-editor--rich .rte-editor blockquote.rte-callout-tip {
+  border-color: color-mix(in srgb, var(--emerald) 34%, transparent);
+  background: color-mix(in srgb, var(--emerald) 9%, transparent);
+}
+.rte-content.world-section-content blockquote.rte-callout-warn,
+.world-editor--rich .rte-editor blockquote.rte-callout-warn {
+  border-color: color-mix(in srgb, var(--crimson) 36%, transparent);
+  background: color-mix(in srgb, var(--crimson) 9%, transparent);
 }
 
 /* Diaporama : lecteur free-page existant, pleine largeur, navigation au bleu de l'app */
@@ -6167,9 +6181,16 @@ body.ach-dragging * { cursor:grabbing !important; }
 
 /* Édition en place (actions Annuler / Enregistrer dans l'en-tête de section) */
 .world-editor { display: flex; flex-direction: column; gap: 10px; }
+/* L'éditeur reproduit le lecteur (même colonne de 68 caractères centrée, même
+   typo) : retours à la ligne et alignements identiques une fois enregistré. */
 .world-editor--rich .rte-editor {
+  box-sizing: border-box;
   min-height: 360px;
+  padding: 24px max(16px, calc((100% - 68ch) / 2));
   background: rgba(5, 11, 20, .54);
+  color: var(--text-soft);
+  font-size: 1rem;
+  line-height: 1.72;
 }
 .world-editor-status {
   align-self: center;
@@ -6541,7 +6562,8 @@ body.ach-dragging * { cursor:grabbing !important; }
   }
   .world-toc-chips { padding: 12px 16px; }
   .world-sec-body { padding: 18px 16px 8px; }
-  .world-section-content { font-size: .97rem; line-height: 1.68; }
+  .world-section-content,
+  .world-editor--rich .rte-editor { font-size: .97rem; line-height: 1.68; }
   .world-pager {
     grid-template-columns: 1fr;
     gap: 8px;
