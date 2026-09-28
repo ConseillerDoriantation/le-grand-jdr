@@ -32,7 +32,7 @@ import {
   _getRareteNum, _getItemStatFilterKeys,
 } from './shop-item-stats.js';
 import { openWeaponFormatsAdmin } from './characters/data.js';
-import { syncEquipmentAfterInventoryMutation, normalizeStatKey as _normalizeStatKey, getWeaponDamageStatKeys as _getDegatsStats } from '../shared/equipment-utils.js';
+import { syncEquipmentAfterInventoryMutation, normalizeStatKey as _normalizeStatKey, getWeaponDamageStatKeys as _getDegatsStats, isWeaponLikeItem } from '../shared/equipment-utils.js';
 import { autocompleteHTML, initAutocomplete } from '../shared/autocomplete.js';
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { getShopCharId, setShopCharId } from '../shared/shop-session.js';
@@ -1117,11 +1117,23 @@ function _renderItemsView() {
   return html;
 }
 
+// Type d'arme affiché/filtré : le format EST le type d'arme. Une ancienne arme
+// (format « Arme 1M CaC Phy. ») est rangée sous son type saisi (sousType).
+function _itemWeaponType(item) {
+  if (!item.format && !item.sousType) return '';
+  return resolveWeaponFamily(_weaponFormats, item)?.label || item.sousType || item.format || '';
+}
+function _itemWeaponHands(item) {
+  return (item.format || item.sousType || item.mains) && isWeaponLikeItem(item) ? weaponHandsLabel(item) : '';
+}
+
 function _getItemTags(item) {
   const tags = new Set();
 
-  if (item.format)     tags.add(`format:${item.format}`);
-  if (item.sousType)   tags.add(`sousType:${item.sousType}`);
+  const weaponType = _itemWeaponType(item);
+  if (weaponType)      tags.add(`typeArme:${weaponType}`);
+  const hands = _itemWeaponHands(item);
+  if (hands)           tags.add(`mains:${hands}`);
   if (item.slotArmure) tags.add(`slotArmure:${item.slotArmure}`);
   if (item.typeArmure) tags.add(`typeArmure:${item.typeArmure}`);
   if (item.slotBijou)  tags.add(`slotBijou:${item.slotBijou}`);
@@ -1151,8 +1163,8 @@ function _buildTagGroups(items) {
     values.length ? { label, key, tags: values.map(v => ({ value: `${key}:${v}`, label: v, color })) } : null;
 
   const groups = [
-    mk('Format',      'format',     uniq(items.filter(i => i.format).map(i => i.format)), '#e8b84b'),
-    mk('Type arme',   'sousType',   uniq(items.filter(i => i.sousType).map(i => i.sousType)), '#e8b84b'),
+    mk('Type d’arme', 'typeArme',   uniq(items.map(_itemWeaponType).filter(Boolean)), '#e8b84b'),
+    mk('Maniement',   'mains',      uniq(items.map(_itemWeaponHands).filter(Boolean)), '#e8b84b'),
     mk('Emplacement', 'slotArmure', uniq(items.filter(i => i.slotArmure).map(i => i.slotArmure)), '#4f8cff'),
     mk('Type armure', 'typeArmure', orderBy(items.filter(i => i.typeArmure).map(i => i.typeArmure), TYPE_ARMURE_ORDER), '#4f8cff'),
     mk('Bijou',       'slotBijou',  uniq(items.filter(i => i.slotBijou).map(i => i.slotBijou)), '#c084fc'),
@@ -1531,10 +1543,9 @@ function _renderItemCard(item, tplKey, itemIdx) {
   // ── Données enrichies style maquette ─────────────────────────────────
   // Sous-titre type : Format · Type d'arme · Slot armure/bijou
   const typeChips = [];
-  if (item.format)     typeChips.push(item.format);
-  // Le format est devenu le type d'arme : sousType identique = doublon.
-  if (item.sousType && item.sousType !== item.format) typeChips.push(item.sousType);
-  if (item.mains)      typeChips.push(item.mains);
+  // Type d'arme (format ou, pour une ancienne arme, type saisi) + maniement.
+  if (_itemWeaponType(item))  typeChips.push(_itemWeaponType(item));
+  if (_itemWeaponHands(item)) typeChips.push(_itemWeaponHands(item));
   if (item.slotArmure) typeChips.push(item.slotArmure);
   if (item.typeArmure) typeChips.push(item.typeArmure);
   if (item.slotBijou)  typeChips.push(item.slotBijou);
@@ -1693,10 +1704,9 @@ function _renderItemRow(item, tplKey, itemIdx) {
 
   // Sous-titre type (format · sousType · slot…)
   const typeChips = [];
-  if (item.format)     typeChips.push(item.format);
-  // Le format est devenu le type d'arme : sousType identique = doublon.
-  if (item.sousType && item.sousType !== item.format) typeChips.push(item.sousType);
-  if (item.mains)      typeChips.push(item.mains);
+  // Type d'arme (format ou, pour une ancienne arme, type saisi) + maniement.
+  if (_itemWeaponType(item))  typeChips.push(_itemWeaponType(item));
+  if (_itemWeaponHands(item)) typeChips.push(_itemWeaponHands(item));
   if (item.slotArmure) typeChips.push(item.slotArmure);
   if (item.typeArmure) typeChips.push(item.typeArmure);
   if (item.slotBijou)  typeChips.push(item.slotBijou);
@@ -1934,9 +1944,9 @@ function openShopItemDetail(itemId) {
   const manque = tropCher ? Math.ceil(prix - solde) : 0;
 
   const rows = [];
-  if (item.format)      rows.push(['Type d’arme', item.format]);
-  if (item.mains)       rows.push(['Maniement', item.mains]);
-  if (item.sousType && item.sousType !== item.format) rows.push(['Type', item.sousType]);
+  if (_itemWeaponType(item))  rows.push(['Type d’arme', _itemWeaponType(item)]);
+  if (_itemWeaponHands(item)) rows.push(['Maniement', _itemWeaponHands(item)]);
+
   if (item.degats) {
     const arr = _getDegatsStats(item);
     rows.push(['Dégâts', `${item.degats}${arr.length ? ' + ' + _formatDegatsStatsText(arr) : ''}`]);
@@ -1968,10 +1978,9 @@ function openShopItemDetail(itemId) {
 
   // Sous-titre type (format · sousType · slot…)
   const typeChips = [];
-  if (item.format)     typeChips.push(item.format);
-  // Le format est devenu le type d'arme : sousType identique = doublon.
-  if (item.sousType && item.sousType !== item.format) typeChips.push(item.sousType);
-  if (item.mains)      typeChips.push(item.mains);
+  // Type d'arme (format ou, pour une ancienne arme, type saisi) + maniement.
+  if (_itemWeaponType(item))  typeChips.push(_itemWeaponType(item));
+  if (_itemWeaponHands(item)) typeChips.push(_itemWeaponHands(item));
   if (item.slotArmure) typeChips.push(item.slotArmure);
   if (item.typeArmure) typeChips.push(item.typeArmure);
   if (item.slotBijou)  typeChips.push(item.slotBijou);
