@@ -13,7 +13,7 @@ import { updateDoc, serverTimestamp } from '../../config/firebase.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc } from '../../shared/html.js';
 import { getMod, statShort } from '../../shared/char-stats.js';
-import { openModal, closeModalDirect } from '../../shared/modal.js';
+import { openModal, pushModal, closeModalDirect } from '../../shared/modal.js';
 import { CONDITION_DEFAULT_LIBRARY } from '../../shared/conditions.js';
 import { _tokRef } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
@@ -132,8 +132,50 @@ export function _vttConditionAdd(tokenId) {
 
 // Faiblesse : l'état porte un élément (dégâts ×2 de cet élément), à choisir.
 const _WEAK_ID = 'faiblesse';
+// Provoqué : l'état porte le token qui détient l'aggro (lanceur ou allié désigné).
+const _TAUNT_ID = 'taunted';
 const _elementLabel = id => (VS.damageTypes || []).find(d => d.id === id)?.label || id || 'élément';
-const _condLabel = (lib, element) => element ? `${lib.label} ${_elementLabel(element)}` : lib.label;
+const _tokName = id => { const d = VS.tokens[id]?.data; return d ? (_live(d).displayName ?? d.name) : '?'; };
+const _condLabel = (lib, element, aggroName = '') => element ? `${lib.label} ${_elementLabel(element)}`
+  : aggroName ? `${lib.label} → ${aggroName}` : lib.label;
+
+/**
+ * Choix du porteur d'aggro d'un Provoqué. Résout l'id du token choisi ; sur
+ * annulation : le lanceur (`srcId`) s'il y en a un, sinon null.
+ * `excludeIds` : les cibles provoquées (elles ne peuvent pas porter l'aggro).
+ */
+export function _vttPickAggroHolder(srcId = null, excludeIds = []) {
+  const src = srcId ? VS.tokens[srcId]?.data : null;
+  const pageId = src?.pageId || VS.activePage?.id;
+  const excluded = new Set(excludeIds);
+  const rank = d => d.id === srcId ? 0 : (d.type === 'player' || d.characterId) ? 1 : d.type === 'enemy' ? 3 : 2;
+  const candidates = Object.values(VS.tokens).map(e => e?.data)
+    .filter(d => d && d.pageId === pageId && !excluded.has(d.id) && (d.visible !== false || STATE.isAdmin))
+    .sort((a, b) => rank(a) - rank(b) || String(_tokName(a.id)).localeCompare(String(_tokName(b.id)), 'fr'));
+  if (!candidates.length) return Promise.resolve(srcId);
+  return new Promise(resolve => {
+    let settled = false;
+    const done = (id, close = true) => {
+      if (settled) return;
+      settled = true;
+      if (close) closeModalDirect();
+      resolve(id);
+    };
+    pushModal('😡 Provoqué : qui porte l\'aggro ?', `
+      <div class="vtt-cond-picker">
+        ${candidates.map(d => `
+          <button class="vtt-cond-pick" style="--cond-c:${d.id === srcId ? '#e8b84b' : '#ef4444'}" data-aggro-id="${_esc(d.id)}">
+            <span class="vtt-cond-pick-ic">${d.id === srcId ? '🪄' : d.type === 'enemy' ? '👹' : '🛡️'}</span>
+            <div class="vtt-cond-pick-body">
+              <div class="vtt-cond-pick-nom">${_esc(_tokName(d.id))}</div>
+              <div class="vtt-cond-pick-desc">${d.id === srcId ? 'Le lanceur (par défaut)' : 'Les cibles provoquées devront l\'attaquer'}</div>
+            </div>
+          </button>`).join('')}
+      </div>`, null, { onDismiss: () => done(srcId, false) });
+    document.querySelectorAll('[data-aggro-id]').forEach(btn =>
+      btn.addEventListener('click', () => done(btn.dataset.aggroId), { once: true }));
+  });
+}
 
 function _vttWeaknessElementPicker(tokenId) {
   const lib = CONDITION_BY_ID[_WEAK_ID];
@@ -162,7 +204,15 @@ export async function _vttConditionApply(tokenId, condId, element = '') {
   const isWeak = condId === _WEAK_ID;
   if (isWeak && !element) { _vttWeaknessElementPicker(tokenId); return; }
   element = isWeak ? String(element) : '';
-  const label = _condLabel(lib, element);
+  // Provoqué : choisir le porteur d'aggro ; une nouvelle provocation remplace l'ancienne.
+  const isTaunt = condId === _TAUNT_ID;
+  let aggroTokenId = null;
+  if (isTaunt) {
+    aggroTokenId = await _vttPickAggroHolder(null, [tokenId]);
+    if (!aggroTokenId) return;
+  }
+  const aggroName = aggroTokenId ? _tokName(aggroTokenId) : '';
+  const label = _condLabel(lib, element, aggroName);
   // Immunité (fiche → onglet Capacités) : la cible ne subit pas l'état du tout.
   const _chApply = _resChar(t);
   if (Array.isArray(_chApply?.resistances) && _chApply.resistances.some(r => r.k === 'imm' && _etatResMatch(r, condId, lib))) {
@@ -171,7 +221,7 @@ export async function _vttConditionApply(tokenId, condId, element = '') {
     return;
   }
   // Évite les doublons (même état déjà appliqué ; Faiblesse : même élément)
-  const existing = (t.conditions || []).some(c => c.id === condId && (!isWeak || c.element === element));
+  const existing = !isTaunt && (t.conditions || []).some(c => c.id === condId && (!isWeak || c.element === element));
   if (existing) {
     showNotif(`${lib.icon} ${label} déjà appliqué`, 'info');
     closeModalDirect();
@@ -198,8 +248,11 @@ export async function _vttConditionApply(tokenId, condId, element = '') {
     expiresAtRound,
     ...(pendingDuration != null ? { pendingDuration } : {}),
     ...(isWeak ? { element } : {}),
+    ...(isTaunt ? { aggroTokenId, aggroName } : {}),
+    ...(lib.effects?.dmgDealtMalus ? { dmgDealtMalusFormula: String(lib.effects.dmgDealtMalus) } : {}),
   };
-  const baseConds = await _vttConditionsBeforeStateApplication({ ...t, id: tokenId }, lib);
+  const baseConds = (await _vttConditionsBeforeStateApplication({ ...t, id: tokenId }, lib))
+    .filter(c => !(isTaunt && c.id === _TAUNT_ID));
   const newConds = [...baseConds, cond];
   const previous = t.conditions || [];
   _vttPatchTokenOptimistically(tokenId, { conditions: newConds });
@@ -231,7 +284,7 @@ export async function _vttConditionRemove(tokenId, idx) {
     console.error('[VTT] État non retiré :', error);
   });
   const lib = CONDITION_BY_ID[removed.id];
-  if (lib) showNotif(`${lib.icon} ${_condLabel(lib, removed.element)} retiré`, 'info');
+  if (lib) showNotif(`${lib.icon} ${_condLabel(lib, removed.element, removed.aggroName)} retiré`, 'info');
 }
 
 // Une résistance d'état de la fiche correspond-elle à cet état posé ?

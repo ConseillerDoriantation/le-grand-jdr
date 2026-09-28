@@ -38,7 +38,7 @@ import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nea
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, spellConditionId, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm, getProtectionCAOverride, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
@@ -3847,7 +3847,7 @@ function _vttSpellMods(s) {
         },
       };
     }
-    const stateId = s.classicStateId || s.enchantEtatId || s.afflictionEtatId || null;
+    const stateId = spellConditionId(s.classicStateId || s.enchantEtatId || s.afflictionEtatId || '') || null;
     if (!stateId) return null;
     const friendly = s.classicTarget === 'ally' || s.classicTarget === 'self';
     return {
@@ -3961,12 +3961,12 @@ function _vttSpellMods(s) {
         } : null,
     // Enchantement mode État : applique l'état choisi directement à l'allié
     enchantEtatId: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
-      ? (s.enchantEtatId || null) : null,
+      ? (spellConditionId(s.enchantEtatId) || null) : null,
     // Multi-états : 1 par rune Enchantement (le 1er garde ses réglages fins, les
     // suivants sont auto-modulés par Puissance/Amplification). Limité à nbEnch.
     enchantEtatIds: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? ((Array.isArray(s.enchantEtatIds) && s.enchantEtatIds.length
-          ? s.enchantEtatIds : [s.enchantEtatId]).filter(Boolean).slice(0, nbEnch))
+          ? s.enchantEtatIds : [s.enchantEtatId]).map(spellConditionId).filter(Boolean).slice(0, nbEnch))
       : [],
     enchantStatePower: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? nbP : 0,
@@ -9390,6 +9390,10 @@ async function _vttRollAttack() {
     closeModalDirect();
     return;
   }
+  // Provoqué : l'attaque doit inclure le porteur de l'aggro. Modale laissée
+  // ouverte : le joueur/MJ peut annuler et viser la bonne cible.
+  const _tauntMsg = _vttTauntBlockMessage(srcId, allTargets && allTargets.length ? allTargets : [tgtId], opt);
+  if (_tauntMsg) { showNotif(_tauntMsg, 'error'); return; }
   const mode     = document.getElementById('atk-mode')?.value || 'normal';
   const bonusHit     = parseInt(document.getElementById('atk-bonus-hit')?.value)||0;
   const bonusDmg     = parseInt(document.getElementById('atk-bonus-dmg')?.value)||0;
@@ -10714,6 +10718,23 @@ async function _vttRollAttack() {
       }
     }
 
+    // ── Affaibli : malus de dégâts sur les coups réussis de l'attaquant ──
+    // Un seul malus (le plus fort état actif), 1 dégât minimum. Soins exclus.
+    let weakenDetail = null;
+    if (!opt.isHeal && !isFumble && sharedDmgTotalHit > 0) {
+      const weak = _activeConditionsOf(src).find(({ lib }) => lib?.effects?.dmgDealtMalus);
+      if (weak) {
+        const formula = weak.cond.dmgDealtMalusFormula || String(weak.lib.effects.dmgDealtMalus);
+        const det = _rollDiceDetailed(formula);
+        const cut = Math.min(Math.max(0, det.total), sharedDmgTotalHit - 1);
+        if (cut > 0) {
+          sharedDmgTotalHit -= cut;
+          weakenDetail = { formula, rolls: det.rolls, mod: det.mod, sides: det.sides, total: cut, label: weak.lib.label, icon: weak.lib.icon };
+          buffDmgNotes.push(`${weak.lib.icon || '🥀'} −${cut} (${weak.lib.label})`);
+        }
+      }
+    }
+
     const sourceWritesDone = Promise.all([_deductAllCosts(), _consumeItem(), _markActionUsed()])
       .then(() => null, error => error);
 
@@ -11079,6 +11100,9 @@ async function _vttRollAttack() {
                 saveStat: technique.conditionSaveStat || lib.defaultSaveStat || null,
                 expiresAtRound: round > 0 && !consumed ? round + duration - 1 : null,
                 ...(round === 0 && !consumed ? { pendingDuration: duration } : {}),
+                // Provoqué par une technique : l'attaquant porte l'aggro.
+                ...(lib.effects?.tauntLock ? { aggroTokenId: srcId, aggroName: lS.displayName ?? src.name } : {}),
+                ...(lib.effects?.dmgDealtMalus ? { dmgDealtMalusFormula: String(lib.effects.dmgDealtMalus) } : {}),
               }];
               _vttPatchTokenOptimistically(curTgtData.id, { conditions });
               await updateDoc(_tokRef(curTgtData.id), { conditions }).catch(error => {
@@ -11365,6 +11389,7 @@ async function _vttRollAttack() {
         buffDmgBonus: buffDmgBonus || 0,
         buffDmgNotes: buffDmgNotes.length ? buffDmgNotes : null,
         buffDmgDetail: buffDmgDetail || null,
+        weakenDetail: weakenDetail || null,
         dmgRollsDetail: sharedDmgRollsDetail || null,
         critRollsDetail: sharedCritRollsDetail || null,
         ..._diceLogFields('dmg', sharedDmgRollsDetail),
@@ -11425,6 +11450,7 @@ async function _vttRollAttack() {
         buffDmgBonus: buffDmgBonus || 0,
         buffDmgNotes: buffDmgNotes.length ? buffDmgNotes : null,
         buffDmgDetail: buffDmgDetail || null,
+        weakenDetail: weakenDetail || null,
         condDmgNotes: r.condDmgNotes?.length ? r.condDmgNotes : null,
         condDmgDetails: r.condDmgDetails?.length ? r.condDmgDetails : null,
         consumedNotes: r.consumedNotes?.length ? r.consumedNotes : null,
@@ -13918,6 +13944,30 @@ function _hasConditionEffect(token, effectKey) {
 }
 
 /** Helper : retourne la liste des états actifs sur un token (objets {cond, lib}). */
+/**
+ * Provoqué : message de refus si `srcId` est provoqué et que l'action offensive
+ * ne vise pas le porteur de l'aggro (null = autorisé). Actions de soutien, sur
+ * soi ou sans autre cible : toujours autorisées. Porteur absent de la scène ou
+ * à 0 PV : la provocation ne bloque plus rien.
+ */
+function _vttTauntBlockMessage(srcId, targetIds = [], opt = {}) {
+  if (opt?.isHeal || opt?.isEnchant || opt?.isCaSort || opt?.isRegen || opt?.isLight || opt?.isInvocation || opt?.isDeplacement) return null;
+  const others = targetIds.filter(id => id && id !== srcId);
+  if (!others.length) return null;
+  const src = VS.tokens[srcId]?.data; if (!src) return null;
+  for (const { cond, lib } of _activeConditionsOf(src)) {
+    if (!lib?.effects?.tauntLock || !cond.aggroTokenId) continue;
+    const holder = VS.tokens[cond.aggroTokenId]?.data;
+    if (!holder || holder.pageId !== src.pageId) continue;
+    if (holder.hp != null && Number(holder.hp) <= 0) continue;
+    if (others.includes(cond.aggroTokenId)) continue;
+    const srcName = _live(src).displayName ?? src.name;
+    const holderName = _live(holder).displayName ?? holder.name;
+    return `${lib.icon || '😡'} ${srcName} est provoqué : son attaque doit viser ${holderName}.`;
+  }
+  return null;
+}
+
 export function _activeConditionsOf(token) {
   const round = VS.session?.combat?.round ?? 0;
   const out = [];

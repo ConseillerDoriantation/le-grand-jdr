@@ -12,7 +12,7 @@ import { getProtectionCAOverride, getProtectionReductionStep, getComboConfig, ge
 import { getMainWeapon } from './data.js';
 import { ZONE_SHAPES, _zoneCount, _zoneDims, _zoneShapeUnlocked, _zoneCellCount } from '../../shared/spell-zones.js';
 import { damageTypeEmitsLight } from '../../shared/damage-types.js';
-import { calcSpellDuration, calcSpellTargets, getAfflictionMode, isLightSpell, lightSpellRadius, getProtectionModes, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, getAfflictionMode, spellConditionId, isLightSpell, lightSpellRadius, getProtectionModes, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { spellSetCostDelta } from '../../shared/spell-system.js';
 import { calculateSummonStats, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
@@ -101,12 +101,12 @@ function _conditionMeta(id, fallback = {}) {
 }
 
 function _afflictionStateId(s = {}) {
-  return s.afflictionEtatId
+  return spellConditionId(s.afflictionEtatId
     || s.afflictionStateId
     || s.afflictionConditionId
     || (s.afflictionMode === 'etat' ? (s.classicStateId || '') : '')
     || (s.afflictionMode === 'faiblesse' ? 'faiblesse' : '')
-    || '';
+    || '');
 }
 
 // ── Helpers calcul sorts ─────────────────────────────────────────────────────

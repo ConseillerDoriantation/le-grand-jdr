@@ -17,6 +17,7 @@ import { showNotif } from '../../shared/notifications.js';
 import { _tokRef } from './vtt-refs.js';
 import { _live, _scaledEnchantConditionFields } from './vtt-effective.js';
 import { _vttPublishOptimisticLog } from './vtt-chat.js';
+import { _vttPickAggroHolder } from './vtt-conditions.js';
 import { bumpHeal } from '../../shared/stats.js';
 import {
   CONDITION_BY_ID, _STAT_SHORT, _buffShared, _consumeLuckyReroll,
@@ -182,6 +183,11 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
   const mode = aff.mode || 'dot';
   const srcTok = VS.tokens[srcId]?.data;
   const srcName = srcTok ? (_live(srcTok).displayName ?? srcTok.name) : '?';
+  // Provoqué : porteur de l'aggro choisi une fois pour tout le sort (lanceur par défaut).
+  const isTauntCast = mode === 'etat' && aff.etatId === 'taunted';
+  const aggroTokenId = isTauntCast ? (await _vttPickAggroHolder(srcId, targetIds)) || srcId : null;
+  const aggroTok = aggroTokenId ? VS.tokens[aggroTokenId]?.data : null;
+  const aggroName = aggroTok ? (_live(aggroTok).displayName ?? aggroTok.name) : '';
 
   // ── Log d'annonce du cast (1 message global) ────────────────────────
   // « A lance Silence sur B » avant les JS individuels
@@ -207,7 +213,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
     effectLbl: mode === 'etat' && aff.etatId === 'faiblesse'
                ? `💢 ${_weakLbl(aff.element)}`
                : mode === 'etat' && aff.etatId && CONDITION_BY_ID[aff.etatId]
-               ? `${CONDITION_BY_ID[aff.etatId].icon} ${CONDITION_BY_ID[aff.etatId].label}`
+               ? `${CONDITION_BY_ID[aff.etatId].icon} ${CONDITION_BY_ID[aff.etatId].label}${aggroName ? ` → ${aggroName}` : ''}`
                : `🩸 DoT ${dotFormula}/tour`,
     createdAt: serverTimestamp(),
   }).catch(() => {});
@@ -254,7 +260,7 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       if (mode === 'etat' && aff.etatId === 'faiblesse') return `💢 ${_weakLbl(aff.element)}`;
       if (mode === 'etat' && aff.etatId && CONDITION_BY_ID[aff.etatId]) {
         const l = CONDITION_BY_ID[aff.etatId];
-        return `${l.icon} ${l.label}`;
+        return `${l.icon} ${l.label}${aggroName ? ` → ${aggroName}` : ''}`;
       }
       return `🩸 DoT ${dotFormula}/tour`;
     })();
@@ -301,8 +307,9 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
         showNotif(`⚠️ Sort "${opt.label}" : Faiblesse sans élément (noyau) — rien n'est appliqué`, 'warning');
         return;
       }
-      const sameCond = c => c.id === aff.etatId && (!isWeak || c.element === aff.element);
-      const condLbl = isWeak ? _weakLbl(aff.element) : lib.label;
+      // Provoqué : une nouvelle provocation remplace l'ancienne (nouveau porteur d'aggro).
+      const sameCond = c => !isTauntCast && c.id === aff.etatId && (!isWeak || c.element === aff.element);
+      const condLbl = isWeak ? _weakLbl(aff.element) : aggroName ? `${lib.label} → ${aggroName}` : lib.label;
       const round = VS.session?.combat?.round ?? 0;
       const isConsumed = !!lib.effects?.consumedByAttackAgainst;
       // Contrôle total (cantAct : Étourdi, Paralysé…) : durée de l'état, jamais
@@ -319,7 +326,8 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
       //   le calcul au démarrage du combat (sinon l'état durerait à l'infini)
       const expiresAtRound = (round > 0 && !isConsumed && dur > 0) ? round + dur - 1 : null;
       const pendingDuration = (round === 0 && !isConsumed && dur > 0) ? dur : null;
-      const existingConds = await _vttConditionsBeforeStateApplication({ ...td, id: tid }, lib);
+      const existingConds = (await _vttConditionsBeforeStateApplication({ ...td, id: tid }, lib))
+        .filter(c => !(isTauntCast && c.id === aff.etatId));
       if (existingConds.some(sameCond)) {
         showNotif(`${lib.icon} ${tgtName} portait déjà ${condLbl}`, 'info');
         return;
@@ -334,6 +342,9 @@ export async function _vttApplyAfflictions(srcId, targetIds, opt, { undo = null,
         expiresAtRound,
         ...(pendingDuration != null ? { pendingDuration } : {}),
         ...(isWeak ? { element: aff.element } : {}),
+        ...(isTauntCast ? { aggroTokenId, aggroName } : {}),
+        // Affaibli : malus scalé par les runes Puissance du sort (miroir de Renforcé).
+        ...(lib.effects?.dmgDealtMalus ? { dmgDealtMalusFormula: `${1 + (aff.nbP || 0)}d4` } : {}),
       };
       // Surface l'erreur si l'update Firestore échoue (permissions, etc.)
       const previous = td.conditions || [];
