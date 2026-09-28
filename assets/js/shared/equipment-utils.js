@@ -258,6 +258,7 @@ export function buildEquippedItemFromInventory(slot, item, invIndex) {
     return {
       ...common,
       sousType: item.sousType || '',
+      mains: item.mains || '',
       degats: item.degats || '',
       degatsStat: item.degatsStat || inferredStat,
       degatsStats: Array.isArray(item.degatsStats) && item.degatsStats.length
@@ -332,6 +333,7 @@ export function serializeShopWeaponForCombat(item = {}) {
     statAttaque: item.statAttaque || item.toucherStat || '',
     typeArme: item.typeArme || item.sousType || '',
     sousType: item.sousType || '',
+    mains: item.mains || '',
     portee: item.portee || '',
     traits: getItemTraits(item),
     format: item.format || '',

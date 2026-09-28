@@ -394,10 +394,16 @@ export function getMaitriseBonus(c, item = {}) {
 
   add(item.sousType);
   add(item.typeArme);
+  // Le format d'arme est devenu le type d'arme (Épée, Dague…). Les anciens
+  // libellés de maniement (« Arme 1M CaC Phy. ») ne désignent aucun type.
+  if (!/^arme\s/i.test(String(item.format || ''))) add(item.format);
 
   if (!item.sousType && Number.isInteger(item.sourceInvIndex)) {
     const invItem = (c.inventaire || [])[item.sourceInvIndex];
-    if (invItem) { add(invItem.sousType); add(invItem.typeArme); }
+    if (invItem) {
+      add(invItem.sousType); add(invItem.typeArme);
+      if (!/^arme\s/i.test(String(invItem.format || ''))) add(invItem.format);
+    }
   }
 
   if (!candidates.size) return 0;

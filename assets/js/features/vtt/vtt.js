@@ -25,6 +25,7 @@ import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, r
 import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
+import { resolveWeaponFamily } from '../../shared/weapon-family.js';
 import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
 import { _zoneCellRects } from './vtt-render.js';
 import { resolveWeaponDamageContext } from '../../shared/weapon-damage-context.js';
@@ -5920,7 +5921,8 @@ function _buildAttackOptions(t) {
   const wMaitrise    = c && !wReplace && weapon ? getMaitriseBonus(c, weapon) : 0;
   // Règles de type de dégâts (missEffect, armorPen, dmgBonus)
   const wReplaceTypeId = wReplace?.element || 'physique';
-  const fmt        = wReplace ? null : VS.weaponFormats?.find(f => f.label === weapon?.format);
+  // Type d'arme (ex-format) : porte isMagic, type de dégâts et techniques.
+  const fmt        = wReplace ? null : resolveWeaponFamily(VS.weaponFormats, weapon);
   const isMagicW   = wReplace ? true : fmt?.isMagic === true;
   const typeRules  = wReplace
     ? getDamageTypeRules(VS.damageTypes, wReplaceTypeId)
@@ -6004,7 +6006,7 @@ function _buildAttackOptions(t) {
     const secondaryDmgMod = secondaryDmgStats.reduce((sum, stat) => sum + getMod(c, stat), 0);
     const secondaryTouchMod = getMod(c, secondaryTouchStat);
     const secondaryMastery = getMaitriseBonus(c, secondaryWeapon);
-    const secondaryFormat = VS.weaponFormats?.find(format => format.label === secondaryWeapon.format);
+    const secondaryFormat = resolveWeaponFamily(VS.weaponFormats, secondaryWeapon);
     const secondaryMagic = secondaryFormat?.isMagic === true;
     const secondaryTypeId = secondaryMagic ? null : (secondaryFormat?.damageType || 'physique');
     const secondaryType = secondaryTypeId ? getDamageTypeById(VS.damageTypes, secondaryTypeId) : null;
@@ -14084,7 +14086,7 @@ function _conditionsAttackMods(srcToken, tgtToken, opt) {
 /** Règles du style actif du personnage, résolues au moment du jet. */
 function _combatStyleContext(srcToken, tgtToken, opt) {
   const character = _characterForToken(srcToken);
-  const style = character ? detectCombatStyle(character, VS.combatStyles || []) : null;
+  const style = character ? detectCombatStyle(character, VS.combatStyles || [], VS.weaponFormats || []) : null;
   const hasAttackRoll = !opt?.autoHit && !opt?.isCaSort && !opt?.isUtil
     && !opt?.isAffliction && !opt?.isEnchant;
   if (!style || !hasAttackRoll) {

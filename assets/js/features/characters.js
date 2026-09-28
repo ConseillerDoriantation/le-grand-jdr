@@ -2036,7 +2036,8 @@ function renderCharInventaireV3(c, canEdit) {
     if (it.typeArmure) props.push({ k: 'Type', v: it.typeArmure });
     if (it.slotArmure)  props.push({ k: 'Slot', v: it.slotArmure });
     else if (it.slotBijou) props.push({ k: 'Slot', v: it.slotBijou });
-    if (it.format) props.push({ k: 'Format', v: it.format });
+    if (it.format) props.push({ k: 'Type d’arme', v: it.format });
+    if (it.mains) props.push({ k: 'Maniement', v: it.mains });
     if (effetTxt && hero?.k !== 'Effet') props.push({ k: 'Effet', v: effetTxt, c: 'effect' });
     const traits = _getTraits?.(it) || [];
 

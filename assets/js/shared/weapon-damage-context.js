@@ -1,15 +1,16 @@
+import { resolveWeaponFamily } from './weapon-family.js';
+
 /**
- * Résout le format et le type de dégâts réellement portés par une arme.
- * Les anciennes armes stockent le libellé du format, les plus récentes peuvent
- * en stocker l'id : les deux restent acceptés.
+ * Résout le type d'arme (ex-format) et le type de dégâts réellement portés par
+ * une arme. Id ou libellé du format acceptés ; une arme dont l'ancien format
+ * n'existe plus se rattache à son type saisi (voir weapon-family.js).
  *
  * Pour un format magique sans élément imposé, le lanceur peut choisir parmi
  * les types magiques configurés dans l'aventure. `preferredElements` permet de
  * placer ses affinités éventuelles en tête de liste sans masquer les autres.
  */
 export function resolveWeaponDamageContext(formats = [], damageTypes = [], weapon = {}, preferredElements = []) {
-  const formatRef = String(weapon?.formatId || weapon?.format || '').trim();
-  const format = (formats || []).find(f => f?.id === formatRef || f?.label === formatRef) || null;
+  const format = resolveWeaponFamily(formats, weapon);
   const explicitTypeId = String(
     weapon?.damageTypeId || weapon?.elementId || weapon?.noyauTypeId || format?.damageType || ''
   ).trim();

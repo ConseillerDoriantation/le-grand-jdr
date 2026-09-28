@@ -19,6 +19,7 @@ import { buildRaretePicker, loadRarities } from '../../shared/rarity.js';
 import { canControlCharacter, getCharacterById } from '../../shared/character-state.js';
 import { loadEquipmentSlots, getEquipmentItemOptions } from '../../shared/equipment-slots.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
+import { WEAPON_HANDS_OPTIONS, resolveWeaponFamily, weaponHandsLabel } from '../../shared/weapon-family.js';
 import { loadArmorSetSettings, getArmorTypeOptions } from '../../shared/armor-set-settings.js';
 import { syncEquipmentAfterInventoryMutation } from '../../shared/equipment-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
@@ -53,7 +54,7 @@ function _blankDraft() {
   return {
     nom: '', rarete: 0, description: '',
     // arme
-    format: '', degats: '', degatsStats: [], toucherStat: '', portee: '', traits: '',
+    format: '', mains: '', degats: '', degatsStats: [], toucherStat: '', portee: '', traits: '',
     // armure / accessoire
     slotArmure: '', typeArmure: '', ca: '', slotBijou: '',
     // bonus (stats + dérivés)
@@ -71,7 +72,8 @@ function _draftFromItem(item = {}) {
   d.nom         = item.nom || '';
   d.rarete      = parseInt(item.rarete) || 0;
   d.description = item.description || '';
-  d.format      = item.format || '';
+  d.format      = resolveWeaponFamily(_forge?.formats || [], item)?.label || item.format || '';
+  d.mains       = item.mains || (item.format ? weaponHandsLabel(item) : '');
   d.degats      = item.degats || '';
   d.degatsStats = Array.isArray(item.degatsStats)
     ? [...item.degatsStats]
@@ -156,7 +158,10 @@ function _catBody() {
       _forge.formats.map(fm => _opt(fm.label, fm.label, d.format)).join('');
     return identity +
       _section('Combat',
-        _fRow('Format', _fSelect('format', formatOpts)) +
+        _row2(
+          _fRow('Type d’arme', _fSelect('format', formatOpts)),
+          _fRow('Maniement', _fSelect('mains', `<option value="">—</option>` + WEAPON_HANDS_OPTIONS.map(v => _opt(v, v, d.mains)).join(''))),
+        ) +
         _row2(
           _fRow('Dégâts', _fText('degats', 'Ex. 1d8')),
           _fRow('Portée', _fText('portee', 'Ex. 1, 18/54…')),
@@ -266,6 +271,9 @@ function _buildItem() {
     return {
       ...base, template: 'arme',
       format: d.format || '',
+      // Type d'arme = format ; sousType synchronisé pour les maîtrises et filtres.
+      ...(d.format ? { sousType: d.format, formatId: _forge.formats.find(fm => fm.label === d.format)?.id || '' } : {}),
+      mains: d.mains || '',
       degats: String(d.degats || '').trim(),
       degatsStats: stats,
       degatsStat: stats[0] || '',

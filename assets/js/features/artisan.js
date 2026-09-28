@@ -12,6 +12,7 @@
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { getShopCharId } from '../shared/shop-session.js';
+import { weaponHands } from '../shared/weapon-family.js';
 import { trySave } from '../shared/crud.js';
 import { openModal, pushModal, closeModalDirect, confirmModal, modalSection } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
@@ -1197,7 +1198,7 @@ function _renderAmuletStats(item, invIndex, c) {
 
 function _renderWeaponStats(item, invIndex, c) {
   const s = getUpgradeSettings();
-  const is2H = /2M|2m/.test(String(item.format || ''));
+  const is2H = weaponHands(item) === 2;
   const cap = is2H ? (s.caps?.weapon2H ?? 4) : (s.caps?.weapon1H ?? 2);
   const tariff = is2H ? (s.weapon?.['2H'] || {}) : (s.weapon?.['1H'] || {});
   const used = _getUpgradedStatEntries(item);
@@ -1351,8 +1352,7 @@ async function _artisanWeaponAddPoint(invIndex, statFullKey) {
   if (!meta) return;
 
   const s = getUpgradeSettings();
-  const fmt = String(item.format || '');
-  const is2H = /2M|2m/.test(fmt);
+  const is2H = weaponHands(item) === 2;
   const cap = is2H ? (s.caps?.weapon2H ?? 4) : (s.caps?.weapon1H ?? 2);
   const tariffTable = is2H ? (s.weapon?.['2H'] || {}) : (s.weapon?.['1H'] || {});
 

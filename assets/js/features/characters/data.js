@@ -1,4 +1,4 @@
-import { getDocData, saveDoc } from '../../data/firestore.js';
+import { getDocData, saveDoc, loadCollection, updateInCol } from '../../data/firestore.js';
 import { registerActions } from '../../core/actions.js';
 import { openModal, closeModal, closeModalDirect, confirmModal, setModalCloseGuard } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
@@ -13,7 +13,8 @@ import { openEquipmentSlotsAdmin, getPrimaryWeaponSlotId, getSecondaryWeaponSlot
 import { openArmorSetsAdmin } from '../../shared/armor-set-settings.js';
 import { openSpellSystemAdmin } from '../../shared/spell-system.js';
 import { defaultCombatStyles, detectCombatStyle as detectCombatStyleRule, normalizeCombatStyles } from '../../shared/combat-styles.js';
-import { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, resolveEquippedInventoryIndices, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
+import { missingWeaponFamilies, resolveWeaponFamily, weaponHandsLabel } from '../../shared/weapon-family.js';
+import { DEFAULT_UNARMED, isWeaponLikeItem, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, resolveEquippedInventoryIndices, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
 export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits };
 
 // ══════════════════════════════════════════════
@@ -52,7 +53,7 @@ export function _defaultCombatStyles() {
  * Ordre des styles : du plus spécifique au plus général.
  */
 export function detectCombatStyle(c, styles) {
-  return detectCombatStyleRule(c, styles);
+  return detectCombatStyleRule(c, styles, _weaponFormats || []);
 }
 
 // Admin : ouvrir la gestion des styles de combat
@@ -98,7 +99,7 @@ export function _renderCombatStylesModal(styles) {
                 <div class="cs-style-admin-rules">${rulePills(s)}</div>
                 ${s.description ? `<p>${_esc(s.description)}</p>` : ''}
                 <div class="cs-style-admin-match">
-                  <span><b>Principale</b>${_esc((s.condPrincipale || []).filter(Boolean).join(', ') || 'aucune arme')}</span>
+                  <span><b>Principale</b>${_esc((s.condPrincipale || []).filter(Boolean).join(', ') || ((s.condPrincipale || []).length ? 'aucune arme' : 'toute arme'))}${s.condMains ? ` · ${s.condMains === '2' ? '2 mains' : '1 main'}` : ''}</span>
                   <span><b>Secondaire</b>${_esc((s.condSecondaire || []).filter(Boolean).join(', ') || 'aucune arme')}</span>
                 </div>
               </div>
@@ -137,6 +138,7 @@ async function _deleteCombatStyle(i) {
 export function _getFormatsOpt() {
   return [
     { v:'', l:'(aucune arme)' },
+    { v:'*', l:'(toute arme)' },
     ...(_weaponFormats || []).map(f => ({ v: f.label, l: f.label })),
   ];
 }
@@ -164,12 +166,12 @@ export function _openStyleEditor(idx, s) {
         </section>
 
         <section class="cs-style-editor-section">
-          <div class="cs-style-editor-heading"><span>2</span><div><b>Équipement déclencheur</b><small>Plusieurs choix dans une main signifient « ou ».</small></div></div>
+          <div class="cs-style-editor-heading"><span>2</span><div><b>Équipement déclencheur</b><small>Types d’arme par main ; plusieurs choix dans une main signifient « ou ». Aucun choix = n’importe quelle arme.</small></div></div>
           <div class="cs-style-hands-grid">
             <div class="cs-style-hand">
               <label>Main principale</label>
               <div id="cs-cond-p" class="cs-style-conditions">
-        ${(s.condPrincipale?.length ? s.condPrincipale : ['']).map((v,fi) => `
+        ${(s.condPrincipale?.length ? s.condPrincipale : ['*']).map((v,fi) => `
                 <div class="cs-style-condition-row">
           <select class="input-field cs-cond-p-sel">
             ${_getFormatsOpt().map(o=>`<option value="${_esc(o.v)}" ${v===o.v?'selected':''}>${_esc(o.l)}</option>`).join('')}
@@ -178,7 +180,14 @@ export function _openStyleEditor(idx, s) {
         </div>`).join('')}
       </div>
       <button type="button" data-action="_csAddCond" data-container="cs-cond-p" data-sel="cs-cond-p-sel"
-                class="cs-style-add-condition">＋ Ajouter un format</button>
+                class="cs-style-add-condition">＋ Ajouter un type</button>
+              <label class="cs-style-field" style="margin-top:.5rem"><span>Maniement de l’arme principale</span>
+                <select class="input-field" id="cs-style-hands">
+                  <option value="" ${!style.condMains ? 'selected' : ''}>Indifférent</option>
+                  <option value="1" ${String(style.condMains) === '1' ? 'selected' : ''}>À une main</option>
+                  <option value="2" ${String(style.condMains) === '2' ? 'selected' : ''}>À deux mains</option>
+                </select>
+              </label>
             </div>
             <div class="cs-style-hand">
               <label>Main secondaire</label>
@@ -192,7 +201,7 @@ export function _openStyleEditor(idx, s) {
         </div>`).join('')}
       </div>
       <button type="button" data-action="_csAddCond" data-container="cs-cond-s" data-sel="cs-cond-s-sel"
-                class="cs-style-add-condition">＋ Ajouter un format</button>
+                class="cs-style-add-condition">＋ Ajouter un type</button>
             </div>
           </div>
         </section>
@@ -270,6 +279,7 @@ async function _saveCombatStyle(idx) {
     label,
     condPrincipale: condP,
     condSecondaire: condS,
+    condMains: document.getElementById('cs-style-hands')?.value || '',
     description: document.getElementById('cs-style-desc')?.value?.trim() || '',
     couleur: document.getElementById('cs-style-color')?.value || '#4f8cff',
     condSousTypeS: idx >= 0 ? (_combatStyles[idx]?.condSousTypeS || []) : [],
@@ -296,11 +306,87 @@ function _backToStylesList() {
 // ══════════════════════════════════════════════
 // FORMATS D'ARMES — Admin
 // ══════════════════════════════════════════════
+// Armes de la boutique (catalogue) : sert à la migration « format de maniement →
+// type d'arme ». Collection session-live : aucune lecture supplémentaire.
+let _wfShopWeapons = [];
+
 export async function openWeaponFormatsAdmin() {
-  [_weaponFormats, _damageTypes, _techniqueConditions] = await Promise.all([
-    loadWeaponFormats(), loadDamageTypes(), loadConditionLibrary(),
+  let shopItems = [];
+  [_weaponFormats, _damageTypes, _techniqueConditions, shopItems] = await Promise.all([
+    loadWeaponFormats(), loadDamageTypes(), loadConditionLibrary(), loadCollection('shop').catch(() => []),
   ]);
+  _wfShopWeapons = (shopItems || []).filter(isWeaponLikeItem);
   _renderWeaponFormatsModal(_weaponFormats);
+}
+
+// État de la migration : types à créer, armes à mettre à jour, armes sans type.
+function _wfMigrationState(formats) {
+  const missing = missingWeaponFamilies(formats, _wfShopWeapons);
+  const toUpdate = [];
+  const untyped = [];
+  for (const item of _wfShopWeapons) {
+    const family = resolveWeaponFamily(formats, item);
+    if (!family || /^arme\s/i.test(family.label)) { untyped.push(item); continue; }
+    if (item.format !== family.label || item.formatId !== family.id || item.sousType !== family.label || !item.mains) {
+      toUpdate.push({ item, family });
+    }
+  }
+  return { missing, toUpdate, untyped };
+}
+
+function _wfMigrationPanel(formats) {
+  if (!_wfShopWeapons.length) return '';
+  const { missing, toUpdate, untyped } = _wfMigrationState(formats);
+  const legacy = formats.filter(f => /^arme\s/i.test(f.label));
+  if (!missing.length && !toUpdate.length && !untyped.length && !legacy.length) return '';
+  return `
+    <div class="sh-admin-section wf-migration">
+      <div class="sh-admin-section-title">🔁 Passage aux types d’arme</div>
+      <p class="sh-admin-intro">Les anciens formats de maniement (1M / 2M / distance) sont remplacés par des types d’arme. Le maniement devient un champ de chaque arme.</p>
+      <ol class="wf-migration-steps">
+        <li>${missing.length
+          ? `Créer <b>${missing.length}</b> type${missing.length > 1 ? 's' : ''} depuis les armes existantes : ${missing.map(f => `${_esc(f.label)}${f.isMagic ? ' 🔮' : ''}`).join(', ')}.
+             <button class="btn btn-gold btn-sm" data-action="_importWeaponFamilies">Créer</button>`
+          : '✅ Tous les types saisis sur les armes existent.'}</li>
+        <li>${toUpdate.length
+          ? `Mettre à jour <b>${toUpdate.length}</b> arme${toUpdate.length > 1 ? 's' : ''} de la boutique (type + maniement).
+             <button class="btn btn-gold btn-sm" data-action="_convertShopWeapons">Mettre à jour</button>`
+          : '✅ Les armes de la boutique sont à jour.'}</li>
+        <li>${legacy.length
+          ? `Réattribuer les techniques des anciens formats (${legacy.map(f => _esc(f.label)).join(', ')}) aux bons types, puis supprimer ces formats.`
+          : '✅ Aucun ancien format restant.'}</li>
+      </ol>
+      ${untyped.length ? `<div class="wf-migration-warn">⚠️ ${untyped.length} arme${untyped.length > 1 ? 's' : ''} sans type reconnu, à corriger dans la boutique : ${untyped.slice(0, 12).map(i => _esc(i.nom || '?')).join(', ')}${untyped.length > 12 ? '…' : ''}</div>` : ''}
+    </div>`;
+}
+
+async function _importWeaponFamilies() {
+  const formats = [...(_weaponFormats || [])];
+  const missing = missingWeaponFamilies(formats, _wfShopWeapons);
+  if (!missing.length) return;
+  const stamp = Date.now();
+  missing.forEach((f, i) => formats.push({ id: `type_${stamp}_${i}`, label: f.label, damageType: f.damageType, isMagic: f.isMagic, techniques: [] }));
+  await saveWeaponFormats(formats);
+  _weaponFormats = formats;
+  showNotif(`${missing.length} type${missing.length > 1 ? 's' : ''} d’arme créé${missing.length > 1 ? 's' : ''}.`, 'success');
+  _renderWeaponFormatsModal(formats);
+}
+
+// Réécrit format/formatId/sousType/mains des armes du catalogue (1 écriture par
+// arme, action MJ ponctuelle). Les copies déjà possédées par les personnages
+// restent reconnues via leur type saisi (resolveWeaponFamily).
+async function _convertShopWeapons() {
+  const { toUpdate } = _wfMigrationState(_weaponFormats || []);
+  if (!toUpdate.length) return;
+  if (!await confirmModal(`Mettre à jour ${toUpdate.length} arme(s) de la boutique ? Le maniement (1 ou 2 mains) est déduit de l’ancien format.`, { title: 'Types d’arme', danger: false, confirmLabel: 'Mettre à jour' })) return;
+  let done = 0;
+  for (const { item, family } of toUpdate) {
+    const patch = { format: family.label, formatId: family.id, sousType: family.label, mains: item.mains || weaponHandsLabel(item) };
+    const ok = await updateInCol('shop', item.id, patch).then(() => true, () => false);
+    if (ok) { Object.assign(item, patch); done += 1; }
+  }
+  showNotif(`${done}/${toUpdate.length} arme(s) mise(s) à jour.`, done === toUpdate.length ? 'success' : 'warning');
+  _renderWeaponFormatsModal(_weaponFormats || []);
 }
 
 export async function openDamageTypesAdmin() {
@@ -324,27 +410,28 @@ export function _renderWeaponFormatsModal(formats) {
     <div class="sh-admin-head">
       <div class="sh-admin-head-ico">⚔️</div>
       <div class="sh-admin-head-title">
-        <h2>Formats d'armes</h2>
-        <small>${formats.length} format${formats.length>1?'s':''} configuré${formats.length>1?'s':''} · utilisés dans la boutique et les styles de combat</small>
+        <h2>Types d’arme</h2>
+        <small>${formats.length} type${formats.length>1?'s':''} configuré${formats.length>1?'s':''} · boutique, maîtrises, styles de combat et techniques</small>
       </div>
       <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
     </div>
 
     <div class="sh-admin-body">
       <p class="sh-admin-intro">
-        Bascule chaque format en <em>🔮 Magique</em> ou <em>💪 Physique</em>, puis ajoute des <strong>techniques optionnelles</strong> proposées au joueur au moment de l'attaque.
+        Un type par famille d’arme (Épée, Dague, Arc…), qu’elle se manie à une ou deux mains. Bascule chaque type en <em>🔮 Magique</em> ou <em>💪 Physique</em>, puis ajoute des <strong>techniques optionnelles</strong> proposées au joueur au moment de l'attaque.
       </p>
+      ${_wfMigrationPanel(formats)}
 
       <div class="sh-admin-section">
-        <div class="sh-admin-section-title">📋 Formats existants</div>
+        <div class="sh-admin-section-title">📋 Types existants</div>
         <div class="sh-admin-list" id="wf-list">
           ${formats.length === 0
-            ? '<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun format — ajoute-en un ci-dessous.</div>'
+            ? '<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun type — ajoute-en un ci-dessous.</div>'
             : formats.map((f, i) => `
               <div class="sh-admin-list-item">
-                <span class="sh-admin-list-item-label">${_esc(f.label)}</span>
+                <span class="sh-admin-list-item-label">${_esc(f.label)}${/^arme\s/i.test(f.label) ? ' <small style="color:var(--text-dim)">(ancien format)</small>' : ''}</span>
                 <button class="wf-tech-open" data-action="_editWeaponFormatTechniques" data-idx="${i}"
-                  title="Configurer les techniques de ce format">
+                  title="Configurer les techniques de ce type">
                   🎯 ${f.techniques?.length || 0} technique${(f.techniques?.length || 0) > 1 ? 's' : ''}
                 </button>
                 ${magPill(f.isMagic, i)}
@@ -353,7 +440,7 @@ export function _renderWeaponFormatsModal(formats) {
         </div>
 
         <div class="sh-admin-add-row">
-          <input type="text" id="wf-new-label" placeholder="Nouveau format (ex: Arme 2M CaC Mag.)..."
+          <input type="text" id="wf-new-label" placeholder="Nouveau type (ex : Hallebarde)..."
             data-enter-click="[data-action=_addWeaponFormat]">
           <button class="btn btn-gold btn-sm" data-action="_addWeaponFormat">+ Ajouter</button>
         </div>
@@ -385,22 +472,22 @@ async function _addWeaponFormat() {
   if (!label) { showNotif('Nom requis.', 'error'); return; }
   const formats = _weaponFormats ? [..._weaponFormats] : [];
   if (formats.some(f => f.label.toLowerCase() === label.toLowerCase())) {
-    showNotif('Ce format existe déjà.', 'error'); return;
+    showNotif('Ce type existe déjà.', 'error'); return;
   }
   formats.push({ id: `fmt_${Date.now()}`, label, damageType: 'physique', isMagic: false });
   await saveWeaponFormats(formats);
   _weaponFormats = formats;
-  showNotif('Format ajouté.', 'success');
+  showNotif('Type ajouté.', 'success');
   _renderWeaponFormatsModal(formats);
 }
 
 async function _deleteWeaponFormat(i) {
-  if (!await confirmModal('Supprimer ce format ?', { title: 'Confirmation de suppression' })) return;
+  if (!await confirmModal('Supprimer ce type d’arme ?', { title: 'Confirmation de suppression' })) return;
   const formats = [...(_weaponFormats || [])];
   formats.splice(i, 1);
   await saveWeaponFormats(formats);
   _weaponFormats = formats;
-  showNotif('Format supprimé.', 'success');
+  showNotif('Type supprimé.', 'success');
   _renderWeaponFormatsModal(formats);
 }
 
@@ -607,7 +694,7 @@ function _renderWeaponFormatTechniquesEditor() {
   openModal('', `
     <div class="sh-admin-modal is-formats wf-tech-editor">
       <div class="sh-admin-head">
-        <button class="wf-tech-back" data-action="_backToWeaponFormats" title="Retour aux formats">←</button>
+        <button class="wf-tech-back" data-action="_backToWeaponFormats" title="Retour aux types d’arme">←</button>
         <div class="sh-admin-head-ico">🎯</div>
         <div class="sh-admin-head-title">
           <h2>Techniques · ${_esc(format.label)}</h2>
@@ -623,7 +710,7 @@ function _renderWeaponFormatTechniquesEditor() {
         <div class="wf-tech-list">
           ${_wfTechniqueDrafts.length
             ? _wfTechniqueDrafts.map(_wfTechniqueCard).join('')
-            : '<div class="wf-tech-empty"><span>🎯</span><strong>Aucune technique</strong><small>Les attaques de ce format restent entièrement normales.</small></div>'}
+            : '<div class="wf-tech-empty"><span>🎯</span><strong>Aucune technique</strong><small>Les attaques de ce type d’arme restent entièrement normales.</small></div>'}
         </div>
         <div class="wf-tech-presets">
           <span>Ajouter :</span>
@@ -1573,6 +1660,8 @@ registerActions({
   _backToStylesList:        ()    => _backToStylesList(),
   _csAddCond:               (btn) => _csAddCond(btn.dataset.container, btn.dataset.sel),
   _toggleWeaponFormatMagic: (btn) => _toggleWeaponFormatMagic(Number(btn.dataset.idx)),
+  _importWeaponFamilies:    ()    => _importWeaponFamilies(),
+  _convertShopWeapons:      ()    => _convertShopWeapons(),
   _editWeaponFormatTechniques: (btn) => _editWeaponFormatTechniques(Number(btn.dataset.idx)),
   _wfTechniqueDraftField:   (el)  => _wfTechniqueDraftField(el),
   _addWeaponFormatTechnique:(btn) => _addWeaponFormatTechnique(btn.dataset.preset),

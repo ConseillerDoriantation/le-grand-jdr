@@ -11,6 +11,8 @@ import { quillEditorHtml, getQuillHtml, markQuillSaved } from '../../shared/rich
 import { uploadJpeg } from '../../shared/image-upload.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import { saveBuildPatch } from '../../shared/character-builds.js';
+import { loadWeaponFormats } from '../../shared/weapon-formats.js';
+import { normalizeWeaponFamilyKey } from '../../shared/weapon-family.js';
 
 import { getCharacterById } from '../../shared/character-state.js';
 // ══════════════════════════════════════════════
@@ -619,12 +621,20 @@ function _refreshCompteTotals(c) {
 // TAB : MAÎTRISES
 // ══════════════════════════════════════════════
 // Charge les sousTypes distincts depuis la collection shop (cachée 5 min)
+// Types d'arme proposés pour une maîtrise : liste configurée (ex-formats) +
+// types encore saisis sur les armes de la boutique, sans doublon d'orthographe.
 async function _loadWeaponSousTypes() {
   try {
-    const items = await loadCollection('shop');
-    return [...new Set(
-      items.filter(i => i?.sousType).map(i => i.sousType)
-    )].sort((a, b) => a.localeCompare(b, 'fr'));
+    const [items, formats] = await Promise.all([loadCollection('shop'), loadWeaponFormats().catch(() => [])]);
+    const byKey = new Map();
+    const add = label => {
+      const value = String(label || '').trim();
+      const key = normalizeWeaponFamilyKey(value);
+      if (key && !/^arme\s/.test(key) && !byKey.has(key)) byKey.set(key, value);
+    };
+    (formats || []).forEach(f => add(f.label));
+    items.filter(i => i?.sousType).forEach(i => add(i.sousType));
+    return [...byKey.values()].sort((a, b) => a.localeCompare(b, 'fr'));
   } catch {
     return [];
   }
