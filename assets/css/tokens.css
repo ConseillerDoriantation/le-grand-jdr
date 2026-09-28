@@ -602,7 +602,7 @@
 ══════════════════════════════════════════════════ */
 [data-theme="light"] .input-field,
 [data-theme="light"] .input-sm {
-  background: var(--bg-elevated) !important;
+  background-color: var(--bg-elevated) !important;   /* -color : garde le chevron des <select> */
   border-color: rgba(0,0,0,0.13) !important;
   color: var(--text) !important;
   box-shadow: none !important;
@@ -610,7 +610,7 @@
 [data-theme="light"] .input-field:focus,
 [data-theme="light"] .input-sm:focus {
   border-color: rgba(37,99,235,0.45) !important;
-  background: var(--bg-elevated) !important;
+  background-color: var(--bg-elevated) !important;
   box-shadow: 0 0 0 3px rgba(37,99,235,0.10) !important;
 }
 [data-theme="light"] textarea.input-field { background: var(--bg-elevated) !important; }

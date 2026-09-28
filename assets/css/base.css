@@ -51,6 +51,45 @@ button, input, textarea, select {
   color: inherit;
 }
 
+/* Contrôles natifs (liste déroulante ouverte, barres de défilement, cases,
+   dates…) dessinés dans le thème de l'app par tous les navigateurs. */
+:root { color-scheme: dark; --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa8bd' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+:root[data-theme="light"] { color-scheme: light; --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%235b6678' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+
+/* Listes déroulantes : même rendu sous Chrome, Firefox et Safari. Chaque
+   navigateur dessine sa propre flèche (forme, taille, marge et retrait du texte
+   différents) → flèche native retirée, chevron commun à la place.
+   !important sur la flèche et sa marge : les composants posent leur fond avec le
+   raccourci `background:`, qui effacerait l'image. */
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: var(--select-chevron) !important;
+  background-repeat: no-repeat !important;
+  background-position: right .75em center !important;
+  background-size: .65em auto !important;
+  padding-right: 2.2em !important;
+  text-overflow: ellipsis;
+}
+/* Select sans style de composant : valeurs communes au lieu des couleurs
+   système propres à chaque navigateur (:where → toujours surchargeable). */
+:where(select) {
+  padding-block: 2px;
+  padding-left: 6px;
+  border: 1px solid var(--border-md);
+  border-radius: 6px;
+  background-color: var(--surface-2);
+  color: var(--text);
+}
+/* Options opaques : sans elles, Firefox peint la liste ouverte avec les
+   couleurs système (fond clair sous un texte clair). */
+option,
+optgroup {
+  background-color: var(--surface-3);
+  color: var(--text);
+}
+
 /* Fond hexagonal + gradients radiaux */
 body::before {
   content: '';

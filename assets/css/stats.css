@@ -2564,6 +2564,8 @@ table.stats-tbl { width: 100%; border-collapse: collapse; font-variant-numeric: 
   border-radius: var(--r-md); padding: 4px; max-width: 760px; }
 .stats-sc { flex: 1; display: flex; flex-direction: column; gap: 1px; padding: 7px 30px 7px 14px; border-radius: 10px;
   cursor: pointer; max-width: none; transition: background .15s; position: relative; }
+/* La puce dessine sa propre flèche (▾) : pas de chevron global sur son select. */
+.stats-sc select { background-image: none !important; padding-right: 0 !important; }
 .stats-sc::after { content: '▾'; position: absolute; right: 12px; top: 50%; transform: translateY(-20%); font-size: 10px; color: var(--text-dim); pointer-events: none; }
 .stats-sc small { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-dim); }
 .stats-sc select { background: none; border: 0; padding: 0; margin: 0; font: inherit; font-size: 14px; font-weight: 600;

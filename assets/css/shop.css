@@ -140,9 +140,9 @@
 }
 
 .sh-wallet .sh-char-select {
-  background: transparent !important;
+  background-color: transparent !important;
   border: none !important;
-  padding: 0 1.2rem 0 0 !important;
+  padding: 0 2.2em 0 0 !important;
   min-height: unset !important;
   font-size: 0.95rem !important;
   font-weight: 700 !important;
@@ -1048,7 +1048,7 @@
 ══════════════════════════════════════════════════ */
 
 .sh-modal-select {
-  background: var(--bg-elevated, var(--bg-card)) !important;
+  background-color: var(--bg-elevated, var(--bg-card)) !important;
   color: var(--text) !important;
   border-color: var(--border-strong) !important;
   color-scheme: dark;
@@ -1353,8 +1353,8 @@ input[type="number"].input-field::-webkit-outer-spin-button {
   max-width: 180px;
   flex-shrink: 0;
   font-size: 0.78rem !important;
-  padding: 0.45rem 0.7rem !important;
-  background: #0f172a !important;
+  padding: 0.45rem 2.2em 0.45rem 0.7rem !important;
+  background-color: #0f172a !important;
   color: #ffffff !important;
   border: 1px solid rgba(96, 165, 250, 0.25) !important;
 }
@@ -1574,7 +1574,7 @@ input[type="number"].input-field::-webkit-outer-spin-button {
   max-width: none;
   min-width: 0;
   font-size: 0.88rem !important;
-  padding: 0.7rem 0.85rem !important;
+  padding: 0.7rem 2.2em 0.7rem 0.85rem !important;
 }
 
 .sh-sidebar-or {
@@ -1726,7 +1726,7 @@ input[type="number"].input-field::-webkit-outer-spin-button {
 }
 
 [data-theme="light"] .sh-modal-select {
-  background: #ffffff !important;
+  background-color: #ffffff !important;
   color: #111827 !important;
   border-color: rgba(0,0,0,0.18) !important;
   color-scheme: light;
