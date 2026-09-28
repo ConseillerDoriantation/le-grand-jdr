@@ -259,7 +259,8 @@ export function _renderInventaireBoutique(char) {
 
     const infos = [];
     const statBonuses = _inventoryStatChips(item);
-    if (item.format)      infos.push({ label: 'Format',    val: item.format });
+    if (item.format)      infos.push({ label: 'Type d’arme', val: item.format });
+    if (item.mains)       infos.push({ label: 'Maniement', val: item.mains });
     if (item.slotArmure)  infos.push({ label: 'Slot',      val: item.slotArmure });
     if (item.slotBijou)   infos.push({ label: 'Slot',      val: item.slotBijou });
     if (item.typeArmure)  infos.push({ label: 'Type',      val: item.typeArmure });
@@ -618,8 +619,10 @@ export async function openInventoryItemDetail(charId, indicesB64) {
 
   const facts = [
     ['Catégorie', item.type || item.categorie],
-    ['Sous-type', item.sousType || item.typeArme],
-    ['Format', item.format],
+    // Type d'arme = format : le sous-type n'est affiché que s'il apporte une info.
+    ['Sous-type', [item.sousType, item.typeArme].find(v => v && v !== item.format) || ''],
+    ['Type d’arme', item.format],
+    ['Maniement', item.mains],
     ['Armure', item.typeArmure],
     ['Emplacement', item.slotArmure || item.slotBijou],
     ['Dégâts', item.degats],

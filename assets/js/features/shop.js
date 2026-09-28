@@ -11,6 +11,7 @@ import { emptyStateHtml } from '../shared/list-renderer.js';
 import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort, getDefaultCharForUser } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
+import { WEAPON_HANDS_OPTIONS, resolveWeaponFamily, weaponHandsLabel } from '../shared/weapon-family.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
 import { getShopItemEditableText, shopItemToInvEntry } from '../shared/inventory-utils.js';
@@ -70,8 +71,8 @@ const TEMPLATES = {
   arme: {
     label: '⚔️ Arme',
     fields: [
-      { id:'format',      label:'Format',        type:'format_select' },
-      { id:'sousType',    label:'Type d\'arme',  type:'autocomplete', placeholder:'Épée, Lance, Dague, Arc, Bâton...' },
+      { id:'format',      label:'Type d\'arme',  type:'format_select' },
+      { id:'mains',       label:'Maniement',     type:'select', options: WEAPON_HANDS_OPTIONS },
       { id:'rarete',      label:'Rareté',        type:'rarete' },
       { id:'degats',      label:'Dégâts',        type:'damage_with_stat', placeholder:'1D10, 2D6...' },
       { id:'toucherStat', label:'Toucher',       type:'stat_select' },
@@ -322,7 +323,7 @@ function _renderShopAdminToolbar() {
     <span class="sh-catalog-admin-label">Gestion</span>
     <button class="btn btn-outline btn-sm" data-sh-action="openCatModal" title="Créer une catégorie">📁 Catégorie</button>
     <button class="btn btn-outline btn-sm" data-sh-action="openItemModal" title="Créer un article">＋ Article</button>
-    <button class="btn btn-outline btn-sm" data-sh-action="openWeaponFmts" title="Gérer les formats d'armes">⚙️ Formats</button>
+    <button class="btn btn-outline btn-sm" data-sh-action="openWeaponFmts" title="Gérer les types d'arme et leurs techniques">⚙️ Types d’arme</button>
     <button class="btn btn-outline btn-sm" data-sh-action="openRarities" title="Gérer les raretés">★ Raretés</button>
     <button class="btn btn-outline btn-sm" data-sh-action="openUpgradeStg" title="Tarifs et plafonds des améliorations">⚙️ Améliorations</button>
     <button class="btn btn-outline btn-sm" data-sh-action="openExport" title="Exporter / Importer la boutique">⬆️ Export</button>
@@ -1531,7 +1532,9 @@ function _renderItemCard(item, tplKey, itemIdx) {
   // Sous-titre type : Format · Type d'arme · Slot armure/bijou
   const typeChips = [];
   if (item.format)     typeChips.push(item.format);
-  if (item.sousType)   typeChips.push(item.sousType);
+  // Le format est devenu le type d'arme : sousType identique = doublon.
+  if (item.sousType && item.sousType !== item.format) typeChips.push(item.sousType);
+  if (item.mains)      typeChips.push(item.mains);
   if (item.slotArmure) typeChips.push(item.slotArmure);
   if (item.typeArmure) typeChips.push(item.typeArmure);
   if (item.slotBijou)  typeChips.push(item.slotBijou);
@@ -1691,7 +1694,9 @@ function _renderItemRow(item, tplKey, itemIdx) {
   // Sous-titre type (format · sousType · slot…)
   const typeChips = [];
   if (item.format)     typeChips.push(item.format);
-  if (item.sousType)   typeChips.push(item.sousType);
+  // Le format est devenu le type d'arme : sousType identique = doublon.
+  if (item.sousType && item.sousType !== item.format) typeChips.push(item.sousType);
+  if (item.mains)      typeChips.push(item.mains);
   if (item.slotArmure) typeChips.push(item.slotArmure);
   if (item.typeArmure) typeChips.push(item.typeArmure);
   if (item.slotBijou)  typeChips.push(item.slotBijou);
@@ -1775,7 +1780,7 @@ function _buildSimEquipFromShop(slot, shopItem) {
     ch:  getItemStatBonus(shopItem, 'charisme'),
   };
   if (slot.startsWith('Main')) {
-    return { ...base, degats: shopItem.degats || '', sousType: shopItem.sousType || '', toucherStat: shopItem.toucherStat || '' };
+    return { ...base, degats: shopItem.degats || '', sousType: shopItem.sousType || '', format: shopItem.format || '', mains: shopItem.mains || '', toucherStat: shopItem.toucherStat || '' };
   }
   return {
     ...base,
@@ -1929,8 +1934,9 @@ function openShopItemDetail(itemId) {
   const manque = tropCher ? Math.ceil(prix - solde) : 0;
 
   const rows = [];
-  if (item.format)      rows.push(['Format', item.format]);
-  if (item.sousType)    rows.push(['Type', item.sousType]);
+  if (item.format)      rows.push(['Type d’arme', item.format]);
+  if (item.mains)       rows.push(['Maniement', item.mains]);
+  if (item.sousType && item.sousType !== item.format) rows.push(['Type', item.sousType]);
   if (item.degats) {
     const arr = _getDegatsStats(item);
     rows.push(['Dégâts', `${item.degats}${arr.length ? ' + ' + _formatDegatsStatsText(arr) : ''}`]);
@@ -1963,7 +1969,9 @@ function openShopItemDetail(itemId) {
   // Sous-titre type (format · sousType · slot…)
   const typeChips = [];
   if (item.format)     typeChips.push(item.format);
-  if (item.sousType)   typeChips.push(item.sousType);
+  // Le format est devenu le type d'arme : sousType identique = doublon.
+  if (item.sousType && item.sousType !== item.format) typeChips.push(item.sousType);
+  if (item.mains)      typeChips.push(item.mains);
   if (item.slotArmure) typeChips.push(item.slotArmure);
   if (item.typeArmure) typeChips.push(item.typeArmure);
   if (item.slotBijou)  typeChips.push(item.slotBijou);
@@ -3164,7 +3172,7 @@ const _SI_TAB_DEF = {
 // ce qu'on touche 95% du temps : caractéristiques + prix/dispo/rareté.
 const _SI_TAB_FIELDS = {
   arme: {
-    essentiel: ['format','sousType','rarete','degats','toucherStat','portee','prix','dispo'],
+    essentiel: ['format','mains','rarete','degats','toucherStat','portee','prix','dispo'],
     bonus:     ['statBonuses','derivedBonuses','skillBonuses'],
     traits:    ['traits'],
   },
@@ -3432,7 +3440,7 @@ function _buildFieldsHtml(tpl,item) {
   _pendingAutocompletes.length = 0;
   let html=`<div class="sh-fields-grid">`;
   tpl.fields.forEach(f=>{
-    const val = getShopItemEditableText(item, f.id);
+    let val = getShopItemEditableText(item, f.id);
     if(f.id==='prix'){
       const pv=Math.round((parseFloat(val)||0)*PRIX_VENTE_RATIO);
       html+=`<div class="form-group"><label>${f.label}</label>
@@ -3459,6 +3467,8 @@ function _buildFieldsHtml(tpl,item) {
           </button>
         </div></div>`;
     } else if(f.type==='select'){
+      // Maniement : les anciennes armes le déduisent du libellé « 2M ».
+      if (f.id === 'mains' && !val && item) val = weaponHandsLabel(item);
       const configured = f.id === 'slotArmure' ? getEquipmentItemOptions('armor')
         : f.id === 'typeArmure' ? getArmorTypeOptions()
         : f.id === 'slotBijou' ? getEquipmentItemOptions('accessory') : (f.options || []);
@@ -3469,10 +3479,15 @@ function _buildFieldsHtml(tpl,item) {
           ${options.map(o=>`<option value="${_esc(o)}" ${val===o?'selected':''}>${_esc(o)}</option>`).join('')}
         </select></div>`;
     } else if(f.type==='format_select'){
+      // Type d'arme : une ancienne arme (format « Arme 1M CaC Phy. » supprimé)
+      // est présélectionnée sur son type saisi ; une valeur inconnue est conservée.
+      const current = resolveWeaponFamily(_weaponFormats, item || {})?.label || val;
+      const known = _weaponFormats.some(o => o.label === current);
       html+=`<div class="form-group"><label>${f.label}</label>
         <select class="input-field sh-modal-select" id="si-${f.id}">
           <option value="">— Choisir —</option>
-          ${_weaponFormats.map(o=>`<option value="${o.label}" ${val===o.label?'selected':''}>${o.label}</option>`).join('')}
+          ${!known && current ? `<option value="${_esc(current)}" selected>${_esc(current)} (ancien)</option>` : ''}
+          ${_weaponFormats.map(o=>`<option value="${_esc(o.label)}" ${current===o.label?'selected':''}>${_esc(o.label)}</option>`).join('')}
         </select></div>`;
     } else if(f.type==='damage_with_stat'){
       const statsArr = _getDegatsStats(item||{});
@@ -3850,6 +3865,10 @@ async function saveShopItem(itemId) {
     if (tplKey === 'libre') data.effet = data.description || '';
 
     if (tplKey === 'arme') {
+      // Le type d'arme (ex-format) alimente aussi sousType : maîtrises, filtres, recettes.
+      const family = _weaponFormats.find(f => f.label === data.format);
+      if (family) { data.formatId = family.id; data.sousType = family.label; }
+      else if (data.format) data.sousType = data.format;
       data.toucher = _legacyToucherTextFromData(data);
       data.stats = _legacyStatsTextFromData(data);
       data.statAttaque = data.degatsStat || data.toucherStat || '';
@@ -4264,7 +4283,9 @@ function _renderAtelierItems() {
   // Renvoie [rang, libellé] : rang défini d'abord, puis alpha pour le reste.
   const ARMURE_ORDER = getArmorTypeOptions();
   const typeRank = (it) => {
-    if (it.format)     { const i = _weaponFormats.findIndex(f => f.label === it.format); return [i < 0 ? 999 : i, it.format]; }
+    const family = (it.format || it.sousType) ? resolveWeaponFamily(_weaponFormats, it) : null;
+    if (family)        return [_weaponFormats.indexOf(family), family.label];
+    if (it.format)     return [999, it.format];
     if (it.sousType)   return [998, it.sousType]; // arme sans format défini → après les formats connus
     if (it.typeArmure) { const i = ARMURE_ORDER.indexOf(it.typeArmure); return [i < 0 ? 999 : i, it.typeArmure]; }
     return [999, it.slotArmure || it.slotBijou || it.type || ''];

@@ -17,6 +17,8 @@ import { _rareteTag } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes, _trunc } from "../shared/html.js";
 import { formatWeaponDamageText, isWeaponLikeItem } from '../shared/equipment-utils.js';
 import { canControlCharacter } from '../shared/character-state.js';
+import { loadWeaponFormats } from '../shared/weapon-formats.js';
+import { normalizeWeaponFamilyKey, resolveWeaponFamily } from '../shared/weapon-family.js';
 
 // ── État local ─────────────────────────────────────────────────────────────────
 
@@ -74,10 +76,11 @@ let _recipeReturnCharacterId = '';
 async function _ensureRecipeData() {
   const adventureId = STATE.adventure?.id || '';
   if (STORE.loaded && STORE.adventureId === adventureId) return;
-  [STORE.all, STORE.shopItems, STORE.shopCats] = await Promise.all([
+  [STORE.all, STORE.shopItems, STORE.shopCats, STORE.weaponFormats] = await Promise.all([
     loadCollection('recipes'),
     loadCollection('shop'),
     loadCollection('shopCategories').catch(() => []),
+    loadWeaponFormats().catch(() => []),
   ]);
   STORE.all.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
   STORE.shopItems.sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
@@ -177,11 +180,27 @@ function _filterRecipesBySearch(recipes) {
 }
 
 // ── Conversion item boutique → recette ───────────────────────────────────────
+// Nature d'une arme pour l'artisanat : anciens libellés de format (« Arme 2M Dist
+// Mag. ») ou type d'arme actuel (magique ?) + portée (au-delà du contact = distance).
+function _weaponCraftKind(item = {}) {
+  const fmt = String(item.format || '');
+  if (fmt.includes('Mag')) return 'magic';
+  if (fmt.includes('Dist')) return 'ranged';
+  if (fmt.includes('CaC')) return 'melee';
+  if (fmt.includes('Bouclier')) return 'shield';
+  const family = resolveWeaponFamily(STORE.weaponFormats || [], item);
+  if (!family && !isWeaponLikeItem(item)) return null;
+  if (family?.isMagic) return 'magic';
+  if (normalizeWeaponFamilyKey(family?.label || item.sousType) === 'bouclier') return 'shield';
+  const reach = String(item.portee || '').replace(',', '.').match(/(\d+(?:\.\d+)?)\s*m/i);
+  return reach && parseFloat(reach[1]) > 1.5 ? 'ranged' : 'melee';
+}
+
 function _shopItemAtelierReq(item, type) {
-  const fmt = item.format || '';
+  const kind = type === 'arme' ? _weaponCraftKind(item) : null;
   if (type === 'bijou')                   return "Atelier d'orfèvre";
-  if (fmt.includes('Mag'))                return "Atelier d'orfèvre";
-  if (fmt.includes('Dist'))               return 'Atelier de confection';
+  if (kind === 'magic')                   return "Atelier d'orfèvre";
+  if (kind === 'ranged')                  return 'Atelier de confection';
   if (item.slotArmure) {
     return item.typeArmure === 'Lourde' ? 'Forge' : 'Atelier de confection';
   }
@@ -190,12 +209,12 @@ function _shopItemAtelierReq(item, type) {
 
 function _shopItemIngredients(item) {
   const quantity = Math.max(1, Math.round((parseFloat(item.prix) || 0) / 10));
-  const itemFormat = item.format || '';
+  const kind = item.slotArmure ? null : _weaponCraftKind(item);
   let materiau;
-  if      (itemFormat.includes('Mag'))                           materiau = MATERIALS.matMyst;
-  else if (itemFormat.includes('Dist') && itemFormat.includes('Phy'))   materiau = MATERIALS.matSoup;
-  else if (itemFormat.includes('CaC')  && itemFormat.includes('Phy'))   materiau = MATERIALS.matBest;
-  else if (itemFormat.includes('Bouclier'))                      materiau = MATERIALS.matResi;
+  if      (kind === 'magic')  materiau = MATERIALS.matMyst;
+  else if (kind === 'ranged') materiau = MATERIALS.matSoup;
+  else if (kind === 'melee')  materiau = MATERIALS.matBest;
+  else if (kind === 'shield') materiau = MATERIALS.matResi;
   else if (item.slotArmure) {
     if      (item.typeArmure === 'Légère')        materiau = MATERIALS.matLeger;
     else if (item.typeArmure === 'Intermédiaire') materiau = MATERIALS.matTann;

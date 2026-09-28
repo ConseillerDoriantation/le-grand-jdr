@@ -1,4 +1,5 @@
 import { getPrimaryWeaponSlotId, getSecondaryWeaponSlotId } from './equipment-slots.js';
+import { weaponFamilyLabels, weaponHands } from './weapon-family.js';
 
 const OPPORTUNITY_MODES = new Set(['inherit', 'allow', 'forbid']);
 const CONTACT_MODES = new Set(['none', 'advantage', 'disadvantage']);
@@ -10,7 +11,7 @@ export function defaultCombatStyles() {
     { id:'bouclier', label:'🛡️ Bouclier', condPrincipale:['Arme 1M CaC Phy.','Arme 2M CaC Phy.',''], condSecondaire:['Bouclier'], condSousTypeS:[], description:"+2 CA passive. Pas d'attaque d'opportunité avec la main secondaire.", couleur:'#22c38e', rules:{ opportunityAttack:'inherit', contactAttackMode:'none', contactAttackScope:'ranged', contactDistance:1 } },
     { id:'deux_mains', label:'⚔️⚔️ Deux armes', condPrincipale:['Arme 1M CaC Phy.'], condSecondaire:['Arme 1M CaC Phy.'], condSousTypeS:[], description:"Attaque bonus avec l'arme secondaire (dégâts seulement, pas de mod). Désavantage si armes lourdes.", couleur:'#ff6b6b', rules:{ opportunityAttack:'inherit', contactAttackMode:'none', contactAttackScope:'ranged', contactDistance:1 } },
     { id:'main_libre', label:'🤜 Main libre', condPrincipale:['Arme 1M CaC Phy.','Arme 2M CaC Phy.','Arme 1M CaC Phy.'], condSecondaire:['Main Libre',''], condSousTypeS:[], description:'Main secondaire libre (torche, objet…). Peut parer (+1 CA si en garde).', couleur:'#4f8cff', rules:{ opportunityAttack:'allow', contactAttackMode:'none', contactAttackScope:'ranged', contactDistance:1 } },
-    { id:'arme_2m', label:'🗡️ Arme à 2 mains', condPrincipale:['Arme 2M CaC Phy.','Arme 2M Dist Phy.','Arme 2M CaC Mag.','Arme 2M Dist Mag.'], condSecondaire:[''], condSousTypeS:[], description:'Arme à 2 mains : dégâts maximisés (relancer les 1 et 2).', couleur:'#e8b84b', rules:{ opportunityAttack:'forbid', contactAttackMode:'none', contactAttackScope:'ranged', contactDistance:1 } },
+    { id:'arme_2m', label:'🗡️ Arme à 2 mains', condPrincipale:[], condMains:'2', condSecondaire:[''], condSousTypeS:[], description:'Arme à 2 mains : dégâts maximisés (relancer les 1 et 2).', couleur:'#e8b84b', rules:{ opportunityAttack:'forbid', contactAttackMode:'none', contactAttackScope:'ranged', contactDistance:1 } },
     { id:'mains_nues', label:'🤛 Mains nues', condPrincipale:[''], condSecondaire:[''], condSousTypeS:[], description:'Aucune arme équipée. Dégâts 1d4 + Force. Attaque bonus possible chaque tour.', couleur:'#9ca3af', rules:{ opportunityAttack:'allow', contactAttackMode:'none', contactAttackScope:'ranged', contactDistance:1 } },
   ];
 }
@@ -88,29 +89,33 @@ export function nearestHostileDistance(source, tokens = [], distanceBetween, isA
   return distances.length ? Math.min(...distances) : null;
 }
 
-/** Détecte le premier style correspondant à l'équipement actif. */
-export function detectCombatStyle(character, styles = []) {
+/**
+ * Détecte le premier style correspondant à l'équipement actif.
+ * Conditions par main : types d'arme (ou anciens libellés de format), « '' » =
+ * main vide. `condMains` ('1' | '2') exige en plus ce maniement pour l'arme principale.
+ */
+export function detectCombatStyle(character, styles = [], formats = []) {
   const equip = character?.equipement || {};
   const main = equip[getPrimaryWeaponSlotId()];
   const secondary = equip[getSecondaryWeaponSlotId()];
-  const mainFormat = main?.format || '';
-  const secondaryFormat = secondary?.format || '';
+  const mainLabels = weaponFamilyLabels(formats, main?.nom || main?.format ? main : null);
+  const secondaryLabels = weaponFamilyLabels(formats, secondary?.nom || secondary?.format ? secondary : null);
   const secondarySubtype = String(secondary?.sousType || secondary?.nom || '').toLowerCase();
+  // '*' = n'importe quelle arme, '' = main vide, sinon type (ou ancien libellé).
+  const matchesHand = (conditions, labels) => conditions.length === 0
+    || conditions.some(value => value === '*' ? labels.length > 0 : value ? labels.includes(value) : labels.length === 0);
 
   for (const rawStyle of styles) {
     const style = normalizeCombatStyle(rawStyle);
-    const mainConditions = style.condPrincipale || [];
-    const secondaryConditions = style.condSecondaire || [];
     const subtypeConditions = (style.condSousTypeS || []).map(value => String(value).toLowerCase());
-    const matchesMain = mainConditions.length === 0
-      || mainConditions.includes(mainFormat)
-      || (mainConditions.includes('') && !mainFormat);
-    const matchesSecondary = secondaryConditions.length === 0
-      || secondaryConditions.includes(secondaryFormat)
-      || (secondaryConditions.includes('') && !secondaryFormat);
+    const requiredHands = parseInt(style.condMains, 10);
+    const matchesHands = !(requiredHands === 1 || requiredHands === 2)
+      || (mainLabels.length > 0 && weaponHands(main) === requiredHands);
     const matchesSubtype = subtypeConditions.length === 0
       || subtypeConditions.some(value => secondarySubtype.includes(value));
-    if (matchesMain && matchesSecondary && matchesSubtype) return style;
+    if (matchesHand(style.condPrincipale || [], mainLabels)
+      && matchesHand(style.condSecondaire || [], secondaryLabels)
+      && matchesHands && matchesSubtype) return style;
   }
   return null;
 }

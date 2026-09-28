@@ -41,6 +41,7 @@ import {
 } from '../shared/equipment-utils.js';
 import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
+import { resolveWeaponFamily } from '../shared/weapon-family.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { getDeckUsage } from '../shared/spell-deck.js';
 import { loadRarities, getRarities, RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
@@ -208,6 +209,7 @@ const _serializeShopWeapon = (item = {}) => ({
   statAttaque: item.statAttaque || item.toucherStat || '',
   typeArme: item.typeArme || item.sousType || '',
   sousType: item.sousType || '',
+  mains: item.mains || '',
   portee: item.portee || '',
   traits: _getTraits(item),
   format: item.format || '',
@@ -2540,7 +2542,7 @@ const _npcEquipFeatures = (item = {}, def = {}) => {
   if (item.damageProfile?.faiblesses?.length) values.push('weakness');
   if (Array.isArray(item.actions) && item.actions.length) values.push('action');
   if (item.effet || item.particularite || item.description) values.push('effect');
-  const fmt = _weaponFormats.find(f => f.id === item.formatId || f.label === item.format);
+  const fmt = resolveWeaponFamily(_weaponFormats, item);
   const dmgType = _damageTypes.find(t => t.id === (item.damageTypeId || item.elementId));
   if (def.kind === 'weapon' && (fmt?.isMagic || dmgType?.isMagic)) values.push('magic');
   return _npcUnique(values);
@@ -2873,7 +2875,7 @@ function _renderManualEquipHtml(n, def, item) {
     <section class="npc-manual-section is-slot-specific">
       <div class="npc-manual-section-head"><span>2</span><div><b>Attaque de l’arme</b><small>Ces valeurs alimentent directement le VTT.</small></div></div>
       <div class="npc-manual-grid npc-manual-grid--weapon">
-        <label class="npc-manual-field"><span>Format</span><select id="npc-manual-format">
+        <label class="npc-manual-field"><span>Type d’arme</span><select id="npc-manual-format">
           <option value="">Format libre / non défini</option>
           ${formats.map(value => `<option value="${_esc(value)}" ${value === item.format ? 'selected' : ''}>${_esc(value)}</option>`).join('')}
         </select></label>

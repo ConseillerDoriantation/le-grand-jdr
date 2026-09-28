@@ -162,7 +162,7 @@ export function renderCharEquip(c, canEdit) {
     if (!style) {
       el.innerHTML = STATE.isAdmin ? `<div class="cs-admin-row" style="margin:.3rem 0 0">
         <button data-action="openCombatStylesAdmin" class="btn btn-outline btn-sm">⚙️ Styles</button>
-        <button data-action="openWeaponFormatsAdmin" class="btn btn-outline btn-sm">⚙️ Formats</button>
+        <button data-action="openWeaponFormatsAdmin" class="btn btn-outline btn-sm">⚙️ Types d’arme</button>
       </div>` : '';
       return;
     }
@@ -175,7 +175,7 @@ export function renderCharEquip(c, canEdit) {
           </div>
           ${STATE.isAdmin ? `<div class="cs-admin-row">
             <button data-action="openCombatStylesAdmin" class="btn btn-outline btn-sm">⚙️ Styles</button>
-            <button data-action="openWeaponFormatsAdmin" class="btn btn-outline btn-sm">⚙️ Formats</button>
+            <button data-action="openWeaponFormatsAdmin" class="btn btn-outline btn-sm">⚙️ Types d’arme</button>
           </div>` : ''}
         </div>
         <p class="cs-style-desc">${style.description}</p>

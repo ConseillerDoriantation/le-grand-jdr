@@ -41,18 +41,45 @@ export function normalizeWeaponTechnique(technique = {}, index = 0) {
     maxUses: _int(technique.maxUses, 0, 99),
     cooldownRounds: _int(technique.cooldownRounds, 0, 99),
     onHitEffect: String(technique.onHitEffect || '').trim().slice(0, 160),
+    // Frappe (techniques d'arme « actives ») : conditions, critique, armure, coût, contrecoup.
+    requiresAdvantage: technique.requiresAdvantage === true,
+    critRangeBonus: _int(technique.critRangeBonus, 0, 5),
+    armorIgnorePct: _int(technique.armorIgnorePct, 0, 100),
+    damageMalusFlat: _int(technique.damageMalusFlat, 0, 99),
+    missSelfCaMalus: _int(technique.missSelfCaMalus, 0, 10),
+    missSelfConditionId: String(technique.missSelfConditionId || '').trim().slice(0, 80),
   };
 }
 
 export function weaponTechniqueTargetCA(baseCA, technique) {
-  const ca = Number.isFinite(Number(baseCA)) ? Number(baseCA) : 10;
-  return ca + _int(technique?.defenseBonus, 0, 30);
+  return combinedTechniqueTargetCA(baseCA, technique ? [technique] : []);
 }
 
+/** CA à battre avec les techniques actives : +défense (Point faible…), puis
+ * une part de la CA ignorée (Broyeur : % arrondi à l'entier inférieur). */
 export function combinedTechniqueTargetCA(baseCA, techniques = []) {
   const ca = Number.isFinite(Number(baseCA)) ? Number(baseCA) : 10;
-  return ca + (Array.isArray(techniques) ? techniques : [])
-    .reduce((total, technique) => total + _int(technique?.defenseBonus, 0, 30), 0);
+  const list = Array.isArray(techniques) ? techniques : [];
+  const ignorePct = Math.min(100, list.reduce((total, technique) => total + _int(technique?.armorIgnorePct, 0, 100), 0));
+  const ignored = Math.floor(ca * ignorePct / 100);
+  return ca - ignored + list.reduce((total, technique) => total + _int(technique?.defenseBonus, 0, 30), 0);
+}
+
+/** Seuil de critique abaissé par les techniques (Élan total : 20 → 18). */
+export function techniqueCritRangeBonus(techniques = []) {
+  return (Array.isArray(techniques) ? techniques : [])
+    .reduce((total, technique) => total + _int(technique?.critRangeBonus, 0, 5), 0);
+}
+
+/** Malus plat de dégâts des techniques (Frappe maîtrisée, Broyeur). */
+export function techniqueDamageMalus(techniques = []) {
+  return (Array.isArray(techniques) ? techniques : [])
+    .reduce((total, technique) => total + _int(technique?.damageMalusFlat, 0, 99), 0);
+}
+
+/** Une technique « avec l'avantage seulement » ne s'active que si le jet final est à l'avantage. */
+export function techniqueActiveForMode(technique, effectiveMode = 'normal') {
+  return !normalizeWeaponTechnique(technique).requiresAdvantage || effectiveMode === 'adv';
 }
 
 function _scaledFormula(formula, multiplier) {

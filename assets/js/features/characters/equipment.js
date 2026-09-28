@@ -174,6 +174,7 @@ export function editEquipSlot(slot) {
     slotBijou: equipped.slotBijou || '',
     traits: Array.isArray(equipped.traits) ? [...equipped.traits] : [],
     sousType: equipped.sousType || '',
+    mains: equipped.mains || '',
   };
 }
 
@@ -210,6 +211,7 @@ export function previewEquipFromInv(val, slot) {
       _equipSelectedMeta.stats         = item.stats         || '';
       _equipSelectedMeta.traits        = Array.isArray(item.traits) ? [...item.traits] : (item.trait ? [item.trait] : []);
       _equipSelectedMeta.sousType      = item.sousType      || '';
+      _equipSelectedMeta.mains         = item.mains         || '';
       _equipSelectedMeta.sourceInvIndex = Number.isInteger(compat?.invIndex) ? compat.invIndex : -1;
     }
   }
@@ -260,6 +262,7 @@ export async function saveEquipSlot(slot) {
       toucher:       meta.toucher       || '',
       stats:         meta.stats         || '',
       sousType:      meta.sousType      || '',
+      mains:         meta.mains         || '',
       sourceInvIndex: Number.isInteger(meta.sourceInvIndex) ? meta.sourceInvIndex : -1,
       fo: parseInt(meta.fo)||0, dex: parseInt(meta.dex)||0,
       in: parseInt(meta.in)||0, sa: parseInt(meta.sa)||0,

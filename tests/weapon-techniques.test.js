@@ -8,6 +8,9 @@ import {
   techniqueAreaIntersects,
   techniqueOutcomeMultiplier,
   techniqueBlastIntersects,
+  techniqueActiveForMode,
+  techniqueCritRangeBonus,
+  techniqueDamageMalus,
   techniqueScalingSteps,
   techniqueTriggerApplies,
   weaponTechniqueTargetCA,
@@ -123,6 +126,29 @@ test('une technique élémentaire ajoute le modificateur de dégâts de l’arme
     { kind: 'formula', formula: '1d4' },
     { kind: 'weapon_modifier', flat: 4 },
   ]);
+});
+
+test('Broyeur ignore un pourcentage de la CA, cumulable avec Point faible', () => {
+  const crush = normalizeWeaponTechnique({ label: 'Broyeur', armorIgnorePct: 20 });
+  assert.equal(combinedTechniqueTargetCA(20, [crush]), 16);
+  assert.equal(combinedTechniqueTargetCA(12, [crush]), 10);
+  const weak = normalizeWeaponTechnique({ label: 'Point faible', defenseBonus: 4 });
+  assert.equal(combinedTechniqueTargetCA(20, [crush, weak]), 20);
+  assert.equal(weaponTechniqueTargetCA(20, crush), 16);
+});
+
+test('seuil critique, malus plat et avantage requis', () => {
+  const axe = normalizeWeaponTechnique({ label: 'Élan total', critRangeBonus: 2, missSelfCaMalus: 2 });
+  const sword = normalizeWeaponTechnique({ label: 'Frappe maîtrisée', attackModifier: 2, damageMalusFlat: 2 });
+  const dagger = normalizeWeaponTechnique({ label: 'Coup sournois', requiresAdvantage: true, missSelfConditionId: 'exposed' });
+  assert.equal(techniqueCritRangeBonus([axe, sword]), 2);
+  assert.equal(techniqueDamageMalus([axe, sword]), 2);
+  assert.equal(axe.missSelfCaMalus, 2);
+  assert.equal(dagger.missSelfConditionId, 'exposed');
+  assert.equal(techniqueActiveForMode(dagger, 'adv'), true);
+  assert.equal(techniqueActiveForMode(dagger, 'normal'), false);
+  assert.equal(techniqueActiveForMode(sword, 'dis'), true);
+  assert.equal(normalizeWeaponTechnique({ critRangeBonus: 99, armorIgnorePct: 500 }).critRangeBonus, 5);
 });
 
 test('le rayon entoure toute l’empreinte de la cible sans toucher au-delà', () => {

@@ -25,11 +25,13 @@ import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, r
 import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
+import { resolveWeaponFamily } from '../../shared/weapon-family.js';
 import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
 import { _zoneCellRects } from './vtt-render.js';
 import { resolveWeaponDamageContext } from '../../shared/weapon-damage-context.js';
 import {
   combinedTechniqueTargetCA, techniqueAllowedForAction, techniqueAreaIntersects, techniqueOutcomeMultiplier, techniqueTriggerApplies,
+  techniqueActiveForMode, techniqueCritRangeBonus, techniqueDamageMalus,
   weaponTechniqueDamageTerms,
 } from '../../shared/weapon-techniques.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById, damageTypeEmitsLight } from '../../shared/damage-types.js';
@@ -5919,7 +5921,8 @@ function _buildAttackOptions(t) {
   const wMaitrise    = c && !wReplace && weapon ? getMaitriseBonus(c, weapon) : 0;
   // Règles de type de dégâts (missEffect, armorPen, dmgBonus)
   const wReplaceTypeId = wReplace?.element || 'physique';
-  const fmt        = wReplace ? null : VS.weaponFormats?.find(f => f.label === weapon?.format);
+  // Type d'arme (ex-format) : porte isMagic, type de dégâts et techniques.
+  const fmt        = wReplace ? null : resolveWeaponFamily(VS.weaponFormats, weapon);
   const isMagicW   = wReplace ? true : fmt?.isMagic === true;
   const typeRules  = wReplace
     ? getDamageTypeRules(VS.damageTypes, wReplaceTypeId)
@@ -6003,7 +6006,7 @@ function _buildAttackOptions(t) {
     const secondaryDmgMod = secondaryDmgStats.reduce((sum, stat) => sum + getMod(c, stat), 0);
     const secondaryTouchMod = getMod(c, secondaryTouchStat);
     const secondaryMastery = getMaitriseBonus(c, secondaryWeapon);
-    const secondaryFormat = VS.weaponFormats?.find(format => format.label === secondaryWeapon.format);
+    const secondaryFormat = resolveWeaponFamily(VS.weaponFormats, secondaryWeapon);
     const secondaryMagic = secondaryFormat?.isMagic === true;
     const secondaryTypeId = secondaryMagic ? null : (secondaryFormat?.damageType || 'physique');
     const secondaryType = secondaryTypeId ? getDamageTypeById(VS.damageTypes, secondaryTypeId) : null;
@@ -7482,6 +7485,12 @@ function _weaponTechniqueEffectParts(technique) {
   if (technique.resourceType !== 'none' && technique.resourceCost > 0) parts.push(`${technique.resourceCost} ${_RES_LABEL[technique.resourceType] || technique.resourceType}`);
   if (technique.maxUses > 0 && technique.usageScope !== 'none') parts.push(`${technique.maxUses}/${technique.usageScope === 'combat' ? 'combat' : 'session'}`);
   if (technique.cooldownRounds > 0) parts.push(`recharge ${technique.cooldownRounds}t`);
+  if (technique.requiresAdvantage) parts.push('avec l’avantage seulement');
+  if (technique.critRangeBonus > 0) parts.push(`critique sur ${20 - technique.critRangeBonus}–20`);
+  if (technique.armorIgnorePct > 0) parts.push(`ignore ${technique.armorIgnorePct}% de la CA`);
+  if (technique.damageMalusFlat > 0) parts.push(`−${technique.damageMalusFlat} dégâts`);
+  if (technique.missSelfCaMalus > 0) parts.push(`raté : CA −${technique.missSelfCaMalus} (1 round)`);
+  if (technique.missSelfConditionId) parts.push(`raté : ${CONDITION_BY_ID[technique.missSelfConditionId]?.label || technique.missSelfConditionId} (1 round)`);
   if (technique.onHitEffect) parts.push(technique.onHitEffect);
   return parts;
 }
@@ -9416,15 +9425,19 @@ async function _vttRollAttack() {
   // de la modale). opt est propre à ce cast → aucune empreinte parasite ailleurs.
   if (opt?._zoneFx) { try { opt._zoneFx(); } catch {} opt._zoneFx = null; }
 
-  const selectedTechniques = [ctx.weaponTechnique, ctx.damageTechnique].filter(Boolean);
-  const techniqueDefenseBonus = selectedTechniques.reduce(
+  // `let` : une technique « avec l'avantage seulement » est retirée au moment du
+  // jet si le mode final n'est pas l'avantage (voir plus bas).
+  let selectedTechniques = [ctx.weaponTechnique, ctx.damageTechnique].filter(Boolean);
+  const _techniqueDefense = list => list.reduce(
     (total, technique) => total + Math.max(0, parseInt(technique?.defenseBonus, 10) || 0),
     0,
   );
-  const techniqueAttackModifier = selectedTechniques.reduce(
+  const _techniqueAttack = list => list.reduce(
     (total, technique) => total + Math.max(-30, Math.min(30, parseInt(technique?.attackModifier, 10) || 0)),
     0,
   );
+  let techniqueDefenseBonus = _techniqueDefense(selectedTechniques);
+  let techniqueAttackModifier = _techniqueAttack(selectedTechniques);
 
   // Liste des cibles : multi si allTargets, sinon cible unique
   const targetIds = allTargets && allTargets.length > 0 ? allTargets : [tgtId];
@@ -10416,6 +10429,15 @@ async function _vttRollAttack() {
     else if (hasAdv) effectiveMode = 'adv';
     else if (hasDis) effectiveMode = 'dis';
     const automaticReasons = [...condMods.reasons, ...styleMods.reasons];
+    // Technique réservée à l'avantage (Coup sournois) : sans avantage final,
+    // elle ne s'active pas et l'attaque reste normale.
+    const _inactiveTechniques = selectedTechniques.filter(technique => !techniqueActiveForMode(technique, effectiveMode));
+    if (_inactiveTechniques.length) {
+      selectedTechniques = selectedTechniques.filter(technique => !_inactiveTechniques.includes(technique));
+      techniqueDefenseBonus = _techniqueDefense(selectedTechniques);
+      techniqueAttackModifier = _techniqueAttack(selectedTechniques);
+      showNotif(`${_inactiveTechniques.map(t => `${t.icon || '🎯'} ${t.label}`).join(', ')} : il faut l'avantage, attaque normale.`, 'warning');
+    }
     // ── Attaque offensive — un seul roll d20, appliqué à chaque cible ──
     const roll1    = actionSimulation?.hit?.[0] ?? Math.floor(Math.random()*20)+1;
     const roll2    = effectiveMode !== 'normal' ? (actionSimulation?.hit?.[1] ?? Math.floor(Math.random()*20)+1) : null;
@@ -10426,7 +10448,9 @@ async function _vttRollAttack() {
     // RC = rc du sort (rune Chance) abaissée par l'état « Chanceux » de l'attaquant,
     // plancher 17. Le crit garde le jet de base puis relance tous ses dés ;
     // le double-max n'est pas appliqué ici.
-    const critThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+    // Technique d'arme (Élan total) : abaisse aussi le seuil de critique.
+    const critThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20)
+      - _conditionCritRangeBonusOf(src) - techniqueCritRangeBonus(selectedTechniques)));
     let isCrit   = d20 >= critThreshold;
     let isFumble = d20 === 1;
 
@@ -10486,7 +10510,9 @@ async function _vttRollAttack() {
     const diceToRoll    = opt.rawDice || opt.dice;
     const effectiveDice = _effectiveDmgDice(diceToRoll);
     const dmgFixed      = _optionFixedBonus(opt);
-    const totalFixed  = dmgFixed + bonusDmg + typeDmgBon;
+    // Malus plat des techniques (Frappe maîtrisée, Broyeur) : le coup garde 1 dégât minimum.
+    const techniqueDmgMalus = techniqueDamageMalus(selectedTechniques);
+    const totalFixed  = dmgFixed + bonusDmg + typeDmgBon - techniqueDmgMalus;
 
     // ── Dés tirés UNE SEULE fois, partagés entre toutes les cibles ──────
     // On stocke aussi les rolls individuels pour affichage détaillé dans le log
@@ -11164,6 +11190,41 @@ async function _vttRollAttack() {
     const modNotes = []; // notes textuelles pour la notif/log
     const concentrationLogs = [];
 
+    // ── Contrecoup de technique sur un raté (Élan total, Coup sournois) ──
+    // L'attaquant est découvert jusqu'à la fin du round (≈ son prochain tour).
+    // En combat uniquement : hors combat un buff sans échéance serait permanent.
+    let techniqueBacklashNote = null;
+    const _roundBk = VS.session?.combat?.round ?? 0;
+    const _missedAll = !opt.autoHit && [...primaryOutcomes.values()].every(outcome => !outcome.hit);
+    if (_missedAll && _roundBk > 0) {
+      const caMalus = selectedTechniques.reduce((max, t) => Math.max(max, parseInt(t.missSelfCaMalus, 10) || 0), 0);
+      const condIds = [...new Set(selectedTechniques.map(t => t.missSelfConditionId).filter(id => id && CONDITION_BY_ID[id]))];
+      const label = selectedTechniques.find(t => t.missSelfCaMalus || t.missSelfConditionId)?.label || 'Technique';
+      const notes = [];
+      const patch = {};
+      if (caMalus > 0) {
+        const sortLabel = `Contrecoup · ${label}`;
+        patch.buffs = [...(src.buffs || []).filter(b => !(b.type === 'ca' && b.sortLabel === sortLabel)), {
+          type: 'ca', bonus: -caMalus, startRound: _roundBk, totalDuration: 1, expiresAtRound: _roundBk,
+          sortLabel, icon: '💢',
+        }];
+        notes.push(`CA −${caMalus}`);
+      }
+      if (condIds.length) {
+        const kept = (src.conditions || []).filter(c => !condIds.includes(c.id));
+        patch.conditions = [...kept, ...condIds.map(id => ({
+          id, appliedAt: Date.now(), appliedBy: srcId, source: label, saveDC: null, saveStat: null, expiresAtRound: _roundBk,
+        }))];
+        notes.push(...condIds.map(id => `${CONDITION_BY_ID[id].icon} ${CONDITION_BY_ID[id].label}`));
+      }
+      if (notes.length) {
+        techniqueBacklashNote = `${label} raté : ${notes.join(' · ')} jusqu'à la fin du round`;
+        modNotes.push(`💢 ${techniqueBacklashNote}`);
+        _vttPatchTokenOptimistically(srcId, patch);
+        updateDoc(_tokRef(srcId), patch).catch(error => console.error('[vtt] contrecoup de technique', error));
+      }
+    }
+
     // Remonte dans modNotes les effets liés aux états (dégâts bonus + consommations)
     for (const r of targetResults) {
       if (r.condDmgNotes?.length) {
@@ -11318,6 +11379,8 @@ async function _vttRollAttack() {
         missEffectMode: technique.missEffectMode || 'none',
         attackModifier: parseInt(technique.attackModifier, 10) || 0,
         defenseBonus: Math.max(0, parseInt(technique.defenseBonus, 10) || 0),
+        armorIgnorePct: Math.max(0, parseInt(technique.armorIgnorePct, 10) || 0),
+        critRangeBonus: Math.max(0, parseInt(technique.critRangeBonus, 10) || 0),
         damageBonus: rolled?.damageBonus || 0,
         damageDetails: rolled?.damageDetails || [],
         damageTypeId: technique.damageTypeId || opt.damageTypeId || null,
@@ -11366,6 +11429,8 @@ async function _vttRollAttack() {
         techniques: techniqueLogs,
         techniqueDefenseBonus,
         techniqueAttackModifier,
+        techniqueDmgMalus: techniqueDmgMalus || 0,
+        techniqueBacklash: techniqueBacklashNote,
         autoHit: !!opt.autoHit,
         isCrit, isFumble, advMode: effectiveMode, advAuto: effectiveMode !== mode,
         advReasons: effectiveMode !== mode ? automaticReasons : null,
@@ -11419,6 +11484,8 @@ async function _vttRollAttack() {
         techniques: techniqueLogs,
         techniqueDefenseBonus,
         techniqueAttackModifier,
+        techniqueDmgMalus: techniqueDmgMalus || 0,
+        techniqueBacklash: techniqueBacklashNote,
         // Identifiants cible pour rendu côté joueur (estimation CA)
         beastId: r.beastId || null,
         npcId: r.npcId || null,
@@ -14019,7 +14086,7 @@ function _conditionsAttackMods(srcToken, tgtToken, opt) {
 /** Règles du style actif du personnage, résolues au moment du jet. */
 function _combatStyleContext(srcToken, tgtToken, opt) {
   const character = _characterForToken(srcToken);
-  const style = character ? detectCombatStyle(character, VS.combatStyles || []) : null;
+  const style = character ? detectCombatStyle(character, VS.combatStyles || [], VS.weaponFormats || []) : null;
   const hasAttackRoll = !opt?.autoHit && !opt?.isCaSort && !opt?.isUtil
     && !opt?.isAffliction && !opt?.isEnchant;
   if (!style || !hasAttackRoll) {
