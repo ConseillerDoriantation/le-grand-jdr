@@ -82,11 +82,17 @@ test('résolution du jet : succès si total >= DD', () => {
   assert.equal(resolveCraftRoll(0, 0, 1).d20, 1);
 });
 
-test('remboursement en cas d échec : moitié, arrondi inférieur', () => {
-  assert.equal(craftRefundOnFail(10), 5);
-  assert.equal(craftRefundOnFail(15), 7);
-  assert.equal(craftRefundOnFail(6), 3);
-  assert.equal(craftRefundOnFail(0), 0);
+test('échec : perte totale par défaut, fraction configurable', () => {
+  // Défaut = perte totale (loot généreux).
+  assert.equal(craftRefundOnFail(10), 0);
+  assert.equal(craftRefundOnFail(15), 0);
+  // Le MJ peut remonter la fraction (ex. 1/4), arrondi inférieur.
+  const q = { refundFractionOnFail: 0.25 };
+  assert.equal(craftRefundOnFail(10, q), 2);
+  assert.equal(craftRefundOnFail(15, q), 3);
+  // Fraction bornée à [0,1].
+  assert.equal(craftRefundOnFail(10, { refundFractionOnFail: 2 }), 10);
+  assert.equal(craftRefundOnFail(10, { refundFractionOnFail: -1 }), 0);
 });
 
 test('pool de traits : armes/armures/anneau/amulette', () => {

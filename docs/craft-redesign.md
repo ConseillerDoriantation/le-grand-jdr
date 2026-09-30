@@ -14,7 +14,7 @@ Le joueur **forge** un objet :
 4. **nomme** l'objet librement ;
 5. **lance le jet** d'Artisanat à la table.
    - **Réussite** → objet créé (stats de base + trait + nom) ;
-   - **Échec** → **moitié des matériaux rendus** (arrondi inférieur).
+   - **Échec** → **perte totale des matériaux** (défaut, loot généreux : 2 matériaux par créature). Fraction rendue **réglable** par le MJ (`refundFractionOnFail`, ex. 1/4).
 
 **Aucun objet pré-créé, aucune recette à assigner.** Le craft d'équipement est **ouvert** : y accède qui a les **matériaux** + la **compétence de discipline**. Les **4★/5★ restent des uniques** placés par le MJ (non craftables).
 
@@ -40,6 +40,8 @@ Mapping palier → rareté craftable : **★ → 1★**, **★★ → 2★**, **
 
 Quantité requise par palier (défaut, éditable) : **1★ = 6**, **2★ = 10**, **3★ = 15**.
 
+> **Création** : les matériaux sont des objets **créés dans la Boutique** par le MJ. Il faut pouvoir **associer chaque matériau à sa catégorie + son palier** (★/★★/★★★) → champ à ajouter dans l'éditeur d'objet (`matCategorie` + `tier`). *(Codex refond l'éditeur d'objet → relire avant d'y ajouter le champ.)*
+
 ## 3. Disciplines & jet
 
 3 disciplines, chacune reliée à **une compétence** des Jets 🎲 (console MJ). Mapping **catégorie → discipline** éditable ; défauts :
@@ -61,7 +63,7 @@ DD par palier (défaut, éditable) : **1★ = 11**, **2★ = 14**, **3★ = 17**
 4. **Nom** libre.
 5. **Jet** `d20 + compétence(discipline)` vs `DD(palier)`, **visible dans le log VTT**.
    - Réussite → objet ajouté à l'inventaire ;
-   - Échec → `floor(matériaux/2)` rendus.
+   - Échec → **matériaux perdus** (défaut ; `floor(quantité × refundFractionOnFail)`, fraction 0 par défaut).
 
 Modale **compacte** : type · palier · 1 trait · nom · bouton.
 
@@ -88,14 +90,21 @@ Modale **compacte** : type · palier · 1 trait · nom · bouton.
 }
 ```
 
-### `world/craft_templates` (MJ) — stats de base par type × palier
-Pré-rempli avec des défauts (§6), **à ajuster** pour coller à l'aventure.
+### Stats de base — **PAS de nouveau doc** : on lit l'existant
+Les données de base (type d'arme, dégâts, portée, données fixes des armures, bijoux)
+**sont déjà définies dans la console MJ**. Le craft **s'aligne dessus**, il ne les
+redéfinit pas :
+- **Armes** : défauts par type d'arme (`world/weapon_formats` → `normalizeWeaponDefaults` : `degats`, `degatsStats`, `toucherStat`, `portee`, `mains`, `caBonus`).
+- **Armures** : données fixes par type d'armure (config console).
+- **Bijoux** : données par type (config console).
+→ à câbler en **lecture** ; rien à ré-saisir.
 
-### `world/craft_traits` (MJ) — traits par emplacement × palier
-Voir §7. Chaque trait : `{ id, nom, portee: 'arme'|'armure'|'anneau'|'amulette', tier: 1|2|3, texte, effet? }`.
-- `effet` = bonus **systémique** quand mécanisable (réutilise le système d'items : +stat, +CA, +dégât, résistance) ;
-- sinon **texte** appliqué en jeu.
-Compat au craft : **arme** isolée · **armure** = pool commun (tête/torse/bottes) · **anneau / amulette** séparés.
+### Traits — **PAS de nouveau doc** : on réutilise les traits existants
+Les traits sont **déjà établis dans la Boutique, par rareté d'objet**, et gérés par
+le **système d'améliorations/fragments** (`upgrade-settings.js` / Artisan). Le craft
+**pioche dans ce pool existant** (par emplacement × rareté), il n'invente rien.
+Compat au craft (à appliquer au pool existant) : **arme** isolée · **armure** = pool commun (tête/torse/bottes) · **anneau / amulette** séparés.
+⚠️ Codex refond **Artisan / le système de fragments** en ce moment → on lira la source une fois son travail stabilisé.
 
 ### Matériaux (inventaire) — `{ matCategorie, tier }`
 Objets d'inventaire normaux, tagués catégorie + palier.
@@ -103,9 +112,11 @@ Objets d'inventaire normaux, tagués catégorie + palier.
 ### Objet crafté (inventaire)
 Objet normal (réutilise `nature`, `traits[]`, stats, rareté) : `rarete = tier`, `nom` saisi, `traits = [traitChoisi]`, `craftedBy` (traçabilité). S'équipe comme n'importe quel objet.
 
-## 6. Templates de base — **premier jet à ajuster**
+## 6. Templates de base — ⚠️ REMPLACÉ (voir §5)
 
-> Conventions rappelées par le MJ : sur les **armes**, les stats n'apparaissent qu'à partir de 3★ ; sur les **armures**, le schéma de slots de stats est propre à l'aventure (ici on ne fixe que la CA de base + le nombre de slots).
+> **Non normatif.** Le MJ a confirmé que **type, dégâts, portée, données fixes des armures et bijoux sont déjà spécifiés dans la console MJ**. Le craft **lit ces données existantes** (cf. §5) — les tables ci-dessous ne sont qu'une **illustration d'intention** et ne doivent PAS être ressaisies.
+
+> Rappel de convention : sur les **armes**, les stats n'apparaissent qu'à partir de 3★ ; sur les **armures**, le schéma de slots est propre à l'aventure.
 
 ### Armes (dégâts de base + slots de stats)
 | Type | 1★ | 2★ | 3★ |
@@ -129,7 +140,9 @@ Objet normal (réutilise `nature`, `traits[]`, stats, rareté) : `rarete = tier`
 | Anneau | trait seul (bonus de compétence) | idem | idem |
 | Amulette | trait seul (règle à briser) | idem | idem |
 
-## 7. Listes de traits — **premier jet à ajuster**
+## 7. Listes de traits — ⚠️ REMPLACÉ (voir §5)
+
+> **Non normatif.** Les traits sont **déjà établis dans la Boutique, par rareté d'objet** (système de fragments / améliorations). Le craft **pioche dans ce pool existant** (cf. §5) ; le MJ me montrera l'existant pour l'aligner. Les tables ci-dessous ne sont qu'une **illustration d'intention**.
 
 Chaque objet crafté 1★-3★ = **1 trait**, tiré du palier correspondant. Budget : ★ = petit / ★★ = modéré / ★★★ = fort.
 

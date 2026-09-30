@@ -28,6 +28,9 @@ export const DEFAULT_CRAFT_CONFIG = {
   },
   ddParPalier:       { 1: 11, 2: 14, 3: 17 },
   quantiteParPalier: { 1: 6,  2: 10, 3: 15 },
+  // Part des matériaux rendue en cas d'ÉCHEC. Défaut 0 = perte totale (loot
+  // généreux : 2 matériaux par créature). Le MJ peut la remonter (ex. 0.25).
+  refundFractionOnFail: 0,
 };
 
 // Emplacement de l'objet → POOL de traits piochables au craft.
@@ -103,9 +106,14 @@ export function resolveCraftRoll(d20, competenceBonus, tier, config) {
   return { d20: roll, total, dd, success: dd != null && total >= dd };
 }
 
-/** Matériaux rendus en cas d'échec : moitié, arrondi inférieur. */
-export function craftRefundOnFail(quantite) {
-  return Math.floor((parseInt(quantite, 10) || 0) / 2);
+/**
+ * Matériaux rendus en cas d'échec (arrondi inférieur). Par défaut 0 = perte
+ * totale ; la fraction est pilotée par `config.refundFractionOnFail`.
+ */
+export function craftRefundOnFail(quantite, config) {
+  const frac = _CFG(config).refundFractionOnFail;
+  const f = Number.isFinite(+frac) ? Math.max(0, Math.min(1, +frac)) : 0;
+  return Math.floor((parseInt(quantite, 10) || 0) * f);
 }
 
 /** Pool de traits ('arme'|'armure'|'anneau'|'amulette') pour un type d'objet. */
