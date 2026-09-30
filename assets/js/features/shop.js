@@ -2751,7 +2751,7 @@ const _SI_TAB_DEF = {
 // ce qu'on touche 95% du temps : caractéristiques + prix/dispo/rareté.
 const _SI_TAB_FIELDS = {
   arme: {
-    essentiel: ['format','mains','rarete','degats','toucherStat','portee','prix','dispo'],
+    essentiel: ['format','nature','mains','rarete','degats','toucherStat','portee','prix','dispo'],
     bonus:     ['statBonuses','derivedBonuses','skillBonuses'],
     traits:    ['traits'],
   },
