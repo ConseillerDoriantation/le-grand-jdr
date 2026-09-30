@@ -175,6 +175,7 @@ export function editEquipSlot(slot) {
     traits: Array.isArray(equipped.traits) ? [...equipped.traits] : [],
     sousType: equipped.sousType || '',
     mains: equipped.mains || '',
+    nature: equipped.nature || '',
   };
 }
 
@@ -212,6 +213,7 @@ export function previewEquipFromInv(val, slot) {
       _equipSelectedMeta.traits        = Array.isArray(item.traits) ? [...item.traits] : (item.trait ? [item.trait] : []);
       _equipSelectedMeta.sousType      = item.sousType      || '';
       _equipSelectedMeta.mains         = item.mains         || '';
+      _equipSelectedMeta.nature        = item.nature        || '';
       _equipSelectedMeta.sourceInvIndex = Number.isInteger(compat?.invIndex) ? compat.invIndex : -1;
     }
   }
@@ -259,6 +261,7 @@ export async function saveEquipSlot(slot) {
       particularite: meta.particularite || '',
       traits:        Array.isArray(meta.traits) ? [...meta.traits] : [],
       format:        meta.format        || '',
+      nature:        meta.nature        || '',
       toucher:       meta.toucher       || '',
       stats:         meta.stats         || '',
       sousType:      meta.sousType      || '',

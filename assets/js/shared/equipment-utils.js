@@ -270,6 +270,7 @@ export function buildEquippedItemFromInventory(slot, item, invIndex) {
       portee: item.portee || '',
       particularite: item.particularite || getItemEffectText(item) || item.description || '',
       format: item.format || '',
+      nature: item.nature || '',   // physique / magique — découplé de la famille
       toucher: item.toucher || '',
       stats: item.stats || '',
     };
@@ -337,6 +338,7 @@ export function serializeShopWeaponForCombat(item = {}) {
     portee: item.portee || '',
     traits: getItemTraits(item),
     format: item.format || '',
+    nature: item.nature || '',   // physique / magique — découplé de la famille
     toucher: item.toucher || '',
     particularite: item.particularite || getItemEffectText(item) || '',
     stats: item.stats || '',
