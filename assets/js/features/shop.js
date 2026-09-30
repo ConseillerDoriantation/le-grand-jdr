@@ -2,9 +2,9 @@ import { STATE } from '../core/state.js';
 import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol, batchUpdateInCol, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { deleteField } from '../config/firebase.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
-import { openModal, updateModalContent, closeModalDirect, confirmModal, promptModal } from '../shared/modal.js';
+import { openModal, updateModalContent, closeModalDirect, confirmModal, promptModal, setModalCloseGuard, clearModalCloseGuard } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
-import { RARETE_NAMES, _rareteColor, buildRaretePicker, pickRarete, loadRarities, openRaritiesAdmin } from '../shared/rarity.js';
+import { RARETE_NAMES, _rareteColor, buildRaretePicker, pickRarete, loadRarities, getRarities, openRaritiesAdmin } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes, loadingHtml, eyeIcon } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
 import { calcOr, computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort, getDefaultCharForUser } from '../shared/char-stats.js';
@@ -39,11 +39,11 @@ import { characterPortraitContent, characterAvatarHtml } from '../shared/portrai
 import { loadConditionLibrary } from '../shared/conditions.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { compareManualOrder, manualOrderValue, mergeVisibleManualOrder, nextManualOrder } from '../shared/manual-order.js';
-import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
 import { shopAffinityScore, shopCartTotals, shopItemBuyState, shopUpgradeGain } from '../shared/shop-cart.js';
 import { atelierApplyBuild, atelierCompactSlots, atelierGainScore, atelierNetCost } from '../shared/shop-atelier.js';
+import { damageProfileToRelations, parseShopItemQuickEntry, relationsToDamageProfile } from '../shared/shop-item-editor.js';
 import {
   equipmentSlotAcceptsItem, getEquipmentItemOptions, getEquipmentSlot,
   getEquipmentSlots, resolveEquipmentSlotForItem,
@@ -484,10 +484,10 @@ export async function renderShop() {
           data-sh-action="setSection" data-section="atelier" role="tab" aria-selected="${_shopSection === 'atelier'}">
           ${_shopIcon('wand')} Atelier
         </button>
-        <button type="button" class="sh-page-tab ${_shopSection === 'artisan' ? 'active' : ''}"
+        ${STATE.isAdmin ? `<button type="button" class="sh-page-tab ${_shopSection === 'artisan' ? 'active' : ''}"
           data-sh-action="setSection" data-section="artisan" role="tab" aria-selected="${_shopSection === 'artisan'}">
           ${_shopIcon('hammer')} Artisan
-        </button>
+        </button>` : '' /* Artisan masqué aux joueurs — refonte du craft en cours */}
       </nav>
       </div>
     </header>
@@ -2817,34 +2817,39 @@ async function _shopEnsureDamageTypes() {
 // Affiché dans l'onglet « Bonus » des objets équipables (arme/armure/bijou).
 // Appliqué côté VTT quand le perso est touché (cf. getCharDamageProfile + applyDamageTypeInteraction).
 
+const _SHOP_EDITOR_RELATION_COLORS = {
+  resistances: '#4f8cff',
+  immunites: '#22c38e',
+  absorptions: '#9d6fff',
+  faiblesses: '#ff5a7e',
+};
+
+function _shopEditorRelationColor(key) {
+  return _SHOP_EDITOR_RELATION_COLORS[key] || DAMAGE_RELATIONS.find(rel => rel.key === key)?.color || 'transparent';
+}
+
 function _shopRenderDamageProfileSection(item) {
   const prof  = item?.damageProfile || {};
   const types = _shopDamageTypes;
   const rows = !types
     ? loadingHtml('Chargement des types de dégâts…', { compact: true })
-    : DAMAGE_RELATIONS.map(rel => {
-        const active = Array.isArray(prof[rel.key]) ? prof[rel.key] : [];
-        return `<div class="sh-dmgprof-row" style="border-left:3px solid ${rel.color};background:${rel.color}0d">
-          <div class="sh-dmgprof-head">
-            <span>${rel.icon}</span>
-            <span style="color:${rel.color}">${rel.label}</span>
-            <span class="sh-dmgprof-rule">${rel.shortLabel}</span>
-          </div>
-          <div class="sh-dmgprof-chips">
-            ${types.map(t => {
-              const on = active.includes(t.id);
-              return `<button type="button" class="sh-dmgprof-chip${on ? ' is-on' : ''}"
-                style="${on ? `color:${rel.color};border-color:${rel.color};background:${rel.color}1a` : ''}"
-                data-sh-action="toggleDmgProfile" data-rel="${rel.key}" data-tid="${t.id}" aria-pressed="${on}">
-                ${t.icon || ''} ${_esc(t.label)}
-              </button>`;
-            }).join('')}
-          </div>
+    : (() => {
+        const byType = damageProfileToRelations(prof);
+        return types.map(type => {
+          const selected = DAMAGE_RELATIONS.find(rel => byType[type.id] === rel.key);
+          const selectedColor = _shopEditorRelationColor(selected?.key);
+          return `<div class="sh-dmgprof-row si-dmgprof-type" style="--row-rel:${selectedColor};--row-bg:${selected ? `${selectedColor}18` : 'transparent'}">
+          <div class="sh-dmgprof-head"><span>${type.icon || '◆'}</span><span>${_esc(type.label)}</span></div>
+          <div class="sh-dmgprof-chips">${['resistances','immunites','absorptions','faiblesses'].map(key => DAMAGE_RELATIONS.find(rel => rel.key === key)).filter(Boolean).map(rel => {
+            const on = byType[type.id] === rel.key;
+            const short = ({ resistances:'Rés.', immunites:'Imm.', absorptions:'Abs.', faiblesses:'Faib.' })[rel.key];
+            return `<button type="button" class="sh-dmgprof-chip${on ? ' is-on' : ''}" style="--rel:${_shopEditorRelationColor(rel.key)}" data-sh-action="toggleDmgProfile" data-rel="${rel.key}" data-tid="${type.id}" aria-pressed="${on}" title="${_esc(rel.label)} · ${_esc(rel.shortLabel)}">${short}</button>`;
+          }).join('')}</div>
         </div>`;
-      }).join('');
+        }).join('');
+      })();
   return `<div class="sh-dmgprof sh-field-full">
-    <div class="sh-dmgprof-title">🛡️ Résistances accordées <span class="sh-dmgprof-sub">— quand l'objet est équipé</span></div>
-    <div class="sh-dmgprof-hint">Non cumulable. En cas de conflit sur un même type : Immunité &gt; Absorption &gt; Faiblesse &gt; Résistance.</div>
+    <div class="sh-dmgprof-title">Résistances accordées <span class="sh-dmgprof-sub">un seul effet par type · Immunité &gt; Absorption &gt; Faiblesse &gt; Résistance</span></div>
     <div id="si-dmgprof-rows">${rows}</div>
   </div>`;
 }
@@ -2866,9 +2871,15 @@ function _shopToggleDmgProfile(btn) {
   if (!btn) return;
   const on = !btn.classList.contains('is-on');
   const rel = DAMAGE_RELATIONS.find(r => r.key === btn.dataset.rel);
+  const color = _shopEditorRelationColor(rel?.key);
+  document.querySelectorAll(`.sh-dmgprof-chip[data-tid="${CSS.escape(btn.dataset.tid || '')}"]`).forEach(other => {
+    other.classList.remove('is-on'); other.setAttribute('aria-pressed', 'false');
+  });
   btn.classList.toggle('is-on', on);
   btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-  btn.style.cssText = on && rel ? `color:${rel.color};border-color:${rel.color};background:${rel.color}1a` : '';
+  const row = btn.closest('.si-dmgprof-type');
+  row?.style.setProperty('--row-rel', on && rel ? color : 'transparent');
+  row?.style.setProperty('--row-bg', on && rel ? `${color}18` : 'transparent');
 }
 
 // Cache des compétences de dés (chargées depuis world/dice_skills)
@@ -2896,14 +2907,14 @@ async function _shopLoadDiceSkills() {
 /** Rend une chip de bonus de compétence (skillName + value + bouton ✕). */
 function _shopRenderSkillChipHTML(skillName, val) {
   const v = parseInt(val) || 0;
-  const sign = v > 0 ? '+' : '';
+  const sign = '';
   const col = v > 0 ? '#22c38e' : v < 0 ? '#ef4444' : 'var(--text-dim)';
   return `<span class="sh-skill-chip" data-skill="${_esc(skillName)}" data-val="${v}"
       style="display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .55rem;
              background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:999px;
              font-size:.78rem;font-weight:600">
-      <strong style="color:${col};font-variant-numeric:tabular-nums">${sign}${v}</strong>
       <span>${_esc(skillName)}</span>
+      <input type="number" value="${sign}${v}" min="-10" max="10" aria-label="Bonus de ${_esc(skillName)}" data-sh-action="skillValue" data-sh-on="input">
       <button type="button" data-sh-action="skillRemove" data-skill="${skillName.replace(/"/g, '&quot;')}"
         style="background:transparent;border:0;cursor:pointer;color:var(--text-dim);padding:0;
                font-size:.85rem;line-height:1;margin-left:.15rem"
@@ -2917,6 +2928,13 @@ async function _shopPopulateSkillPicker(savedBonuses = {}) {
   if (!picker) return;
   const skills = await _shopLoadDiceSkills();
   const used = new Set(Object.keys(savedBonuses));
+  const list = document.getElementById('si-skill-options');
+  if (picker.tagName === 'INPUT' && list) {
+    list.innerHTML = skills.filter(sk => !used.has(sk.name))
+      .map(sk => `<option value="${_esc(sk.name)}">${_esc(sk.name)}${sk.stat ? ` (${sk.stat})` : ''}</option>`).join('');
+    picker.placeholder = skills.length ? '＋ Compétence… (Entrée)' : 'Aucune compétence configurée';
+    return;
+  }
   if (!skills.length) {
     picker.innerHTML = '<option value="">⚠️ Aucune compétence — définir dans Console MJ</option>';
     return;
@@ -2932,7 +2950,7 @@ function addSkillBonus() {
   const picker = document.getElementById('si-skill-picker');
   const valInp = document.getElementById('si-skill-val');
   const skillName = picker?.value;
-  const val = parseInt(valInp?.value);
+  const val = parseInt(valInp?.value || '1');
   if (!skillName) { showNotif('Choisis une compétence', 'warning'); return; }
   if (!Number.isFinite(val) || val === 0) { showNotif('Valeur invalide (≠ 0)', 'warning'); return; }
   // Ajoute la chip dans le container
@@ -2941,9 +2959,10 @@ function addSkillBonus() {
   if (empty) empty.remove();
   chips?.insertAdjacentHTML('beforeend', _shopRenderSkillChipHTML(skillName, val));
   // Retire l'option du picker
-  picker.querySelector(`option[value="${skillName}"]`)?.remove();
+  picker.querySelector?.(`option[value="${skillName}"]`)?.remove();
+  document.getElementById('si-skill-options')?.querySelector(`option[value="${CSS.escape(skillName)}"]`)?.remove();
   picker.value = '';
-  if (valInp) valInp.value = '';
+  if (valInp) valInp.value = '1';
 }
 
 /** Retire un bonus de compétence. */
@@ -2953,7 +2972,7 @@ function removeSkillBonus(skillName) {
   chip?.remove();
   // Réinjecte dans le picker (au bon endroit alphabétique, avec sa stat)
   const picker = document.getElementById('si-skill-picker');
-  if (picker && _shopDiceSkillsCache) {
+  if (picker?.tagName === 'SELECT' && _shopDiceSkillsCache) {
     const sk = _shopDiceSkillsCache.find(s => s.name === skillName);
     if (sk) {
       const opt = document.createElement('option');
@@ -2989,11 +3008,15 @@ function _shopActionsCacheLoad(actions) {
 
 /** Carte récap d'une action (lecture seule + boutons Edit/Suppr). */
 function _shopRenderActionCard(act, idx) {
-  return spellActionCardHtml(act, idx, {
-    className: 'si-action-card',
-    actionAttr: 'data-sh-action',
-    style: 'display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px',
-  });
+  const actionType = act?.actionType === 'bonus' ? 'Action bonus' : act?.actionType === 'reaction' ? 'Réaction' : 'Action';
+  const cost = act?.cout || `${act?.pmOverride ?? act?.pm ?? 0} PM · ${actionType}`;
+  const summary = act?.resume || act?.description || act?.effet || act?.degats || 'Action d’objet';
+  return `<div class="si-action-card">
+    <span class="si-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 3 5 14h6l-1 7 8-11h-6z"></path></svg></span>
+    <div><b>${_esc(act?.nom || 'Sans nom')}</b><small>${_esc(cost)} · ${_esc(summary)}</small></div>
+    <button type="button" class="si-action-edit" data-sh-action="editAction" data-idx="${idx}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path><path d="m13.5 6.5 4 4"></path></svg><span>Modifier</span></button>
+    <button type="button" class="si-action-remove" data-sh-action="removeAction" data-idx="${idx}" aria-label="Supprimer l’action"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"></path></svg></button>
+  </div>`;
 }
 
 
@@ -3005,18 +3028,10 @@ function _shopRenderActionsSection(actions) {
   // Précharge la lib des états (utile pour l'éditeur de sort)
   _shopEnsureConditions();
   const list = _shopActionsCache;
-  return `
-    <div class="form-group si-actions-section">
-      <label class="si-actions-label">
-        <span>⚡ Actions disponibles <span class="si-actions-hint">(sorts embarqués — même modal que les sorts de personnage)</span></span>
-        <button type="button" class="btn btn-outline btn-sm" data-sh-action="addAction">＋ Ajouter</button>
-      </label>
-      <div id="si-actions-list" style="display:flex;flex-direction:column;gap:.4rem">
-        ${list.length
-          ? list.map((a, i) => _shopRenderActionCard(a, i)).join('')
-          : '<div class="si-actions-empty">Aucune action définie — clique sur ＋ Ajouter pour ouvrir l\'éditeur de sort.</div>'}
-      </div>
-    </div>`;
+  return `<div id="si-actions-list" class="si-actions-list">
+    ${list.map((a, i) => _shopRenderActionCard(a, i)).join('')}
+    <button type="button" class="si-action-new" data-sh-action="addAction"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg><strong>Nouvelle action</strong><small>ouvre l’éditeur de sort</small></button>
+  </div>`;
 }
 
 function _shopCollectActions() {
@@ -3029,6 +3044,7 @@ function _shopCollectActions() {
 function _shopRefreshActionsHost() {
   const host = document.getElementById('si-actions-host');
   if (host) host.innerHTML = _shopRenderActionsSection(_shopActionsCache);
+  _siRefreshLive();
 }
 
 /** Hook commun appelé par la modal de sort après save : met à jour le cache. */
@@ -3037,6 +3053,7 @@ async function _shopActionsOnSave(itemSnapshot) {
   _shopActionsCache = Array.isArray(itemSnapshot?.actions)
     ? itemSnapshot.actions.map(a => ({ ...a })) : [];
   _shopRefreshActionsHost();
+  setTimeout(() => { _siBindEditor(); _siRefreshLive(); }, 0);
 }
 
 /** Charge spells.js pour enregistrer ses actions et utiliser l'éditeur de sorts embarqués. */
@@ -3080,53 +3097,34 @@ async function removeShopAction(idx) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODAL ARTICLE — refonte (v2) : header compact + onglets sticky + footer fixe.
-// Les IDs d'inputs sont préservés (saveShopItem inchangé).
+// ÉDITEUR D'ARTICLE « ÉTABLI » — page unique, sommaire et aperçu temps réel.
+// Les IDs historiques restent inchangés : saveShopItem conserve son schéma.
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Onglets disponibles par template (ordre = ordre d'affichage)
-const _SI_TABS = {
-  arme:      ['essentiel', 'bonus', 'traits', 'actions', 'lecture', 'meta'],
-  armure:    ['essentiel', 'bonus', 'traits', 'actions', 'lecture', 'meta'],
-  bijou:     ['essentiel', 'bonus', 'traits', 'actions', 'lecture', 'meta'],
-  classique: ['essentiel', 'actions', 'lecture', 'meta'],
-  libre:     ['essentiel', 'lecture', 'meta'],
+const _SI_SECTIONS = {
+  arme:      ['identite', 'combat', 'bonus', 'traits', 'actions', 'commerce', 'lecture'],
+  armure:    ['identite', 'combat', 'bonus', 'traits', 'actions', 'commerce', 'lecture'],
+  bijou:     ['identite', 'combat', 'bonus', 'traits', 'actions', 'commerce', 'lecture'],
+  classique: ['identite', 'description', 'actions', 'commerce', 'lecture'],
+  libre:     ['identite', 'description', 'commerce', 'lecture'],
 };
 
-const _SI_TAB_DEF = {
-  essentiel: { label: 'Essentiel', icon: '⚙️' },
-  bonus:     { label: 'Bonus',     icon: '✨' },
-  traits:    { label: 'Traits',    icon: '🏷️' },
-  actions:   { label: 'Actions',   icon: '⚡' },
-  lecture:   { label: 'Texte',      icon: '📖' },
-  meta:      { label: 'Méta',      icon: '🔧' },
+const _SI_SECTION_DEF = {
+  identite:    { label: 'Identité', icon: '◆', hint: 'Nom, catégorie, rareté' },
+  combat:      { label: 'Combat', icon: '⚔', hint: '' },
+  bonus:       { label: 'Bonus & résistances', icon: '✦', hint: 'Quand l’objet est équipé', optional: true },
+  traits:      { label: 'Traits', icon: '◇', hint: 'Propriétés textuelles', optional: true },
+  actions:     { label: 'Actions', icon: 'ϟ', hint: 'Utilisables depuis l’inventaire', optional: true },
+  description: { label: 'Description', icon: '≡', hint: 'Effet visible en boutique', optional: true },
+  commerce:    { label: 'Vente & visibilité', icon: '◉', hint: 'Prix, stock, drapeaux' },
+  lecture:     { label: 'Texte à lire', icon: '▤', hint: 'Livre, lettre, notes', optional: true },
 };
 
-// Champs de chaque onglet, par template. L'onglet "essentiel" regroupe TOUT
-// ce qu'on touche 95% du temps : caractéristiques + prix/dispo/rareté.
-const _SI_TAB_FIELDS = {
-  arme: {
-    essentiel: ['format','nature','mains','rarete','degats','toucherStat','portee','prix','dispo'],
-    bonus:     ['statBonuses','derivedBonuses','skillBonuses'],
-    traits:    ['traits'],
-  },
-  armure: {
-    essentiel: ['slotArmure','typeArmure','rarete','ca','prix','dispo'],
-    bonus:     ['statBonuses','derivedBonuses','skillBonuses'],
-    traits:    ['traits'],
-  },
-  bijou: {
-    essentiel: ['slotBijou','rarete','prix','dispo'],
-    bonus:     ['statBonuses','derivedBonuses','skillBonuses'],
-    traits:    ['traits'],
-  },
-  classique: {
-    essentiel: ['type','effet','description','prix','dispo'],
-  },
-  libre: {
-    essentiel: ['type','description','prix','dispo'],
-  },
-};
+let _siEditorState = null;
+
+function _siClone(value) {
+  try { return structuredClone(value); } catch { return JSON.parse(JSON.stringify(value || {})); }
+}
 
 function _siBuildFieldsSubset(tpl, item, fieldIds) {
   if (!fieldIds?.length) return '';
@@ -3135,26 +3133,139 @@ function _siBuildFieldsSubset(tpl, item, fieldIds) {
   return _buildFieldsHtml(subTpl, item);
 }
 
-/** Contenu d'un onglet (HTML). */
-function _siBuildTabContent(tab, tpl, item, tplKey) {
-  if (tab === 'essentiel' || tab === 'bonus' || tab === 'traits') {
-    let h = _siBuildFieldsSubset(tpl, item, _SI_TAB_FIELDS[tplKey]?.[tab] || []);
-    if (tab === 'bonus' && ['arme', 'armure', 'bijou'].includes(tplKey)) {
-      h += _shopRenderDamageProfileSection(item);
-    }
-    return h;
-  }
-  if (tab === 'actions') {
-    return `<div class="si-actions-toggle">
-      <label>
-        <input type="checkbox" id="si-consommable" ${item?.consommable?'checked':''}>
-        <span class="si-actions-toggle-lbl">🧪 Objet consommable</span>
-        <span class="si-actions-toggle-hint">— perd 1 exemplaire à chaque utilisation</span>
-      </label>
+function _siTemplateButtonHtml(key, active) {
+  return `<button type="button" class="${key === active ? 'is-on' : ''}" data-sh-action="setItemTemplate" data-value="${key}">${TEMPLATES[key]?.label || key}</button>`;
+}
+
+function _siIdentityHtml(item, tplKey) {
+  const defCatId = item?.categorieId || '';
+  const cats = _cats.map(c => `<option value="${c.id}" ${defCatId === c.id ? 'selected' : ''}>${_esc(c.nom)}</option>`).join('');
+  const rarities = getRarities();
+  const rarity = parseInt(item?.rarete, 10) || 0;
+  const rarityColor = rarities.find(entry => entry.value === rarity)?.color || 'var(--text)';
+  const img = item?.image
+    ? `<img src="${_esc(item.image)}" alt="Aperçu de ${_esc(item.nom || 'l’article')}">`
+    : `<span class="si-img-placeholder">▧</span>`;
+  return `<div class="si-identity-grid">
+    <label class="si-img-btn" title="Changer l’image">
+      <input type="file" id="si-img-file" accept="image/*" data-sh-action="uploadImg" data-sh-on="change" data-preview="si-img-preview-thumb" data-hidden="si-img-b64" hidden>
+      <input type="hidden" id="si-img-b64" value="${_esc(item?.image || '')}">
+      <div id="si-img-preview-thumb" class="si-img-thumb">${img}</div>
+      <span>Image</span>
+    </label>
+    <div class="si-identity-main">
+      <input class="input-field si-name-input" id="si-nom" style="--si-rarity:${rarityColor}" value="${_esc(item?.nom || '')}" placeholder="Nom de l’article…" aria-label="Nom de l’article">
+      <div class="si-field si-template-picker"><span>Type d’article</span><div>${Object.keys(TEMPLATES).map(key => _siTemplateButtonHtml(key, tplKey)).join('')}</div><input type="hidden" id="si-template" value="${tplKey}"></div>
+      <div class="si-identity-bottom">
+        <label class="si-field"><span>Catégorie</span><select class="input-field sh-modal-select" id="si-cat" data-sh-action="setItemCat" data-sh-on="change"><option value="">— Catégorie —</option>${cats}</select></label>
+        <div class="si-field"><span>Rareté</span><div class="si-rarity-row" id="si-rarity-row">
+          <input type="hidden" id="si-rarete" value="${rarity}">
+          ${rarities.map(r => `<button type="button" class="${rarity === r.value ? 'is-on' : ''}" style="--si-rarity:${r.color}" data-sh-action="editorRarity" data-value="${r.value}"><i></i>${_esc(r.name)}</button>`).join('')}
+        </div></div>
+      </div>
     </div>
+  </div>`;
+}
+
+function _siWeaponCombatHtml(item) {
+  const currentFormat = resolveWeaponFamily(_weaponFormats, item || {})?.label || item?.format || '';
+  const known = _weaponFormats.some(format => format.label === currentFormat);
+  const hands = item?.mains || (item ? weaponHandsLabel(item) : '');
+  const nature = item?.nature || '';
+  const damageStats = _getDegatsStats(item || {});
+  const toucher = _normalizeStatKey(item?.toucherStat || item?.toucher || item?.statAttaque || '');
+  const segment = (field, selected, values) => `<select id="si-${field}" hidden><option value=""></option>${values.map(([value, label]) => `<option value="${_esc(value)}" ${selected === value ? 'selected' : ''}>${_esc(label)}</option>`).join('')}</select><div class="si-segment">${values.map(([value, label]) => `<button type="button" class="${selected === value ? 'is-on' : ''}" data-sh-action="editorSelect" data-field="${field}" data-value="${_esc(value)}">${_esc(label)}</button>`).join('')}</div>`;
+  const statButtons = (selectedKeys, action, single = false) => `<div class="si-segment si-segment--stats">${ITEM_STATS.map(stat => `<button type="button" class="${selectedKeys.includes(stat.key) ? 'is-on' : ''}" data-sh-action="${action}" data-field="${single ? 'toucherStat' : ''}" data-value="${stat.key}">${stat.short}</button>`).join('')}</div>`;
+  return `<div class="si-combat-grid">
+    <label class="si-field"><span>Type d’arme</span><select class="input-field sh-modal-select" id="si-format" data-sh-action="weaponTypeDefaults" data-sh-on="change"><option value="">— Choisir —</option>${!known && currentFormat ? `<option value="${_esc(currentFormat)}" selected>${_esc(currentFormat)} (ancien)</option>` : ''}${_weaponFormats.map(format => `<option value="${_esc(format.label)}" ${currentFormat === format.label ? 'selected' : ''}>${_esc(format.label)}</option>`).join('')}</select></label>
+    <div class="si-field"><span>Maniement</span>${segment('mains', hands, [['1 main','1 main'],['2 mains','2 mains'],['Polyvalente','Polyvalente']])}</div>
+    <div class="si-field"><span>Nature</span>${segment('nature', nature, [['','Auto'],['Physique','Physique'],['Magique','Magique']])}</div>
+    <div class="si-field si-combat-damage"><span>Dégâts</span><div class="si-damage-line"><input class="input-field" id="si-degats" value="${_esc(item?.degats || '')}" placeholder="1d8"><b>＋</b><input type="hidden" id="si-degats-stats-data" value="${_esc(JSON.stringify(damageStats))}">${statButtons(damageStats, 'editorDamageStat')}</div></div>
+    <div class="si-field si-combat-touch"><span>Toucher</span>${statButtons(toucher ? [toucher] : [], 'editorSelect', true)}</div>
+    <label class="si-field si-combat-range"><span>Portée</span><input class="input-field" id="si-portee" value="${_esc(item?.portee || '')}" placeholder="Contact"></label>
+  </div>`;
+}
+
+function _siBonusCount(item = {}) {
+  const stats = ITEM_STATS.reduce((sum, stat) => sum + Math.abs(Number(item?.[stat.store]) || 0), 0);
+  const derived = ['caBonus','pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus'].reduce((sum, key) => sum + Math.abs(Number(item?.[key]) || 0), 0);
+  const skills = Object.values(item?.skillBonuses || {}).reduce((sum, value) => sum + Math.abs(Number(value) || 0), 0);
+  const relations = Object.values(item?.damageProfile || {}).reduce((sum, values) => sum + (Array.isArray(values) ? values.length : 0), 0);
+  return stats + derived + skills + relations;
+}
+
+function _siStepperHtml(label, field, value) {
+  const num = Number(value) || 0;
+  return `<div class="si-stepper${num > 0 ? ' is-positive' : num < 0 ? ' is-negative' : ''}"><span>${label}</span><button type="button" data-sh-action="editorStep" data-field="${field}" data-delta="-1">−</button><input type="number" id="si-${field}" value="${num}"><button type="button" data-sh-action="editorStep" data-field="${field}" data-delta="1">＋</button></div>`;
+}
+
+function _siBonusHtml(item) {
+  const parsed = _parseLegacyStats(item || {});
+  const skillBonuses = item?.skillBonuses || {};
+  const chips = Object.entries(skillBonuses).filter(([, value]) => Number(value)).map(([name, value]) => _shopRenderSkillChipHTML(name, value)).join('');
+  setTimeout(() => _shopPopulateSkillPicker(skillBonuses).catch(() => {}), 0);
+  return `<div class="si-bonus-columns">
+    <div><h4>Attributs</h4><div class="si-bonus-grid">${ITEM_STATS.map(stat => _siStepperHtml(stat.short, stat.store, parsed[stat.store])).join('')}</div></div>
+    <div><h4>Dérivés</h4><div class="si-bonus-grid">${[
+      ['CA','caBonus'],['PV','pvMaxBonus'],['PM','pmMaxBonus'],['Vit','vitesseBonus'],['Init','initiativeBonus'],
+    ].map(([label, field]) => _siStepperHtml(label, field, item?.[field])).join('')}</div></div>
+  </div>
+  <div class="si-bonus-skills"><h4>Compétences</h4><div id="si-skill-chips" class="sh-skill-chips">${chips}</div><div class="si-skill-add"><input class="input-field" id="si-skill-picker" list="si-skill-options" placeholder="＋ Compétence… (Entrée)"><datalist id="si-skill-options"></datalist><input type="hidden" id="si-skill-val" value="1"></div></div>
+  ${_shopRenderDamageProfileSection(item)}`;
+}
+
+function _siMetaHtml(item, tplKey) {
+  const recipeChk = item?.hasRecipe != null ? !!item.hasRecipe : (item ? !item?.recipeMeta?.hidden : ['arme', 'armure', 'bijou'].includes(tplKey));
+  const newUntilMs = _itemNewUntilMs(item);
+  const newActive = item ? (newUntilMs > Date.now() || item.isNew === true) : true;
+  const flag = (id, title, hint, checked) => `<label class="si-flag${checked ? ' is-on' : ''}"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><i></i><span><b>${title}</b><small>${hint}</small></span></label>`;
+  return `<div class="si-meta-grid">
+    ${flag('si-masque', 'Masqué aux joueurs', 'Visible uniquement du MJ et récupérable en butin.', !!item?.masque)}
+    ${flag('si-new', 'Nouveauté', 'Présent dans le filtre Nouveautés pendant deux semaines.', newActive)}
+    ${flag('si-has-recipe', 'Recette d’artisanat', 'Permet la fabrication via l’Artisan.', recipeChk)}
+  </div>`;
+}
+
+function _siCommerceHtml(item, tplKey) {
+  const price = Math.max(0, Number(item?.prix) || 0);
+  const rawStock = Number(item?.dispo);
+  const infinite = item?.dispo == null || rawStock < 0;
+  const stock = infinite ? '' : Math.max(0, Math.trunc(rawStock));
+  return `<div class="si-commerce-fields">
+    <label class="si-field si-commerce-price"><span>Prix d’achat</span>
+      <div><input type="number" id="si-prix" value="${price || ''}" min="0" inputmode="numeric" data-sh-action="prixInput" data-sh-on="input"><b>po</b></div>
+      <small>Rachat : <strong id="si-pv-val">${Math.round(price * PRIX_VENTE_RATIO)}</strong> po (60 %)</small>
+    </label>
+    <div class="si-field si-commerce-stock"><span>Stock</span><div>
+      <div class="si-stock-stepper${infinite ? ' is-disabled' : ''}">
+        <button type="button" data-sh-action="editorStep" data-field="dispo" data-delta="-1" ${infinite ? 'disabled' : ''}>−</button>
+        <input type="number" id="si-dispo" value="${stock}" min="0" inputmode="numeric" ${infinite ? 'disabled' : ''}>
+        <button type="button" data-sh-action="editorStep" data-field="dispo" data-delta="1" ${infinite ? 'disabled' : ''}>＋</button>
+      </div>
+      <input type="checkbox" id="si-dispo-infini" ${infinite ? 'checked' : ''} hidden>
+      <button type="button" id="si-dispo-infini-btn" class="si-infinite-toggle${infinite ? ' is-on' : ''}" data-sh-action="dispoInfiniBtn" aria-pressed="${infinite}"><i></i><span>∞ Illimité</span></button>
+    </div></div>
+  </div>${_siMetaHtml(item, tplKey)}`;
+}
+
+function _siSectionBody(section, tpl, item, tplKey) {
+  if (section === 'identite') return _siIdentityHtml(item, tplKey);
+  if (section === 'combat') {
+    const prefill = _siEditorState?.prefill;
+    const fields = tplKey === 'armure' ? ['slotArmure', 'typeArmure', 'ca'] : ['slotBijou'];
+    const body = tplKey === 'arme' ? _siWeaponCombatHtml(item) : _siBuildFieldsSubset(tpl, item, fields);
+    return `${prefill ? `<div class="si-prefill">✓ ${_esc(prefill.label)} a pré-rempli ${prefill.fields.map(_esc).join(', ')}.<button type="button" data-sh-action="editorUndoPrefill">Annuler</button></div>` : ''}${body}`;
+  }
+  if (section === 'bonus') return _siBonusHtml(item);
+  if (section === 'traits') return _siBuildFieldsSubset(tpl, item, ['traits']);
+  if (section === 'description') return _siBuildFieldsSubset(tpl, item, ['type', 'effet', 'description']);
+  if (section === 'actions') {
+    return `<input type="checkbox" id="si-consommable" ${item?.consommable ? 'checked' : ''} hidden>
+    <button type="button" class="si-consumable-toggle${item?.consommable ? ' is-on' : ''}" data-sh-action="editorToggleConsumable" aria-pressed="${!!item?.consommable}"><i></i><span><b>Objet consommable</b> — perd 1 exemplaire à chaque utilisation</span></button>
     <div id="si-actions-host">${_shopRenderActionsSection(item?.actions)}</div>`;
   }
-  if (tab === 'lecture') {
+  if (section === 'commerce') return _siCommerceHtml(item, tplKey);
+  if (section === 'lecture') {
     const readableContent = sanitizeRichTextHtml(item?.readableContent || '');
     return `<div class="si-readable-editor">
       <div class="si-readable-intro">
@@ -3178,79 +3289,287 @@ function _siBuildTabContent(tab, tpl, item, tplKey) {
       <small class="si-readable-hint">Laisse le texte vide si l'objet ne doit rien contenir de lisible.</small>
     </div>`;
   }
-  if (tab === 'meta') {
-    const recipeChk = item ? !(item?.recipeMeta?.hidden) : ['arme','armure','bijou'].includes(tplKey);
-    // Nouveauté : actif si newUntil dans le futur (ou legacy isNew). Nouveau
-    // article → coché par défaut (il sera flaggé 2 semaines à la création).
-    const newUntilMs = _itemNewUntilMs(item);
-    const newActive  = item ? (newUntilMs > Date.now() || item.isNew === true) : true;
-    const newHint    = newUntilMs > Date.now()
-      ? `Actif dans le filtre « Nouveautés » jusqu'au ${new Date(newUntilMs).toLocaleDateString('fr-FR')}`
-      : 'Place l\'article dans le filtre « Nouveautés » pendant 2 semaines, puis se désactive seul.';
-    return `<div class="si-meta-grid">
-      <label class="si-meta-row">
-        <input type="checkbox" id="si-masque" ${item?.masque ? 'checked' : ''}>
-        <span>
-          <strong>${eyeIcon(true)} Masquer aux joueurs</strong>
-          <em>L'article n'apparaît plus dans la boutique pour les joueurs (visible du MJ). Reste récupérable en butin.</em>
-        </span>
-      </label>
-      <label class="si-meta-row">
-        <input type="checkbox" id="si-new" ${newActive ? 'checked' : ''}>
-        <span>
-          <strong>✨ Nouveauté (2 semaines)</strong>
-          <em>${newHint}</em>
-        </span>
-      </label>
-      <label class="si-meta-row">
-        <input type="checkbox" id="si-has-recipe" ${recipeChk ? 'checked' : ''}>
-        <span>
-          <strong>Recette d'artisanat</strong>
-          <em>Permet de fabriquer cet objet via l'Artisan</em>
-        </span>
-      </label>
-    </div>`;
+  return '';
+}
+
+function _siSectionHasContent(section, item = {}) {
+  if (section === 'bonus') return ITEM_STATS.some(s => Number(item?.[s.store]))
+    || ['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','caBonus'].some(k => Number(item?.[k]))
+    || Object.values(item?.skillBonuses || {}).some(Number)
+    || Object.values(item?.damageProfile || {}).some(a => Array.isArray(a) && a.length);
+  if (section === 'traits') return Array.isArray(item?.traits) && item.traits.some(Boolean);
+  if (section === 'actions') return !!item?.consommable || (item?.actions?.length || _shopActionsCache.length) > 0;
+  if (section === 'description') return !!String(item?.effet || item?.description || item?.type || '').trim();
+  if (section === 'lecture') return !!String(item?.readableTitle || '').trim() || !!sanitizeRichTextHtml(item?.readableContent || '').replace(/<[^>]*>/g, '').trim();
+  return true;
+}
+
+function _siSectionStatus(section, item) {
+  if (section === 'identite' && !String(item?.nom || '').trim()) return { cls: 'req', text: 'Nom requis' };
+  if (section === 'combat' && item?.template === 'arme' && !item?.degats) return { cls: 'warn', text: 'Dégâts à définir' };
+  if (section === 'commerce' && !(Number(item?.prix) > 0)) return { cls: 'warn', text: 'Prix à définir' };
+  return _siSectionHasContent(section, item) ? { cls: 'ok', text: 'Renseigné' } : { cls: '', text: 'Facultatif' };
+}
+
+function _siSectionSummary(section, item = {}) {
+  if (section === 'identite') return RARETE_NAMES[parseInt(item.rarete, 10) || 0] || '';
+  if (section === 'combat') return item.template === 'arme' ? item.degats || '' : item.template === 'armure' ? (item.ca ? `CA ${item.ca}` : '') : item.slotBijou || '';
+  if (section === 'bonus') { const count = _siBonusCount(item); return count ? `${count} bonus` : ''; }
+  if (section === 'traits') {
+    const count = Array.isArray(item.traits) ? item.traits.filter(Boolean).length : 0;
+    return count ? `${count} trait${count > 1 ? 's' : ''}` : '';
+  }
+  if (section === 'actions') {
+    const count = _shopActionsCache.length || (Array.isArray(item.actions) ? item.actions.length : 0);
+    return count ? `${count} action${count > 1 ? 's' : ''}` : '';
+  }
+  if (section === 'commerce') {
+    const stock = Number(item.dispo);
+    return `${Math.max(0, Number(item.prix) || 0)} po · ${item.dispo == null || stock < 0 ? '∞' : `×${Math.max(0, Math.trunc(stock))}`}`;
   }
   return '';
 }
 
-/** Construit la barre d'onglets + tous les panneaux (1 seul visible à la fois). */
-function _siBuildTabs(tpl, item, tplKey, activeTab = 'essentiel') {
-  const tabs = _SI_TABS[tplKey] || ['essentiel'];
-  const active = tabs.includes(activeTab) ? activeTab : tabs[0];
-  const strip = tabs.map((t, i) => {
-    const d = _SI_TAB_DEF[t];
-    return `<button type="button" class="si-tab${t===active?' is-active':''}"
-              data-tab="${t}" data-sh-action="setTab"
-              title="Alt+${i+1}">${d.icon} <span>${d.label}</span></button>`;
-  }).join('');
-  const panels = tabs.map(t => `
-    <div class="si-panel${t===active?' is-active':''}" data-panel="${t}">
-      ${_siBuildTabContent(t, tpl, item, tplKey)}
-    </div>`).join('');
-  return `<nav class="si-tabs">${strip}</nav>
-    <div class="si-panels">${panels}</div>`;
+function _siSectionHtml(section, tpl, item, tplKey, index) {
+  const def = _SI_SECTION_DEF[section];
+  const has = _siSectionHasContent(section, item);
+  const open = !def.optional || has || _siEditorState?.open?.has(section);
+  const status = _siSectionStatus(section, item);
+  const summary = _siSectionSummary(section, item);
+  return `<section class="si-section${open ? '' : ' is-closed'}" id="si-section-${section}" data-si-section="${section}">
+    <header class="si-section-head"><div><h3>${def.label}</h3>${def.hint ? `<small>${def.hint}</small>` : ''}</div><strong class="si-section-summary" ${summary ? '' : 'hidden'}>${_esc(summary)}</strong><span class="si-section-state ${status.cls}" ${summary ? 'hidden' : ''}>${status.text}</span>
+      ${!open ? `<button type="button" class="si-section-add" data-sh-action="editorOpenSection" data-section="${section}">＋ Ajouter</button>` : ''}
+    </header>
+    ${open ? `<div class="si-section-body">${_siSectionBody(section, tpl, item, tplKey)}</div>` : ''}
+  </section>`;
 }
 
-/** Switch d'onglet — pure manipulation DOM, ne reconstruit rien. */
-function setItemTab(name) {
-  document.querySelectorAll('.si-tab').forEach(b => b.classList.toggle('is-active', b.dataset.tab === name));
-  document.querySelectorAll('.si-panel').forEach(p => p.classList.toggle('is-active', p.dataset.panel === name));
-  if (name === 'lecture') bindQuillEditors(document.querySelector('.si-modal') || document).catch(() => {});
+function _siNavHtml(sections, item) {
+  return `${sections.map((section, index) => {
+    const def = _SI_SECTION_DEF[section];
+    const status = _siSectionStatus(section, item);
+    return `<button type="button" class="si-nav-row${index === 0 ? ' is-on' : ''}" data-sh-action="editorGoSection" data-section="${section}" title="Alt + ${index + 1}"><i class="${status.cls}"></i><span><b>${def.label}</b><small>${status.text}</small></span></button>`;
+  }).join('')}<div class="si-nav-shortcuts"><span><kbd>Alt</kbd><i>+</i><kbd>1–${sections.length}</kbd> Aller à une section</span><span><kbd>Alt</kbd><i>+</i><kbd>Q</kbd> Saisie rapide</span><span><kbd>Ctrl</kbd><i>+</i><kbd>↵</kbd> Enregistrer</span></div>`;
 }
 
-/** Mini "carte" live qui montre comment l'objet apparaîtra dans la boutique. */
-function _siRefreshChip() {
-  const chip = document.getElementById('si-name-chip');
-  if (!chip) return;
-  const nom = document.getElementById('si-nom')?.value || '—';
-  const rN  = parseInt(document.getElementById('si-rarete')?.value) || 0;
-  const rar = rN > 0 ? (RARETE_NAMES[rN] || '') : '';
-  const col = rar ? (_rareteColor(rar) || 'var(--text)') : 'var(--text)';
-  chip.innerHTML = `<span style="color:${col}">${_esc(nom)}</span>${rar?` <em style="color:${col};opacity:.7;font-size:.72rem;font-style:normal">· ${_esc(rar)}</em>`:''}`;
+function _siPreviewHtml(item) {
+  const rarity = parseInt(item?.rarete, 10) || 0;
+  const rarityName = RARETE_NAMES[rarity] || 'Sans rareté';
+  const rarityColor = _rareteColor(rarityName) || 'var(--text-muted)';
+  const tpl = item?.template || 'classique';
+  const stock = Number(item?.dispo);
+  const signed = value => `${Number(value) > 0 ? '+' : ''}${Number(value) || 0}`;
+  const damageStats = _getDegatsStats(item || {});
+  let subtype = [];
+  let mainValue = '';
+  let mainDetail = '';
+  if (tpl === 'arme') {
+    subtype = [item?.format, item?.mains || weaponHandsLabel(item || {}), item?.nature].filter(Boolean);
+    mainValue = [item?.degats || '—', ...damageStats.map(_statShort)].join(' + ');
+    mainDetail = [item?.toucherStat && `Toucher ${_statShort(item.toucherStat)}`, item?.portee].filter(Boolean).join(' · ');
+  } else if (tpl === 'armure') {
+    subtype = [item?.slotArmure, item?.typeArmure].filter(Boolean);
+    mainValue = `CA ${signed(item?.ca)}`;
+  } else if (tpl === 'bijou') {
+    subtype = [item?.slotBijou].filter(Boolean);
+  } else {
+    subtype = [item?.type].filter(Boolean);
+  }
+  const chips = [
+    ...ITEM_STATS.filter(stat => Number(item?.[stat.store])).map(stat => ({
+      text: `${stat.short} ${signed(item[stat.store])}`,
+      negative: Number(item[stat.store]) < 0,
+    })),
+    ...['pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','caBonus'].filter(key => Number(item?.[key])).map(key => ({
+      text: `${({ pvMaxBonus:'PV', pmMaxBonus:'PM', vitesseBonus:'VIT', initiativeBonus:'INIT', caBonus:'CA' })[key]} ${signed(item[key])}`,
+      negative: Number(item[key]) < 0,
+    })),
+    ...Object.entries(item?.skillBonuses || {}).filter(([, value]) => Number(value)).map(([name, value]) => ({
+      text: `${name} ${signed(value)}`,
+      negative: Number(value) < 0,
+    })),
+    ...Object.entries(damageProfileToRelations(item?.damageProfile || {})).map(([typeId, relationKey]) => {
+      const relation = DAMAGE_RELATIONS.find(entry => entry.key === relationKey);
+      const damageType = (_shopDamageTypes || []).find(entry => entry.id === typeId);
+      return {
+        text: `${relation?.name || relationKey} ${(damageType?.label || typeId).toLowerCase()}`,
+        color: _shopEditorRelationColor(relationKey),
+      };
+    }),
+  ];
+  const traitsCount = Array.isArray(item?.traits) ? item.traits.filter(Boolean).length : 0;
+  const actionsCount = Array.isArray(item?.actions) ? item.actions.length : 0;
+  const metadata = [
+    traitsCount ? `${traitsCount} trait${traitsCount > 1 ? 's' : ''}` : '',
+    actionsCount ? `${actionsCount} action${actionsCount > 1 ? 's' : ''}` : '',
+    item?.consommable ? 'consommable' : '',
+  ].filter(Boolean);
+  const description = !['arme', 'armure', 'bijou'].includes(tpl) ? String(item?.effet || item?.description || '').trim() : '';
+  const glyph = TEMPLATES[tpl]?.label?.split(' ')[0] || '◆';
+  const isNew = _itemNewUntilMs(item) > Date.now() || item?.isNew;
+  const todo = [];
+  if (!String(item?.nom || '').trim()) todo.push(['identite', 'Donner un nom', true]);
+  if (!item?.categorieId) todo.push(['identite', 'Choisir une catégorie']);
+  if (tpl === 'arme' && !item?.degats) todo.push(['combat', 'Définir les dégâts']);
+  if (tpl === 'armure' && !item?.slotArmure) todo.push(['combat', 'Choisir l’emplacement']);
+  if (tpl === 'bijou' && !item?.slotBijou) todo.push(['combat', 'Choisir l’emplacement']);
+  if (!(Number(item?.prix) > 0)) todo.push(['commerce', 'Fixer un prix']);
+  return `<div class="si-preview-heading">Aperçu boutique</div><article class="si-preview-card" style="--si-rarity:${rarityColor}">
+    <div class="si-preview-img">${item?.image ? `<img src="${_esc(item.image)}" alt="">` : `<span>${glyph}</span>`}<div class="si-preview-badges">${isNew ? '<em class="si-preview-badge is-new">Nouveau</em>' : ''}${item?.masque ? '<em class="si-preview-badge is-hidden">Masqué</em>' : ''}</div></div>
+    <div class="si-preview-body">
+      <div class="si-preview-rarity">${_esc(rarityName)}${subtype.length ? ` · <span>${_esc(subtype.join(' · '))}</span>` : ''}</div>
+      <h3>${String(item?.nom || '').trim() ? _esc(item.nom) : '<span class="si-preview-placeholder">Sans nom</span>'}</h3>
+      ${mainValue ? `<div class="si-preview-main"><b>${_esc(mainValue)}</b>${mainDetail ? `<small>${_esc(mainDetail)}</small>` : ''}</div>` : ''}
+      ${description ? `<p class="si-preview-effect">${_esc(description)}</p>` : ''}
+      ${chips.length ? `<div class="si-preview-chips">${chips.map(chip => `<span class="${chip.negative ? 'is-negative' : ''}"${chip.color ? ` style="--si-chip:${chip.color}"` : ''}>${_esc(chip.text)}</span>`).join('')}</div>` : ''}
+      ${metadata.length ? `<div class="si-preview-meta">${_esc(metadata.join(' · '))}</div>` : ''}
+      <footer><b>${Number(item?.prix) || 0}<small>po</small></b><span>${stock < 0 || !Number.isFinite(stock) ? 'Stock illimité' : stock ? `${stock} en stock` : '<strong>Épuisé</strong>'}</span></footer>
+    </div></article>
+    <div class="si-preview-heading">${todo.length ? `À compléter · ${todo.length}` : 'Prêt'}</div>
+    ${todo.length ? `<div class="si-preview-todo">${todo.map(([section, label, req]) => `<button type="button" class="${req ? 'req' : ''}" data-sh-action="editorGoSection" data-section="${section}">${req ? '⚠' : '›'} ${label}${req ? '<em>requis</em>' : ''}</button>`).join('')}</div>` : '<p class="si-preview-ready">✓ Tous les champs essentiels sont remplis.</p>'}`;
 }
-async function openItemModal(itemId) {
-  const catalogItem = itemId ? _items.find(i=>i.id===itemId) : null;
+
+function _siQuickResultsHtml(value) {
+  const parsed = parseShopItemQuickEntry(value, { rarities: getRarities(), weaponFormats: _weaponFormats, damageTypes: _shopDamageTypes || [], template: _siEditorState?.draft?.template });
+  if (!parsed.length) return `<span>Sépare les informations par des virgules : nom, type, dés, rareté, bonus, prix, stock…</span>`;
+  const count = parsed.filter(x => !x.bad).length;
+  return `<div>${parsed.map(x => `<i class="${x.bad ? 'bad' : ''}">${_esc(x.label)}</i>`).join('')}</div><button type="button" data-sh-action="editorApplyQuick" ${count ? '' : 'disabled'}>Appliquer ${count} champ${count > 1 ? 's' : ''} <kbd>↵</kbd></button>`;
+}
+
+function _siQuickHtml() {
+  const value = _siEditorState?.quick || '';
+  return `<div class="si-quick"><label>ϟ <input id="si-quick-input" value="${_esc(value)}" placeholder="Saisie rapide : Lame de givre, épée, 1d8 + FOR, rare, DEX +1, 120 or, stock 2" autocomplete="off"><span class="si-quick-key"><kbd>Alt</kbd><i>+</i><kbd>Q</kbd></span></label><div id="si-quick-results">${_siQuickResultsHtml(value)}</div></div>`;
+}
+
+function _siDiffCount(current = {}, original = {}) {
+  const ignored = new Set(['id', 'ordre', 'updatedAt']);
+  return [...new Set([...Object.keys(current || {}), ...Object.keys(original || {})])]
+    .filter(key => !ignored.has(key) && JSON.stringify(current?.[key]) !== JSON.stringify(original?.[key])).length;
+}
+
+function _siReadDraftFromDom() {
+  const draft = _siEditorState?.draft;
+  if (!draft) return null;
+  const text = id => document.getElementById(id)?.value ?? '';
+  const num = id => parseFloat(text(id)) || 0;
+  draft.nom = text('si-nom').trim(); draft.categorieId = text('si-cat'); draft.template = text('si-template') || draft.template;
+  draft.image = text('si-img-b64'); draft.rarete = parseInt(text('si-rarete'), 10) || 0;
+  ['format','nature','mains','degats','toucherStat','portee','slotArmure','typeArmure','slotBijou','type','effet','description'].forEach(k => {
+    const el = document.getElementById(`si-${k}`); if (el) draft[k] = el.value;
+  });
+  const readableTitle = document.getElementById('si-readable-title');
+  if (readableTitle) draft.readableTitle = readableTitle.value;
+  ['prix','ca','pvMaxBonus','pmMaxBonus','vitesseBonus','initiativeBonus','caBonus'].forEach(k => { if (document.getElementById(`si-${k}`)) draft[k] = num(`si-${k}`); });
+  ITEM_STATS.forEach(stat => { if (document.getElementById(`si-${stat.store}`)) draft[stat.store] = num(`si-${stat.store}`); });
+  const stockInput = document.getElementById('si-dispo');
+  const stockInfinite = !!document.getElementById('si-dispo-infini')?.checked;
+  const finiteStock = Math.max(0, parseInt(stockInput?.value, 10) || 0);
+  if (!stockInfinite && stockInput) _siEditorState.lastFiniteStock = finiteStock;
+  draft.dispo = stockInfinite ? -1 : finiteStock;
+  draft.masque = !!document.getElementById('si-masque')?.checked; draft.isNew = !!document.getElementById('si-new')?.checked;
+  draft.hasRecipe = !!document.getElementById('si-has-recipe')?.checked;
+  draft.consommable = !!document.getElementById('si-consommable')?.checked;
+  draft.actions = _shopCollectActions(); draft.damageProfile = _shopCollectDamageProfile() || draft.damageProfile || {};
+  draft.traits = [...document.querySelectorAll('#si-traits-list input')].map(el => el.value.trim()).filter(Boolean);
+  if (document.getElementById('si-skill-chips')) {
+    draft.skillBonuses = {};
+    document.querySelectorAll('#si-skill-chips .sh-skill-chip').forEach(chip => {
+      const value = parseInt(chip.dataset.val, 10);
+      if (chip.dataset.skill && Number.isFinite(value) && value !== 0) draft.skillBonuses[chip.dataset.skill] = value;
+    });
+  }
+  try { draft.degatsStats = JSON.parse(text('si-degats-stats-data') || '[]'); } catch { draft.degatsStats = []; }
+  const content = document.querySelector('[data-rtq-id="si-readable-content"]');
+  if (content?.classList.contains('ql-container')) draft.readableContent = getQuillHtml('si-readable-content');
+  return draft;
+}
+
+function _siRefreshLive() {
+  const item = _siReadDraftFromDom() || _siEditorState?.draft;
+  if (!item) return;
+  const subtitle = document.getElementById('si-editor-subtitle');
+  if (subtitle) {
+    const category = _cats.find(entry => entry.id === item.categorieId);
+    subtitle.textContent = _siEditorState?.itemId
+      ? `${_siEditorState.itemId} · ${category?.nom || 'Sans catégorie'}`
+      : 'Saisie rapide ou champ par champ — tout est sur une seule page';
+  }
+  const preview = document.getElementById('si-editor-preview');
+  if (preview) preview.innerHTML = _siPreviewHtml(item);
+  (_SI_SECTIONS[item.template] || []).forEach(section => {
+    const host = document.getElementById(`si-section-${section}`); if (!host) return;
+    const summary = _siSectionSummary(section, item);
+    const summaryEl = host.querySelector('.si-section-summary');
+    const stateEl = host.querySelector('.si-section-state');
+    if (summaryEl) { summaryEl.textContent = summary; summaryEl.hidden = !summary; }
+    if (stateEl) stateEl.hidden = !!summary;
+  });
+  const nav = document.getElementById('si-editor-nav');
+  if (nav) nav.innerHTML = _siNavHtml(_SI_SECTIONS[item.template] || _SI_SECTIONS.classique, item);
+  const dirty = document.getElementById('si-editor-dirty');
+  const changes = _siDiffCount(item, _siEditorState.originalDraft || {});
+  _siEditorState.dirty = !!changes;
+  if (dirty) dirty.innerHTML = !_siEditorState.itemId
+    ? ''
+    : changes
+      ? `<i class="is-warn"></i>${changes} modification${changes > 1 ? 's' : ''} non enregistrée${changes > 1 ? 's' : ''}`
+      : '<i class="is-ok"></i>Aucune modification';
+  const save = document.getElementById('si-editor-save');
+  const saveNew = document.getElementById('si-editor-save-new');
+  if (save) save.disabled = !item.nom?.trim();
+  if (saveNew) saveNew.disabled = !item.nom?.trim();
+  document.querySelectorAll('.si-stepper input').forEach(input => {
+    const stepper = input.closest('.si-stepper'); const value = Number(input.value) || 0;
+    stepper?.classList.toggle('is-positive', value > 0); stepper?.classList.toggle('is-negative', value < 0);
+  });
+}
+
+function _siRenderEditorPanels({ keepScroll = true } = {}) {
+  const state = _siEditorState; if (!state) return;
+  const scroll = document.getElementById('si-editor-scroll');
+  const y = keepScroll ? scroll?.scrollTop || 0 : 0;
+  const item = state.draft;
+  const tplKey = item.template || 'classique';
+  const tpl = TEMPLATES[tplKey] || TEMPLATES.classique;
+  const sections = _SI_SECTIONS[tplKey] || _SI_SECTIONS.classique;
+  const nav = document.getElementById('si-editor-nav');
+  const form = document.getElementById('si-editor-form');
+  const preview = document.getElementById('si-editor-preview');
+  if (nav) nav.innerHTML = _siNavHtml(sections, item);
+  if (form) form.innerHTML = `${_siQuickHtml()}${sections.map((section, index) => _siSectionHtml(section, tpl, item, tplKey, index)).join('')}`;
+  if (preview) preview.innerHTML = _siPreviewHtml(item);
+  _bindPrixListener(); _initAutocompletes();
+  if (state.open.has('lecture') || _siSectionHasContent('lecture', item)) bindQuillEditors(document.querySelector('.si-editor') || document).catch(() => {});
+  if (scroll) scroll.scrollTop = y;
+  _siRefreshLive();
+}
+
+function _siEditorShellHtml(itemId, item) {
+  const choices = _items.slice().sort((a, b) => String(a.nom || '').localeCompare(String(b.nom || ''), 'fr')).map(source => `<button type="button" data-sh-action="editorCopyItem" data-id="${source.id}"><span>${source.image ? `<img src="${_esc(source.image)}" alt="">` : '◆'}</span><b>${_esc(source.nom || 'Sans nom')}</b><em>${Number(source.prix) || 0} or</em></button>`).join('');
+  const category = _cats.find(entry => entry.id === item?.categorieId);
+  const subtitle = itemId
+    ? `${itemId} · ${category?.nom || 'Sans catégorie'}`
+    : 'Saisie rapide ou champ par champ — tout est sur une seule page';
+  return `<div class="si-editor" data-item-id="${itemId || ''}">
+    <header class="si-editor-head"><div class="si-editor-title"><h2 id="si-editor-title">${itemId ? 'Modifier l’article' : 'Nouvel article'}</h2><small id="si-editor-subtitle">${_esc(subtitle)}</small></div><div class="si-editor-library"><button type="button" data-sh-action="editorToggleLibrary"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"></path></svg><span>Partir d’un article…</span></button><div id="si-editor-library-menu" hidden><small>Copier un article existant</small>${choices || '<p>Aucun article disponible.</p>'}</div></div><button type="button" class="si-editor-close" data-sh-action="editorCancel" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button></header>
+    <div class="si-editor-grid"><nav id="si-editor-nav"></nav><main id="si-editor-scroll"><div id="si-editor-form"></div></main><aside id="si-editor-preview"></aside></div>
+    <footer class="si-editor-footer"><div id="si-editor-dirty"></div><button type="button" class="ghost" data-sh-action="editorCancel">Annuler</button><button type="button" id="si-editor-save-new" data-sh-action="saveItemNew" data-id="${itemId || ''}" title="Ctrl+Maj+Entrée">Enregistrer &amp; nouveau</button><button type="button" class="primary" id="si-editor-save" data-sh-action="saveItem" data-id="${itemId || ''}" title="Ctrl+Entrée">Enregistrer <kbd>Ctrl ↵</kbd></button></footer>
+  </div>`;
+}
+
+function _siInstallCloseGuard() {
+  setModalCloseGuard(() => {
+    if (!_siEditorState?.dirty || _siEditorState?.saving) return false;
+    confirmModal('Quitter sans enregistrer les modifications ?', { title: 'Modifications non enregistrées' }).then(ok => {
+      if (!ok) return;
+      _siEditorState.dirty = false; clearModalCloseGuard(); closeModalDirect();
+    });
+    return true;
+  });
+}
+
+async function openItemModal(itemId, seedItem = null) {
+  const catalogItem = seedItem || (itemId ? _items.find(i=>i.id===itemId) : null);
   const storedContent = itemId ? await getDocDataSilent('shopContent', itemId) : null;
   _shopReadableDraft = {
     itemId: itemId || '',
@@ -3265,102 +3584,135 @@ async function openItemModal(itemId) {
   _shopActionsCacheLoad(item?.actions || []);
   _shopEnsureSpellsModule().catch(() => {});
 
-  const defCatId   = item?.categorieId || _activeCat || '';
-  const cat        = _cats.find(c=>c.id===defCatId);
-  // Le template vient désormais DE L'ITEM en priorité (item.template),
-  // avec fallback sur la catégorie pour rétrocompat sur les vieux items.
-  const tplKey     = item?.template || cat?.template || 'classique';
-  const tpl        = TEMPLATES[tplKey] || TEMPLATES.classique;
-  const catOptions = _cats.map(c=>`<option value="${c.id}" ${defCatId===c.id?'selected':''}>${c.nom}</option>`).join('');
-  const tplOptions = Object.entries(TEMPLATES).map(([k, t]) =>
-    `<option value="${k}" ${tplKey===k?'selected':''}>${t.label || k}</option>`
-  ).join('');
-
-  const imgPreviewHtml = item?.image
-    ? `<img src="${_esc(item.image)}" alt="Aperçu de ${_esc(item.nom || 'l’article')}">`
-    : `<span class="si-img-placeholder">+</span>`;
-
-  const headerHtml = `
-    <div class="si-header">
-      <label class="si-img-btn" title="Cliquer pour changer l'image">
-        <input type="file" id="si-img-file" accept="image/*"
-               data-sh-action="uploadImg" data-sh-on="change" data-preview="si-img-preview-thumb" data-hidden="si-img-b64"
-               style="display:none">
-        <input type="hidden" id="si-img-b64" value="${item?.image||''}">
-        <div id="si-img-preview-thumb" class="si-img-thumb">${imgPreviewHtml}</div>
-      </label>
-      <div class="si-header-fields">
-        <input class="input-field si-name-input" id="si-nom"
-               value="${(item?.nom||'').replace(/"/g,'&quot;')}"
-               placeholder="Nom de l'article…"
-               data-sh-action="refreshChip" data-sh-on="input">
-        <div class="si-header-row2">
-          <select class="input-field sh-modal-select si-cat-select" id="si-cat"
-                  data-sh-action="setItemCat" data-sh-on="change"
-                  title="Catégorie d'affichage dans la boutique">
-            <option value="">— Catégorie —</option>${catOptions}
-          </select>
-          <select class="input-field sh-modal-select si-tpl-select" id="si-template"
-                  data-sh-action="setItemTemplate" data-sh-on="change"
-                  title="Type de boutique (détermine les champs disponibles)">
-            ${tplOptions}
-          </select>
-          <span class="si-name-chip" id="si-name-chip"></span>
-        </div>
-      </div>
-    </div>`;
-
-  openModal(item ? `✏️ ${item.nom||'Article'}` : '🛒 Nouvel article', `
-    <div class="si-modal">
-      ${headerHtml}
-      <div class="si-body" id="si-sections-dynamic">${_siBuildTabs(tpl, item, tplKey)}</div>
-      <footer class="si-footer">
-        <button class="btn btn-outline" data-sh-action="closeModal">Annuler</button>
-        <button class="btn btn-gold" data-sh-action="saveItem" data-id="${itemId||''}">
-          ${item ? '💾 Enregistrer' : '➕ Ajouter'}
-        </button>
-      </footer>
-    </div>`);
-
-  setTimeout(() => {
-    document.getElementById('si-nom')?.focus();
-    _bindPrixListener();
-    _initAutocompletes();
-    _siRefreshChip();
-    _siBindShortcuts();
-  }, 60);
+  const defCatId = item?.categorieId || _activeCat || '';
+  const cat = _cats.find(c => c.id === defCatId);
+  const draft = { ...(item || {}), categorieId: defCatId, template: item?.template || cat?.template || 'classique', readableTitle: _shopReadableDraft.title, readableContent: _shopReadableDraft.html };
+  _siEditorState = {
+    itemId: itemId || '', draft, originalDraft: _siClone(draft), dirty: false, quick: '', open: new Set(), saving: false,
+    lastFiniteStock: Number.isFinite(Number(draft.dispo)) && Number(draft.dispo) >= 0 ? Math.trunc(Number(draft.dispo)) : 0,
+  };
+  ['bonus','traits','actions','description','lecture'].forEach(section => { if (_siSectionHasContent(section, draft)) _siEditorState.open.add(section); });
+  openModal('', _siEditorShellHtml(itemId, draft));
+  document.getElementById('modal-overlay')?.setAttribute('aria-labelledby', 'si-editor-title');
+  _siRenderEditorPanels({ keepScroll: false });
+  _siReadDraftFromDom();
+  _siEditorState.originalDraft = _siClone(_siEditorState.draft);
+  _siRefreshLive();
+  _siBindEditor();
+  _siInstallCloseGuard();
+  requestAnimationFrame(() => document.getElementById('si-nom')?.focus({ preventScroll: true }));
 
   _shopEnsureDamageTypes().then(() => {
-    const host = document.getElementById('si-actions-host');
-    if (host) host.innerHTML = _shopRenderActionsSection(_shopCollectActions().length ? _shopCollectActions() : (item?.actions || []));
-    // Re-rend la section « Résistances accordées » maintenant que les types sont chargés.
-    const dp = document.querySelector('.sh-dmgprof');
-    if (dp) dp.outerHTML = _shopRenderDamageProfileSection(item);
+    if (_siEditorState) { _siReadDraftFromDom(); _siRenderEditorPanels(); }
   });
 }
 
-/** Alt+1..5 pour switcher d'onglet + rafraîchir la chip de prévisualisation. */
-function _siBindShortcuts() {
-  const modal = document.querySelector('.si-modal');
-  if (!modal || modal._siBound) return;
-  modal._siBound = true;
+function _siGoSection(section) {
+  const el = document.getElementById(`si-section-${section}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  setTimeout(() => el.querySelector('input:not([type="hidden"]), select, textarea, button')?.focus({ preventScroll: true }), 280);
+}
 
-  // Raccourcis clavier Alt+1..9 → onglet
-  document.addEventListener('keydown', (e) => {
-    if (!document.querySelector('.si-modal')) return;
-    if (!e.altKey || e.ctrlKey || e.metaKey) return;
-    const n = parseInt(e.key);
-    if (!Number.isFinite(n) || n < 1 || n > 9) return;
-    const btns = document.querySelectorAll('.si-tab');
-    if (btns[n-1]) { e.preventDefault(); btns[n-1].click(); }
-  });
+let _siEditorGlobalBound = false;
+function _siBindEditor() {
+  const editor = document.querySelector('.si-editor');
+  if (!editor) return;
+  if (!_siEditorGlobalBound) {
+    _siEditorGlobalBound = true;
+    document.addEventListener('input', event => {
+      if (!event.target?.closest?.('.si-editor')) return;
+      if (event.target.id === 'si-quick-input') {
+        _siEditorState.quick = event.target.value;
+        const out = document.getElementById('si-quick-results'); if (out) out.innerHTML = _siQuickResultsHtml(event.target.value);
+        return;
+      }
+      _siRefreshLive();
+    });
+    document.addEventListener('change', event => {
+      if (event.target?.closest?.('.si-editor')) _siRefreshLive();
+    });
+    document.addEventListener('keydown', event => {
+      if (!document.querySelector('.si-editor')) return;
+      if (event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === 'q') { event.preventDefault(); document.getElementById('si-quick-input')?.focus(); return; }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault(); document.getElementById(event.shiftKey ? 'si-editor-save-new' : 'si-editor-save')?.click(); return;
+      }
+      if (event.altKey && /^[1-9]$/.test(event.key)) {
+        const section = (_SI_SECTIONS[_siEditorState?.draft?.template] || [])[Number(event.key) - 1];
+        if (section) { event.preventDefault(); _siGoSection(section); }
+      }
+      if (event.key === 'Enter' && event.target?.id === 'si-trait-new') { event.preventDefault(); addShopTraitsFromInput(event.target); return; }
+      if (event.key === 'Enter' && event.target?.id === 'si-skill-picker') { event.preventDefault(); addSkillBonus(); _siRefreshLive(); return; }
+      if (event.key === 'Enter' && event.target?.id === 'si-quick-input') { event.preventDefault(); shHandlers.editorApplyQuick?.(); }
+    });
+  }
+  const scroller = document.getElementById('si-editor-scroll');
+  if (scroller?._siBound) return;
+  if (scroller) scroller._siBound = true;
+  scroller?.addEventListener('scroll', () => {
+    const sections = [...scroller.querySelectorAll('[data-si-section]')];
+    const active = sections.filter(el => el.offsetTop <= scroller.scrollTop + 120).pop() || sections[0];
+    document.querySelectorAll('.si-nav-row').forEach(btn => btn.classList.toggle('is-on', btn.dataset.section === active?.dataset.siSection));
+  }, { passive: true });
+}
 
-  // Délégation : tout clic sur une étoile de rareté → refresh de la chip
-  modal.addEventListener('click', (e) => {
-    if (e.target.closest('.sh-rarete-star-btn')) {
-      setTimeout(_siRefreshChip, 0); // après que pickRarete ait mis à jour le hidden
-    }
+function _siApplyWeaponDefaultsToDraft(draft, family) {
+  if (!family || !hasWeaponDefaults(family.defaults)) return;
+  const defaults = normalizeWeaponDefaults(family.defaults);
+  const setIfEmpty = (key, value) => {
+    if (value == null || value === '' || (Array.isArray(value) && !value.length)) return;
+    if (draft[key] == null || draft[key] === '' || (Array.isArray(draft[key]) && !draft[key].length) || Number(draft[key]) === 0) draft[key] = _siClone(value);
+  };
+  setIfEmpty('degats', defaults.degats); setIfEmpty('degatsStats', defaults.degatsStats);
+  setIfEmpty('toucherStat', defaults.toucherStat); setIfEmpty('portee', defaults.portee);
+  setIfEmpty('mains', defaults.mains); setIfEmpty('nature', defaults.nature);
+  if (defaults.caBonus) setIfEmpty('caBonus', defaults.caBonus);
+}
+
+function _siApplyQuick() {
+  const state = _siEditorState; if (!state) return;
+  const parsed = parseShopItemQuickEntry(state.quick, { rarities: getRarities(), weaponFormats: _weaponFormats, damageTypes: _shopDamageTypes || [], template: state.draft.template }).filter(result => !result.bad);
+  if (!parsed.length) return;
+  _siReadDraftFromDom();
+  const relations = damageProfileToRelations(state.draft.damageProfile || {});
+  parsed.forEach(result => {
+    Object.assign(state.draft, result.patch || {});
+    if (result.weapon) _siApplyWeaponDefaultsToDraft(state.draft, result.weapon);
+    if (result.trait) state.draft.traits = [...(state.draft.traits || []), result.trait];
+    if (result.damage) relations[result.damage.typeId] = result.damage.relation;
   });
+  state.draft.damageProfile = relationsToDamageProfile(relations);
+  state.quick = '';
+  _siRenderEditorPanels();
+  showNotif(`${parsed.length} champ${parsed.length > 1 ? 's' : ''} appliqué${parsed.length > 1 ? 's' : ''}.`, 'success');
+  requestAnimationFrame(() => document.getElementById('si-quick-input')?.focus({ preventScroll: true }));
+}
+
+async function _siCopyExistingItem(itemId) {
+  const source = _items.find(item => item.id === itemId); if (!source) return;
+  const content = await getDocDataSilent('shopContent', itemId);
+  const copy = _siClone(source);
+  delete copy.id; delete copy.ordre;
+  copy.nom = `${copy.nom || 'Article'} (copie)`;
+  copy.readableTitle = content?.title || copy.readableTitle || '';
+  copy.readableContent = content?.html || copy.readableContent || '';
+  _shopReadableDraft = { itemId: '', title: copy.readableTitle, html: copy.readableContent };
+  _shopActionsCacheLoad(copy.actions || []);
+  _siEditorState = {
+    itemId: '', draft: copy, originalDraft: {}, dirty: true, quick: '', open: new Set(['bonus','traits','actions','description','lecture']), saving: false,
+    lastFiniteStock: Number.isFinite(Number(copy.dispo)) && Number(copy.dispo) >= 0 ? Math.trunc(Number(copy.dispo)) : 0,
+  };
+  const body = document.getElementById('modal-body');
+  if (body) body.innerHTML = _siEditorShellHtml('', copy);
+  _siRenderEditorPanels({ keepScroll: false }); _siBindEditor(); _siRefreshLive();
+  showNotif(`Copie de « ${source.nom || 'Article'} » prête.`, 'success');
+}
+
+function _siStep(field, delta) {
+  const input = document.getElementById(`si-${field}`); if (!input) return;
+  input.value = String((parseInt(input.value, 10) || 0) + Number(delta || 0));
+  input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 const _pendingAutocompletes = [];
@@ -3410,11 +3762,16 @@ function _buildFieldsHtml(tpl,item) {
       // « Nature » : vide = auto (physique/magique selon le type d'arme) → compat
       // ascendante, aucune arme existante n'est modifiée tant qu'on n'y touche pas.
       const emptyLabel = f.id === 'nature' ? 'Auto (selon le type d\'arme)' : '— Choisir —';
-      html+=`<div class="form-group"><label>${f.label}</label>
-        <select class="input-field sh-modal-select" id="si-${f.id}">
-          <option value="">${emptyLabel}</option>
-          ${options.map(o=>`<option value="${_esc(o)}" ${val===o?'selected':''}>${_esc(o)}</option>`).join('')}
-        </select></div>`;
+      if (f.id === 'nature' || f.id === 'mains') {
+        html += `<div class="form-group"><label>${f.label}</label><select id="si-${f.id}" hidden><option value="">${emptyLabel}</option>${options.map(o=>`<option value="${_esc(o)}" ${val===o?'selected':''}>${_esc(o)}</option>`).join('')}</select>
+          <div class="si-segment">${[['', f.id === 'nature' ? 'Auto' : 'Auto'], ...options.map(o => [o, o])].map(([value, label]) => `<button type="button" class="${val === value ? 'is-on' : ''}" data-sh-action="editorSelect" data-field="${f.id}" data-value="${_esc(value)}">${_esc(label)}</button>`).join('')}</div></div>`;
+      } else {
+        html+=`<div class="form-group"><label>${f.label}</label>
+          <select class="input-field sh-modal-select" id="si-${f.id}">
+            <option value="">${emptyLabel}</option>
+            ${options.map(o=>`<option value="${_esc(o)}" ${val===o?'selected':''}>${_esc(o)}</option>`).join('')}
+          </select></div>`;
+      }
     } else if(f.type==='format_select'){
       // Type d'arme : une ancienne arme (format « Arme 1M CaC Phy. » supprimé)
       // est présélectionnée sur son type saisi ; une valeur inconnue est conservée.
@@ -3442,19 +3799,13 @@ function _buildFieldsHtml(tpl,item) {
       </div>`;
     } else if(f.type==='stat_select'){
       const selected = _normalizeStatKey(item?.[f.id] || item?.toucher || item?.statAttaque || '');
-      html+=`<div class="form-group"><label>${f.label}</label>
-        <select class="input-field sh-modal-select" id="si-${f.id}">
-          <option value="">— Choisir —</option>
-          ${ITEM_STATS.map(stat=>`<option value="${stat.key}" ${selected===stat.key?'selected':''}>${stat.label}</option>`).join('')}
-        </select></div>`;
+      html+=`<div class="form-group"><label>${f.label}</label><select id="si-${f.id}" hidden><option value="">— Choisir —</option>${ITEM_STATS.map(stat=>`<option value="${stat.key}" ${selected===stat.key?'selected':''}>${stat.label}</option>`).join('')}</select>
+        <div class="si-segment si-segment--stats">${ITEM_STATS.map(stat => `<button type="button" class="${selected === stat.key ? 'is-on' : ''}" data-sh-action="editorSelect" data-field="${f.id}" data-value="${stat.key}">${stat.short}</button>`).join('')}</div></div>`;
     } else if(f.type==='stat_bonus_grid'){
       const parsed = _parseLegacyStats(item||{});
       html+=`<div class="form-group sh-field-full"><label>${f.label}</label>
         <div class="sh-bonus-row">
-          ${ITEM_STATS.map(stat=>`<label class="sh-bonus-cell">
-            <span>${stat.short}</span>
-            <input type="number" id="si-${stat.store}" value="${parsed[stat.store]||''}" placeholder="0">
-          </label>`).join('')}
+          ${ITEM_STATS.map(stat=>`<div class="si-stepper"><span>${stat.short}</span><button type="button" data-sh-action="editorStep" data-field="${stat.store}" data-delta="-1">−</button><input type="number" id="si-${stat.store}" value="${parsed[stat.store]||0}"><button type="button" data-sh-action="editorStep" data-field="${stat.store}" data-delta="1">＋</button></div>`).join('')}
         </div>
       </div>`;
     } else if(f.type==='derived_bonus_grid'){
@@ -3468,10 +3819,7 @@ function _buildFieldsHtml(tpl,item) {
       ];
       html+=`<div class="form-group sh-field-full"><label>${f.label} <span style="font-size:.7rem;color:var(--text-dim);font-weight:400">— ajoutés au calcul de base quand l'objet est équipé</span></label>
         <div class="sh-bonus-row">
-          ${D.map(d=>`<label class="sh-bonus-cell" title="${d.label}">
-            <span>${d.icon} ${d.short}</span>
-            <input type="number" id="si-${d.id}" value="${item?.[d.id]||''}" placeholder="0">
-          </label>`).join('')}
+          ${D.map(d=>`<div class="si-stepper" title="${d.label}"><span>${d.icon} ${d.short}</span><button type="button" data-sh-action="editorStep" data-field="${d.id}" data-delta="-1">−</button><input type="number" id="si-${d.id}" value="${item?.[d.id]||0}"><button type="button" data-sh-action="editorStep" data-field="${d.id}" data-delta="1">＋</button></div>`).join('')}
         </div>
       </div>`;
     } else if(f.type==='skill_bonus_grid'){
@@ -3508,22 +3856,15 @@ function _buildFieldsHtml(tpl,item) {
       html+=`<div class="form-group sh-field-full">
         <label>${f.label}</label>
         <input type="hidden" id="si-traits-data" value="${traitsJson}">
-        <div id="si-traits-list" style="display:flex;flex-direction:column;gap:.35rem;margin-bottom:.4rem">
+        <div id="si-traits-list" class="si-traits-list">
           ${traitsArr.map((t,i)=>`
-          <div style="display:flex;gap:.4rem;align-items:center" data-trait-idx="${i}">
-            <input class="input-field" style="flex:1;font-size:.83rem" value="${t.replace(/"/g,'&quot;')}"
+          <div class="si-trait-row" data-trait-idx="${i}">
+            <input class="input-field" value="${t.replace(/"/g,'&quot;')}"
               data-sh-action="traitUpdate" data-sh-on="input" data-idx="${i}" placeholder="Trait...">
-            <button type="button" data-sh-action="traitRemove" data-idx="${i}"
-              style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:2px 6px">✕</button>
+            <button type="button" data-sh-action="traitRemove" data-idx="${i}" aria-label="Retirer le trait">✕</button>
           </div>`).join('')}
         </div>
-        <button type="button" data-sh-action="traitAdd"
-          style="font-size:.75rem;padding:4px 12px;border-radius:8px;cursor:pointer;
-          border:1px dashed var(--border);background:transparent;color:var(--text-dim);
-          transition:all .12s;width:100%"
-          data-hov-border="var(--gold)" data-hov-color="var(--gold)">
-          + Ajouter un trait
-        </button>
+        <input class="input-field si-trait-new" id="si-trait-new" placeholder="Nouveau trait… (Entrée pour ajouter, virgules pour plusieurs)" autocomplete="off">
       </div>`;
     } else if(f.type==='dispo'){
       // Quantité en stock + case « Illimité » (dispo = -1). Restauré : le
@@ -3578,11 +3919,10 @@ function _shopTraitsRender(arr) {
   const list = document.getElementById('si-traits-list');
   if (!list) return;
   list.innerHTML = arr.map((t,i)=>`
-    <div style="display:flex;gap:.4rem;align-items:center" data-trait-idx="${i}">
-      <input class="input-field" style="flex:1;font-size:.83rem" value="${t.replace(/"/g,'&quot;')}"
+    <div class="si-trait-row" data-trait-idx="${i}">
+      <input class="input-field" value="${t.replace(/"/g,'&quot;')}"
         data-sh-action="traitUpdate" data-sh-on="input" data-idx="${i}" placeholder="Trait...">
-      <button type="button" data-sh-action="traitRemove" data-idx="${i}"
-        style="background:none;border:none;cursor:pointer;color:#ff6b6b;font-size:.9rem;padding:2px 6px">✕</button>
+      <button type="button" data-sh-action="traitRemove" data-idx="${i}" aria-label="Retirer le trait">✕</button>
     </div>`).join('');
 }
 function addShopTrait() {
@@ -3640,6 +3980,9 @@ function removeShopDegatsStat(i) {
 function applyWeaponTypeDefaults(select) {
   const family = _weaponFormats.find(f => f.label === select?.value);
   if (!family || !hasWeaponDefaults(family.defaults)) return;
+  const trackedFields = ['degats','toucherStat','portee','mains','nature','caBonus'];
+  const before = Object.fromEntries(trackedFields.map(key => [key, document.getElementById(`si-${key}`)?.value ?? '']));
+  before.degatsStats = _shopDegatsStatsGet();
   const d = normalizeWeaponDefaults(family.defaults);
   const filled = [];
   const fill = (el, value, label) => {
@@ -3667,7 +4010,19 @@ function applyWeaponTypeDefaults(select) {
       filled.push('stats de dégâts');
     }
   }
-  if (filled.length) showNotif(`📋 ${family.label} : ${filled.join(', ')} pré-rempli${filled.length > 1 ? 's' : ''}`, 'info');
+  if (filled.length) {
+    if (_siEditorState) _siEditorState.prefill = { label: family.label, fields: filled, before };
+    showNotif(`📋 ${family.label} : ${filled.join(', ')} pré-rempli${filled.length > 1 ? 's' : ''}`, 'info');
+  }
+}
+function addShopTraitsFromInput(input) {
+  const additions = String(input?.value || '').split(/[,;]+/).map(value => value.trim()).filter(Boolean);
+  if (!additions.length) return;
+  const arr = [..._shopTraitsGet(), ...additions];
+  _shopTraitsSet(arr); _shopTraitsRender(arr);
+  input.value = '';
+  _siRefreshLive();
+  requestAnimationFrame(() => input.focus({ preventScroll: true }));
 }
 
 function toggleDispoInfini(cb){
@@ -3675,13 +4030,22 @@ function toggleDispoInfini(cb){
   const btn=document.getElementById('si-dispo-infini-btn');
   if(!input) return;
   if(cb.checked){
+    const current = Math.max(0, parseInt(input.value, 10) || 0);
+    if (_siEditorState) _siEditorState.lastFiniteStock = current;
     input.value=''; input.disabled=true; input.placeholder='∞';
     btn?.classList.add('is-on');
+    btn?.setAttribute('aria-pressed', 'true');
   } else {
-    input.disabled=false; input.placeholder='3'; input.value='5';
+    const previous = Math.max(0, Number(_siEditorState?.lastFiniteStock) || 0);
+    input.disabled=false; input.placeholder='0'; input.value=String(previous);
     btn?.classList.remove('is-on');
+    btn?.setAttribute('aria-pressed', 'false');
     input.focus();
   }
+  const stepper = input.closest('.si-stock-stepper');
+  stepper?.classList.toggle('is-disabled', cb.checked);
+  stepper?.querySelectorAll('button').forEach(step => { step.disabled = cb.checked; });
+  _siRefreshLive();
 }
 function toggleDispoInfiniBtn(){
   const cb=document.getElementById('si-dispo-infini'); if(!cb) return;
@@ -3691,23 +4055,22 @@ function toggleDispoInfiniBtn(){
 function updatePrixVente(val){ const pv=Math.round((parseFloat(val)||0)*PRIX_VENTE_RATIO); const el=document.getElementById('si-pv-val'); if(el) el.textContent=pv; }
 
 function refreshItemFields(catId) {
-  // La catégorie ne dicte plus le template — c'est le select #si-template.
-  // Cette fonction reste pour rétrocompat mais redirige vers refreshTemplateFields.
-  const tplKey = document.getElementById('si-template')?.value
-              || _cats.find(c=>c.id===catId)?.template
-              || 'classique';
-  refreshTemplateFields(tplKey);
+  const cat = _cats.find(c => c.id === catId);
+  if (!_siEditorState) return;
+  _siReadDraftFromDom();
+  _siEditorState.draft.categorieId = catId || '';
+  // Sur un article encore vide, choisir une catégorie adopte naturellement son
+  // type. Une fiche déjà renseignée ne change jamais de structure toute seule.
+  if (!_siEditorState.itemId && !_siEditorState.draft.nom && cat?.template) _siEditorState.draft.template = cat.template;
+  _siRenderEditorPanels();
 }
 
 /** Re-render les champs de la modale article selon le type sélectionné. */
 function refreshTemplateFields(tplKey) {
-  const tpl  = TEMPLATES[tplKey] || TEMPLATES.classique;
-  const host = document.getElementById('si-sections-dynamic');
-  if (!host) return;
-  // Conserve l'onglet actif si possible (sinon retombe sur "essentiel")
-  const cur = document.querySelector('.si-tab.is-active')?.dataset.tab || 'essentiel';
-  host.innerHTML = _siBuildTabs(tpl, null, tplKey, cur);
-  _bindPrixListener(); _initAutocompletes(); _siRefreshChip();
+  if (!_siEditorState || !TEMPLATES[tplKey]) return;
+  _siReadDraftFromDom();
+  _siEditorState.draft.template = tplKey;
+  _siRenderEditorPanels();
 }
 
 // ── Upload image ──────────────────────────────────────────────────────────────
@@ -3735,13 +4098,14 @@ function previewUpload(fileInputId,previewId,hiddenId) {
       const kb=Math.round(b64.length*3/4/1024);
       if(kb>700) showNotif(`⚠️ Image encore lourde (${kb}KB).`,'error');
       else showNotif(`✅ Image prête (${kb}KB)`,'success');
+      _siRefreshLive();
     };
     img.src=e.target.result;
   };
   reader.readAsDataURL(file);
 }
 
-async function saveShopItem(itemId) {
+async function saveShopItem(itemId, { createAnother = false } = {}) {
   try {
     const item = itemId ? _items.find(i=>i.id===itemId) : null;
     const catId=document.getElementById('si-cat')?.value||'';
@@ -3901,8 +4265,14 @@ async function saveShopItem(itemId) {
     if (itemId) await _syncCharactersAfterItemUpdate(itemId, data);
 
     markQuillSaved('si-readable-content');
-    closeModalDirect(); showNotif('Article enregistré !','success'); renderShop();
-  } catch (e) { notifySaveError(e); }
+    const nextSeed = createAnother ? { categorieId: catId, template: tplKey } : null;
+    if (_siEditorState) { _siEditorState.dirty = false; _siEditorState.saving = false; }
+    clearModalCloseGuard(); closeModalDirect(); showNotif('Article enregistré !','success'); renderShop();
+    if (nextSeed) await openItemModal('', nextSeed);
+  } catch (e) {
+    if (_siEditorState) { _siEditorState.saving = false; _siInstallCloseGuard(); }
+    notifySaveError(e);
+  }
 }
 
 /**
@@ -4768,32 +5138,83 @@ Object.assign(shHandlers, {
   qtyDown:        (el) => { const inp = el.nextElementSibling; inp?.stepDown(); inp?.dispatchEvent(new Event('input')); },
   qtyUp:          (el) => { const inp = el.previousElementSibling; inp?.stepUp(); inp?.dispatchEvent(new Event('input')); },
   qtyInput:       (el) => _shBuyQtyInput(el),
-  // Modal article : tabs, prix, dispo, image, nom
-  setTab:         (el) => setItemTab(el.dataset.tab),
-  refreshChip:    () => _siRefreshChip(),
+  // Éditeur d'article « Établi »
+  editorGoSection:(el) => _siGoSection(el.dataset.section),
+  editorOpenSection: (el) => {
+    _siReadDraftFromDom(); _siEditorState?.open.add(el.dataset.section); _siRenderEditorPanels();
+    requestAnimationFrame(() => _siGoSection(el.dataset.section));
+  },
+  editorToggleLibrary: () => {
+    const menu = document.getElementById('si-editor-library-menu'); if (menu) menu.hidden = !menu.hidden;
+  },
+  editorCopyItem: (el) => _siCopyExistingItem(el.dataset.id),
+  editorApplyQuick: () => _siApplyQuick(),
+  editorRarity: (el) => {
+    const current = parseInt(document.getElementById('si-rarete')?.value, 10) || 0;
+    const clicked = parseInt(el.dataset.value, 10) || 0;
+    const value = current === clicked ? 0 : clicked;
+    const hidden = document.getElementById('si-rarete'); if (hidden) hidden.value = String(value);
+    document.getElementById('si-nom')?.style.setProperty('--si-rarity', value ? (el.style.getPropertyValue('--si-rarity') || 'var(--text)') : 'var(--text)');
+    document.querySelectorAll('#si-rarity-row button').forEach(btn => btn.classList.toggle('is-on', value > 0 && btn === el));
+    _siRefreshLive();
+  },
+  editorDamageStat: (el) => {
+    const hidden = document.getElementById('si-degats-stats-data'); if (!hidden) return;
+    let values = []; try { values = JSON.parse(hidden.value || '[]'); } catch {}
+    const key = el.dataset.value;
+    values = values.includes(key) ? values.filter(value => value !== key) : [...values, key];
+    hidden.value = JSON.stringify(values);
+    el.classList.toggle('is-on', values.includes(key));
+    _siRefreshLive();
+  },
+  editorToggleConsumable: (el) => {
+    const input = document.getElementById('si-consommable'); if (!input) return;
+    input.checked = !input.checked;
+    el.classList.toggle('is-on', input.checked);
+    el.setAttribute('aria-pressed', input.checked ? 'true' : 'false');
+    _siRefreshLive();
+  },
+  editorStep: (el) => _siStep(el.dataset.field, el.dataset.delta),
+  editorSelect: (el) => {
+    const field = el.dataset.field;
+    const select = document.getElementById(`si-${field}`); if (!select) return;
+    select.value = el.dataset.value || '';
+    el.parentElement?.querySelectorAll('button').forEach(btn => btn.classList.toggle('is-on', btn === el));
+    _siRefreshLive();
+  },
+  editorUndoPrefill: () => {
+    const prefill = _siEditorState?.prefill; if (!prefill) return;
+    _siReadDraftFromDom();
+    Object.assign(_siEditorState.draft, prefill.before);
+    _siEditorState.prefill = null;
+    _siRenderEditorPanels();
+  },
+  editorCancel: () => closeModalDirect(),
   refreshFields:  (el) => refreshItemFields(el.value),
-  setItemTemplate:(el) => refreshTemplateFields(el.value),
-  setItemCat:     () => { /* la catégorie n'affecte plus les champs ; juste un changement de référence */ },
-  toggleDmgProfile: (el) => _shopToggleDmgProfile(el),
+  setItemTemplate:(el) => refreshTemplateFields(el.dataset.value || el.value),
+  setItemCat:     (el) => refreshItemFields(el.value),
+  toggleDmgProfile: (el) => { _shopToggleDmgProfile(el); _siRefreshLive(); },
   prixInput:      (el) => updatePrixVente(el.value),
   dispoInfini:    (el) => toggleDispoInfini(el),
   dispoInfiniBtn: ()   => toggleDispoInfiniBtn(),
   uploadImg:      (el) => previewUpload(el.id, el.dataset.preview, el.dataset.hidden),
-  saveItem:       (el) => saveShopItem(el.dataset.id || ''),
+  saveItem:       (el) => { if (_siEditorState) { _siEditorState.saving = true; clearModalCloseGuard(); } saveShopItem(el.dataset.id || ''); },
+  saveItemNew:    (el) => { if (_siEditorState) { _siEditorState.saving = true; clearModalCloseGuard(); } saveShopItem(el.dataset.id || '', { createAnother: true }); },
   // Modal article : actions/sorts
   addAction:      () => addShopAction(),
   editAction:     (el) => editShopAction(parseInt(el.dataset.idx)),
   removeAction:   (el) => removeShopAction(parseInt(el.dataset.idx)),
   // Modal article : traits + degats stats + skills
-  traitAdd:       () => addShopTrait(),
-  traitUpdate:    (el) => updateShopTrait(parseInt(el.dataset.idx), el.value),
-  traitRemove:    (el) => removeShopTrait(parseInt(el.dataset.idx)),
-  degatsAdd:      () => addShopDegatsStat(),
-  degatsUpdate:   (el) => updateShopDegatsStat(parseInt(el.dataset.idx), el.value),
-  weaponTypeDefaults: (el) => applyWeaponTypeDefaults(el),
-  degatsRemove:   (el) => removeShopDegatsStat(parseInt(el.dataset.idx)),
-  skillAdd:       () => addSkillBonus(),
-  skillRemove:    (el) => removeSkillBonus(el.dataset.skill),
+  traitAdd:       () => { addShopTrait(); _siRefreshLive(); },
+  traitUpdate:    (el) => { updateShopTrait(parseInt(el.dataset.idx), el.value); _siRefreshLive(); },
+  traitRemove:    (el) => { removeShopTrait(parseInt(el.dataset.idx)); _siRefreshLive(); },
+  degatsAdd:      () => { addShopDegatsStat(); _siRefreshLive(); },
+  degatsUpdate:   (el) => { updateShopDegatsStat(parseInt(el.dataset.idx), el.value); _siRefreshLive(); },
+  weaponTypeDefaults: (el) => { applyWeaponTypeDefaults(el); _siReadDraftFromDom(); _siRenderEditorPanels(); },
+  degatsRemove:   (el) => { removeShopDegatsStat(parseInt(el.dataset.idx)); _siRefreshLive(); },
+  skillAdd:       () => { addSkillBonus(); _siRefreshLive(); },
+  skillValue:     (el) => { const chip = el.closest('.sh-skill-chip'); if (chip) chip.dataset.val = String(parseInt(el.value, 10) || 0); _siRefreshLive(); },
+  skillRemove:    (el) => { removeSkillBonus(el.dataset.skill); _siRefreshLive(); },
   // Modal catégorie
   saveCat:        (el) => saveCat(el.dataset.id || ''),
   // Export / import
