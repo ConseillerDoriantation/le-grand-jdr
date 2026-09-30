@@ -101,7 +101,7 @@ import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
   _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf,
 } from './vtt-effective.js';
-import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttBuildJetsBody, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
+import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttInsFilterConditionPicker, _vttBuildJetsBody, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
@@ -325,9 +325,12 @@ function _vttClearAoptSearch(btn) {
   if (inp) { inp.value = ''; _vttAoptSearch('', inp); inp.focus(); }
 }
 function _vttMoveTokenAndReset(sel, tid) {
-  if (!sel.value) return;
-  _vttMoveTokenToPage(tid, sel.value);
-  sel.value = '';
+  const input = sel?.matches?.('select')
+    ? sel
+    : document.getElementById(sel?.dataset?.pageSelect || '');
+  if (!input?.value) return;
+  _vttMoveTokenToPage(tid, input.value);
+  input.value = '';
 }
 function _vttSetEmoteAlbum(v) {
   const t = (v || '').trim();
@@ -357,6 +360,11 @@ function _vttIsTypingTarget(target) {
     (editable && editable.getAttribute('contenteditable') !== 'false') ||
     el.isContentEditable
   );
+}
+
+function _vttHasCopyableTextSelection() {
+  const selection = window.getSelection?.();
+  return !!selection && !selection.isCollapsed && selection.toString().length > 0;
 }
 
 function _vttSetActionPending(el) {
@@ -13964,6 +13972,12 @@ async function _vttClearBuffs(id) {
   if (!STATE.isAdmin) return;
   const t=VS.tokens[id]?.data; if (!t) return;
   const previous = t.buffs || [];
+  if (!previous.length) return;
+  const accepted = await confirmModal(
+    `Supprimer les ${previous.length} effet${previous.length > 1 ? 's' : ''} actif${previous.length > 1 ? 's' : ''} de ce token ?`,
+    { title: 'Purger les effets', confirmLabel: 'Purger', danger: true, icon: '🗑️' },
+  );
+  if (!accepted) return;
   _vttPatchTokenOptimistically(id, { buffs: [] });
   try {
     await updateDoc(_tokRef(id),{buffs:[]});
@@ -15388,6 +15402,9 @@ function _keyHandler(e) {
   if (e.key === 'Enter' && _polyActive) { e.preventDefault(); _polyFinish(); return; }
   // Ctrl+C / Ctrl+V : copier / coller la sélection (tokens + dessins)
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+    // Une sélection de texte (notamment dans le chat) reste prioritaire sur
+    // le presse-papier interne des tokens et dessins.
+    if (_vttHasCopyableTextSelection()) return;
     if (_vttCopySelection()) e.preventDefault();
     return;
   }
@@ -15854,7 +15871,6 @@ function _vttRailButton(id, label, shortcut, description, { tool = '', panel = '
       ${tool ? `data-tool="${tool}" data-vtt-fn="_vttTool" data-vtt-args="${tool}" aria-pressed="${active}"` : ''}
       ${panel ? `data-tool-panel="${panel}"` : ''}
       ${!tool && id === 'center' ? 'data-vtt-fn="_vttCenterOnMyToken"' : ''}
-      ${!tool && id === 'perf' ? `data-vtt-fn="_vttToggleLowFx" aria-pressed="${vttLowFx()}"` : ''}
       ${!tool && id === 'keys' ? 'data-vtt-fn="_vttOpenKeyboardHelp"' : ''}
       aria-label="${label}">
     ${_vttToolIcon(id)}${shortcut ? `<span class="vtt-tool-key">${shortcut}</span>` : ''}
@@ -15887,7 +15903,6 @@ function _vttToolbarMarkup() {
       </div>
       <div class="vtt-tool-group">${_vttRailButton('center','Recentrer','X','Ramène la vue sur ton personnage.')}</div>
       <div class="vtt-tool-group">
-        ${_vttRailButton('perf','Mode performance','','Coupe les effets coûteux pour fluidifier la table.',{active:vttLowFx(),extra:'vtt-tool-performance'})}
         ${_vttRailButton('keys','Raccourcis','?','Affiche toutes les commandes clavier.',{panel:'keys'})}
       </div>
     </div>
@@ -16277,6 +16292,7 @@ export const VTT_ACTIONS = {
   _vttFogRedo,
   _vttImportGithubRelease,
   _vttInsTab,
+  _vttInsFilterConditionPicker,
   _vttOpenSource,
   _vttRcolView,
   _vttSkillFilter,

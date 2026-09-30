@@ -901,9 +901,9 @@ async function _vttCreatSendLootToStash(beastId, idx, btn) {
   await _vttLootAddItemToStash(item, qty, template);
 
   if (btn) {
-    btn.textContent = '✓';
+    btn.textContent = 'Envoyé';
     btn.classList.add('vtt-creat-loot-add--ok');
-    setTimeout(() => { btn.textContent = '＋'; btn.classList.remove('vtt-creat-loot-add--ok'); }, 800);
+    btn.disabled = true;
   }
   showNotif(`+${qty} "${item.nom}" → réserve MJ`, 'success');
 }
@@ -928,9 +928,9 @@ async function _vttCreatSendGoldToStash(beastId, btn) {
   if (!amt) { showNotif('Or lancé = 0', 'warning'); return; }
   await _vttLootAddGoldToStash(amt);
   if (btn) {
-    btn.textContent = '✓';
+    btn.textContent = 'Envoyé';
     btn.classList.add('vtt-creat-loot-add--ok');
-    setTimeout(() => { btn.textContent = '＋'; btn.classList.remove('vtt-creat-loot-add--ok'); }, 800);
+    btn.disabled = true;
   }
   showNotif(`🪙 ${formula} → ${amt} or → réserve MJ`, 'success');
 }
