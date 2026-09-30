@@ -9,7 +9,7 @@ import { _esc, _nl2br, _norm } from '../../shared/html.js';
 import { calcDeckMax, calcPMMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
 import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell, spellValidationState as _sortValidationState } from '../../shared/spell-deck.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
-import { loadConditionLibrary } from '../../shared/conditions.js';
+import { loadConditionLibrary, conditionSpellRunes } from '../../shared/conditions.js';
 import { loadSpellMatrices, getMatrixSuggestions, getComboConfig, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
 import { getSpellSystemMode, loadSpellSystem, spellRuneCost, spellSetCostDelta } from '../../shared/spell-system.js';
@@ -3886,6 +3886,7 @@ export async function openSortModal(idx, s) {
 
 // Cache des états en mémoire pour éviter de retaper Firestore à chaque dropdown
 let _conditionsLibCache = null;
+let _stateRuneBudgetKey = '';   // « nbEnchantement|nbAffliction » des listes d'états affichées
 
 /** Source unique : lit world/conditions dans Firestore via le module partagé. */
 async function _loadAllConditions() {
@@ -3901,11 +3902,13 @@ function _conditionSupportsSpellUsage(condition, usage) {
   return usage === 'enchantment' ? !!su.enchantment : !!su.affliction;
 }
 
-/** Remplit un <select> d'état (Enchantement OU Affliction) depuis la BDD. */
-async function _populateConditionSelect(selectId, savedHiddenId, usage) {
+/** Remplit un <select> d'état (Enchantement OU Affliction) depuis la BDD.
+ * `maxRunes` : runes disponibles pour cet état ; un état qui en coûte plus
+ * (Invisible, Rage, Paralysé, Pétrifié : 2) est grisé avec son coût. */
+async function _populateConditionSelect(selectId, savedHiddenId, usage, maxRunes = Infinity) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
-  const savedVal = document.getElementById(savedHiddenId)?.value || '';
+  const savedVal = sel.value || document.getElementById(savedHiddenId)?.value || '';
   const lib = await _loadAllConditions();
   const filtered = lib.filter(c => _conditionSupportsSpellUsage(c, usage) || c.id === savedVal);
   if (!lib.length) {
@@ -3916,10 +3919,27 @@ async function _populateConditionSelect(selectId, savedHiddenId, usage) {
     sel.innerHTML = `<option value="">— Aucun état compatible —</option>`;
     return;
   }
+  const runeFamily = usage === 'enchantment' ? 'Enchantement' : 'Affliction';
   sel.innerHTML = `<option value="">— Aucun —</option>`
-    + filtered.map(c => `<option value="${c.id}" title="${_esc(c.desc||'')}" ${c.id===savedVal?'selected':''}>${c.icon||''} ${c.label}</option>`).join('');
+    + filtered.map(c => {
+      const cost = conditionSpellRunes(c);
+      const tooCostly = cost > maxRunes;
+      const costLbl = cost > 1 ? ` (${cost} runes${tooCostly ? ` ${runeFamily} requises` : ''})` : '';
+      const selected = c.id === savedVal && !tooCostly;
+      return `<option value="${c.id}" title="${_esc(c.desc||'')}" ${selected?'selected':''} ${tooCostly?'disabled':''}>${c.icon||''} ${c.label}${costLbl}</option>`;
+    }).join('');
   _updateEtatDesc(sel);
-  sel.onchange = () => _updateEtatDesc(sel);
+  sel.onchange = () => {
+    _updateEtatDesc(sel);
+    // Un état d'Enchantement à 2 runes occupe les deux : moins d'états supplémentaires.
+    if (selectId === 's-enchant-etat') _renderEnchantExtraSlots();
+  };
+}
+
+// Runes consommées par l'état choisi dans un <select> (1 si rien / état simple).
+function _selectedStateRuneCost(selectId) {
+  const id = document.getElementById(selectId)?.value || '';
+  return id ? conditionSpellRunes((_conditionsLibCache || []).find(c => c.id === id)) : 1;
 }
 
 // Affiche sous un <select> d'état la description de l'état choisi → on comprend
@@ -3944,14 +3964,15 @@ function _updateEtatDesc(sel) {
   }
 }
 
-function _populateEnchantEtatSelect()    { return _populateConditionSelect('s-enchant-etat', 's-enchant-etat-saved', 'enchantment'); }
+function _populateEnchantEtatSelect()    { return _populateConditionSelect('s-enchant-etat', 's-enchant-etat-saved', 'enchantment', _runeCountsEdit?.Enchantement || 0); }
 
 // États d'enchantement SUPPLÉMENTAIRES : 1 sélecteur par rune Enchantement en plus
 // du premier. Idempotent (ne reconstruit que si le nombre change → préserve les choix).
 async function _renderEnchantExtraSlots() {
   const container = document.getElementById('s-enchant-extra-slots');
   if (!container) return;
-  const needed = Math.max(0, (_runeCountsEdit?.Enchantement || 0) - 1);   // le 1er état = s-enchant-etat
+  // Le 1er état (s-enchant-etat) consomme 1 rune, ou 2 pour Invisible / Rage.
+  const needed = Math.max(0, (_runeCountsEdit?.Enchantement || 0) - _selectedStateRuneCost('s-enchant-etat'));
   const existing = container.querySelectorAll('select.s-enchant-extra').length;
   if (existing === needed && container.dataset.rendered === '1') return;   // rien à refaire
   const cur = [...container.querySelectorAll('select.s-enchant-extra')].map(s => s.value);
@@ -3967,7 +3988,8 @@ async function _renderEnchantExtraSlots() {
       <input type="hidden" id="s-enchant-etat-${i + 1}-saved" value="${_esc(saved(i))}">
     </div>`).join('');
   for (let i = 0; i < needed; i++) {
-    await _populateConditionSelect(`s-enchant-etat-${i + 1}`, `s-enchant-etat-${i + 1}-saved`, 'enchantment');
+    // États supplémentaires : 1 rune chacun (un état à 2 runes se choisit en 1er).
+    await _populateConditionSelect(`s-enchant-etat-${i + 1}`, `s-enchant-etat-${i + 1}-saved`, 'enchantment', 1);
   }
 }
 // Liste ordonnée des états d'enchantement choisis (1er + supplémentaires non vides).
@@ -3980,7 +4002,7 @@ function _collectEnchantEtatIds() {
   });
   return ids;
 }
-function _populateAfflictionEtatSelect() { return _populateConditionSelect('s-affliction-etat', 's-affliction-etat-saved', 'affliction'); }
+function _populateAfflictionEtatSelect() { return _populateConditionSelect('s-affliction-etat', 's-affliction-etat-saved', 'affliction', _runeCountsEdit?.Affliction || 0); }
 
 function _refreshEnchantStateTuning() {
   const wrap = document.getElementById('s-enchant-state-tuning');
@@ -4114,6 +4136,13 @@ function _refreshConditionalSections() {
   if (affSec)  affSec.style.display  = (hasAffliction && !isRegen) ? '' : 'none';
   if (regenSec)  regenSec.style.display  = isRegen ? '' : 'none';
   if (enchantSec) enchantSec.style.display = hasEnchant ? '' : 'none';
+  // Nombre de runes modifié : les états à 2 runes deviennent (in)disponibles.
+  const runeBudgetKey = `${_runeCountsEdit?.Enchantement || 0}|${_runeCountsEdit?.Affliction || 0}`;
+  if (_conditionsLibCache && runeBudgetKey !== _stateRuneBudgetKey) {
+    _stateRuneBudgetKey = runeBudgetKey;
+    _populateAfflictionEtatSelect();
+    _populateEnchantEtatSelect().then(() => { if (hasEnchant) _renderEnchantExtraSlots(); });
+  }
   if (hasEnchant) _renderEnchantExtraSlots();   // (re)génère 1 select par rune Enchantement en plus
   // Avec Enchantement, l'Amplification BOOSTE l'effet (portée/déplacement de l'état) :
   // pas de choix de mode zone/déplacement → on masque la section et on force « zone ».

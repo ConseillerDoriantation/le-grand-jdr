@@ -40,10 +40,10 @@ import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nea
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, spellConditionId, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, spellConditionId, affordableSpellConditionId, enchantStatesWithinRunes, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm, getProtectionCAOverride, getProtectionReductionStep } from '../../shared/spell-matrices.js';
-import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
+import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary, conditionSpellRunes } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
 import { toggleTheme } from '../../shared/theme.js';
 import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken, bumpDamageTaken, setActiveStatsSession } from '../../shared/stats.js';
@@ -3963,12 +3963,14 @@ function _vttSpellMods(s) {
         } : null,
     // Enchantement mode État : applique l'état choisi directement à l'allié
     enchantEtatId: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
-      ? (spellConditionId(s.enchantEtatId) || null) : null,
+      ? (enchantStatesWithinRunes([spellConditionId(s.enchantEtatId)], nbEnch, id => conditionSpellRunes(CONDITION_BY_ID[id]))[0] || null) : null,
     // Multi-états : 1 par rune Enchantement (le 1er garde ses réglages fins, les
     // suivants sont auto-modulés par Puissance/Amplification). Limité à nbEnch.
     enchantEtatIds: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
-      ? ((Array.isArray(s.enchantEtatIds) && s.enchantEtatIds.length
-          ? s.enchantEtatIds : [s.enchantEtatId]).map(spellConditionId).filter(Boolean).slice(0, nbEnch))
+      // Chaque état coûte ses runes (Invisible, Rage : 2) : le total ne dépasse pas nbEnch.
+      ? enchantStatesWithinRunes((Array.isArray(s.enchantEtatIds) && s.enchantEtatIds.length
+          ? s.enchantEtatIds : [s.enchantEtatId]).map(spellConditionId).filter(Boolean),
+          nbEnch, id => conditionSpellRunes(CONDITION_BY_ID[id]))
       : [],
     enchantStatePower: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? nbP : 0,
@@ -4014,7 +4016,9 @@ function _vttSpellMods(s) {
           const mode = getAfflictionMode(s);
           let saveStat = 'constitution';
           let conditionLib = null;
-          const etatId = mode === 'etat' ? getAfflictionEtatId(s) : '';
+          // État à 2 runes (Paralysé, Pétrifié) avec une seule rune : version 1 rune.
+          const rawEtatId = mode === 'etat' ? getAfflictionEtatId(s) : '';
+          const etatId = affordableSpellConditionId(rawEtatId, nbAff, conditionSpellRunes(CONDITION_BY_ID[rawEtatId]));
           if (etatId) {
             conditionLib = CONDITION_BY_ID[etatId] || null;
             if (conditionLib?.defaultSaveStat) saveStat = conditionLib.defaultSaveStat;

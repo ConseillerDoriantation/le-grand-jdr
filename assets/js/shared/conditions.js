@@ -6,20 +6,20 @@ export const CONDITION_DEFAULT_LIBRARY = [
     defaultSaveStat:'constitution', defaultDC:11, defaultDuration:2,
     effects:{ attackBy:'dis' } },
   { id:'charmed',       label:'Charmé',      icon:'💖', color:'#ec4899',
-    desc:'Ne peut pas attaquer le charmeur ni le viser par un effet nuisible. Avantage social pour le charmeur.',
-    defaultSaveStat:'sagesse',     defaultDC:11,
+    desc:'Ne peut pas attaquer le charmeur ni le viser par un effet nuisible. Avantage social pour le charmeur. Surtout utile hors combat (arbitré par le MJ).',
+    defaultSaveStat:'sagesse',     defaultDC:11, defaultDuration:2,
     effects:{} },
   { id:'taunted',       label:'Provoqué',    icon:'😡', color:'#ef4444',
     desc:'L\'aggro est fixée sur un porteur (le lanceur ou l\'allié qu\'il désigne) : ses attaques doivent viser ce porteur, toute attaque qui ne l\'inclut pas est refusée. Sans effet si le porteur est à 0 PV ou absent de la scène.',
-    defaultSaveStat:'charisme',    defaultDC:11, defaultDuration:2,
+    defaultSaveStat:'sagesse',     defaultDC:11, defaultDuration:2,
     effects:{ tauntLock:true } },
   { id:'deafened',      label:'Assourdi',    icon:'🔇', color:'#94a3b8',
     desc:'Ne peut pas entendre, échec auto aux tests basés sur l\'Ouïe.',
     defaultSaveStat:'constitution', defaultDC:11,
     effects:{} },
   { id:'frightened',    label:'Effrayé',     icon:'😱', color:'#f59e0b',
-    desc:'Désavantage à ses jets tant que la source est en vue. Ne peut s\'en approcher volontairement.',
-    defaultSaveStat:'sagesse',     defaultDC:11,
+    desc:'Désavantage à ses attaques tant que la source de sa peur est en vue ; ne peut s\'en approcher volontairement (arbitré par le MJ). Se résiste en Sagesse, là où Aveuglé se résiste en Constitution.',
+    defaultSaveStat:'sagesse',     defaultDC:11, defaultDuration:2,
     effects:{ attackBy:'dis' } },
   { id:'grappled',      label:'Empoigné',    icon:'🤼', color:'#a16207',
     desc:'Vitesse 0. Prend fin si le saisisseur est neutralisé.',
@@ -30,20 +30,20 @@ export const CONDITION_DEFAULT_LIBRARY = [
     defaultSaveStat:'constitution', defaultDC:11,
     effects:{ cantAct:true } },
   { id:'invisible',     label:'Invisible',   icon:'👻', color:'#9ca3af',
-    desc:'Ne peut être vu sans détection. Avantage à ses attaques, désavantage aux attaques contre lui.',
-    defaultSaveStat:null,           defaultDC:null,
+    desc:'Ne peut être vu sans détection. Avantage à ses attaques, désavantage aux attaques contre lui. Sort : 2 runes Enchantement pour ce seul état.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:2, spellRunes:2,
     effects:{ attackBy:'adv', attackAgainst:'dis' } },
   { id:'paralyzed',     label:'Paralysé',    icon:'⚡', color:'#fbbf24',
-    desc:'Neutralisé, ne peut bouger ni parler. Échec auto JS Force/Dex. Avantage aux attaques. CaC à ≤1,50m = critique. Contrôle total : 1 tour, jamais prolongé (Concentration / Durée).',
-    defaultSaveStat:'constitution', defaultDC:11, defaultDuration:1,
+    desc:'Étourdi renforcé : perd son tour, échec auto JS Force/Dex, avantage aux attaques contre lui et tout coup au contact (≤1,50m) est critique. Contrôle total : 1 tour, jamais prolongé. Sort : 2 runes Affliction pour ce seul état.',
+    defaultSaveStat:'sagesse',     defaultDC:13, defaultDuration:1, spellRunes:2,
     effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, meleeCritOnHit:true } },
   { id:'petrified',     label:'Pétrifié',    icon:'🗿', color:'#78716c',
-    desc:'Transformé en pierre. Neutralisé, vitesse 0. Résistance à tous les dégâts (50%). Contrôle total : 1 tour, jamais prolongé (Concentration / Durée).',
-    defaultSaveStat:'constitution', defaultDC:11, defaultDuration:1,
+    desc:'Transformé en pierre : retiré du combat un tour (aucune action, vitesse 0), mais ne subit que la moitié des dégâts. Contrôle total : 1 tour, jamais prolongé. Sort : 2 runes Affliction pour ce seul état.',
+    defaultSaveStat:'constitution', defaultDC:13, defaultDuration:1, spellRunes:2,
     effects:{ cantAct:true, movementMod:0, attackAgainst:'adv', failsStrSaves:true, failsDexSaves:true, dmgReductionPct:50 } },
   { id:'prone',         label:'À terre',     icon:'🛌', color:'#a78bfa',
     desc:'Désavantage à ses attaques. Avantage aux attaques au CaC ≤1,50m, désavantage à distance. Se relever coûte ½ mouvement.',
-    defaultSaveStat:null,           defaultDC:null,
+    defaultSaveStat:'dexterite',   defaultDC:11, defaultDuration:1,
     effects:{ attackBy:'dis', attackAgainstMelee:'adv', attackAgainstRanged:'dis' } },
   { id:'restrained',    label:'Entravé',     icon:'⛓️', color:'#dc2626',
     desc:'Immobilisé : vitesse 0. Peut toujours attaquer et lancer des sorts.',
@@ -51,7 +51,7 @@ export const CONDITION_DEFAULT_LIBRARY = [
     effects:{ movementMod:0 } },
   { id:'slowed',        label:'Ralenti',     icon:'🐌', color:'#64748b',
     desc:'−2 cases de déplacement. (Miroir d\'Accéléré.)',
-    defaultSaveStat:'sagesse',     defaultDC:11, defaultDuration:2,
+    defaultSaveStat:'force',       defaultDC:11, defaultDuration:2,
     effects:{ movementBonus:-2 } },
   { id:'stunned',       label:'Étourdi',     icon:'💫', color:'#06b6d4',
     desc:'Perd son tour : aucune action ni déplacement. Échec auto JS Force/Dex. Avantage aux attaques contre lui. Contrôle total : 1 tour, jamais prolongé (Concentration / Durée).',
@@ -67,7 +67,7 @@ export const CONDITION_DEFAULT_LIBRARY = [
     effects:{ cantCastSpells:true } },
   { id:'marked',        label:'Marqué',      icon:'🎯', color:'#f43f5e',
     desc:'Avantage aux attaques contre la cible et +2d6 dégâts subis. L\'effet se consomme dès qu\'un coup touche.',
-    defaultSaveStat:null,           defaultDC:null, defaultDuration:null,
+    defaultSaveStat:'dexterite',   defaultDC:11, defaultDuration:null,
     effects:{ attackAgainst:'adv', dmgTakenBonus:'2d6', consumedByAttackAgainst:true } },
   { id:'swift',         label:'Accéléré',    icon:'💨', color:'#38bdf8',
     desc:'L\'allié gagne +2 cases de déplacement, +1 par rune Amplification du sort d\'enchantement.',
@@ -98,8 +98,8 @@ export const CONDITION_DEFAULT_LIBRARY = [
     defaultSaveStat:'sagesse',      defaultDC:11, defaultDuration:2,
     effects:{ concentrationCheck:true } },
   { id:'rage',          label:'Rage',        icon:'🔥', color:'#ef4444',
-    desc:'Rage D&D : avantage aux tests et JS de Force, bonus de dégâts aux attaques de mêlée utilisant la Force (+2, puis +3 niv. 9 et +4 niv. 16), résistance aux dégâts contondants, perforants et tranchants. Impossible de lancer des sorts ou de maintenir une concentration.',
-    defaultSaveStat:null,           defaultDC:null, defaultDuration:10,
+    desc:'Rage D&D : avantage aux tests et JS de Force, bonus de dégâts aux attaques de mêlée utilisant la Force (+2, puis +3 niv. 9 et +4 niv. 16), résistance aux dégâts contondants, perforants et tranchants. Impossible de lancer des sorts ou de maintenir une concentration. Sort : 2 runes Enchantement pour ce seul état.',
+    defaultSaveStat:null,           defaultDC:null, defaultDuration:10, spellRunes:2,
     effects:{
       checkAdvantageStats:['force'], saveAdvantageStats:['force'],
       dmgDealtBonus:'2',
@@ -121,7 +121,7 @@ export const CONDITION_DEFAULT_LIBRARY = [
     effects:{ dmgDealtBonus:'1d4' } },
   { id:'faiblesse',     label:'Faiblesse',   icon:'💢', color:'#f59e0b',
     desc:'Le prochain coup de l\'élément du sort qui l\'a affligée inflige des dégâts doublés, puis la Faiblesse se consomme (2 tours max). Annule une résistance à cet élément, sans percer immunité ni absorption.',
-    defaultSaveStat:null,           defaultDC:null, defaultDuration:2,
+    defaultSaveStat:'constitution', defaultDC:11, defaultDuration:2,
     effects:{ consumedByElementHit:true } },
   { id:'weakened',      label:'Affaibli',    icon:'🥀', color:'#a855f7',
     desc:'Ses coups réussis infligent −(1 + Puissance)d4 dégâts (1 minimum). (Miroir de Renforcé.)',
@@ -155,42 +155,48 @@ export const CONDITION_DEFAULT_IDS = new Set(CONDITION_DEFAULT_LIBRARY.map(c => 
 const CONDITION_REMOVED_IDS = new Set(['poisoned', 'warded']);
 // Un état = un levier. Enchantement (allié) et Affliction (ennemi) se répondent
 // en miroir : Guidé/Aveuglé, Renforcé/Affaibli, Accéléré/Ralenti, Garde/Marqué.
-const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'allonge', 'chanceux', 'guided', 'distant_ward', 'melee_ward', 'empowered']);
+const CONDITION_ENCHANTMENT_DEFAULT_IDS = new Set(['swift', 'allonge', 'chanceux', 'guided', 'distant_ward', 'melee_ward', 'empowered', 'invisible', 'rage']);
 // Hors sorts (pose MJ, capacités, créatures) : actions de base, états sans effet
 // en combat VTT, doublons d'un état de sort plus lisible, capacités de classe.
 const CONDITION_NON_SPELL_DEFAULT_IDS = new Set([
   'dodge', 'hidden', 'disengaged', 'exposed',
-  'deafened', 'charmed', 'invisible',
-  'incapacitated', 'unconscious', 'paralyzed', 'petrified', 'grappled', 'frightened',
-  'focused', 'rage',
+  'deafened', 'incapacitated', 'unconscious', 'grappled', 'focused',
 ]);
+
+/** Runes de la famille (Enchantement / Affliction) consommées par cet état dans
+ * un sort : 1 par défaut, 2 pour les états puissants (Invisible, Rage,
+ * Paralysé, Pétrifié) qui occupent alors les deux runes à eux seuls. */
+export function conditionSpellRunes(condition = {}) {
+  return Math.max(1, Math.min(3, parseInt(condition?.spellRunes, 10) || 1));
+}
 
 // ── Équilibrage des états ──
 // Une bibliothèque sauvegardée par le MJ écrase les défauts. Quand l'équilibrage
 // change, les champs listés ici sont réimposés UNE fois aux lignes sauvegardées
 // avant cette version (le MJ peut ensuite les retoucher, la ligne passe à jour).
 // Patches cumulatifs : une ligne en retard reçoit toutes les valeurs actuelles.
-export const CONDITION_BALANCE_VERSION = 2;
+export const CONDITION_BALANCE_VERSION = 3;
 const CONDITION_BALANCE_PATCHES = {
-  marked:        { fields: ['desc'], effects: ['dmgTakenBonus'] },
-  faiblesse:     { fields: ['desc'], effects: ['consumedByElementHit'] },
+  marked:        { fields: ['desc', 'defaultSaveStat', 'defaultDC'], effects: ['dmgTakenBonus'] },
+  faiblesse:     { fields: ['desc', 'defaultSaveStat', 'defaultDC'], effects: ['consumedByElementHit'] },
   stunned:       { fields: ['desc', 'defaultDuration'] },
-  paralyzed:     { fields: ['desc', 'defaultDuration'], spellUsage: true },
-  petrified:     { fields: ['desc', 'defaultDuration'], spellUsage: true },
+  paralyzed:     { fields: ['desc', 'defaultDuration', 'defaultSaveStat', 'defaultDC', 'spellRunes'], spellUsage: true },
+  petrified:     { fields: ['desc', 'defaultDuration', 'defaultDC', 'spellRunes'], spellUsage: true },
+  prone:         { fields: ['defaultSaveStat', 'defaultDC', 'defaultDuration'] },
   blinded:       { fields: ['desc', 'defaultDuration'], effects: ['attackBy', 'attackAgainst'] },
   restrained:    { fields: ['desc', 'defaultDuration'], effects: ['movementMod', 'attackBy', 'attackAgainst'] },
-  slowed:        { fields: ['desc'], effects: ['movementBonus'] },
-  taunted:       { fields: ['desc'], effects: ['tauntLock'] },
+  slowed:        { fields: ['desc', 'defaultSaveStat'], effects: ['movementBonus'] },
+  taunted:       { fields: ['desc', 'defaultSaveStat'], effects: ['tauntLock'] },
   empowered:     { fields: ['desc'] },
   deafened:      { spellUsage: true },
   incapacitated: { spellUsage: true },
   unconscious:   { spellUsage: true },
-  charmed:       { spellUsage: true },
-  invisible:     { spellUsage: true },
+  charmed:       { fields: ['desc', 'defaultDuration'], spellUsage: true },
+  invisible:     { fields: ['desc', 'defaultDuration', 'spellRunes'], spellUsage: true },
   grappled:      { spellUsage: true },
-  frightened:    { spellUsage: true },
+  frightened:    { fields: ['desc', 'defaultDuration'], spellUsage: true },
   focused:       { spellUsage: true },
-  rage:          { spellUsage: true },
+  rage:          { fields: ['desc', 'spellRunes'], spellUsage: true },
 };
 
 function applyBalancePatch(def, ov) {
@@ -237,6 +243,7 @@ function normalizeCondition(entry = {}) {
     defaultSaveStat: entry.defaultSaveStat || null,
     defaultDC: entry.defaultDC || null,
     defaultDuration: entry.defaultDuration || null,
+    ...(entry.spellRunes ? { spellRunes: conditionSpellRunes(entry) } : {}),
     spellUsage: entry.spellUsage ? normalizeSpellUsage(entry) : null,
     effects: { ...(entry.effects || {}) },
     balanceVersion: Number(entry.balanceVersion) || 0,
