@@ -7,7 +7,7 @@ import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { RARETE_NAMES, _rareteColor, buildRaretePicker, pickRarete, loadRarities, openRaritiesAdmin } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes, loadingHtml, eyeIcon } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
-import { calcOr, computeEquipStatsBonus, getItemStatBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort, getDefaultCharForUser } from '../shared/char-stats.js';
+import { calcOr, computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort, getDefaultCharForUser } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { WEAPON_HANDS_OPTIONS, hasWeaponDefaults, normalizeWeaponDefaults, resolveWeaponFamily, weaponHandsLabel } from '../shared/weapon-family.js';
@@ -43,6 +43,7 @@ import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
 import { shopAffinityScore, shopCartTotals, shopItemBuyState, shopUpgradeGain } from '../shared/shop-cart.js';
+import { atelierApplyBuild, atelierCompactSlots, atelierGainScore, atelierNetCost } from '../shared/shop-atelier.js';
 import {
   equipmentSlotAcceptsItem, getEquipmentItemOptions, getEquipmentSlot,
   getEquipmentSlots, resolveEquipmentSlotForItem,
@@ -150,6 +151,18 @@ const _SHOP_ICONS = {
   chevronLeft: '<path d="m15 6-6 6 6 6"/>',
   up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   coin: '<circle cx="12" cy="12" r="8"/><path d="M14.8 9.4c-.6-.7-1.5-1-2.7-1-1.5 0-2.5.7-2.5 1.8 0 2.8 5.2 1.3 5.2 4 0 1.1-1 1.9-2.7 1.9-1.3 0-2.3-.4-3-1.2M12 6.8v10.4"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  save: '<path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  shield: '<path d="M12 3l7 3v5.5c0 4.3-3 7.7-7 9.5-4-1.8-7-5.2-7-9.5V6z"/>',
+  heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
+  mana: '<path d="M12 3l6 9-6 9-6-9z"/>',
+  move: '<path d="M13 4a1.6 1.6 0 1 1 0 .01M9 20l2.5-6 3 2.5V21M8 11l3-3 3.5 2 2.5 3.5M11.5 8 9.5 13"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
 };
 function _shopIcon(name, cls = 'shc-svg') {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${_SHOP_ICONS[name] || ''}</svg>`;
@@ -465,7 +478,7 @@ export async function renderShop() {
       <nav class="sh-page-tabs" role="tablist" aria-label="Sections de la boutique">
         <button type="button" class="sh-page-tab ${_shopSection === 'shop' ? 'active' : ''}"
           data-sh-action="setSection" data-section="shop" role="tab" aria-selected="${_shopSection === 'shop'}">
-          ${_shopIcon('bag')} Boutique
+          ${_shopIcon('bag')} Boutique${_cartTotals(activeChar).count ? `<span class="sh-page-tab-count">${_cartTotals(activeChar).count}</span>` : ''}
         </button>
         <button type="button" class="sh-page-tab ${_shopSection === 'atelier' ? 'active' : ''}"
           data-sh-action="setSection" data-section="atelier" role="tab" aria-selected="${_shopSection === 'atelier'}">
@@ -1628,7 +1641,12 @@ function _resolveSlotForItem(item) {
 // (champs nécessaires aux calculs : statsBonus, CA, type d'armure pour le bouclier).
 function _buildSimEquipFromShop(slot, shopItem) {
   const base = {
+    itemId: shopItem.id || shopItem.itemId || '',
     nom: shopItem.nom || '',
+    template: shopItem.template || '',
+    icon: shopItem.icon || '',
+    image: shopItem.image || '',
+    rarete: shopItem.rarete || '',
     fo:  getItemStatBonus(shopItem, 'force'),
     dex: getItemStatBonus(shopItem, 'dexterite'),
     in:  getItemStatBonus(shopItem, 'intelligence'),
@@ -1966,7 +1984,7 @@ function shopSetChar(charId) {
     _detailItemId = null;
   }
   if (_shopSection === 'atelier') {
-    _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: _atelier.sort || 'rarity' };
+    _atelier = _newAtelierState({ sort: _atelier?.sort || 'gain' });
   } else if (_shopSection === 'artisan') {
     _artisanNeedsReset = true;
   }
@@ -3980,532 +3998,616 @@ async function deleteShopItem(itemId) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ATELIER D'ESSAYAGE — version simplifiée
-// Modale plein écran à 3 colonnes :
-//   • Doll : silhouette du perso avec les slots configurés pour l'aventure.
-//   • Stats : 6 caracs + 4 dérivés (CA, PV max, PM max, Vitesse) avec
-//     cur → next + delta coloré live.
-//   • Items : liste des articles compatibles avec le slot actif, clic = toggle
-//     l'essai. Reset bouton pour vider tous les essais.
-// État local (réinitialisé à chaque ouverture) :
-//   _atelier = { activeSlot, simulated: { slot → shopItem } }
+// ATELIER D'ÉQUIPEMENT — builds différentiels, aperçu et panier local
 // ══════════════════════════════════════════════════════════════════════════════
-const _atelierSlots = () => getEquipmentSlots().map(slot => ({
-  name: slot.id,
-  label: slot.label,
-  ico: slot.icon,
-}));
-let _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: 'rarity' };
+const _cloneSlots = slots => Object.fromEntries(Object.entries(slots || {}).map(([slot, id]) => [slot, id ?? null]));
+const _atelierSlots = () => getEquipmentSlots().map(slot => ({ ...slot, name: slot.id, ico: slot.icon }));
+
+function _newAtelierState({ sort = 'gain' } = {}) {
+  return {
+    buildId: 'equip', draft: {}, cmp: 'equip', slot: getEquipmentSlots()[0]?.id || null,
+    src: 'all', sort, q: '', preview: undefined, resale: true, renaming: null,
+    contextBuild: null, working: new Map(), localBuilds: [],
+  };
+}
+
+let _atelier = _newAtelierState();
+
+function _atelierBuilds(c = _getActiveShopChar()) {
+  const saved = Array.isArray(c?.shopBuilds) ? c.shopBuilds : [];
+  return [...saved, ..._atelier.localBuilds.filter(local => !saved.some(build => build.id === local.id))];
+}
+
+function _atelierBuild(buildId = _atelier.buildId) {
+  return _atelierBuilds().find(build => build.id === buildId) || null;
+}
+
+function _atelierWork(buildId = _atelier.buildId) {
+  if (buildId === 'equip') return null;
+  if (!_atelier.working.has(buildId)) {
+    const build = _atelierBuild(buildId);
+    if (!build) return null;
+    _atelier.working.set(buildId, {
+      name: build.name || 'Sans nom',
+      slots: _cloneSlots(build.slots),
+      savedName: build.name || 'Sans nom',
+      savedSlots: _cloneSlots(build.slots),
+      isNew: _atelier.localBuilds.some(local => local.id === buildId),
+    });
+  }
+  return _atelier.working.get(buildId);
+}
+
+function _atelierUseBuild(buildId) {
+  if (buildId !== 'equip' && !_atelierBuild(buildId)) return;
+  _atelier.buildId = buildId;
+  const work = _atelierWork(buildId);
+  _atelier.draft = work?.slots || {};
+  _atelier.preview = undefined;
+  if (_atelier.cmp === buildId) _atelier.cmp = 'equip';
+}
+
+function _atelierNewBuild({ rename = false, notify = false } = {}) {
+  const id = `bld_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const build = { id, name: `Build ${_atelierBuilds().length + 1}`, slots: {}, createdAt: Date.now() };
+  _atelier.localBuilds.push(build);
+  _atelier.working.set(id, { name: build.name, slots: {}, savedName: build.name, savedSlots: {}, isNew: true });
+  _atelierUseBuild(id);
+  _atelier.renaming = rename ? id : null;
+  if (notify) showNotif('Nouveau build créé à partir de ton équipement.', 'success');
+  return _atelierWork(id);
+}
+
+function _atelierDirty(buildId = _atelier.buildId) {
+  const work = _atelierWork(buildId);
+  if (!work) return false;
+  if (work.isNew) return true;
+  return work.name !== work.savedName
+    || JSON.stringify(atelierCompactSlots(_atelierEquippedIds(), work.slots)) !== JSON.stringify(atelierCompactSlots(_atelierEquippedIds(), work.savedSlots));
+}
+
+function _atelierCatalogId(entry, slot = '') {
+  if (!entry) return null;
+  const id = entry.itemId || entry.shopItemId || entry.id || '';
+  if (id && _items.some(item => item.id === id)) return id;
+  const sameName = _items.find(item => item.nom && item.nom === entry.nom && (!slot || equipmentSlotAcceptsItem(slot, item)));
+  return sameName?.id || (slot ? `@equip:${slot}` : null);
+}
+
+function _atelierEquippedIds(c = _getActiveShopChar()) {
+  return Object.fromEntries(_atelierSlots().map(slot => [slot.id, _atelierCatalogId(c?.equipement?.[slot.id], slot.id)]));
+}
+
+function _atelierItemById(id, slot = '', c = _getActiveShopChar()) {
+  if (!id) return null;
+  if (String(id).startsWith('@equip:')) return c?.equipement?.[slot] || null;
+  return _items.find(item => item.id === id) || (c?.equipement?.[slot] && _atelierCatalogId(c.equipement[slot], slot) === id ? c.equipement[slot] : null);
+}
+
+function _atelierPrimarySlot() {
+  return _atelierSlots().find(slot => slot.role === 'primaryWeapon')?.id || _atelierSlots().find(slot => slot.kind === 'weapon')?.id || 'Main principale';
+}
+
+function _atelierSecondarySlot() {
+  const weapons = _atelierSlots().filter(slot => slot.kind === 'weapon');
+  return weapons.find(slot => slot.role === 'secondaryWeapon')?.id || weapons[1]?.id || 'Main secondaire';
+}
+
+function _atelierTwoHanded(item) {
+  return !!item && _itemWeaponHands(item) === '2 mains';
+}
+
+function _atelierEffectiveIds(slots = _atelier.draft, preview = undefined) {
+  const c = _getActiveShopChar();
+  const overrides = _cloneSlots(slots);
+  if (preview !== undefined && _atelier.slot) overrides[_atelier.slot] = preview;
+  return atelierApplyBuild(_atelierEquippedIds(c), overrides, {
+    primarySlot: _atelierPrimarySlot(),
+    secondarySlot: _atelierSecondarySlot(),
+    isTwoHanded: id => _atelierTwoHanded(_atelierItemById(id, _atelierPrimarySlot(), c)),
+  });
+}
+
+function _atelierOverrides(slots = _atelier.draft, preview = undefined) {
+  const c = _getActiveShopChar();
+  const equipped = _atelierEquippedIds(c);
+  const effective = _atelierEffectiveIds(slots, preview);
+  const overrides = {};
+  _atelierSlots().forEach(slot => {
+    const id = effective[slot.id] ?? null;
+    if (id !== (equipped[slot.id] ?? null)) overrides[slot.id] = id ? _atelierItemById(id, slot.id, c) : null;
+  });
+  return overrides;
+}
+
+function _atelierSim(slots = _atelier.draft, preview = undefined) {
+  const c = _getActiveShopChar();
+  return c ? _simulateCharWithBuild(c, _atelierOverrides(slots, preview)) : null;
+}
+
+function _atelierCmpSlots() {
+  if (_atelier.cmp === 'equip') return {};
+  return _atelierWork(_atelier.cmp)?.slots || _atelierBuild(_atelier.cmp)?.slots || {};
+}
 
 /** Filtre les items boutique compatibles avec un slot d'équipement donné. */
 function _atelierItemsForSlot(slotName) {
-  if (!slotName) return [];
-  const slotMeta = getEquipmentSlot(slotName);
-  if (!slotMeta) return [];
-  return _visibleItems().filter(it => {
-    if (!it.nom) return false;
-    return equipmentSlotAcceptsItem(slotMeta, it);
+  const slot = getEquipmentSlot(slotName);
+  if (!slot) return [];
+  return _visibleItems().filter(item => item.nom && equipmentSlotAcceptsItem(slot, item));
+}
+
+function _atelierSlotArea(slot) {
+  const key = _norm(`${slot.role || ''} ${slot.label || slot.id}`);
+  if (/armorhead|tete/.test(key)) return 'head';
+  if (/armortorso|torse|armure portee/.test(key)) return 'torse';
+  if (/armorfeet|botte|pied/.test(key)) return 'feet';
+  if (/primaryweapon|principale/.test(key)) return 'mainp';
+  if (/secondaryweapon|secondaire/.test(key)) return 'mains';
+  if (/anneau/.test(key)) return 'ring';
+  if (/amulette/.test(key)) return 'amul';
+  if (/harmonise.*(?:1|\bi\b)$/.test(key)) return 'amul';
+  if (/harmonise.*(?:2|\bii\b)$/.test(key)) return 'ring';
+  if (/harmonise.*(?:3|\biii\b)$/.test(key)) return 'obj';
+  if (/objet magique/.test(key)) return 'obj';
+  return '';
+}
+
+function _atelierItemVisual(item, slot) {
+  if (!item) return { glyph: slot?.icon || '＋', image: '' };
+  const cat = _cats.find(entry => entry.id === item.categorieId);
+  return { glyph: item.icon || _itemGlyph(item, item.template, cat), image: item.image || '' };
+}
+
+function _atelierOwnedCounts(c = _getActiveShopChar()) {
+  const counts = new Map();
+  (c?.inventaire || []).forEach(item => {
+    const id = item?.itemId || item?.shopItemId;
+    if (id) counts.set(id, (counts.get(id) || 0) + 1);
   });
+  return counts;
 }
 
-/** Construit le perso simulé avec tous les essais en cours. */
-function _atelierBuildSimChar() {
+function _atelierMoney() {
   const c = _getActiveShopChar();
-  if (!c) return null;
-  return _simulateCharWithBuild(c, _atelier.simulated);
+  const equipped = _atelierEquippedIds(c);
+  const effective = _atelierEffectiveIds();
+  const owned = _atelierOwnedCounts(c);
+  const toBuy = [], alreadyOwned = [], replaced = [];
+  const used = new Map();
+  _atelierSlots().forEach(slot => {
+    const id = effective[slot.id] ?? null;
+    if (id && id === (equipped[slot.id] ?? null) && !String(id).startsWith('@equip:')) {
+      used.set(id, (used.get(id) || 0) + 1);
+    }
+  });
+  _atelierSlots().forEach(slot => {
+    const before = equipped[slot.id] ?? null;
+    const after = effective[slot.id] ?? null;
+    if (before === after) return;
+    if (after && !String(after).startsWith('@equip:')) {
+      const item = _atelierItemById(after, slot.id, c);
+      const usedCount = used.get(after) || 0;
+      if (item && usedCount < (owned.get(after) || 0)) alreadyOwned.push({ slot: slot.id, item });
+      else if (item) toBuy.push({ slot: slot.id, item });
+      used.set(after, usedCount + 1);
+    }
+    const old = c?.equipement?.[slot.id];
+    const invIndex = Number(old?.sourceInvIndex);
+    const invItem = Number.isInteger(invIndex) && invIndex >= 0 ? c?.inventaire?.[invIndex] : null;
+    if (old && invItem) replaced.push({ slot: slot.id, item: invItem, credit: parseFloat(invItem.prixVente) || 0 });
+  });
+  const gross = toBuy.reduce((sum, entry) => sum + (parseFloat(entry.item.prix) || 0), 0);
+  const resaleCredit = replaced.reduce((sum, entry) => sum + entry.credit, 0);
+  const money = atelierNetCost({ purchase: gross, resaleCredit, resale: _atelier.resale });
+  const out = toBuy.filter(entry => _itemDispo(entry.item) === 0);
+  return { ...money, resaleCredit, toBuy, alreadyOwned, replaced, out, remaining: calcOr(c) - money.net };
 }
 
-/** Rendu de la silhouette paper-doll */
+function _atelierBuildTabs() {
+  const c = _getActiveShopChar();
+  const builds = _atelierBuilds(c);
+  const compareOptions = [['equip', 'Équipement actuel'], ...builds.filter(build => build.id !== _atelier.buildId).map(build => [build.id, _atelierWork(build.id)?.name || build.name])];
+  if (_atelier.cmp === _atelier.buildId || !compareOptions.some(([id]) => id === _atelier.cmp)) _atelier.cmp = 'equip';
+  return `<div class="at3-buildbar">
+    <span class="at3-buildbar-label">Builds</span>
+    <button type="button" class="at3-build${_atelier.buildId === 'equip' ? ' is-active' : ''} is-base" data-sh-action="atelierSelectBuild" data-id="equip">${_shopIcon('lock')}Équipé</button>
+    ${builds.map(build => {
+      const work = _atelierWork(build.id);
+      const active = _atelier.buildId === build.id;
+      if (_atelier.renaming === build.id) return `<span class="at3-build is-active"><input id="atelier-build-rename" value="${_esc(work?.name || build.name)}" maxlength="32" data-sh-action="atelierRenameInput" data-sh-on="input" aria-label="Nom du build"></span>`;
+      return `<button type="button" class="at3-build${active ? ' is-active' : ''}" data-sh-action="atelierSelectBuild" data-id="${_esc(build.id)}" title="Double-clique pour renommer · clic droit pour les actions" data-atelier-build="${_esc(build.id)}">
+        ${_esc(work?.name || build.name)}${_atelierDirty(build.id) ? '<i class="at3-dirty" title="Modifications non enregistrées"></i>' : ''}<em>${Object.keys(work?.slots || build.slots || {}).length}</em>
+      </button>`;
+    }).join('')}
+    <button type="button" class="at3-build is-new" data-sh-action="atelierNewBuild">${_shopIcon('plus')}Nouveau</button>
+    <span class="at3-buildbar-spacer"></span>
+    <label class="at3-compare">Comparer à <select data-sh-action="atelierSetCompare" data-sh-on="change">${compareOptions.map(([id, name]) => `<option value="${_esc(id)}"${_atelier.cmp === id ? ' selected' : ''}>${_esc(name)}</option>`).join('')}</select></label>
+    ${_atelier.contextBuild ? `<div class="at3-build-menu" role="menu" style="left:${Math.max(8, Number(_atelier.contextBuild.x) || 8)}px;top:${Math.max(8, Number(_atelier.contextBuild.y) || 8)}px">
+      <button type="button" role="menuitem" data-sh-action="atelierDuplicateBuild" data-id="${_esc(_atelier.contextBuild.id)}">${_shopIcon('plus')}Dupliquer</button>
+      <button type="button" role="menuitem" class="is-danger" data-sh-action="atelierDeleteBuild" data-id="${_esc(_atelier.contextBuild.id)}">${_shopIcon('trash')}Supprimer</button>
+    </div>` : ''}
+  </div>`;
+}
+
 function _renderAtelierDoll() {
   const c = _getActiveShopChar();
   if (!c) return '';
-  const eq = c.equipement || {};
-  const av = _shopCharAvatarColor(c);
-  const init = (c.nom || '?')[0].toUpperCase();
-
-  const slotsHtml = _atelierSlots().map(s => {
-    const cur = eq[s.name];
-    const sim = _atelier.simulated[s.name];
-    const filled = !!cur?.nom;
-    const simulated = !!sim;
-    const active = _atelier.activeSlot === s.name;
-    const itemName = simulated ? sim.nom : (cur?.nom || '');
-    const classes = ['atelier-slot'];
-    if (active)    classes.push('is-active');
-    if (simulated) classes.push('is-simulated');
-    else if (filled) classes.push('is-filled');
-    return `<button class="${classes.join(' ')}" data-slot="${_esc(s.name)}"
-      data-sh-action="atelierSelectSlot"
-      title="${_esc(s.label)}${itemName?` — ${_esc(itemName)}`:''}">
-      <span class="atelier-slot-ico">${s.ico}</span>
-      <span class="atelier-slot-name">${_esc(s.label)}</span>
-      ${itemName ? `<span class="atelier-slot-item">${_esc(itemName)}</span>` : ''}
-      ${simulated ? `<span class="atelier-slot-clear"
-        data-sh-action="atelierClearSlot" data-slot="${_esc(s.name)}"
-        title="Retirer cet essai">✕</span>` : ''}
+  const ids = _atelierEffectiveIds();
+  const equipped = _atelierEquippedIds(c);
+  const primary = _atelierItemById(ids[_atelierPrimarySlot()], _atelierPrimarySlot(), c);
+  const secondaryLocked = _atelierTwoHanded(primary);
+  const slotsHtml = _atelierSlots().map((slot, index) => {
+    const locked = slot.id === _atelierSecondarySlot() && secondaryLocked;
+    const id = ids[slot.id] ?? null;
+    const item = locked ? null : _atelierItemById(id, slot.id, c);
+    const changed = id !== (equipped[slot.id] ?? null);
+    const active = _atelier.slot === slot.id;
+    const rare = _itemRarity(item || {});
+    const visual = _atelierItemVisual(item, slot);
+    const area = _atelierSlotArea(slot);
+    return `<button type="button" class="at3-slot${item ? '' : ' is-empty'}${changed ? ' is-changed' : ''}${active ? ' is-active' : ''}${locked ? ' is-locked' : ''}"
+      ${area ? `style="grid-area:${area};--rar:${rare.color || 'var(--border-md)'}"` : `style="--rar:${rare.color || 'var(--border-md)'}"`}
+      data-sh-action="atelierSelectSlot" data-slot="${_esc(slot.id)}" ${locked ? 'disabled' : ''}>
+      ${changed && !locked ? `<span class="at3-slot-undo" data-sh-action="atelierRevertSlot" data-slot="${_esc(slot.id)}" title="Revenir à l'équipement actuel">${_shopIcon('undo')}</span>` : ''}
+      <span class="at3-slot-icon"${visual.image ? ` style="background-image:url('${_esc(visual.image)}')"` : ''}>${locked ? _shopIcon('lock') : visual.image ? '' : _esc(visual.glyph)}</span>
+      <small>${_esc(slot.label)}</small><b>${locked ? '2 mains' : item?.nom ? _esc(item.nom) : 'Vide'}</b>
     </button>`;
   }).join('');
-
-  return `
-    <div class="atelier-char">
-      <span class="atelier-char-av" style="--av-c:${av}">${characterPortraitContent(c, { fallbackText: init })}</span>
-      <div class="atelier-char-body">
-        <div class="atelier-char-name">${_esc(c.nom || 'Personnage')}</div>
-        <div class="atelier-char-meta">Niv. ${c.niveau||1}${c.classe?' · '+_esc(c.classe):''}</div>
-      </div>
-      <span class="atelier-char-or" title="Solde">${calcOr(c)}<small>or</small></span>
+  const init = (c.nom || '?')[0].toUpperCase();
+  const work = _atelierWork();
+  const money = _atelierMoney();
+  const short = money.remaining < 0;
+  const summary = _atelier.buildId === 'equip' ? `<div class="at3-summary"><p class="at3-muted">C'est ton équipement réel. Choisis une pièce à droite : un nouveau build sera créé automatiquement pour l'essayer, sans modifier ta fiche.</p></div>` : `<div class="at3-summary">
+    <div class="at3-label"><span>Coût du build</span></div>
+    <div class="at3-cost${short ? ' is-short' : ''}"><b>${_fmtOr(money.net)}<i>or</i></b><span>${money.toBuy.length ? `${money.toBuy.length} à acheter` : 'Rien à acheter'}</span></div>
+    ${money.alreadyOwned.length ? `<div class="at3-summary-line"><span>Déjà possédé</span><b class="is-up">${money.alreadyOwned.map(entry => _esc(entry.item.nom)).join(', ')}</b></div>` : ''}
+    ${money.replaced.length ? `<label class="at3-resale"><input type="checkbox" ${_atelier.resale ? 'checked' : ''} data-sh-action="atelierToggleResale" data-sh-on="change"><span>Revendre les pièces remplacées<small>${money.replaced.map(entry => _esc(entry.item.nom)).join(', ')}</small></span><b>+${_fmtOr(money.resaleCredit)} or</b></label>` : ''}
+    <div class="at3-summary-line"><span>Solde après achat</span><b class="${short ? 'is-down' : ''}">${_fmtOr(calcOr(c))} → ${_fmtOr(money.remaining)} or</b></div>
+    ${money.out.length ? `<div class="at3-warning is-danger">${_shopIcon('warn')}<span>${money.out.map(entry => _esc(entry.item.nom)).join(', ')} : stock épuisé.</span></div>` : ''}
+    ${short ? `<div class="at3-warning">${_shopIcon('warn')}<span>Il manque ${_fmtOr(Math.abs(money.remaining))} or pour ce build.</span></div>` : ''}
+    <div class="at3-actions">
+      <button type="button" class="at3-btn is-primary" data-sh-action="atelierToCart" ${!money.toBuy.length || money.out.length === money.toBuy.length ? 'disabled' : ''}>${_shopIcon('cart')}Envoyer au panier${money.toBuy.length ? ` (${money.toBuy.length - money.out.length})` : ''}</button>
+      <button type="button" class="at3-btn" data-sh-action="atelierSaveBuild" ${!_atelierDirty() ? 'disabled' : ''}>${_shopIcon('save')}${_atelierDirty() ? 'Enregistrer' : 'Enregistré'}</button>
+      <button type="button" class="at3-btn" data-sh-action="atelierReset" ${!_atelierDirty() ? 'disabled' : ''}>${_shopIcon('undo')}Annuler</button>
     </div>
-    <div class="atelier-doll">${slotsHtml}</div>`;
+    <button type="button" class="at3-delete" data-sh-action="atelierDeleteBuild" data-id="${_esc(_atelier.buildId)}">${_shopIcon('trash')}Supprimer ce build</button>
+  </div>`;
+  return `<div class="at3-panel-head"><h2>${_atelier.buildId === 'equip' ? 'Équipement actuel' : _esc(work?.name || 'Build')}<small>${_atelier.buildId === 'equip' ? 'Ta fiche, telle qu’elle est' : 'Clique un emplacement pour le modifier'}</small></h2></div>
+    <div class="at3-doll">${slotsHtml}<div class="at3-portrait"><span style="--av-c:${_shopCharAvatarColor(c)}">${characterPortraitContent(c, { fallbackText: init })}</span><b>${_esc((c.nom || 'Personnage').split(' ')[0])}</b><small>${_esc(c.classe || '')} · Niv. ${c.niveau || 1}</small></div></div>${summary}`;
 }
 
-/** Rendu du panneau de stats (cur → next + delta) */
+function _atelierTotalStat(c, key) {
+  return (parseInt(c?.stats?.[key]) || 0) + (parseInt(c?.statsBonus?.[key]) || 0);
+}
+
+function _atelierAttack(c) {
+  const slot = _atelierPrimarySlot();
+  const weapon = c?.equipement?.[slot] || null;
+  const stat = _normalizeStatKey(weapon?.toucherStat || weapon?.statAttaque || weapon?.degatsStat || 'force') || 'force';
+  const value = _atelierTotalStat(c, stat);
+  const mod = Math.floor((value - 10) / 2);
+  const formula = weapon?.degats || '1d4';
+  return { weapon, stat, mod, formula, touch: mod + getMaitriseBonus(c, weapon || {}), avg: _diceAverage(formula) + mod };
+}
+
+function _atelierDiffs(base, next) {
+  const diffs = [
+    { key: 'ca', label: 'CA', delta: calcCA(next) - calcCA(base) },
+    { key: 'pv', label: 'PV', delta: calcPVMax(next) - calcPVMax(base) },
+    { key: 'pm', label: 'PM', delta: calcPMMax(next) - calcPMMax(base) },
+    { key: 'vitesse', label: 'Vit.', delta: calcVitesse(next) - calcVitesse(base) },
+    { key: 'degats', label: 'Dég.', delta: _atelierAttack(next).avg - _atelierAttack(base).avg },
+    ...ITEM_STAT_META.map(meta => ({ key: `stat:${meta.full}`, label: meta.short, delta: _atelierTotalStat(next, meta.full) - _atelierTotalStat(base, meta.full) })),
+  ];
+  return diffs.filter(diff => diff.delta);
+}
+
 function _renderAtelierStats() {
   const c = _getActiveShopChar();
-  if (!c) return '';
-  const sim = _atelierBuildSimChar();
-  if (!sim) return '';
-
-  // ── Dérivés ──
+  const base = _atelierSim(_atelierCmpSlots());
+  const previewing = _atelier.preview !== undefined;
+  const current = _atelierSim();
+  const target = _atelierSim(_atelier.draft, _atelier.preview);
+  if (!c || !base || !target || !current) return '';
+  const cmpName = _atelier.cmp === 'equip' ? 'l’équipement actuel' : (_atelierWork(_atelier.cmp)?.name || _atelierBuild(_atelier.cmp)?.name || 'un build');
   const derived = [
-    { lbl:"Classe d'armure", ico:'🛡', cur: calcCA(c),       next: calcCA(sim) },
-    { lbl:'PV max',          ico:'❤', cur: calcPVMax(c),    next: calcPVMax(sim) },
-    { lbl:'PM max',          ico:'✦', cur: calcPMMax(c),    next: calcPMMax(sim) },
-    { lbl:'Vitesse',         ico:'🏃', cur: calcVitesse(c), next: calcVitesse(sim) },
+    ['CA', 'Armure (CA)', 'shield', '#60a5fa', calcCA],
+    ['PV', 'PV max', 'heart', '#fb7185', calcPVMax],
+    ['PM', 'PM max', 'mana', '#a78bfa', calcPMMax],
+    ['VIT', 'Vitesse', 'move', '#38bdf8', calcVitesse],
   ];
-  const derivedHtml = derived.map(d => {
-    const delta = d.next - d.cur;
-    const cls = delta > 0 ? 'is-up' : delta < 0 ? 'is-down' : '';
-    return `<div class="atelier-derived ${cls}">
-      <span class="atelier-derived-ico">${d.ico}</span>
-      <div class="atelier-derived-body">
-        <span class="atelier-derived-lbl">${d.lbl}</span>
-        <div class="atelier-derived-row">
-          <span class="atelier-derived-val">${d.cur}</span>
-          ${delta !== 0 ? `<span class="atelier-derived-arr">→</span><span class="atelier-derived-new">${d.next}</span>` : ''}
-        </div>
-      </div>
-      ${delta !== 0 ? `<span class="atelier-derived-delta">${delta>0?'+':''}${delta}</span>` : ''}
+  const cards = derived.map(([key, label, icon, color, calc]) => {
+    const value = calc(target), was = calc(base), delta = value - was;
+    const previewChanged = previewing && value !== calc(current);
+    return `<div class="at3-derived${delta > 0 ? ' is-up' : delta < 0 ? ' is-down' : ''}${previewChanged ? ' is-preview' : ''}" style="--metric:${color}">
+      <span class="at3-derived-key">${_shopIcon(icon)}${label}</span><span class="at3-derived-value">${value}${delta ? `<i>${delta > 0 ? '+' : ''}${delta}</i>` : ''}</span><small>${delta ? `était ${was}` : 'inchangé'}</small>
     </div>`;
   }).join('');
-
-  // ── 6 caracs ──
-  const statsList = ITEM_STAT_META.map(m => {
-    const cur  = (c?.stats?.[m.full]   || 0) + (c?.statsBonus?.[m.full]   || 0);
-    const next = (sim?.stats?.[m.full] || 0) + (sim?.statsBonus?.[m.full] || 0);
-    const delta = next - cur;
-    const cls = delta > 0 ? 'is-up' : delta < 0 ? 'is-down' : '';
-    const visual = _statVisual(m.full);
-    return `<div class="atelier-stat-row ${cls}">
-      <span class="atelier-stat-key" style="--st-c:${visual.color};--st-bg:${visual.color}1a;--st-bd:${visual.color}55">${m.short}</span>
-      <span class="atelier-stat-name">${m.label || m.full}</span>
-      <span class="atelier-stat-cur">${cur}</span>
-      ${delta !== 0 ? `<span class="atelier-stat-arr">→</span><span class="atelier-stat-new">${next}</span><span class="atelier-stat-delta">${delta>0?'+':''}${delta}</span>` : `<span class="atelier-stat-eq">=</span>`}
-    </div>`;
+  const attack = _atelierAttack(target), baseAttack = _atelierAttack(base);
+  const attackDelta = attack.avg - baseAttack.avg;
+  const attackVisual = _atelierItemVisual(attack.weapon, getEquipmentSlot(_atelierPrimarySlot()));
+  const statRows = ITEM_STAT_META.map(meta => {
+    const value = _atelierTotalStat(target, meta.full), old = _atelierTotalStat(base, meta.full), delta = value - old;
+    const visual = _statVisual(meta.full);
+    const low = Math.min(value, old), width = Math.min(100, Math.abs(delta) / 20 * 100);
+    return `<div class="at3-stat" style="--stat:${visual.color}"><span class="at3-stat-key">${meta.short}</span><span class="at3-stat-name">${_esc(meta.label || meta.full)}</span><span class="at3-stat-track"><i style="width:${Math.min(100, low / 20 * 100)}%"></i>${delta ? `<i class="${delta > 0 ? 'is-up' : 'is-down'}" style="left:${Math.min(100, low / 20 * 100)}%;width:${width}%"></i>` : ''}</span><b>${value}</b><span>${Math.floor((value - 10) / 2) >= 0 ? '+' : ''}${Math.floor((value - 10) / 2)}</span><em class="${delta > 0 ? 'is-up' : delta < 0 ? 'is-down' : ''}">${delta ? `${delta > 0 ? '+' : ''}${delta}` : '='}</em></div>`;
   }).join('');
-
-  // ── Build summary ──
-  const tried = Object.values(_atelier.simulated).filter(Boolean);
-  const cost = tried.reduce((s, it) => s + (parseFloat(it?.prix) || 0), 0);
-  const solde = calcOr(c);
-  const finance = cost <= solde;
-  // Détecte les essais épuisés (bloque "Tout acheter")
-  const epuiseList = tried.filter(it => {
-    const d = (it.dispo !== undefined && it.dispo !== '' && it.dispo !== null) ? parseInt(it.dispo) : null;
-    return d === 0;
-  });
-  const hasEpuise = epuiseList.length > 0;
-  const canBuyAll = tried.length > 0 && finance && !hasEpuise;
-
-  return `
-    <div class="atelier-stats-section">
-      <div class="atelier-stats-title">Dérivés</div>
-      <div class="atelier-derived-grid">${derivedHtml}</div>
-    </div>
-    <div class="atelier-stats-section">
-      <div class="atelier-stats-title">Caractéristiques</div>
-      <div class="atelier-stats-list">${statsList}</div>
-    </div>
-    <div class="atelier-build-summary">
-      <div class="atelier-build-head">
-        <span class="atelier-build-lbl">Build en cours</span>
-        <span class="atelier-build-cost ${finance?'':'is-poor'}">${cost} or</span>
-      </div>
-      <div class="atelier-build-meta">
-        ${tried.length === 0
-          ? 'Aucun essai. Clique sur un slot pour commencer.'
-          : `${tried.length} article${tried.length>1?'s':''} essayé${tried.length>1?'s':''}${finance ? '' : ` · Il te manque ${cost-solde} or`}`}
-      </div>
-      ${hasEpuise ? `<div class="atelier-build-warn">
-        ⚠️ <b>${epuiseList.length} article${epuiseList.length>1?'s':''} épuisé${epuiseList.length>1?'s':''}</b> dans le build —
-        ${epuiseList.map(it => _esc(it.nom)).join(', ')}. Tu peux toujours comparer mais pas tout acheter d'un coup.
-      </div>` : ''}
-      <div class="atelier-build-actions">
-        <button class="btn btn-gold btn-sm" data-sh-action="atelierBuyAll"
-          ${canBuyAll ? '' : 'disabled'}
-          title="${canBuyAll ? 'Acheter tous les articles essayés'
-                  : hasEpuise ? 'Au moins un article du build est épuisé'
-                  : !finance ? `Fonds insuffisants (manque ${cost-solde} or)`
-                  : 'Aucun essai'}">
-          🛒 Tout acheter
-        </button>
-        <button class="btn btn-arcane btn-sm" data-sh-action="atelierSaveBuild"
-          ${tried.length === 0 ? 'disabled' : ''}
-          title="Sauvegarder cette configuration comme build nommé">
-          💾 Sauver
-        </button>
-        <button class="btn btn-outline btn-sm" data-sh-action="atelierReset"
-          ${tried.length === 0 ? 'disabled' : ''}>↺ Reset</button>
-      </div>
-      ${_renderAtelierSavedBuilds(c)}
+  const ids = _atelierEffectiveIds(), equipped = _atelierEquippedIds(c);
+  const changes = _atelierSlots().filter(slot => (ids[slot.id] ?? null) !== (equipped[slot.id] ?? null));
+  const primaryTwoHands = _atelierTwoHanded(_atelierItemById(ids[_atelierPrimarySlot()], _atelierPrimarySlot(), c));
+  return `<div class="at3-panel-head"><h2>Bilan<small>${previewing ? 'Aperçu de la pièce survolée' : 'Build'} comparé à ${_esc(cmpName)}</small></h2>${previewing ? '<span class="at3-preview-tag">Aperçu</span>' : ''}</div>
+    <div class="at3-bilan"><div class="at3-derived-grid">${cards}</div>
+      <div class="at3-attack"><span class="at3-attack-icon"${attackVisual.image ? ` style="background-image:url('${_esc(attackVisual.image)}')"` : ''}>${attackVisual.image ? '' : _esc(attackVisual.glyph || '✊')}</span><div><span class="at3-label">Attaque principale</span><b>${_esc(attack.weapon?.nom || 'Mains nues')}</b><p>Dégâts <strong>${_esc(attack.formula)} ${attack.mod >= 0 ? '+' : ''}${attack.mod}</strong> · Toucher <strong>${attack.touch >= 0 ? '+' : ''}${attack.touch}</strong> (${_esc(_statShort(attack.stat))})</p></div><div class="at3-attack-avg"><small>Moyenne</small><b>${Number(attack.avg.toFixed(1))}</b>${attackDelta ? `<em class="${attackDelta > 0 ? 'is-up' : 'is-down'}">${attackDelta > 0 ? '+' : ''}${Number(attackDelta.toFixed(1))} / coup</em>` : ''}</div></div>
+      <div><div class="at3-label at3-label-row"><span>Caractéristiques</span></div><div class="at3-stats">${statRows}</div></div>
+      ${_atelier.buildId !== 'equip' ? `<div><div class="at3-label at3-label-row"><span>Changements vs équipé</span><em>${changes.length}</em></div>${changes.length ? `<div class="at3-change-list">${changes.map(slot => {
+        const before = _atelierItemById(equipped[slot.id], slot.id, c), after = _atelierItemById(ids[slot.id], slot.id, c);
+        const forced = slot.id === _atelierSecondarySlot() && !after && primaryTwoHands;
+        return `<div class="at3-change"><span>${slot.icon}</span><span><s>${_esc(before?.nom || 'vide')}</s> → <b>${_esc(after?.nom || 'vide')}</b></span>${forced ? '<small>arme 2 mains</small>' : `<button type="button" data-sh-action="atelierRevertSlot" data-slot="${_esc(slot.id)}" aria-label="Annuler ce changement">${_shopIcon('x')}</button>`}</div>`;
+      }).join('')}</div>` : '<p class="at3-muted">Aucun changement : ce build reprend ton équipement actuel.</p>'}</div>` : ''}
     </div>`;
 }
 
-/** Liste des builds sauvegardés du perso (charger / supprimer). */
-function _renderAtelierSavedBuilds(c) {
-  const builds = Array.isArray(c?.shopBuilds) ? c.shopBuilds : [];
-  if (!builds.length) return '';
-  return `
-    <div class="atelier-builds-saved">
-      <div class="atelier-builds-saved-lbl">Builds sauvegardés</div>
-      <div class="atelier-builds-list">
-        ${builds.map(b => `
-          <div class="atelier-build-row">
-            <button class="atelier-build-load" data-sh-action="atelierLoadBuild" data-id="${_esc(b.id)}"
-              title="Charger ce build">
-              <span class="atelier-build-load-name">${_esc(b.name || 'Sans nom')}</span>
-              <span class="atelier-build-load-count">${Object.keys(b.slots || {}).length} slot${Object.keys(b.slots||{}).length>1?'s':''}</span>
-            </button>
-            <button class="atelier-build-del" data-sh-action="atelierDeleteBuild" data-id="${_esc(b.id)}"
-              title="Supprimer ce build">✕</button>
-          </div>
-        `).join('')}
-      </div>
-    </div>`;
+function _atelierCandidateInfo(itemId) {
+  const current = _atelierSim();
+  const next = _atelierSim(_atelier.draft, itemId);
+  const diffs = current && next ? _atelierDiffs(current, next) : [];
+  return { diffs, score: atelierGainScore(diffs) };
 }
 
-/** Barre d'onglets de slots (navigation rapide entre les types d'équipement) :
- *  clic = sélectionne directement le slot (sans repasser par la silhouette),
- *  avec le nombre d'articles compatibles et un point vert si un essai est en cours. */
-function _renderAtelierSlotTabs() {
-  return _atelierSlots().map(s => {
-    const active = _atelier.activeSlot === s.name;
-    const count  = _atelierItemsForSlot(s.name).length;
-    const sim    = !!_atelier.simulated[s.name];
-    return `<button class="atelier-slot-tab${active?' is-active':''}${sim?' is-simulated':''}${count?'':' is-empty'}"
-      data-sh-action="atelierGoSlot" data-slot="${_esc(s.name)}"
-      title="${_esc(s.label)} — ${count} article${count>1?'s':''} compatible${count>1?'s':''}">
-      <span class="atelier-slot-tab-ico">${s.ico}</span>
-      <span class="atelier-slot-tab-name">${_esc(s.label)}</span>
-      <span class="atelier-slot-tab-count">${count}</span>
-    </button>`;
-  }).join('');
-}
-
-/** Chips de tri de la liste d'articles de l'atelier. */
-function _renderAtelierSort() {
-  const cur = _atelier.sort || 'rarity';
-  const opts = [
-    { k:'rarity', lbl:'✨ Rareté' },
-    { k:'price',  lbl:'🪙 Prix' },
-    { k:'name',   lbl:'🔤 Nom' },
-    { k:'type',   lbl:'🏷️ Type' },
-    { k:'dispo',  lbl:'📦 Dispo' },
-    { k:'fav',    lbl:'⭐ Favoris' },
-  ];
-  return `<span class="atelier-items-sort-lbl">Trier :</span>` + opts.map(o =>
-    `<button class="atelier-sort-chip${cur===o.k?' is-active':''}" data-sh-action="atelierSetSort" data-sort="${o.k}">${o.lbl}</button>`
-  ).join('');
-}
-
-/** Rendu de la colonne droite : items compatibles avec le slot actif. */
 function _renderAtelierItems() {
-  const slot = _atelier.activeSlot;
-  if (!slot) {
-    return `<div class="atelier-items-empty">
-      <div class="atelier-items-empty-ico">👈</div>
-      <div><b>Choisis un slot</b></div>
-      <div class="atelier-items-empty-hint">Clique un emplacement sur la silhouette pour voir les articles compatibles.</div>
-    </div>`;
-  }
-  const q = _norm(_atelier.itemSearch || '');
-  let items = _atelierItemsForSlot(slot);
-  if (q) items = items.filter(it => _searchIncludes(_itemSearchText(it), q));
-  const sortMode = _atelier.sort || 'rarity';
-  const byName = (a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr');
-  const byRare = (a, b) => (_getRareteNum(b.rarete) - _getRareteNum(a.rarete)) || byName(a, b);
-  // Type : tri selon les types *structurés* existants, dans leur ordre logique —
-  // arme → format (ordre des _weaponFormats : Arme 1M CaC Phy., 2M CaC Phy.…),
-  // armure → typeArmure configuré par le MJ, sinon slotBijou / type libre.
-  // Renvoie [rang, libellé] : rang défini d'abord, puis alpha pour le reste.
-  const ARMURE_ORDER = getArmorTypeOptions();
-  const typeRank = (it) => {
-    const family = (it.format || it.sousType) ? resolveWeaponFamily(_weaponFormats, it) : null;
-    if (family)        return [_weaponFormats.indexOf(family), family.label];
-    if (it.format)     return [999, it.format];
-    if (it.sousType)   return [998, it.sousType]; // arme sans format défini → après les formats connus
-    if (it.typeArmure) { const i = ARMURE_ORDER.indexOf(it.typeArmure); return [i < 0 ? 999 : i, it.typeArmure]; }
-    return [999, it.slotArmure || it.slotBijou || it.type || ''];
-  };
-  const byType = (a, b) => {
-    const [ra, la] = typeRank(a), [rb, lb] = typeRank(b);
-    return (ra - rb) || la.localeCompare(lb, 'fr') || byRare(a, b);
-  };
-  // Dispo : illimité (∞) en tête, puis stock décroissant, épuisé (0) en bas
-  const stockVal = (it) => {
-    const d = (it.dispo !== undefined && it.dispo !== '' && it.dispo !== null) ? parseInt(it.dispo) : null;
-    return (d === null || d < 0) ? Infinity : d;
-  };
-  items = items.sort((a, b) => {
-    if (sortMode === 'fav')   { const d = (_isFav(a.id)?0:1) - (_isFav(b.id)?0:1); if (d) return d; return byRare(a, b); }
-    if (sortMode === 'price') return ((parseFloat(a.prix)||0) - (parseFloat(b.prix)||0)) || byName(a, b);
-    if (sortMode === 'name')  return byName(a, b);
-    if (sortMode === 'type')  return byType(a, b);
-    if (sortMode === 'dispo') return (stockVal(b) - stockVal(a)) || byRare(a, b);
-    return byRare(a, b); // 'rarity' (défaut)
-  }).slice(0, 40);
-
-  if (!items.length) {
-    return `<div class="atelier-items-empty">
-      <div class="atelier-items-empty-ico">🔎</div>
-      <div><b>Aucun article compatible</b></div>
-      <div class="atelier-items-empty-hint">Aucun article boutique ne correspond au slot « ${_esc(getEquipmentSlot(slot)?.label || slot)} ».</div>
-    </div>`;
-  }
-
-  const c = _getActiveShopChar();
-  const solde = calcOr(c);
-
-  return items.map(it => {
-    const tried = _atelier.simulated[slot]?.id === it.id;
-    const rareNum = _getRareteNum(it.rarete);
-    const rareCol = rareNum > 0 ? _rareteColor(RARETE_NAMES[rareNum]) : 'var(--border)';
-    const bonus = _getStatBonusEntries(it);
-    const prix = parseFloat(it.prix) || 0;
-    const poor = prix > solde;
-    // Stock : dispo === 0 → épuisé ; <3 → limité ; null/-1 → illimité
-    const dispo = (it.dispo !== undefined && it.dispo !== '' && it.dispo !== null)
-      ? parseInt(it.dispo) : null;
-    const epuise = dispo === 0;
-    const limited = dispo !== null && dispo > 0 && dispo < 3;
-    const stockTxt = dispo === null || dispo < 0 ? '∞'
-                   : epuise ? 'Épuisé'
-                   : `${dispo} dispo`;
-    const stockCls = epuise ? 'is-empty' : limited ? 'is-limited' : 'is-ok';
-
-    const classes = ['atelier-item'];
-    if (tried) classes.push('is-tried');
-    if (epuise) classes.push('is-epuise');
-
-    return `<button class="${classes.join(' ')}" data-id="${it.id}"
-      data-sh-action="atelierTryItem"
-      style="--rare-c:${rareCol}"
-      title="${epuise ? "Article épuisé — tu peux l'essayer pour comparer mais pas l'acheter" : ''}">
-      <div class="atelier-item-ico">${_esc(it.image ? '' : (it.icon || '📦'))}${it.image ? `<img src="${_esc(it.image)}" alt="">` : ''}</div>
-      <div class="atelier-item-body">
-        <div class="atelier-item-name">${_esc(it.nom)}</div>
-        <div class="atelier-item-meta">
-          ${it.sousType ? `<span>${_esc(it.sousType)}</span>` : ''}
-          ${it.slotArmure ? `<span>${_esc(it.slotArmure)}${it.typeArmure?' · '+_esc(it.typeArmure):''}</span>` : ''}
-          ${it.slotBijou ? `<span>${_esc(it.slotBijou)}</span>` : ''}
-          <span class="atelier-item-stock ${stockCls}">${stockTxt}</span>
-          <span class="atelier-item-price ${poor?'is-poor':''}"${poor?` title="Hors budget — il te manque ${prix-solde} or"`:''}>${poor?'🔒 ':''}${prix} or</span>
-        </div>
-        ${bonus.length ? `<div class="atelier-item-bonus">
-          ${bonus.slice(0,4).map(b => `<span class="sh-item-bonus-chip" style="border-color:${b.color}55;background:${b.color}18;color:${b.color}">${b.short} ${b.val>0?'+':''}${b.val}</span>`).join('')}
-        </div>` : ''}
-        ${(() => { const tr = _getItemTraits(it); return tr.length ? `<div class="atelier-item-traits">🔖 ${tr.slice(0,4).map(t => `<span class="atelier-item-trait">${_esc(t)}</span>`).join('')}${tr.length>4?`<span class="atelier-item-trait-more">+${tr.length-4}</span>`:''}</div>` : ''; })()}
-      </div>
-      <span class="atelier-item-fav ${_isFav(it.id)?'is-fav':''}" data-sh-action="toggleFav" data-id="${it.id}"
-        title="${_isFav(it.id)?'Retirer des favoris':'Ajouter aux favoris'}">${_isFav(it.id)?'★':'☆'}</span>
-      <span class="atelier-item-toggle">${tried ? '✓' : '+'}</span>
+  const slot = getEquipmentSlot(_atelier.slot);
+  if (!slot) return '<div class="at3-empty">Choisis un emplacement sur le mannequin.</div>';
+  const ids = _atelierEffectiveIds();
+  const currentId = ids[slot.id] ?? null;
+  const locked = slot.id === _atelierSecondarySlot() && _atelierTwoHanded(_atelierItemById(ids[_atelierPrimarySlot()], _atelierPrimarySlot()));
+  const owned = _atelierOwnedCounts();
+  const equipped = _atelierEquippedIds();
+  const q = _norm(_atelier.q);
+  let rows = _atelierItemsForSlot(slot.id)
+    .filter(item => !q || _searchIncludes(_itemSearchText(item), q))
+    .filter(item => _atelier.src === 'all' || (_atelier.src === 'own' ? owned.has(item.id) || Object.values(equipped).includes(item.id) : !owned.has(item.id) && !Object.values(equipped).includes(item.id)))
+    .map(item => ({ item, ..._atelierCandidateInfo(item.id) }));
+  const byName = (a, b) => (a.item.nom || '').localeCompare(b.item.nom || '', 'fr');
+  rows.sort(_atelier.sort === 'prix'
+    ? (a, b) => ((owned.has(a.item.id) ? 0 : parseFloat(a.item.prix) || 0) - (owned.has(b.item.id) ? 0 : parseFloat(b.item.prix) || 0)) || byName(a, b)
+    : _atelier.sort === 'rar'
+      ? (a, b) => _getRareteNum(b.item.rarete) - _getRareteNum(a.item.rarete) || byName(a, b)
+      : (a, b) => b.score - a.score || byName(a, b));
+  const row = ({ item, diffs }) => {
+    const active = currentId === item.id;
+    const own = owned.has(item.id) || Object.values(equipped).includes(item.id);
+    const eq = equipped[slot.id] === item.id;
+    const stock = _itemDispo(item);
+    const rarity = _itemRarity(item);
+    const visual = _atelierItemVisual(item, slot);
+    const price = own ? 0 : parseFloat(item.prix) || 0;
+    return `<button type="button" class="at3-item${active ? ' is-selected' : ''}${stock === 0 && !own ? ' is-out' : ''}" data-sh-action="atelierPickItem" data-id="${_esc(item.id)}" data-atelier-preview="${_esc(item.id)}" style="--rar:${rarity.color || 'var(--border-md)'}" ${locked ? 'disabled' : ''}>
+      <span class="at3-item-icon"${visual.image ? ` style="background-image:url('${_esc(visual.image)}')"` : ''}>${visual.image ? '' : _esc(visual.glyph)}</span><span class="at3-item-copy"><b>${_esc(item.nom)}</b><small>${_esc([rarity.name, ..._itemTypeChips(item)].filter(Boolean).join(' · '))}</small><span>${active ? '<i>Dans ce build</i>' : diffs.length ? diffs.slice(0, 4).map(diff => `<i class="${diff.delta > 0 ? 'is-up' : 'is-down'}">${_esc(diff.label)} ${diff.delta > 0 ? '+' : ''}${Number(diff.delta.toFixed(1))}</i>`).join('') : '<i>Aucun effet chiffré</i>'}</span></span>
+      <span class="at3-item-side">${eq ? '<em>Équipé</em>' : own ? '<em class="is-owned">Possédé</em>' : `<strong class="${price > calcOr(_getActiveShopChar()) ? 'is-down' : ''}">${_fmtOr(price)} or</strong>`}${!own && stock === 0 ? '<em class="is-out">Épuisé</em>' : !own && stock !== null && stock < 3 ? `<em class="is-low">Plus que ${stock}</em>` : ''}</span>
     </button>`;
-  }).join('');
+  };
+  let list = '';
+  if (locked) list = `<div class="at3-warning at3-picker-warning">${_shopIcon('lock')}<span>Emplacement occupé par une arme à deux mains. Choisis une arme à une main pour le libérer.</span></div>`;
+  if (currentId && !locked) list += `<button type="button" class="at3-item is-none" data-sh-action="atelierPickItem" data-id="" data-atelier-preview=""><span class="at3-item-icon">${_shopIcon('x')}</span><span class="at3-item-copy"><b>Laisser vide</b><small>Retirer la pièce de ce build</small></span></button>`;
+  if (_atelier.src === 'all' && _atelier.sort === 'gain') {
+    const ownedRows = rows.filter(entry => owned.has(entry.item.id) || Object.values(equipped).includes(entry.item.id));
+    const shopRows = rows.filter(entry => !owned.has(entry.item.id) && !Object.values(equipped).includes(entry.item.id));
+    if (ownedRows.length) list += `<div class="at3-picker-group">Dans ton inventaire</div>${ownedRows.map(row).join('')}`;
+    if (shopRows.length) list += `<div class="at3-picker-group">En boutique</div>${shopRows.map(row).join('')}`;
+  } else list += rows.map(row).join('');
+  if (!rows.length && !locked) list += '<div class="at3-empty">Aucune pièce ne correspond à ces filtres.</div>';
+  const current = _atelierItemById(currentId, slot.id);
+  return `<div class="at3-panel-head"><span class="at3-picker-slot">${slot.icon}</span><h2>${_esc(slot.label)}<small>${locked ? 'Bloqué par l’arme à deux mains' : current ? `Dans ce build : ${_esc(current.nom)}` : 'Emplacement vide'}</small></h2></div>
+    <div class="at3-picker-tools"><label class="at3-search">${_shopIcon('search')}<input id="atelier-search" type="search" value="${_esc(_atelier.q)}" placeholder="Filtrer les pièces…" data-sh-action="atelierSearch" data-sh-on="input" autocomplete="off"></label>
+      <div class="at3-picker-row"><div class="at3-segment">${[['all', 'Tout'], ['own', 'Possédé'], ['shop', 'Boutique']].map(([value, label]) => `<button type="button" class="${_atelier.src === value ? 'is-active' : ''}" data-sh-action="atelierSetSource" data-source="${value}">${label}</button>`).join('')}</div><select data-sh-action="atelierSetSort" data-sh-on="change"><option value="gain"${_atelier.sort === 'gain' ? ' selected' : ''}>Meilleur gain</option><option value="prix"${_atelier.sort === 'prix' ? ' selected' : ''}>Prix</option><option value="rar"${_atelier.sort === 'rar' ? ' selected' : ''}>Rareté</option></select></div>
+    </div><div class="at3-picker-list">${list}</div><div class="at3-picker-foot">${_shopIcon('eye')}Survole une pièce pour voir son effet dans le bilan.</div>`;
 }
 
-/** Render complet de l'atelier (silhouette + stats + items). */
 function _renderAtelier() {
-  const doll  = document.getElementById('atelier-doll-col');
+  const buildbar = document.getElementById('atelier-buildbar');
+  const doll = document.getElementById('atelier-doll-col');
   const stats = document.getElementById('atelier-stats-col');
   const items = document.getElementById('atelier-items-col');
-  const tabs  = document.getElementById('atelier-slot-tabs');
-  const slotLbl = document.getElementById('atelier-slot-name');
-  const searchInput = document.getElementById('atelier-items-search');
-  const focusedSearch = (document.activeElement === searchInput);
-  const caret = focusedSearch ? searchInput.selectionStart : null;
-
-  if (doll)    doll.innerHTML  = _renderAtelierDoll();
-  if (stats)   stats.innerHTML = _renderAtelierStats();
-  if (items)   items.innerHTML = _renderAtelierItems();
-  if (tabs)    tabs.innerHTML  = _renderAtelierSlotTabs();
-  const sortEl = document.getElementById('atelier-items-sort');
-  if (sortEl)  sortEl.innerHTML = _renderAtelierSort();
-  if (slotLbl) slotLbl.textContent = getEquipmentSlot(_atelier.activeSlot)?.label || '—';
-
-  // Restaure focus + caret de la search (n'est pas re-rendue, mais sa value oui
-  // si on perd le focus pendant un re-render distant)
-  if (focusedSearch && searchInput) {
-    requestAnimationFrame(() => {
-      searchInput.focus();
-      try { searchInput.setSelectionRange(caret, caret); } catch {}
-    });
-  }
-}
-
-/** Achète tous les items du build en cours et vide le build. */
-async function _atelierBuyAll() {
-  const c = _getActiveShopChar();
-  if (!c) return;
-  const entries = Object.entries(_atelier.simulated).filter(([, it]) => !!it);
-  if (!entries.length) return;
-  const totalCost = entries.reduce((s, [, it]) => s + (parseFloat(it.prix) || 0), 0);
-  const solde = calcOr(c);
-  if (totalCost > solde) {
-    showNotif(`Fonds insuffisants (${totalCost} or pour ${solde}).`, 'error');
-    return;
-  }
-  // Vérifie stocks
-  for (const [, it] of entries) {
-    const dispo = (it.dispo !== undefined && it.dispo !== '') ? parseInt(it.dispo) : null;
-    if (dispo !== null && dispo >= 0 && dispo < 1) {
-      showNotif(`"${it.nom}" est épuisé.`, 'error');
-      return;
-    }
-  }
-  // Achat séquentiel — réutilise confirmBuyItem qui gère stock + or + log
-  let bought = 0;
-  for (const [, it] of entries) {
-    try { await confirmBuyItem(it.id, 1); bought++; } catch (e) { console.warn('[atelier buyAll]', e); }
-  }
-  showNotif(`✅ ${bought} article${bought>1?'s':''} acheté${bought>1?'s':''} pour ${totalCost} or !`, 'success');
-  _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: _atelier.sort || 'rarity' };
-  _renderAtelier();
-}
-
-/** Sauvegarde le build courant comme entrée nommée sur le perso. */
-async function _atelierSaveBuild() {
-  const c = _getActiveShopChar();
-  if (!c) return;
-  const entries = Object.entries(_atelier.simulated).filter(([, it]) => !!it);
-  if (!entries.length) { showNotif('Aucun essai à sauver.', 'error'); return; }
-  const name = await promptModal('Nom du build :', { title: 'Sauvegarder le build', default: `Build ${(c.shopBuilds||[]).length + 1}`, required: true });
-  if (!name?.trim()) return;
-  const slots = {};
-  entries.forEach(([slot, it]) => { slots[slot] = it.id; });
-  const newBuild = {
-    id: `bld_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    name: name.trim(),
-    slots,
-    createdAt: Date.now(),
-  };
-  const builds = [...(c.shopBuilds || []), newBuild];
-  if (await trySave('characters', c.id, { shopBuilds: builds })) {
-    c.shopBuilds = builds;
-    showNotif(`💾 Build « ${newBuild.name} » sauvegardé.`, 'success');
-  }
-  _renderAtelier();
-}
-
-/** Charge un build sauvegardé dans la simulation courante. */
-function _atelierLoadBuild(buildId) {
-  const c = _getActiveShopChar();
-  if (!c) return;
-  const b = (c.shopBuilds || []).find(x => x.id === buildId);
-  if (!b) return;
-  _atelier.simulated = {};
-  _atelier.activeSlot = null;
-  Object.entries(b.slots || {}).forEach(([slot, itemId]) => {
-    const item = _items.find(i => i.id === itemId);
-    if (item) _atelier.simulated[slot] = item;
+  const search = document.getElementById('atelier-search');
+  const focused = document.activeElement === search;
+  const caret = focused ? search.selectionStart : null;
+  if (buildbar) buildbar.innerHTML = _atelierBuildTabs();
+  if (doll) doll.innerHTML = _renderAtelierDoll();
+  if (stats) stats.innerHTML = _renderAtelierStats();
+  if (items) items.innerHTML = _renderAtelierItems();
+  if (_atelier.renaming) requestAnimationFrame(() => document.getElementById('atelier-build-rename')?.select());
+  else if (focused) requestAnimationFrame(() => {
+    const input = document.getElementById('atelier-search');
+    input?.focus();
+    try { input?.setSelectionRange(caret, caret); } catch {}
   });
-  _renderAtelier();
-  showNotif(`Build « ${b.name} » chargé.`, 'success');
 }
 
-/** Supprime un build sauvegardé. */
-async function _atelierDeleteBuild(buildId) {
-  const c = _getActiveShopChar();
-  if (!c) return;
-  const builds = (c.shopBuilds || []).filter(b => b.id !== buildId);
-  await trySave('characters', c.id, { shopBuilds: builds });
-  c.shopBuilds = builds;
+function _atelierSetSlot(slot, itemId) {
+  if (_atelier.buildId === 'equip') _atelierNewBuild({ notify: true });
+  const work = _atelierWork();
+  if (!work || !slot) return;
+  const equipped = _atelierEquippedIds();
+  if ((itemId ?? null) === (equipped[slot] ?? null)) delete work.slots[slot];
+  else work.slots[slot] = itemId ?? null;
+  work.slots = atelierCompactSlots(equipped, work.slots);
+  _atelier.draft = work.slots;
+  _atelier.preview = undefined;
+}
+
+async function _atelierSaveBuild() {
+  const c = _getActiveShopChar(), work = _atelierWork();
+  if (!c || !work) return;
+  const slots = atelierCompactSlots(_atelierEquippedIds(c), work.slots);
+  const saved = (c.shopBuilds || []).map(build => ({ ...build }));
+  const index = saved.findIndex(build => build.id === _atelier.buildId);
+  const next = { id: _atelier.buildId, name: work.name.trim() || 'Sans nom', slots, createdAt: index >= 0 ? saved[index].createdAt || Date.now() : Date.now() };
+  if (index >= 0) saved[index] = next; else saved.push(next);
+  if (!await trySave('characters', c.id, { shopBuilds: saved })) return;
+  c.shopBuilds = saved;
+  _atelier.localBuilds = _atelier.localBuilds.filter(build => build.id !== next.id);
+  work.slots = _cloneSlots(slots); work.savedSlots = _cloneSlots(slots); work.name = next.name; work.savedName = next.name; work.isNew = false;
+  _atelier.draft = work.slots;
+  showNotif(`Build « ${next.name} » enregistré.`, 'success');
   _renderAtelier();
+}
+
+async function _atelierDeleteBuild(buildId = _atelier.buildId) {
+  const c = _getActiveShopChar();
+  if (!c || buildId === 'equip') return;
+  const wasActive = buildId === _atelier.buildId;
+  const exists = (c.shopBuilds || []).some(build => build.id === buildId);
+  if (exists) {
+    const ok = await confirmModal('Supprimer définitivement ce build ?', { title: 'Supprimer le build', confirmLabel: 'Supprimer', danger: true });
+    if (!ok) return;
+    const builds = c.shopBuilds.filter(build => build.id !== buildId);
+    if (!await trySave('characters', c.id, { shopBuilds: builds })) return;
+    c.shopBuilds = builds;
+  }
+  _atelier.localBuilds = _atelier.localBuilds.filter(build => build.id !== buildId);
+  _atelier.working.delete(buildId);
+  _atelier.contextBuild = null;
+  if (wasActive) _atelierUseBuild('equip');
+  _renderAtelier();
+}
+
+function _atelierDuplicateBuild(buildId) {
+  const source = _atelierWork(buildId) || (() => {
+    const build = _atelierBuild(buildId);
+    return build ? { name: build.name || 'Build', slots: _cloneSlots(build.slots) } : null;
+  })();
+  if (!source) return;
+  const id = `bld_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const name = `${source.name || 'Build'} (copie)`;
+  const slots = _cloneSlots(source.slots);
+  _atelier.localBuilds.push({ id, name, slots: _cloneSlots(slots), createdAt: Date.now() });
+  _atelier.working.set(id, { name, slots, savedName: name, savedSlots: _cloneSlots(slots), isNew: true });
+  _atelier.contextBuild = null;
+  _atelierUseBuild(id);
+  showNotif(`Build « ${source.name || 'Build'} » dupliqué.`, 'success');
+  _renderAtelier();
+}
+
+function _atelierToCart() {
+  const money = _atelierMoney();
+  let added = 0;
+  money.toBuy.forEach(({ item }) => {
+    const stock = _itemDispo(item), qty = _cartQty(item.id);
+    if (stock === 0 || (stock !== null && qty >= stock)) return;
+    _cart.set(item.id, qty + 1); added++;
+  });
+  if (_atelier.resale) money.replaced.forEach(entry => _cartTrades.add(entry.slot));
+  if (!added) { showNotif('Aucun article disponible à envoyer au panier.', 'error'); return; }
+  showNotif(`${added} article${added > 1 ? 's' : ''} envoyé${added > 1 ? 's' : ''} au panier${_atelier.resale && money.replaced.length ? ' · reprises incluses' : ''}.`, 'success');
+  renderShop();
 }
 
 function _prepareAtelier(prefillItemId = '') {
-  const char = _getActiveShopChar();
-  if (!char) return false;
-  _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: 'rarity' };
+  if (!_getActiveShopChar()) return false;
+  _atelier = _newAtelierState();
   if (prefillItemId) {
-    const item = _items.find(i => i.id === prefillItemId);
+    const item = _items.find(entry => entry.id === prefillItemId);
     const slot = item ? _resolveSlotForItem(item) : null;
-    if (item && slot) {
-      _atelier.activeSlot = slot;
-      _atelier.simulated[slot] = item;
-    }
+    if (item && slot) { _atelier.slot = slot; _atelierSetSlot(slot, item.id); }
   }
   return true;
 }
 
-function _renderAtelierShell({ embedded = false } = {}) {
-  return `
-    <div class="atelier-shell">
-      <div class="atelier-head">
-        <div class="atelier-head-ico">🪄</div>
-        <div class="atelier-head-title">
-          <h2>Atelier d'essayage</h2>
-          <small>Construis et compare des configurations avant d'acheter</small>
-        </div>
-        ${embedded ? '' : '<button class="atelier-close" data-sh-action="closeModal" title="Fermer">✕</button>'}
-      </div>
-      <div class="atelier-body">
-        <div class="atelier-col atelier-col-doll" id="atelier-doll-col"></div>
-        <div class="atelier-col atelier-col-stats" id="atelier-stats-col"></div>
-        <div class="atelier-col atelier-col-items">
-          <div class="atelier-items-head">
-            <span class="atelier-items-title">Compatibles : <b id="atelier-slot-name">—</b></span>
-          </div>
-          <div class="atelier-slot-tabs" id="atelier-slot-tabs"></div>
-          <div class="atelier-items-search-wrap">
-            <span class="atelier-items-search-ico">🔍</span>
-            <input type="text" class="atelier-items-search" id="atelier-items-search"
-              placeholder="Filtrer la liste…"
-              data-sh-action="atelierSearch" data-sh-on="input"
-              autocomplete="off">
-          </div>
-          <div class="atelier-items-sort" id="atelier-items-sort"></div>
-          <div class="atelier-items-list" id="atelier-items-col"></div>
-        </div>
-      </div>
-    </div>`;
+function _renderAtelierShell() {
+  return `<div class="at3-shell"><div id="atelier-buildbar"></div><div class="at3-grid"><section class="at3-panel" id="atelier-doll-col" aria-label="Mannequin"></section><section class="at3-panel" id="atelier-stats-col" aria-label="Bilan du build"></section><section class="at3-panel at3-picker" id="atelier-items-col" aria-label="Choix d'équipement"></section></div></div>`;
 }
 
 function _renderAtelierPage() {
-  if (!_getActiveShopChar()) {
-    return `<div class="sh-atelier-page">${_renderNoCharBanner()}</div>`;
-  }
-  return `<div class="sh-atelier-page" role="tabpanel">${_renderAtelierShell({ embedded: true })}</div>`;
+  if (!_getActiveShopChar()) return `<div class="sh-atelier-page">${_renderNoCharBanner()}</div>`;
+  return `<div class="sh-atelier-page" role="tabpanel">${_renderAtelierShell()}</div>`;
 }
 
 function shopOpenAtelier(prefillItemId = '') {
-  if (!_prepareAtelier(prefillItemId)) {
-    showNotif('Sélectionne d\'abord un personnage.', 'error');
-    return;
-  }
+  if (!_prepareAtelier(prefillItemId)) { showNotif('Sélectionne d’abord un personnage.', 'error'); return; }
   _shopSection = 'atelier';
   renderShop();
 }
 
 function shopSetSection(section) {
   if (!['shop', 'atelier', 'artisan'].includes(section) || section === _shopSection) return;
-  if (section === 'atelier' && !_prepareAtelier()) {
-    showNotif('Sélectionne d\'abord un personnage.', 'error');
-    return;
-  }
+  if (section === 'atelier' && !_prepareAtelier()) { showNotif('Sélectionne d’abord un personnage.', 'error'); return; }
   if (section === 'artisan') _artisanNeedsReset = true;
   else unmountArtisanPage();
   _shopSection = section;
   renderShop();
 }
+
+function _atelierPointerOver(event) {
+  if (_shopSection !== 'atelier') return;
+  const row = event.target.closest?.('[data-atelier-preview]');
+  if (!row || row.contains(event.relatedTarget)) return;
+  _atelier.preview = row.dataset.atelierPreview || null;
+  const stats = document.getElementById('atelier-stats-col');
+  if (stats) stats.innerHTML = _renderAtelierStats();
+}
+
+function _atelierPointerOut(event) {
+  if (_shopSection !== 'atelier') return;
+  const row = event.target.closest?.('[data-atelier-preview]');
+  if (!row || row.contains(event.relatedTarget)) return;
+  _atelier.preview = undefined;
+  const stats = document.getElementById('atelier-stats-col');
+  if (stats) stats.innerHTML = _renderAtelierStats();
+}
+
+function _atelierRenameKey(event) {
+  if (_atelier.contextBuild && event.key === 'Escape') {
+    _atelier.contextBuild = null;
+    const bar = document.getElementById('atelier-buildbar');
+    if (bar) bar.innerHTML = _atelierBuildTabs();
+    return;
+  }
+  if (event.target?.id !== 'atelier-build-rename' || !['Enter', 'Escape'].includes(event.key)) return;
+  event.preventDefault();
+  const work = _atelierWork(_atelier.renaming);
+  if (event.key === 'Escape' && work) work.name = work.savedName;
+  else if (work) work.name = event.target.value.trim() || work.name;
+  _atelier.renaming = null;
+  _renderAtelier();
+}
+
+function _atelierRenameBlur(event) {
+  if (event.target?.id !== 'atelier-build-rename' || !_atelier.renaming) return;
+  const work = _atelierWork(_atelier.renaming);
+  if (work) work.name = event.target.value.trim() || work.name;
+  _atelier.renaming = null;
+  setTimeout(() => _shopSection === 'atelier' && _renderAtelier(), 0);
+}
+
+function _atelierBuildContextMenu(event) {
+  if (_shopSection !== 'atelier') return;
+  const build = event.target.closest?.('[data-atelier-build]');
+  if (!build) return;
+  event.preventDefault();
+  _atelier.contextBuild = {
+    id: build.dataset.atelierBuild,
+    x: Math.min(event.clientX, window.innerWidth - 180),
+    y: Math.min(event.clientY, window.innerHeight - 96),
+  };
+  const bar = document.getElementById('atelier-buildbar');
+  if (bar) bar.innerHTML = _atelierBuildTabs();
+  requestAnimationFrame(() => bar?.querySelector('.at3-build-menu button')?.focus({ preventScroll: true }));
+}
+
+function _atelierCloseContextMenu(event) {
+  if (!_atelier.contextBuild || event.target.closest?.('.at3-build-menu')) return;
+  _atelier.contextBuild = null;
+  const bar = document.getElementById('atelier-buildbar');
+  if (bar) bar.innerHTML = _atelierBuildTabs();
+}
+
+document.addEventListener('pointerover', _atelierPointerOver);
+document.addEventListener('pointerout', _atelierPointerOut);
+document.addEventListener('keydown', _atelierRenameKey);
+document.addEventListener('focusout', _atelierRenameBlur);
+document.addEventListener('contextmenu', _atelierBuildContextMenu);
+document.addEventListener('click', _atelierCloseContextMenu);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // HANDLERS DE DÉLÉGATION (data-sh-action="…")
@@ -4515,42 +4617,40 @@ Object.assign(shHandlers, {
   setSection:     (el) => shopSetSection(el?.dataset?.section || 'shop'),
   openArtisan:    () => shopSetSection('artisan'),
   openAtelier:    (el) => shopOpenAtelier(el?.dataset?.id || ''),
-  // Atelier (slot + items + reset)
-  atelierSelectSlot: (el) => {
-    const s = el.dataset.slot || '';
-    _atelier.activeSlot = (_atelier.activeSlot === s) ? null : s;
+  // Atelier (builds différentiels + aperçu local)
+  atelierSelectBuild: (el, event) => {
+    const id = el.dataset.id || 'equip';
+    if (event?.detail > 1 && id !== 'equip') _atelier.renaming = id;
+    _atelierUseBuild(id);
     _renderAtelier();
   },
-  // Onglet de slot : sélection directe (pas de toggle off, contrairement à la silhouette).
-  atelierGoSlot: (el) => {
-    _atelier.activeSlot = el.dataset.slot || null;
-    _renderAtelier();
+  atelierNewBuild: () => { _atelierNewBuild({ rename: true }); _renderAtelier(); },
+  atelierRenameInput: (el) => {
+    const work = _atelierWork(_atelier.renaming);
+    if (work) work.name = el.value;
   },
-  atelierClearSlot: (el, ev) => {
-    ev?.stopPropagation?.();
-    const s = el.dataset.slot;
-    if (s) { delete _atelier.simulated[s]; _renderAtelier(); }
+  atelierSetCompare: (el) => { _atelier.cmp = el.value || 'equip'; _renderAtelier(); },
+  atelierSelectSlot: (el) => { _atelier.slot = el.dataset.slot || null; _atelier.q = ''; _atelier.preview = undefined; _renderAtelier(); },
+  atelierRevertSlot: (el, event) => {
+    event?.stopPropagation?.();
+    const work = _atelierWork();
+    if (work && el.dataset.slot) { delete work.slots[el.dataset.slot]; _atelier.draft = work.slots; _atelier.preview = undefined; _renderAtelier(); }
   },
-  atelierTryItem: (el) => {
-    const id = el.dataset.id; if (!id) return;
-    const item = _items.find(i => i.id === id); if (!item) return;
-    const slot = _atelier.activeSlot || _resolveSlotForItem(item);
-    if (!slot) { showNotif('Slot inconnu pour cet article.', 'error'); return; }
-    if (_atelier.simulated[slot]?.id === item.id) delete _atelier.simulated[slot];
-    else _atelier.simulated[slot] = item;
-    _atelier.activeSlot = slot;
-    _renderAtelier();
-  },
+  atelierPickItem: (el) => { _atelierSetSlot(_atelier.slot, el.dataset.id || null); _renderAtelier(); },
   atelierReset: () => {
-    _atelier = { activeSlot: null, simulated: {}, itemSearch: '', sort: _atelier.sort || 'rarity' };
-    _renderAtelier();
+    const work = _atelierWork();
+    if (!work) return;
+    work.slots = _cloneSlots(work.savedSlots); work.name = work.savedName;
+    _atelier.draft = work.slots; _atelier.preview = undefined; _renderAtelier();
   },
-  atelierSearch:      (el) => { _atelier.itemSearch = el.value || ''; _renderAtelier(); },
-  atelierSetSort:     (el) => { _atelier.sort = el.dataset.sort || 'rarity'; _renderAtelier(); },
-  atelierBuyAll:      () => _atelierBuyAll(),
-  atelierSaveBuild:   () => _atelierSaveBuild(),
-  atelierLoadBuild:   (el) => _atelierLoadBuild(el.dataset.id),
-  atelierDeleteBuild: (el, ev) => { ev?.stopPropagation?.(); _atelierDeleteBuild(el.dataset.id); },
+  atelierSearch: (el) => { _atelier.q = el.value || ''; _renderAtelier(); },
+  atelierSetSource: (el) => { _atelier.src = el.dataset.source || 'all'; _renderAtelier(); },
+  atelierSetSort: (el) => { _atelier.sort = el.value || 'gain'; _renderAtelier(); },
+  atelierToggleResale: (el) => { _atelier.resale = !!el.checked; _renderAtelier(); },
+  atelierToCart: () => _atelierToCart(),
+  atelierSaveBuild: () => _atelierSaveBuild(),
+  atelierDuplicateBuild: (el, event) => { event?.stopPropagation?.(); _atelierDuplicateBuild(el.dataset.id); },
+  atelierDeleteBuild: (el, event) => { event?.stopPropagation?.(); _atelierDeleteBuild(el.dataset.id || _atelier.buildId); },
   // Restock 1-clic MJ (carte épuisée)
   restockItem:    async (el, ev) => {
     ev?.stopPropagation?.();
