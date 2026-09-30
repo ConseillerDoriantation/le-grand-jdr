@@ -311,7 +311,18 @@ export async function _vttNextRound() {
       b.delete(_tokRef(id));
       return; // skip buff cleanup pour token supprimé
     }
-    const updates = { movedThisTurn: false, movedCells: 0, bonusMvt: 0, moveOrigin: deleteField(), attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false };
+    // On ne réécrit QUE les tokens réellement « sales » : réinitialiser un drapeau
+    // seulement s'il était posé (sinon il vaut déjà false/0 côté doc), et ne pousser
+    // buffs/conditions que s'ils changent. Un token inactif ne génère AUCUNE écriture
+    // → fin des rafales d'écritures (et de snapshots) au passage de round.
+    const updates = {};
+    if (tokData.movedThisTurn)       updates.movedThisTurn = false;
+    if (tokData.movedCells)          updates.movedCells = 0;
+    if (tokData.bonusMvt)            updates.bonusMvt = 0;
+    if (tokData.moveOrigin != null)  updates.moveOrigin = deleteField();
+    if (tokData.attackedThisTurn)    updates.attackedThisTurn = false;
+    if (tokData.bonusActionThisTurn) updates.bonusActionThisTurn = false;
+    if (tokData.reactionThisTurn)    updates.reactionThisTurn = false;
     if (tokData.buffs?.length) {
       const remaining = tokData.buffs.filter(bf => {
         const isExpired =
@@ -345,7 +356,7 @@ export async function _vttNextRound() {
       });
       if (remainingConds.length !== tokData.conditions.length) updates.conditions = remainingConds;
     }
-    b.update(_tokRef(id), updates);
+    if (Object.keys(updates).length) b.update(_tokRef(id), updates);
   });
   await b.commit().catch(()=>{});
   for (const item of expiredConcentrations) {

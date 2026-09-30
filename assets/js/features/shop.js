@@ -71,6 +71,7 @@ const TEMPLATES = {
     label: '⚔️ Arme',
     fields: [
       { id:'format',      label:'Type d\'arme',  type:'format_select' },
+      { id:'nature',      label:'Nature',        type:'select', options: ['Physique', 'Magique'] },
       { id:'mains',       label:'Maniement',     type:'select', options: WEAPON_HANDS_OPTIONS },
       { id:'rarete',      label:'Rareté',        type:'rarete' },
       { id:'degats',      label:'Dégâts',        type:'damage_with_stat', placeholder:'1D10, 2D6...' },
@@ -2750,7 +2751,7 @@ const _SI_TAB_DEF = {
 // ce qu'on touche 95% du temps : caractéristiques + prix/dispo/rareté.
 const _SI_TAB_FIELDS = {
   arme: {
-    essentiel: ['format','mains','rarete','degats','toucherStat','portee','prix','dispo'],
+    essentiel: ['format','nature','mains','rarete','degats','toucherStat','portee','prix','dispo'],
     bonus:     ['statBonuses','derivedBonuses','skillBonuses'],
     traits:    ['traits'],
   },
@@ -3051,9 +3052,12 @@ function _buildFieldsHtml(tpl,item) {
         : f.id === 'typeArmure' ? getArmorTypeOptions()
         : f.id === 'slotBijou' ? getEquipmentItemOptions('accessory') : (f.options || []);
       const options = [...new Set([...configured, ...(val ? [val] : [])])];
+      // « Nature » : vide = auto (physique/magique selon le type d'arme) → compat
+      // ascendante, aucune arme existante n'est modifiée tant qu'on n'y touche pas.
+      const emptyLabel = f.id === 'nature' ? 'Auto (selon le type d\'arme)' : '— Choisir —';
       html+=`<div class="form-group"><label>${f.label}</label>
         <select class="input-field sh-modal-select" id="si-${f.id}">
-          <option value="">— Choisir —</option>
+          <option value="">${emptyLabel}</option>
           ${options.map(o=>`<option value="${_esc(o)}" ${val===o?'selected':''}>${_esc(o)}</option>`).join('')}
         </select></div>`;
     } else if(f.type==='format_select'){

@@ -49,35 +49,15 @@ import { vttCanvasPixelRatio, vttDefaultLowFx, vttIsPhoneViewport } from './vtt-
 
 const _tokenImageCache = new Map();
 
-// ── Mode Performance (fluidité joueurs) ─────────────────────────────────────
-// Les ombres Konva (shadowBlur) et un DPR élevé sont les coûts de rendu
-// dominants sur les machines modestes (recalculés à CHAQUE redraw : déplacement,
-// PV, ping, pan/zoom). Ce mode les coupe. Défaut : auto-activé sur les appareils
-// détectés comme contraints ; surchargeable manuellement (persisté par client).
-let _vttLowFxCache = null;
-export function vttLowFx() {
-  if (_vttLowFxCache !== null) return _vttLowFxCache;
-  let v = null;
-  try { const s = localStorage.getItem('vtt.lowFx'); if (s === '1') v = true; else if (s === '0') v = false; } catch {}
-  // Défaut (aucun choix explicite stocké) : les JOUEURS et tous les téléphones
-  // démarrent en Mode performance. Le MJ desktop garde le rendu complet, sauf
-  // machine détectée comme faible. Le bouton ⚡ surcharge dans les deux sens.
-  const phone = vttIsPhoneViewport(
-    window.innerWidth, window.innerHeight,
-    !!window.matchMedia?.('(pointer: coarse)')?.matches,
-    navigator.maxTouchPoints,
-  );
-  if (v === null) v = vttDefaultLowFx({
-    isAdmin: STATE.isAdmin,
-    isPhone: phone,
-    deviceMemory: navigator.deviceMemory,
-    hardwareConcurrency: navigator.hardwareConcurrency,
-  });
-  _vttLowFxCache = !!v;
-  return _vttLowFxCache;
-}
+// ── Mode Performance (fluidité) ─────────────────────────────────────────────
+// TOUJOURS actif (décision produit) : ce mode ne coupe que du COSMÉTIQUE — ombres
+// Konva (shadowBlur), DPR bridé à 1, backdrop-filter des panneaux — recalculé à
+// chaque redraw et coûteux sur les machines modestes. Aucun impact fonctionnel,
+// donc on garantit le meilleur FPS pour tout le monde et on supprime le bouton.
+export function vttLowFx() { return true; }
+// Conservé pour compat d'import (plus de bouton) : sans effet tant que vttLowFx
+// est forcé à true.
 export function setVttLowFx(on) {
-  _vttLowFxCache = !!on;
   try { localStorage.setItem('vtt.lowFx', on ? '1' : '0'); } catch {}
 }
 

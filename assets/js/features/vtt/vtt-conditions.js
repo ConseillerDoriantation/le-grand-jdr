@@ -316,7 +316,7 @@ function _combineSaveMode(a, b) {
 }
 
 /** Lance un jet de sauvegarde pour tenter de finir l'état. */
-export async function _vttConditionSave(tokenId, idx) {
+export async function _vttConditionSave(tokenId, idx, button = null) {
   const t = VS.tokens[tokenId]?.data; if (!t) return;
   const cond = (t.conditions || [])[idx]; if (!cond) return;
   const lib = CONDITION_BY_ID[cond.id];
@@ -353,6 +353,10 @@ export async function _vttConditionSave(tokenId, idx) {
       _vttPatchTokenOptimistically(tokenId, { conditions: prevI });
       console.error('[VTT] État non retiré (immunité) :', error);
     });
+    if (button) {
+      button.textContent = 'Réussi';
+      button.classList.add('success');
+    }
     return;
   }
   const _etatMode = _etatRes?.k === 'res' ? 'advantage' : _etatRes?.k === 'vul' ? 'disadvantage' : '';
@@ -372,6 +376,11 @@ export async function _vttConditionSave(tokenId, idx) {
     total = d20 + modVal;
   }
   const passed = d20 !== 1 && (d20 === 20 || total >= DD);
+  if (button) {
+    button.textContent = passed ? 'Réussi' : 'Échec';
+    button.classList.toggle('success', passed);
+    button.classList.toggle('failure', !passed);
+  }
   const statLbl = statShort(statKey) || statKey;
   const luckTxt = luck ? ` 🍀 relance ${luck.reroll}→${d20}` : '';
   const modeTxt = effMode === 'advantage' ? ' · avantage'

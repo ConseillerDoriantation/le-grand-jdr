@@ -801,11 +801,17 @@ function _msTabCombat(c, uid, canEdit) {
     ${weaponSlots.map(({ slot }) => `<button type="button" class="${slot.id === _msAttackSlot ? 'on' : ''}"
       data-vtt-fn="_vttMsAttackSlot" data-vtt-args="${_esc(slot.id)}">${slot.role === 'primaryWeapon' ? 'Principale' : 'Secondaire'}</button>`).join('')}
   </div>` : '';
+  const weaponPickerPid = `attack-slot-${_msAttackSlot}`;
+  const weaponPicker = canEdit
+    ? `<button type="button" class="vtt-ms-atk-picker${_msPop?.v === 'slot' && _msPop.arg === _msAttackSlot ? ' sel' : ''}"
+        data-vtt-fn="_vttMsPop" data-vtt-args="slot|${_esc(weaponPickerPid)}|${_esc(_msAttackSlot)}" data-pid="${_esc(weaponPickerPid)}"
+        title="Changer l’arme équipée">${_msIco('combat')}<span>${weapon?.nom ? _esc(weapon.nom) : 'Mains nues'}</span><span class="vtt-ms-atk-picker-caret" aria-hidden="true">⌄</span></button>`
+    : `<b>${weapon?.nom ? _esc(weapon.nom) : 'Mains nues'}</b>`;
 
   return `
     <div class="vtt-ms-sect-label">Attaque</div>
     <div class="vtt-ms-atk">
-      <div class="vtt-ms-atk-hd"><b>${weapon?.nom ? _esc(weapon.nom) : 'Mains nues'}</b>${weaponSwitch}</div>
+      <div class="vtt-ms-atk-hd">${weaponPicker}${weaponSwitch}</div>
       <div class="vtt-ms-atk-row">
         <div class="vtt-ms-atk-cell"><small>Toucher</small><b>${attackTouch}</b></div>
         <div class="vtt-ms-atk-cell"><small>Dégâts</small><b>${_esc(attackDice)}</b></div>

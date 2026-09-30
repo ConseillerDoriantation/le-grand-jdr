@@ -103,6 +103,12 @@ test('le journal filtre les familles et respecte le scroll du lecteur', () => {
   assert.match(vtt, /_slideInitialChatPending[\s\S]*?requestAnimationFrame\(\(\) => _vttChatShowNew\(true\)\)/);
 });
 
+test('le texte du chat reste sélectionnable et prioritaire sur la copie des tokens', () => {
+  assert.match(css, /\.vtt-chat-log\s*\{[\s\S]*?user-select:\s*text/);
+  assert.match(vtt, /function _vttHasCopyableTextSelection\(\)[\s\S]*?window\.getSelection/);
+  assert.match(vtt, /if \(_vttHasCopyableTextSelection\(\)\) return;[\s\S]*?if \(_vttCopySelection\(\)\) e\.preventDefault\(\)/);
+});
+
 test('une attaque reprend la carte de résultat compacte de la maquette', () => {
   assert.match(chat, /vtt-log--attack-card/);
   assert.match(chat, /vtt-log-resolution/);
