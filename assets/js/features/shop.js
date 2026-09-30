@@ -18,6 +18,7 @@ import { sanitizeRichTextHtml } from '../shared/rich-text.js';
 import { bindQuillEditors, getQuillHtml, markQuillSaved, quillEditorHtml } from '../shared/rich-text-quill.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry, inventoryHistoryEntries } from '../shared/inventory-history.js';
 import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
+import { openCraftSettingsAdmin } from '../shared/craft-settings.js';
 import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
 import { mountArtisanPage, unmountArtisanPage } from './artisan.js';
 import {
@@ -357,6 +358,7 @@ function _renderManageMenu() {
       ${opt('openWeaponFmts', '⚔️ Types d’arme', 'Gérer les types d’arme et leurs techniques')}
       ${opt('openRarities', '★ Raretés', 'Gérer les raretés')}
       ${opt('openUpgradeStg', '⚙️ Améliorations', 'Tarifs et plafonds des améliorations')}
+      ${opt('openCraftStg', '🔨 Réglages du craft', 'Disciplines, compétences et paliers du craft')}
       <hr>
       ${opt('openExport', '⬆️ Export / Import', 'Exporter ou importer la boutique')}
     </div>
@@ -5063,6 +5065,7 @@ Object.assign(shHandlers, {
   openWeaponFmts: () => openWeaponFormatsAdmin(),
   openRarities:   () => openRaritiesAdmin(),
   openUpgradeStg: () => openUpgradeSettingsAdmin(),
+  openCraftStg: () => openCraftSettingsAdmin(),
   openExport:     () => openShopExport({
     getCats: () => _cats,
     getItems: () => _items,
