@@ -20,12 +20,6 @@ export const DEFAULT_CRAFT_CONFIG = {
   },
   // Discipline → id de compétence (Jets 🎲) ; vide tant que le MJ n'a pas relié.
   disciplineCompetence: { forge: '', confection: '', orfevre: '' },
-  // Catégorie d'objet → catégorie de matériau.
-  categorieMateriau: {
-    armeCaC: 'bestiaux', armeDist: 'souples', armeMagique: 'mystiques',
-    armureLegere: 'legers', armureIntermediaire: 'tannes', armureLourde: 'resistants',
-    anneau: 'precieux', amulette: 'precieux',
-  },
   ddParPalier:       { 1: 11, 2: 14, 3: 17 },
   quantiteParPalier: { 1: 6,  2: 10, 3: 15 },
   // Part des matériaux rendue en cas d'ÉCHEC. Défaut 0 = perte totale (loot
@@ -57,11 +51,6 @@ export function craftCompetenceId(objType, config) {
   return (disc && cfg.disciplineCompetence?.[disc]) || '';
 }
 
-/** Catégorie de matériau consommée par ce type d'objet ('bestiaux', 'legers', …). */
-export function craftMaterialCategory(objType, config) {
-  return _CFG(config).categorieMateriau?.[objType] || null;
-}
-
 /** DD du jet d'Artisanat pour un palier (1/2/3). */
 export function craftDD(tier, config) {
   const t = _tier(tier); if (!t) return null;
@@ -74,24 +63,39 @@ export function craftMaterialQty(tier, config) {
   return _CFG(config).quantiteParPalier?.[t] ?? DEFAULT_CRAFT_CONFIG.quantiteParPalier[t];
 }
 
-/**
- * Exigence complète en matériaux pour fabriquer `objType` au palier `tier` :
- * { matCategorie, tier, quantite }. Retourne null si type/palier invalide.
- */
-export function craftMaterialRequirement(objType, tier, config) {
-  const t = _tier(tier); if (!t) return null;
-  const matCategorie = craftMaterialCategory(objType, config);
-  if (!matCategorie) return null;
-  return { matCategorie, tier: t, quantite: craftMaterialQty(t, config) };
+// ── Matériaux liés par le MJ (par itemId) ───────────────────────────────────
+// Le MJ lie à chaque recette un ou plusieurs objets-matériaux (par leur itemId
+// de boutique) + une quantité. On ne dérive plus de « catégorie » : c'est le
+// choix libre du MJ (matériaux bestiaux, cartouches d'encre, peu importe).
+// `requirements` = [{ itemId, quantite }].
+
+/** Normalise une liste d'exigences ; quantité par défaut = quantité du palier. */
+export function normalizeMaterialRequirements(requirements, tier, config) {
+  const defQty = craftMaterialQty(tier, config);
+  return (Array.isArray(requirements) ? requirements : [])
+    .filter(r => r && r.itemId)
+    .map(r => ({ itemId: String(r.itemId), quantite: Math.max(1, parseInt(r.quantite, 10) || defQty) }));
 }
 
-/** true si l'inventaire couvre l'exigence (compte des unités {matCategorie, tier}). */
-export function hasCraftMaterials(inventory, requirement) {
-  if (!requirement) return false;
-  const have = (Array.isArray(inventory) ? inventory : []).filter(it =>
-    it && it.matCategorie === requirement.matCategorie && parseInt(it.tier, 10) === requirement.tier
-  ).length;
-  return have >= requirement.quantite;
+/** Nombre d'unités d'un `itemId` présentes dans l'inventaire (1 entrée = 1 unité). */
+export function countInventoryItem(inventory, itemId) {
+  if (!itemId) return 0;
+  return (Array.isArray(inventory) ? inventory : []).filter(it => it && it.itemId === itemId).length;
+}
+
+/** Manques face aux exigences : [{ itemId, quantite, possede, manque }] (vide si tout est couvert). */
+export function missingMaterials(inventory, requirements) {
+  const out = [];
+  for (const req of (Array.isArray(requirements) ? requirements : [])) {
+    const possede = countInventoryItem(inventory, req.itemId);
+    if (possede < req.quantite) out.push({ ...req, possede, manque: req.quantite - possede });
+  }
+  return out;
+}
+
+/** true si l'inventaire couvre toutes les exigences (liste d'{itemId, quantite}). */
+export function hasCraftMaterials(inventory, requirements) {
+  return missingMaterials(inventory, requirements).length === 0;
 }
 
 /**

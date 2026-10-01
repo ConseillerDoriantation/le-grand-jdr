@@ -40,7 +40,6 @@ function _merge(stored = {}) {
   return {
     categorieDiscipline:  { ...d.categorieDiscipline,  ...(stored.categorieDiscipline  || {}) },
     disciplineCompetence: { ...d.disciplineCompetence, ...(stored.disciplineCompetence || {}) },
-    categorieMateriau:    { ...d.categorieMateriau,    ...(stored.categorieMateriau    || {}) },
     ddParPalier:          { ...d.ddParPalier,          ...(stored.ddParPalier          || {}) },
     quantiteParPalier:    { ...d.quantiteParPalier,    ...(stored.quantiteParPalier    || {}) },
     refundFractionOnFail: stored.refundFractionOnFail ?? d.refundFractionOnFail,

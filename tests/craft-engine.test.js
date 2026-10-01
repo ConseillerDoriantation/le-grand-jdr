@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 
 import {
   DEFAULT_CRAFT_CONFIG,
-  craftDiscipline, craftCompetenceId, craftMaterialCategory,
-  craftDD, craftMaterialQty, craftMaterialRequirement, hasCraftMaterials,
+  craftDiscipline, craftCompetenceId,
+  craftDD, craftMaterialQty,
+  normalizeMaterialRequirements, countInventoryItem, missingMaterials, hasCraftMaterials,
   resolveCraftRoll, craftRefundOnFail, traitPoolFor, craftableTraits, isTraitAllowed,
 } from '../assets/js/shared/craft-engine.js';
 
@@ -38,14 +39,6 @@ test('compétence de discipline : vide par défaut, résolue via config MJ', () 
   assert.equal(craftCompetenceId('armeDist', cfg), ''); // confection non reliée
 });
 
-test('catégorie de matériau selon le type', () => {
-  assert.equal(craftMaterialCategory('armeCaC'), 'bestiaux');
-  assert.equal(craftMaterialCategory('armeDist'), 'souples');
-  assert.equal(craftMaterialCategory('armeMagique'), 'mystiques');
-  assert.equal(craftMaterialCategory('armureIntermediaire'), 'tannes');
-  assert.equal(craftMaterialCategory('anneau'), 'precieux');
-});
-
 test('DD et quantité par palier (défauts éditables)', () => {
   assert.deepEqual([craftDD(1), craftDD(2), craftDD(3)], [11, 14, 17]);
   assert.deepEqual([craftMaterialQty(1), craftMaterialQty(2), craftMaterialQty(3)], [6, 10, 15]);
@@ -53,21 +46,33 @@ test('DD et quantité par palier (défauts éditables)', () => {
   assert.equal(craftDD(1, { ddParPalier: { 1: 10, 2: 13, 3: 16 } }), 10);
 });
 
-test('exigence en matériaux complète', () => {
-  assert.deepEqual(craftMaterialRequirement('armeCaC', 2), { matCategorie: 'bestiaux', tier: 2, quantite: 10 });
-  assert.deepEqual(craftMaterialRequirement('armureLourde', 3), { matCategorie: 'resistants', tier: 3, quantite: 15 });
-  assert.equal(craftMaterialRequirement('armeCaC', 5), null);
+test('exigences liées par itemId : quantité par défaut = quantité du palier', () => {
+  // Le MJ lie des objets par itemId ; sans quantité → défaut du palier (2★ = 10).
+  assert.deepEqual(
+    normalizeMaterialRequirements([{ itemId: 'mat_best_2' }], 2),
+    [{ itemId: 'mat_best_2', quantite: 10 }],
+  );
+  // Quantité explicite respectée ; entrées sans itemId ignorées.
+  assert.deepEqual(
+    normalizeMaterialRequirements([{ itemId: 'encre', quantite: 3 }, { quantite: 5 }], 1),
+    [{ itemId: 'encre', quantite: 3 }],
+  );
 });
 
-test('hasCraftMaterials : compte les unités catégorie+palier', () => {
-  const req = craftMaterialRequirement('armeCaC', 1); // bestiaux ★, 6
+test('matériaux : comptage par itemId + manques + couverture', () => {
   const inv = [
-    ...Array(6).fill({ matCategorie: 'bestiaux', tier: 1 }),
-    { matCategorie: 'bestiaux', tier: 2 }, // mauvais palier
-    { matCategorie: 'souples', tier: 1 },  // mauvaise catégorie
+    ...Array(6).fill({ itemId: 'mat_best_1' }),
+    { itemId: 'mat_best_2' },       // autre matériau
+    { itemId: 'autre' },
   ];
-  assert.equal(hasCraftMaterials(inv, req), true);
-  assert.equal(hasCraftMaterials(inv.slice(0, 5), req), false); // 5 < 6
+  assert.equal(countInventoryItem(inv, 'mat_best_1'), 6);
+  const reqs = normalizeMaterialRequirements([{ itemId: 'mat_best_1' }], 1); // 6 requis
+  assert.equal(hasCraftMaterials(inv, reqs), true);
+  assert.deepEqual(missingMaterials(inv, reqs), []);
+  // Manque : 5 possédés < 6.
+  const short = missingMaterials(inv.slice(0, 5), reqs);
+  assert.deepEqual(short, [{ itemId: 'mat_best_1', quantite: 6, possede: 5, manque: 1 }]);
+  assert.equal(hasCraftMaterials(inv.slice(0, 5), reqs), false);
 });
 
 test('résolution du jet : succès si total >= DD', () => {
@@ -122,10 +127,9 @@ test('isTraitAllowed : même pool + même palier', () => {
   assert.equal(isTraitAllowed({ portee: 'anneau', tier: 1 }, 'amulette', 1), false); // anneau ≠ amulette
 });
 
-test('DEFAULT_CRAFT_CONFIG couvre les 8 types', () => {
+test('DEFAULT_CRAFT_CONFIG : une discipline pour chacun des 8 types', () => {
   const types = ['armeCaC','armeDist','armeMagique','armureLegere','armureIntermediaire','armureLourde','anneau','amulette'];
   for (const t of types) {
     assert.ok(DEFAULT_CRAFT_CONFIG.categorieDiscipline[t], `discipline manquante pour ${t}`);
-    assert.ok(DEFAULT_CRAFT_CONFIG.categorieMateriau[t], `matériau manquant pour ${t}`);
   }
 });

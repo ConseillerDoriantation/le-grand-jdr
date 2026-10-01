@@ -40,7 +40,7 @@ Mapping palier → rareté craftable : **★ → 1★**, **★★ → 2★**, **
 
 Quantité requise par palier (défaut, éditable) : **1★ = 6**, **2★ = 10**, **3★ = 15**.
 
-> **Création** : les matériaux sont des objets **créés dans la Boutique** par le MJ. Il faut pouvoir **associer chaque matériau à sa catégorie + son palier** (★/★★/★★★) → champ à ajouter dans l'éditeur d'objet (`matCategorie` + `tier`). *(Codex refond l'éditeur d'objet → relire avant d'y ajouter le champ.)*
+> **Création & liaison** : les matériaux sont des objets **créés dans la Boutique** par le MJ (avec leur **rareté**). **Aucun champ spécial à ajouter** : à chaque recette de craft, le MJ **lie le ou les objets-matériaux requis par leur `itemId`** (choix 100 % libre — matériaux bestiaux, cartouches d'encre, peu importe) + une quantité. L'exigence de craft est donc une **liste `[{ itemId, quantite }]`**, pas une catégorie déduite.
 
 ## 3. Disciplines & jet
 
@@ -80,15 +80,18 @@ Modale **compacte** : type · palier · 1 trait · nom · bouton.
   disciplineCompetence: {          // discipline → id de compétence (Jets 🎲)
     forge: '<competenceId>', confection: '<competenceId>', orfevre: '<competenceId>'
   },
-  ddParPalier:       { 1: 11, 2: 14, 3: 17 },
-  quantiteParPalier: { 1: 6,  2: 10, 3: 15 },
-  categorieMateriau: {             // catégorie d'objet → catégorie de matériau
-    armeCaC: 'bestiaux', armeDist: 'souples', armeMagique: 'mystiques',
-    armureLegere: 'legers', armureIntermediaire: 'tannes', armureLourde: 'resistants',
-    anneau: 'precieux', amulette: 'precieux'
-  }
+  ddParPalier:          { 1: 11, 2: 14, 3: 17 },   // DD du jet par palier
+  quantiteParPalier:    { 1: 6,  2: 10, 3: 15 },   // quantité de matériaux par défaut
+  refundFractionOnFail: 0                           // part rendue à l'échec (0 = perte totale)
 }
 ```
+*(Plus de `categorieMateriau` : les matériaux sont liés par `itemId` dans chaque recette, cf. §2.)*
+
+### Recette de craft (liée par le MJ)
+`{ outputType, tier, requiredMaterials: [{ itemId, quantite }], … }`
+- `outputType` → discipline (donc compétence) + pool de traits ;
+- `tier` → DD + palier de traits ;
+- `requiredMaterials` → objets-matériaux liés par `itemId` (choix libre du MJ).
 
 ### Stats de base — **PAS de nouveau doc** : on lit l'existant
 Les données de base (type d'arme, dégâts, portée, données fixes des armures, bijoux)
