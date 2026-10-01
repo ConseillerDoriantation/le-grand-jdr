@@ -7,7 +7,7 @@
 // La logique pure vit dans shared/craft-engine.js (source des valeurs par défaut).
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { getDocData, saveDoc } from '../data/firestore.js';
+import { getDocData, saveDoc, loadCollection } from '../data/firestore.js';
 import { openModal, closeModal, closeModalDirect, confirmModal } from './modal.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif } from './notifications.js';
@@ -17,6 +17,9 @@ import { DEFAULT_CRAFT_CONFIG } from './craft-engine.js';
 
 let _cfg = null;
 let _skills = [];
+let _shopItems = [];
+const PALIERS = [1, 2, 3];
+const STARS = { 1: '★', 2: '★★', 3: '★★★' };
 
 const DISCIPLINES = [
   { id: 'forge',      label: '⚒️ Forge' },
@@ -43,7 +46,18 @@ function _merge(stored = {}) {
     ddParPalier:          { ...d.ddParPalier,          ...(stored.ddParPalier          || {}) },
     quantiteParPalier:    { ...d.quantiteParPalier,    ...(stored.quantiteParPalier    || {}) },
     refundFractionOnFail: stored.refundFractionOnFail ?? d.refundFractionOnFail,
+    // Recettes : par type d'objet × palier → matériau requis.
+    // { '<type>': { '1': { itemId, quantite }, '2': {…}, '3': {…} } }
+    recipes:              { ...(stored.recipes || {}) },
   };
+}
+
+/** Exigence normalisée d'un type×palier : [{itemId, quantite}] (vide si non liée). */
+export function craftRecipeMaterials(type, tier, cfg = getCraftSettings()) {
+  const r = cfg?.recipes?.[type]?.[tier];
+  if (!r || !r.itemId) return [];
+  const defQty = cfg?.quantiteParPalier?.[tier] ?? DEFAULT_CRAFT_CONFIG.quantiteParPalier[tier];
+  return [{ itemId: String(r.itemId), quantite: Math.max(1, parseInt(r.quantite, 10) || defQty) }];
 }
 
 export async function loadCraftSettings() {
@@ -74,7 +88,17 @@ async function _loadSkills() {
 export async function openCraftSettingsAdmin() {
   await loadCraftSettings();
   await _loadSkills();
+  try {
+    _shopItems = (await loadCollection('shop') || [])
+      .filter(it => it && it.nom)
+      .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
+  } catch { _shopItems = []; }
   _renderModal();
+}
+
+function _itemOptions(selected) {
+  const opts = _shopItems.map(it => `<option value="${_esc(it.id)}" ${it.id === selected ? 'selected' : ''}>${_esc(it.nom)}</option>`).join('');
+  return `<option value="">— aucun —</option>${opts}`;
 }
 
 function _skillOptions(selected) {
@@ -134,6 +158,25 @@ function _renderModal() {
       </div>
 
       <div class="sh-admin-section">
+        <div class="sh-admin-section-title">🧱 Matériaux requis par recette</div>
+        <p class="sh-admin-section-hint">Pour chaque type d'objet × palier, choisis l'objet-matériau requis (créé en Boutique) et la quantité (vide = défaut du palier).</p>
+        ${OBJ_CATEGORIES.map(c => `
+          <div style="margin-top:8px;padding-top:6px;border-top:1px dashed var(--border-md)">
+            <div class="sh-admin-section-title" style="font-size:.78rem;margin-bottom:4px">${c.label}</div>
+            ${PALIERS.map(p => {
+              const r = s.recipes?.[c.id]?.[p] || {};
+              const defQty = s.quantiteParPalier?.[p] ?? '';
+              return `<div class="sh-admin-row-line">
+                <span class="sh-admin-row-lbl" style="min-width:34px">${STARS[p]}</span>
+                <select class="sh-admin-row-input" data-change="_craftRecipeMat" data-type="${c.id}" data-tier="${p}">${_itemOptions(r.itemId || '')}</select>
+                <input type="number" class="sh-admin-row-input small" min="1" max="99" value="${r.quantite ?? ''}" placeholder="${defQty}"
+                  data-input="_craftRecipeQty" data-type="${c.id}" data-tier="${p}" title="Quantité (vide = ${defQty})">
+              </div>`;
+            }).join('')}
+          </div>`).join('')}
+      </div>
+
+      <div class="sh-admin-section">
         <div class="sh-admin-section-title">🎯 Difficulté (DD) par palier</div>
         ${numRow('★ (1★)',   'ddParPalier.1', s.ddParPalier?.[1] ?? 11, 1, 40)}
         ${numRow('★★ (2★)',  'ddParPalier.2', s.ddParPalier?.[2] ?? 14, 1, 40)}
@@ -177,6 +220,16 @@ function _set(path, value) {
   _cfg = s;
 }
 
+function _setRecipe(type, tier, key, value) {
+  const s = getCraftSettings();
+  (s.recipes ??= {});
+  (s.recipes[type] ??= {});
+  (s.recipes[type][tier] ??= {});
+  if (value === null || value === '') delete s.recipes[type][tier][key];
+  else s.recipes[type][tier][key] = value;
+  _cfg = s;
+}
+
 async function _saveAndClose() {
   try {
     await saveCraftSettings(getCraftSettings());
@@ -198,4 +251,6 @@ registerActions({
   _craftCat:   (el) => _set(el.dataset.field, el.value),
   _craftNum:   (el) => _set(el.dataset.field, Math.max(0, parseInt(el.value, 10) || 0)),
   _craftRefund:(el) => _set('refundFractionOnFail', Math.max(0, Math.min(100, parseInt(el.value, 10) || 0)) / 100),
+  _craftRecipeMat: (el) => _setRecipe(el.dataset.type, el.dataset.tier, 'itemId', el.value),
+  _craftRecipeQty: (el) => _setRecipe(el.dataset.type, el.dataset.tier, 'quantite', el.value ? Math.max(1, parseInt(el.value, 10) || 0) : null),
 });
