@@ -181,9 +181,8 @@ function _wireInspectorDrawer() {
 }
 
 export function _vttInsFilterConditionPicker(value = '') {
-  const query = String(value || '').trim().toLocaleLowerCase('fr');
   document.querySelectorAll('#vtt-inspector .vtt-condition-pick').forEach(button => {
-    button.hidden = !!query && !String(button.dataset.search || '').includes(query);
+    button.hidden = !_searchIncludes(button.dataset.search || '', value);
   });
 }
 export function _renderInspector(t) {

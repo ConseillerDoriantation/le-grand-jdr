@@ -82,6 +82,17 @@ export function techniqueActiveForMode(technique, effectiveMode = 'normal') {
   return !normalizeWeaponTechnique(technique).requiresAdvantage || effectiveMode === 'adv';
 }
 
+/** Mode autorisant les techniques liées à l'avantage. Un avantage choisi à la
+ * main ne crée pas l'ouverture : elle doit venir d'une règle du lanceur, de la
+ * cible ou du style. Un désavantage réel ou choisi annule cette ouverture. */
+export function techniqueEligibilityMode({ hasAdvantage = false, hasDisadvantage = false, requestedMode = 'normal' } = {}) {
+  const advantage = !!hasAdvantage;
+  const disadvantage = !!hasDisadvantage || requestedMode === 'dis';
+  if (advantage && !disadvantage) return 'adv';
+  if (disadvantage && !advantage) return 'dis';
+  return 'normal';
+}
+
 function _scaledFormula(formula, multiplier) {
   const count = Math.max(0, parseInt(multiplier, 10) || 0);
   if (!formula || count <= 0) return '';

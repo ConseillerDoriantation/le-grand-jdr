@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  conditionConsumedByAttack,
   conditionDamageBonusApplies,
   conditionDamageFormula,
   conditionDamageReductionApplies,
@@ -65,4 +66,13 @@ test('Rage donne l’avantage aux tests et JS de Force sans ignorer un désavant
     rage,
     { lib: { effects: { checkDisadvantageStats: ['force'] } } },
   ], 'force', 'check'), 'normal');
+});
+
+test('Invisible se dissipe après une attaque portée ou un coup reçu', () => {
+  const invisible = { breakOnAttack: true, breakOnHit: true };
+  assert.equal(conditionConsumedByAttack(invisible, { attacker: true }), true);
+  assert.equal(conditionConsumedByAttack(invisible, { hit: true }), true);
+  assert.equal(conditionConsumedByAttack(invisible, { hit: false }), false);
+  assert.equal(conditionConsumedByAttack({ consumedByAttackAgainst: true }, { hit: true }), true,
+    'les anciens états consommés au premier coup restent compatibles');
 });

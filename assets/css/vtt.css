@@ -14858,6 +14858,7 @@ button.vtt-ms-fact:last-child:hover { border-right-color: transparent; }
 .vtt-ins-field:focus { border-color: var(--border-bright); }
 .vtt-condition-picker-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
 .vtt-condition-pick { min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 3px 6px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); color: var(--text-soft); font-size: 10.5px; cursor: pointer; }
+.vtt-condition-pick[hidden] { display: none; }
 .vtt-condition-pick span { font-size: 16px; }
 .vtt-condition-pick b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-weight: 650; }
 .vtt-condition-pick:hover:not(:disabled) { color: var(--text); border-color: var(--effect-color); background: color-mix(in srgb, var(--effect-color) 12%, var(--surface-2)); }
