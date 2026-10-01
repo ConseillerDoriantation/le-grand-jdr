@@ -44,3 +44,54 @@ test('les deux premiers groupes de tags sont visibles directement en catégorie'
   assert.match(shop, /id="sh-inline-filters"/);
   assert.match(css, /\.shc-inline-filters\s*\{/);
 });
+
+test('le MJ peut créer une catégorie depuis le bas du rail', () => {
+  const rail = shop.match(/function _renderRail\(\)[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(rail, /STATE\.isAdmin[\s\S]*class="shc-rail-add"[\s\S]*data-sh-action="openCatModal"/);
+  assert.match(rail, /Nouvelle catégorie/);
+  assert.match(css, /\.shc-rail-add\s*\{/);
+});
+
+test('la catégorie se modifie dans une modale haute sans préréglage ni aperçu redondant', () => {
+  assert.match(shop, /class="shcat"/);
+  assert.doesNotMatch(shop, /class="shcat-preview"/);
+  assert.doesNotMatch(shop, /data-sh-action="catPreview"/);
+  assert.doesNotMatch(shop, /CAT_EDITOR_PRESETS|Démarrer avec/);
+  assert.match(shop, /CAT_EDITOR_EMOJIS/);
+  assert.match(css, /\.modal:has\(\.shcat\)\s*\{[^}]*max-width:\s*720px[^}]*height:\s*min\(820px/s);
+  assert.doesNotMatch(css, /\.shcat-preview\s*\{/);
+});
+
+test('le type Libre est fusionné vers Classique et persisté sans lecture supplémentaire', () => {
+  assert.doesNotMatch(shop, /\n\s*libre:\s*\{\s*\n\s*label:/);
+  assert.match(shop, /if \(template === 'libre'\) return 'classique'/);
+  assert.match(shop, /col: 'shopCategories'[\s\S]*template: 'classique'/);
+  assert.match(shop, /col: 'shop'[\s\S]*effet: description, description/);
+  assert.match(shop, /_persistLegacyShopTemplates\(cats, items\)/);
+});
+
+test('le pied de la modale suit directement l ordre statut annuler et action principale', () => {
+  const footer = shop.match(/<footer class="shcat-footer">[\s\S]*?<\/footer>/)?.[0] || '';
+  assert.doesNotMatch(footer, /shcat-footer-actions/);
+  assert.match(shop, /Modifications non enregistrées/);
+  assert.match(shop, /Créer la catégorie/);
+  assert.match(shop, /<kbd>Ctrl ↵<\/kbd>/);
+  assert.match(shop, /class="ghost" data-sh-action="catClose"/);
+  assert.match(shop, /class="primary" data-sh-action="saveCat"/);
+  assert.match(css, /\.shcat-footer\s*\{[^}]*min-height:\s*58px[^}]*padding:\s*12px 18px/s);
+  assert.match(css, /\.shcat-footer button\s*\{[^}]*height:\s*34px[^}]*font-size:\s*12\.5px[^}]*font-weight:\s*700/s);
+});
+
+test('la catégorie persiste couleur et point focal et refuse les noms en double', () => {
+  assert.match(shop, /imageFocus:\s*focus/);
+  assert.match(shop, /couleur:\s*state\?\.couleur/);
+  assert.match(shop, /Une catégorie porte déjà ce nom/);
+  assert.match(shop, /background-position:\$\{focus\.x\}% \$\{focus\.y\}%/);
+});
+
+test('la suppression inline redirige les articles avant de garder l undo', () => {
+  assert.match(shop, /data-sh-action="catDeleteDestination"/);
+  assert.match(shop, /await _catBatchMove\(affected, validDestination\)/);
+  assert.match(shop, /confirmDelete\('shopCategories'[\s\S]*confirmed:\s*true/s);
+  assert.match(shop, /onRestore:\s*async \(\) => \{ if \(affected\.length\) await _catBatchMove\(affected, catId\)/);
+});
