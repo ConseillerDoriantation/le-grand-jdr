@@ -169,3 +169,26 @@ export function isTraitAllowed(trait, objType, tier) {
   const t = _tier(tier);
   return trait.portee === traitPoolFor(objType) && parseInt(trait.tier, 10) === t;
 }
+
+/**
+ * Construit l'objet d'inventaire crafté à partir d'un socle de stats (`base`,
+ * lu de la console/boutique côté app) + les choix du joueur. Pur : l'appelant
+ * fournit `base`, `rarete` (id de rareté du palier) et le `trait` choisi.
+ * L'objet produit est une ENTRÉE d'inventaire fraîche (pas un article boutique).
+ */
+export function buildCraftedItem(base = {}, { name, nature, rarete, trait, author } = {}) {
+  const chosen = trait && trait.nom ? trait.nom : (typeof trait === 'string' ? trait.trim() : '');
+  const out = {
+    ...base,
+    nom: (name && String(name).trim()) || base.nom || 'Objet forgé',
+    rarete: rarete || base.rarete || '',
+    traits: chosen ? [chosen] : [],
+    crafted: true,
+    craftedBy: author || '',
+  };
+  if (nature) out.nature = nature;
+  delete out.id;        // nouvel objet d'inventaire, pas un article de boutique
+  delete out.dispo;     // champs méta boutique non pertinents en inventaire
+  delete out.prix;
+  return out;
+}

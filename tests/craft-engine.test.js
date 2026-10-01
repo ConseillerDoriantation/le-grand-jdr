@@ -8,6 +8,7 @@ import {
   craftDD, craftMaterialQty,
   normalizeMaterialRequirements, countInventoryItem, missingMaterials, hasCraftMaterials,
   resolveCraftRoll, craftRefundOnFail, traitPoolFor, craftableTraits, isTraitAllowed,
+  buildCraftedItem,
 } from '../assets/js/shared/craft-engine.js';
 
 const TRAITS = [
@@ -135,6 +136,24 @@ test('traits piochables : armure fusionne les slots, arme isolée', () => {
   // Anneau et amulette restent séparés.
   assert.deepEqual(craftableTraits('anneau', 1, TRAITS).map(t => t.id), ['anneauMin']);
   assert.deepEqual(craftableTraits('amulette', 1, TRAITS).map(t => t.id), ['souffle']);
+});
+
+test('buildCraftedItem : socle + nom + rareté + trait + nature, sans méta boutique', () => {
+  const base = { id: 'shop_xyz', nom: 'Épée (base)', degats: '1d8', typeArme: 'Épée', prix: 100, dispo: true, traits: ['ignoré'] };
+  const item = buildCraftedItem(base, { name: 'Lame de l’Aube', nature: 'magique', rarete: 'rare', trait: { nom: 'Perce-armure' }, author: 'u1' });
+  assert.equal(item.nom, 'Lame de l’Aube');
+  assert.equal(item.rarete, 'rare');
+  assert.equal(item.nature, 'magique');
+  assert.deepEqual(item.traits, ['Perce-armure']);  // seul le trait choisi
+  assert.equal(item.degats, '1d8');                  // stats de base conservées
+  assert.equal(item.crafted, true);
+  assert.equal(item.craftedBy, 'u1');
+  assert.equal(item.id, undefined);                  // pas d'id boutique
+  assert.equal(item.prix, undefined);
+  assert.equal(item.dispo, undefined);
+  // Nom par défaut si vide + trait sous forme de chaîne accepté.
+  const i2 = buildCraftedItem({ nom: 'X' }, { trait: 'Aiguisé' });
+  assert.deepEqual(i2.traits, ['Aiguisé']);
 });
 
 test('isTraitAllowed : même pool + même palier', () => {
