@@ -116,7 +116,13 @@ test('rollDice : bornes de sécurité (trop de dés / trop de faces)', () => {
 // ── rollCardHtml ──────────────────────────────────────────────────────────────
 test('rollCardHtml : affiche le total et le détail des dés', () => {
   const out = rollCardHtml(rollDice('1d20+3', rngMid));
-  assert.match(out, /chat-roll-total">🎲 14</);
-  assert.match(out, /1d20 \[11\]/);
-  assert.match(out, /\+3/);
+  assert.match(out, /chat-roll-expr">1d20\+3</);
+  assert.match(out, /chat-roll-total">14</);
+  assert.match(out, /chat-roll-die">11</);
+  assert.match(out, /chat-roll-modifier">\+3</);
+});
+
+test('rollCardHtml : distingue les réussites et échecs critiques du d20', () => {
+  assert.match(rollCardHtml(rollDice('1d20', () => .999)), /chat-roll--crit[\s\S]*Réussite critique/);
+  assert.match(rollCardHtml(rollDice('1d20', () => 0)), /chat-roll--fumble[\s\S]*Échec critique/);
 });

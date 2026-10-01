@@ -39,7 +39,7 @@ import { CHAT_REACTIONS as REACTIONS, EMOJI_CATEGORIES as EMOJI_CATS } from '../
 
 const ADV = 'adventure';   // id de la conversation d'aventure
 const HISTORY = 40;
-let _uid = null, _open = false, _view = 'list';   // 'list' | 'convo' | 'new' | 'manage'
+let _uid = null, _open = false, _view = 'convo';
 let _openId = null;                                // conv ouverte (ADV | convoId)
 let _editingId = null;                             // message en cours d'édition (id) | null
 let _replyTo = null;                               // message cité { id, senderName, text } | null
@@ -61,6 +61,36 @@ let _unsubPresence = null, _online = new Set();    // statut en ligne (abonné q
 let _typing = [], _otherReads = 0;                 // uids en train d'écrire · millis lus par l'autre (DM)
 let _typingWroteAt = 0, _typingClearTimer = null, _typingRenderTimer = null;
 let _prevUnread = 0;                               // pour ne pulser QUE sur du neuf
+let _sheet = null;                                 // 'new' | 'manage' | null (feuille dans le tiroir)
+let _sheetSelection = [], _sheetName = '';
+let _pinned = false, _tabY = 50;                   // préférences locales du tiroir
+let _unreadCutoff = 0;                             // lecture connue avant l'ouverture du fil
+let _deleteArmedId = null, _deleteArmTimer = null; // suppression en deux clics
+let _mentionIndex = 0;
+let _tabDrag = null;
+let _tabBound = false, _keyboardBound = false;
+const _echoKeys = new Set();
+
+const _CHAT_ICONS = {
+  chat: '<path d="M4 5.5h16v11H9l-5 4v-15z"/>',
+  flag: '<path d="M6 21V4m0 1h11l-2 4 2 4H6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  bell: '<path d="M18 8a6 6 0 00-12 0c0 7-3 7-3 8h18c0-1-3-1-3-8M10 20h4"/>',
+  belloff: '<path d="M13.7 4.2A6 6 0 006 9c0 7-3 7-3 8h14M10 20h4M3 3l18 18"/>',
+  pin: '<path d="M9 4h6m-5 0v5l-2 4h8l-2-4V4M12 17v4"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6L7 7m10 10 1.4 1.4M5.6 18.4 7 17m10-10 1.4-1.4"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
+  smile: '<circle cx="12" cy="12" r="9"/><path d="M8.5 10h.01M15.5 10h.01M8.5 14.5c1.7 1.7 5.3 1.7 7 0"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/>',
+  dice: '<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9"/>',
+  send: '<path d="m4 4 17 8-17 8 3-8zM7 12h14"/>',
+  reply: '<path d="M9 8 4 12l5 4v-3h5c3 0 5 1 6 4 0-6-3-8-8-8H9z"/>',
+  edit: '<path d="M4 20l1-4L16 5l3 3L8 19z"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  down: '<path d="m7 10 5 5 5-5"/>',
+};
+const _chatIcon = (name, cls = '') => `<svg class="chat-ic${cls ? ` ${cls}` : ''}" viewBox="0 0 24 24" aria-hidden="true">${_CHAT_ICONS[name] || ''}</svg>`;
 
 // ── Refs ──────────────────────────────────────────────────────────────────────
 const _adv = () => getCurrentAdventureId();
@@ -87,9 +117,12 @@ const _totalUnread = () => _advUnread() + _groups.reduce((s, g) => s + _groupUnr
 export async function initChat(uid) {
   _uid = uid || STATE.user?.uid || null;
   _teardownListeners();
-  _advMsgs = []; _groups = []; _convoMsgs = []; _open = false; _view = 'list'; _openId = null;
+  _advMsgs = []; _groups = []; _convoMsgs = []; _open = false; _view = 'convo'; _openId = ADV;
   _editingId = null; _ghosts = new Set(); _replyTo = null; _searchOpen = false; _searchQ = '';
   _muted = localStorage.getItem('chat-muted') === '1'; _soundReady = false;
+  _pinned = localStorage.getItem('chat-drawer-pinned') === '1';
+  _tabY = Math.max(12, Math.min(88, Number(localStorage.getItem('chat-tab-y')) || 50));
+  _sheet = null; _unreadCutoff = 0; _echoKeys.clear();
   _imgCache = new Map();
   _chatEmotes = [];
   _loadChatEmotes().then(() => { if (_open && _view === 'convo') _renderMessages(); });
@@ -113,15 +146,36 @@ export async function initChat(uid) {
 export function teardownChat() {
   _teardownListeners();
   document.getElementById('chat-widget')?.remove();
-  _open = false; _advMsgs = []; _groups = []; _convoMsgs = []; _prevUnread = 0;
+  document.body.classList.remove('chat-drawer-pinned');
+  _open = false; _advMsgs = []; _groups = []; _convoMsgs = []; _prevUnread = 0; _tabBound = false;
 }
 
 // Notifications discrètes (aucune règle Firestore) : pulsation de la bulle
 // quand du NON-LU apparaît (chat fermé ou autre conversation).
 function _notify() {
   const n = _totalUnread();
-  if (n > _prevUnread) { _pulseBubble(); if (_soundReady) { _beep(); _desktopNotify(); } }
+  if (n > _prevUnread) {
+    _pulseBubble();
+    if (_soundReady) {
+      _beep();
+      _desktopNotify();
+      if (!_open) _showEcho(_latestUnreadEvent());
+    }
+  }
   _prevUnread = n; _soundReady = true;   // les non-lus déjà là au chargement ne sonnent pas
+}
+
+const _mentionsMe = (text = '') => !!_uid && String(text || '').includes(`@[${_uid}]`);
+function _latestUnreadEvent() {
+  let event = null;
+  const advLast = [..._advMsgs].reverse().find(m => m.senderId !== _uid && _atMillis(m) > (_reads[ADV] || 0));
+  if (advLast) event = { key: `${ADV}:${advLast.id}`, convoId: ADV, senderId: advLast.senderId, senderName: advLast.senderName, text: advLast.text || '📷 Image', at: _atMillis(advLast) };
+  for (const g of _groups) {
+    const at = _lastMillis(g);
+    if (!g.lastSenderId || g.lastSenderId === _uid || at <= (_reads[g.id] || 0) || at <= (event?.at || 0)) continue;
+    event = { key: `${g.id}:${at}`, convoId: g.id, senderId: g.lastSenderId, senderName: g.lastSenderName, text: g.lastText || 'Nouveau message', at };
+  }
+  return event;
 }
 
 // Aperçu du message non-lu le plus récent (pour la notif desktop).
@@ -168,6 +222,49 @@ function _pulseBubble() {
   el.classList.remove('chat-notify'); void el.offsetWidth; el.classList.add('chat-notify');
   setTimeout(() => el.classList.remove('chat-notify'), 1200);
 }
+
+function _dismissEcho(el) {
+  if (!el || el.classList.contains('is-leaving')) return;
+  el.classList.add('is-leaving');
+  setTimeout(() => el.remove(), 240);
+}
+function _clearEchoes() {
+  document.querySelectorAll('#chat-echoes .chat-echo').forEach(_dismissEcho);
+}
+function _showEcho(event) {
+  if (!event || _echoKeys.has(event.key)) return;
+  const mention = _mentionsMe(event.text);
+  if (_muted && !mention) return;
+  _echoKeys.add(event.key);
+  const host = document.getElementById('chat-echoes'); if (!host) return;
+  const g = event.convoId === ADV ? null : _convoById(event.convoId);
+  const title = event.convoId === ADV ? 'L’aventure' : _convoTitle(g);
+  const el = document.createElement('article');
+  el.className = `chat-echo${mention ? ' is-mention' : ''}`;
+  el.dataset.convo = event.convoId;
+  el.innerHTML = `${_conversationIconHtml(event.convoId, 'chat-ci--echo')}
+    <div class="chat-echo-copy"><span><b>${_esc(event.senderName || _nameOf(event.senderId))}</b>${event.convoId === ADV || g?.type === 'dm' ? '' : ` · ${_esc(title)}`}</span><p>${_esc(event.text)}</p></div>
+    <button type="button" class="chat-echo-close" aria-label="Ignorer">${_chatIcon('close')}</button>
+    <form class="chat-echo-reply"><input maxlength="1000" placeholder="Répondre…" aria-label="Réponse rapide"><button aria-label="Envoyer">${_chatIcon('send')}</button></form>`;
+  host.prepend(el);
+  while (host.children.length > 3) host.lastElementChild?.remove();
+  let timer = null;
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => _dismissEcho(el), 6500); };
+  arm();
+  el.addEventListener('mouseenter', () => clearTimeout(timer));
+  el.addEventListener('mouseleave', () => { if (!el.contains(document.activeElement)) arm(); });
+  el.addEventListener('click', e => {
+    if (e.target.closest('.chat-echo-close')) { e.stopPropagation(); _dismissEcho(el); return; }
+    if (e.target.closest('form')) return;
+    _openDrawer(event.convoId);
+  });
+  el.querySelector('form')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const input = e.currentTarget.querySelector('input');
+    const text = input?.value.trim(); if (!text) return;
+    if (await _sendTextTo(event.convoId, text)) _dismissEcho(el);
+  });
+}
 function _teardownListeners() {
   [_unsubAdv, _unsubGroups, _unsubConvo, _unsubTyping, _unsubReads, _unsubPresence].forEach(u => { if (u) try { u(); } catch {} });
   _unsubAdv = _unsubGroups = _unsubConvo = _unsubTyping = _unsubReads = _unsubPresence = null;
@@ -198,6 +295,7 @@ function _updateOnlineDots() {
   document.querySelectorAll('#chat-widget [data-online-uid]').forEach(el => {
     el.classList.toggle('is-online', _online.has(el.getAttribute('data-online-uid')));
   });
+  if (_open) _renderHead();
 }
 
 // Abonnements messages (avec limite paginée). Re-souscrits par « charger plus ».
@@ -222,22 +320,28 @@ function _subscribeConvo(id) {
 
 // Nouveau lot de données reçu (source = ADV | 'groups' | 'convo')
 function _onData(source) {
-  if (!_open) { _renderBubble(); _notify(); return; }
-  if (_view === 'list') _renderList();
-  else if (_view === 'manage' && source === 'groups') _renderManage();
-  else if (_view === 'convo') {
-    // Rafraîchit le fil si la conv ouverte est concernée
-    if ((_openId === ADV && source === ADV) || (_openId !== ADV && source === 'convo')) { _renderMessages(); _markReadLocal(_openId); }
-    else _renderConvoHeaderBadge();
+  _renderTab();
+  if (!_open) { _notify(); return; }
+  _renderRail();
+  _renderHead();
+  if ((_openId === ADV && source === ADV) || (_openId !== ADV && source === 'convo')) {
+    _renderMessages();
+    _markReadLocal(_openId);
   }
+  if (_sheet === 'manage' && source === 'groups') _renderSheet();
   _notify();
 }
 
 // ── Montage ───────────────────────────────────────────────────────────────────
 function _mount() {
   let el = document.getElementById('chat-widget');
-  if (!el) { el = document.createElement('div'); el.id = 'chat-widget'; (document.getElementById('app') || document.body).appendChild(el); }
-  _renderBubble();
+  if (!el) { el = document.createElement('div'); el.id = 'chat-widget'; document.body.appendChild(el); }
+  el.innerHTML = `<button type="button" class="chat-edge-tab" id="chat-edge-tab" aria-label="Ouvrir la messagerie"></button>
+    <div class="chat-echoes" id="chat-echoes" aria-live="polite"></div>
+    <aside class="chat-drawer" id="chat-drawer" role="dialog" aria-label="Messagerie" aria-hidden="true"></aside>`;
+  _bindTabDrag();
+  _bindKeyboard();
+  _renderTab();
 }
 
 // ── Rendus ────────────────────────────────────────────────────────────────────
@@ -391,6 +495,180 @@ function _renderConvo() {
 }
 function _renderConvoHeaderBadge() { /* pas de badge d'en-tête pour l'instant */ }
 
+// ── Interface tiroir 2026 ───────────────────────────────────────────────────
+function _conversationUnread(id) {
+  return id === ADV ? _advUnread() : _groupUnread(_convoById(id));
+}
+function _conversationHasMention(id) {
+  const cutoff = _reads[id] || 0;
+  if (id === ADV) return _advMsgs.some(m => m.senderId !== _uid && _atMillis(m) > cutoff && _mentionsMe(m.text));
+  const g = _convoById(id);
+  return !!(g?.lastSenderId && g.lastSenderId !== _uid && _lastMillis(g) > cutoff && _mentionsMe(g.lastText));
+}
+function _conversationIds() {
+  return [ADV, ..._groups.slice().sort((a, b) => _lastMillis(b) - _lastMillis(a)).map(g => g.id)];
+}
+function _conversationIconHtml(id, extra = '') {
+  if (id === ADV) return `<span class="chat-ci is-adventure ${extra}">${_chatIcon('flag')}</span>`;
+  const g = _convoById(id);
+  if (g?.type === 'dm') {
+    const uid = _otherDmUid(g);
+    return `<span class="chat-ci ${extra}"><img src="${_esc(avatarSrcOf(_profileOf(uid)))}" alt="" data-online-uid="${_esc(uid || '')}" class="${_isOnline(uid) ? 'is-online' : ''}"></span>`;
+  }
+  const members = (g?.members || []).filter(uid => uid !== _uid).slice(0, 2);
+  return `<span class="chat-ci is-group ${extra}">${members.map(uid => `<img src="${_esc(avatarSrcOf(_profileOf(uid)))}" alt="">`).join('') || '<span>G</span>'}</span>`;
+}
+function _renderTab() {
+  const tab = document.getElementById('chat-edge-tab'); if (!tab) return;
+  const unreadIds = _conversationIds().filter(id => _conversationUnread(id));
+  const total = _totalUnread(), mention = unreadIds.some(_conversationHasMention);
+  tab.hidden = _open;
+  tab.style.top = `${_tabY}%`;
+  tab.innerHTML = `${_chatIcon('chat')}${total ? `<b class="chat-tab-count${mention ? ' is-mention' : ''}">${total > 99 ? '99+' : total}</b>` : ''}
+    ${unreadIds.length ? `<span class="chat-tab-avatars">${unreadIds.slice(0, 3).map(id => _conversationIconHtml(id, 'is-tab')).join('')}</span>` : ''}<i></i>`;
+  tab.title = total ? `${total} message${total > 1 ? 's' : ''} non lu${total > 1 ? 's' : ''} — Entrée pour ouvrir` : 'Messagerie — Entrée pour ouvrir';
+  const echoes = document.getElementById('chat-echoes'); if (echoes) echoes.style.top = `${_tabY}%`;
+}
+function _bindTabDrag() {
+  const tab = document.getElementById('chat-edge-tab');
+  if (!tab || _tabBound) return;
+  _tabBound = true;
+  tab.addEventListener('pointerdown', e => { _tabDrag = { y: e.clientY, moved: false }; tab.setPointerCapture?.(e.pointerId); });
+  tab.addEventListener('pointermove', e => {
+    if (!_tabDrag) return;
+    if (Math.abs(e.clientY - _tabDrag.y) > 4) { _tabDrag.moved = true; tab.classList.add('is-dragging'); }
+    if (!_tabDrag.moved) return;
+    _tabY = Math.max(12, Math.min(88, e.clientY / window.innerHeight * 100));
+    tab.style.top = `${_tabY}%`;
+    const echoes = document.getElementById('chat-echoes'); if (echoes) echoes.style.top = `${_tabY}%`;
+  });
+  tab.addEventListener('pointerup', () => {
+    const moved = _tabDrag?.moved; _tabDrag = null; tab.classList.remove('is-dragging');
+    if (moved) localStorage.setItem('chat-tab-y', String(_tabY)); else _openDrawer();
+  });
+}
+function _renderRail() {
+  const rail = document.getElementById('chat-rail'); if (!rail) return;
+  const items = _conversationIds().map(id => {
+    const n = _conversationUnread(id), mention = _conversationHasMention(id);
+    const title = id === ADV ? 'L’aventure' : _convoTitle(_convoById(id));
+    return `<button type="button" class="chat-rail-item${id === _openId ? ' is-active' : ''}${n ? ' is-unread' : ''}" data-action="chatSwitchConvo" data-convo="${_esc(id)}" title="${_esc(title)}" aria-label="${_esc(title)}">${_conversationIconHtml(id)}${n ? `<b class="chat-rail-badge${mention ? ' is-mention' : ''}">${n > 99 ? '99+' : n}</b>` : ''}</button>`;
+  });
+  rail.innerHTML = `${items.shift() || ''}<hr>${items.join('')}<button type="button" class="chat-rail-btn is-new" data-action="chatNew" title="Nouvelle discussion" aria-label="Nouvelle discussion">${_chatIcon('plus')}</button><span class="chat-rail-spacer"></span>
+    <button type="button" class="chat-rail-btn${_muted ? ' is-active' : ''}" data-action="chatToggleMute" title="${_muted ? 'Réactiver les notifications' : 'Couper les notifications'}" aria-label="Notifications">${_chatIcon(_muted ? 'belloff' : 'bell')}</button>
+    <button type="button" class="chat-rail-btn${_pinned ? ' is-active' : ''}" data-action="chatTogglePin" title="${_pinned ? 'Détacher le tiroir' : 'Épingler à côté du site'}" aria-label="Épingler le tiroir">${_chatIcon('pin')}</button>`;
+}
+function _headerMembers() {
+  if (_openId === ADV) return [_uid, ..._advMembers()];
+  return _convoById(_openId)?.members || [];
+}
+function _renderHead() {
+  const head = document.getElementById('chat-head'); if (!head) return;
+  const g = _convoById(_openId), otherUid = g?.type === 'dm' ? _otherDmUid(g) : null;
+  const title = _openId === ADV ? 'L’aventure' : _convoTitle(g);
+  const members = _headerMembers();
+  const online = members.filter(uid => uid === _uid || _isOnline(uid)).length;
+  const subtitle = g?.type === 'dm'
+    ? (_isOnline(otherUid) ? '<span class="chat-head-online"></span>En ligne' : 'Hors ligne')
+    : `${members.length} membre${members.length > 1 ? 's' : ''} · ${online} en ligne`;
+  const avatars = g?.type === 'dm' ? '' : `<span class="chat-head-avatars">${members.filter(uid => uid !== _uid).slice(0, 5).map(uid => `<img src="${_esc(avatarSrcOf(_profileOf(uid)))}" alt="" class="${_isOnline(uid) ? 'is-online' : ''}" data-online-uid="${_esc(uid)}">`).join('')}</span>`;
+  head.innerHTML = `<div class="chat-head-title"><h2>${_esc(title)}</h2><p>${subtitle}</p></div>${avatars}
+    <button type="button" class="chat-head-btn${_searchOpen ? ' is-active' : ''}" data-action="chatSearchToggle" title="Rechercher (Ctrl+F)" aria-label="Rechercher">${_chatIcon('search')}</button>
+    ${g && g.type !== 'dm' ? `<button type="button" class="chat-head-btn" data-action="chatManage" title="Gérer le groupe" aria-label="Gérer le groupe">${_chatIcon('gear')}</button>` : ''}
+    <button type="button" class="chat-head-btn" data-action="chatToggle" title="Fermer (Échap)" aria-label="Fermer">${_chatIcon('close')}</button>`;
+  const search = document.getElementById('chat-search'); if (search) search.hidden = !_searchOpen;
+  const composer = document.getElementById('chat-input'); if (composer) composer.dataset.placeholder = _composerPlaceholder();
+}
+function _composerPlaceholder() {
+  const g = _convoById(_openId);
+  if (_openId === ADV) return "Écrire à l’aventure…";
+  if (g?.type === 'dm') return `Message à ${_convoTitle(g)}…`;
+  return `Écrire à ${_convoTitle(g)}…`;
+}
+function _renderDrawer() {
+  const drawer = document.getElementById('chat-drawer'); if (!drawer) return;
+  drawer.classList.toggle('is-open', _open);
+  drawer.setAttribute('aria-hidden', _open ? 'false' : 'true');
+  if (!_open) return;
+  drawer.innerHTML = `<nav class="chat-rail" id="chat-rail" aria-label="Conversations"></nav><section class="chat-pane">
+    <header class="chat-drawer-head" id="chat-head"></header>
+    <div class="chat-drawer-search" id="chat-search" ${_searchOpen ? '' : 'hidden'}>${_chatIcon('search')}<input id="chat-search-inp" placeholder="Rechercher dans ce fil…" value="${_esc(_searchQ)}" autocomplete="off"><small id="chat-search-count"></small></div>
+    <div class="chat-msgs chat-thread" id="chat-msgs"></div>
+    <button type="button" class="chat-new-pill" id="chat-new-pill" data-action="chatScrollBottom" hidden>${_chatIcon('down')} Nouveaux messages</button>
+    <form class="chat-form chat-composer" id="chat-form"><div class="chat-typing" id="chat-typing" hidden></div><div class="chat-edit-bar" id="chat-edit-bar" hidden></div><div class="chat-reply-bar" id="chat-reply-bar" hidden></div>
+      <div class="chat-composer-box"><div id="chat-input" class="chat-input-ce" contenteditable="true" role="textbox" aria-label="Message" data-placeholder="${_esc(_composerPlaceholder())}"></div>
+        <button type="button" class="chat-compose-btn" data-action="chatEmojiToggle" title="Emoji" aria-label="Insérer un emoji">${_chatIcon('smile')}</button>
+        <button type="button" class="chat-compose-btn" data-action="chatPickImage" title="Envoyer une image" aria-label="Envoyer une image">${_chatIcon('image')}</button>
+        <button type="button" class="chat-compose-btn" data-action="chatDiceToggle" title="Lancer des dés" aria-label="Lancer des dés">${_chatIcon('dice')}</button>
+        <input type="file" id="chat-file" accept="image/*" hidden><button type="submit" class="chat-send" aria-label="Envoyer">${_chatIcon('send')}</button></div>
+      <div class="chat-compose-hints"><span><kbd>Entrée</kbd> envoyer</span><span><kbd>↑</kbd> modifier</span><span><kbd>@</kbd> mentionner</span><span><kbd>/roll 1d20+3</kbd></span></div></form>
+    <section class="chat-sheet" id="chat-sheet" hidden></section></section>`;
+  _renderRail(); _renderHead(); _renderSheet();
+  drawer.querySelector('#chat-form')?.addEventListener('submit', e => { e.preventDefault(); _send(); });
+  drawer.querySelector('#chat-search-inp')?.addEventListener('input', e => { _searchQ = e.target.value; _renderMessages(); });
+  drawer.querySelector('#chat-file')?.addEventListener('change', e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) _sendImage(f); });
+  const ce = drawer.querySelector('#chat-input');
+  ce?.addEventListener('input', _onComposerInput);
+  ce?.addEventListener('keydown', _onComposerKeydown);
+  drawer.querySelector('#chat-msgs')?.addEventListener('scroll', e => { const list = e.target; if (list.scrollHeight - list.scrollTop - list.clientHeight < 60) _hideNewPill(); });
+  if (_typing.length) _renderTyping();
+  if (_replyTo) _showReplyBar();
+  if (_editingId) _showEditBar(); else _restoreDraft();
+  _renderMessages();
+  drawer.querySelector(_searchOpen ? '#chat-search-inp' : '#chat-input')?.focus();
+}
+function _onComposerKeydown(e) {
+  const mentionButtons = [...document.querySelectorAll('#chat-mention-menu [data-uid]')];
+  if (mentionButtons.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault(); _mentionIndex = (_mentionIndex + (e.key === 'ArrowDown' ? 1 : mentionButtons.length - 1)) % mentionButtons.length;
+    mentionButtons.forEach((button, index) => button.classList.toggle('is-active', index === _mentionIndex)); return;
+  }
+  if (mentionButtons.length && (e.key === 'Enter' || e.key === 'Tab')) { e.preventDefault(); mentionButtons[_mentionIndex]?.click(); return; }
+  if (e.key === 'ArrowUp' && !_composerText()) {
+    const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
+    const last = [...msgs].reverse().find(m => m.senderId === _uid && m.text && !m.deleted);
+    if (last) { e.preventDefault(); chatEditMsg({ dataset: { msg: last.id } }); return; }
+  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _send(); }
+}
+function _isTypingTarget(target = document.activeElement) {
+  if (typeof window._vttIsTypingTarget === 'function' && window._vttIsTypingTarget(target)) return true;
+  return !!target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/i.test(target.tagName));
+}
+function _bindKeyboard() {
+  if (_keyboardBound) return;
+  _keyboardBound = true;
+  document.addEventListener('keydown', e => {
+    const typing = _isTypingTarget(e.target);
+    if (e.key === 'Enter' && !_open && !typing && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault(); _openDrawer(); return;
+    }
+    if (!_open) return;
+    if (e.key === 'Escape') {
+      if (document.getElementById('chat-mention-menu')) { _closeMentionMenu(); return; }
+      if (document.getElementById('chat-emoji-pop')) { _closeEmojiPop(); return; }
+      if (document.getElementById('chat-dice-pop')) { _closeDicePop(); return; }
+      if (_sheet) { _sheet = null; _renderSheet(); return; }
+      if (_editingId) { chatCancelEdit(); return; }
+      if (_replyTo) { chatCancelReply(); return; }
+      if (_searchOpen && document.activeElement?.id === 'chat-search-inp') { chatSearchToggle(); return; }
+      if (!typing || document.getElementById('chat-drawer')?.contains(e.target)) _closeDrawer();
+      return;
+    }
+    if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      const ids = _conversationIds(), index = Math.max(0, ids.indexOf(_openId));
+      _switchConversation(ids[(index + (e.key === 'ArrowDown' ? 1 : ids.length - 1)) % ids.length]);
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && document.getElementById('chat-drawer')?.contains(e.target)) {
+      e.preventDefault();
+      if (!_searchOpen) { _searchOpen = true; _renderHead(); }
+      document.getElementById('chat-search-inp')?.focus();
+    }
+  });
+}
+
 // Libellé de jour pour les séparateurs de date (logique pure → chat-format.js).
 const _dayLabel = (ms) => dayLabel(ms);
 function _formatTime(ms) {
@@ -422,16 +700,28 @@ function _renderMessages() {
   if (!msgs.length) {
     html = `<div class="chat-empty">${q ? 'Aucun message trouvé.' : 'Aucun message. Lance la discussion !'}</div>`;
   } else {
+    if (!q) {
+      const g = _convoById(_openId);
+      const title = _openId === ADV ? 'L’aventure' : _convoTitle(g);
+      const intro = _openId === ADV
+        ? 'Le fil commun de la table. Tout le monde le voit, MJ compris.'
+        : g?.type === 'dm' ? `Début de ta conversation privée avec ${title}.` : `Groupe privé · ${(g?.members || []).length} membres.`;
+      html += `<div class="chat-thread-intro">${_conversationIconHtml(_openId, 'is-intro')}<h3>${_esc(title)}</h3><p>${_esc(intro)}</p></div>`;
+    }
     // Il y a peut-être plus ancien si on a atteint la limite courante.
     if (!q && all.length >= curLimit) html += `<button class="chat-load-more" data-action="chatLoadMore">⤒ Messages plus anciens</button>`;
-    let prevDay = '', prevSender = null, prevAt = 0;
+    let prevDay = '', prevSender = null, prevAt = 0, unreadLine = false;
     for (const m of msgs) {
       const at = _atMillis(m) || Date.now();
       const day = _dayLabel(at);
       const dayChanged = day !== prevDay;
       if (dayChanged) { html += `<div class="chat-date-sep"><span>${_esc(day)}</span></div>`; prevDay = day; prevSender = null; }
+      if (!q && !unreadLine && _unreadCutoff && m.senderId !== _uid && at > _unreadCutoff) {
+        html += '<div class="chat-unread-line">Nouveaux</div>';
+        unreadLine = true; prevSender = null;
+      }
       // Regroupement : même auteur, < 5 min, même jour → on masque avatar + nom.
-      const grouped = !dayChanged && !m.deleted && m.senderId === prevSender && (at - prevAt) < 300000;
+      const grouped = !dayChanged && !m.deleted && !m.replyTo && m.senderId === prevSender && (at - prevAt) < 300000;
       html += _msgRow(m, grouped);
       prevSender = m.deleted ? null : m.senderId; prevAt = at;
     }
@@ -443,8 +733,14 @@ function _renderMessages() {
     if (last && _otherReads >= _atMillis(last)) html += '<div class="chat-seen">Vu</div>';
   }
   list.innerHTML = html;
+  const count = document.getElementById('chat-search-count');
+  if (count) count.textContent = q ? `${msgs.length} résultat${msgs.length > 1 ? 's' : ''}` : '';
 
   if (q) { list.scrollTop = 0; }
+  else if (!prevHeight && list.querySelector('.chat-unread-line')) {
+    list.scrollTop = Math.max(0, list.querySelector('.chat-unread-line').offsetTop - 70);
+    _hideNewPill();
+  }
   else if (nearBottom) { list.scrollTop = list.scrollHeight; _hideNewPill(); }
   else {
     list.scrollTop = prevTop + (list.scrollHeight - prevHeight);   // préserve la position
@@ -462,6 +758,12 @@ function _profileOf(uid) {
   return (p && typeof p === 'object') ? p : {};
 }
 function _nameOf(uid) { const p = _profileOf(uid); return p.pseudo || p.email || `Joueur ${String(uid || '').slice(0, 6)}…`; }
+const _CHAT_PALETTE = ['#6ea2ff', '#34d399', '#f4c430', '#ff9f5a', '#b18cff', '#ff6f91'];
+function _chatIdentity(uid, fallback = '') {
+  const name = fallback || _nameOf(uid) || '?';
+  const hash = [...String(uid || name)].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return { name, initial: [...name.trim()][0]?.toUpperCase() || '?', color: _CHAT_PALETTE[hash % _CHAT_PALETTE.length] };
+}
 
 // Membres de l'aventure (hors moi et hors fantômes confirmés). Source AUTORITAIRE :
 // union de accessList/admins/players/memberProfiles → un vrai membre apparaît
@@ -496,7 +798,7 @@ function _reactionsHtml(m) {
   if (!emojis.length) return '';
   const mine = r[_uid] || '';
   return `<span class="chat-msg-reacts">${emojis.map(e =>
-    `<button class="chat-react-chip${e === mine ? ' is-mine' : ''}" data-action="chatReact" data-msg="${_esc(m.id)}" data-emo="${_esc(e)}">${e} ${counts[e]}</button>`
+    `<button class="chat-react-chip${e === mine ? ' is-mine' : ''}" data-action="chatReact" data-msg="${_esc(m.id)}" data-emo="${_esc(e)}" aria-label="${_esc(`${e} · ${counts[e]} réaction${counts[e] > 1 ? 's' : ''}`)}">${e}<span>${counts[e]}</span></button>`
   ).join('')}</span>`;
 }
 
@@ -517,37 +819,31 @@ const _rollCardHtml     = rollCardHtml;
 function _msgRow(m, grouped = false) {
   const mine = m.senderId === _uid;
   const time = new Date(_atMillis(m) || Date.now()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  // Message groupé (même auteur qui enchaîne) : avatar → espaceur, pas de nom.
-  const av = mine ? '' : (grouped
-    ? '<span class="chat-msg-av-spacer"></span>'
-    : `<img class="chat-msg-av" src="${_esc(avatarSrcOf(_profileOf(m.senderId)))}" alt="" loading="lazy">`);
-  const author = (mine || grouped) ? '' : `<span class="chat-msg-author">${_esc(m.senderName || '?')}</span>`;
+  const authorName = m.senderName || _nameOf(m.senderId) || '?';
+  const identity = _chatIdentity(m.senderId, authorName);
+  const av = grouped
+    ? `<span class="chat-msg-group-time">${time}</span>`
+    : `<img class="chat-msg-av" src="${_esc(avatarSrcOf(_profileOf(m.senderId)))}" alt="" loading="lazy">`;
+  const isGm = !!(_profileOf(m.senderId)?.isAdmin || (STATE.adventure?.admins || []).includes(m.senderId));
+  const author = grouped ? '' : `<span class="chat-msg-author" style="--author-c:${identity.color}"><b>${_esc(authorName)}</b>${isGm ? '<i>MJ</i>' : ''}<time>${time}</time></span>`;
   const grpCls = grouped ? ' chat-msg--grouped' : '';
   if (m.deleted) {
-    return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${grpCls}" data-mid="${_esc(m.id)}">${av}
-      <span class="chat-msg-content">${author}
-        <span class="chat-msg-bubble chat-msg-bubble--del">Message supprimé</span>
-      </span></div>`;
+    return `<div class="chat-msg chat-msg--compact${mine ? ' chat-msg--mine' : ''}${grpCls}" data-mid="${_esc(m.id)}">${av}<span class="chat-msg-content">${author}<span class="chat-msg-bubble chat-msg-bubble--del">Message supprimé</span></span></div>`;
   }
-  const edited = m.editedAt ? ' <span class="chat-msg-edited">(modifié)</span>' : '';
+  const edited = m.editedAt ? '<span class="chat-msg-edited">(modifié)</span>' : '';
   const quote = m.replyTo
-    ? `<span class="chat-msg-quote" role="button" data-action="chatJumpTo" data-msg="${_esc(m.replyTo.id || '')}" title="Aller au message"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_esc(m.replyTo.text || '📷 Image')}</span></span>` : '';
-  const img = m.image
-    ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="image" loading="lazy">`                    // legacy inline
-    : (m.imageId ? `<img class="chat-msg-img chat-msg-img--loading" data-img-id="${_esc(m.imageId)}" alt="image">` : '');
+    ? `<button type="button" class="chat-msg-quote" data-action="chatJumpTo" data-msg="${_esc(m.replyTo.id || '')}" title="Aller au message"><span class="chat-quote-name">${_esc(m.replyTo.senderName || '')}</span><span class="chat-quote-text">${_applyMentions(_esc(m.replyTo.text || '📷 Image'))}</span></button>` : '';
+  const imageName = m.imageName || m.fileName || 'image.jpg';
+  const image = m.image
+    ? `<img class="chat-msg-img" src="${_esc(m.image)}" alt="${_esc(imageName)}" loading="lazy">`                    // legacy inline
+    : (m.imageId ? `<img class="chat-msg-img chat-msg-img--loading" data-img-id="${_esc(m.imageId)}" alt="${_esc(imageName)}">` : '');
+  const img = image ? `<span class="chat-msg-image">${image}<small>${_esc(imageName)}</small></span>` : '';
   // Ordre : échappe → linkify (sur texte pur) → émotes/mentions. Linkifier en
   // dernier capturait l'URL du src des <img> d'émote (→ src cassé, 404).
   const txt = m.text ? `<span class="chat-msg-btext">${_applyMentions(_applyChatEmotes(_linkify(_esc(m.text))))}</span>` : '';
   const mentionsMe = !mine && _uid && (m.text || '').includes(`@[${_uid}]`);
-  return `<div class="chat-msg${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}${grpCls}" data-mid="${_esc(m.id)}">${av}
-    <span class="chat-msg-content">${author}
-      <span class="chat-msg-bubble-wrap">
-        <span class="chat-msg-bubble${((m.image || m.imageId) && !m.text) || m.roll ? ' chat-msg-bubble--media' : ''}">${quote}${m.roll ? _rollCardHtml(m.roll) : `${img}${txt}`}</span>
-        <button class="chat-msg-menu-btn" data-action="chatMsgMenu" data-msg="${_esc(m.id)}" title="Réagir / modifier" aria-label="Options du message">⋯</button>
-      </span>
-      ${_reactionsHtml(m)}
-      <span class="chat-msg-time">${time}${edited}</span>
-    </span></div>`;
+  const quickActions = `<span class="chat-msg-actions"><button data-action="chatReact" data-msg="${_esc(m.id)}" data-emo="👍" aria-label="Réagir 👍">👍</button><button data-action="chatReact" data-msg="${_esc(m.id)}" data-emo="😂" aria-label="Réagir 😂">😂</button><button data-action="chatReact" data-msg="${_esc(m.id)}" data-emo="❤️" aria-label="Réagir ❤️">❤️</button><button data-action="chatMsgMenu" data-msg="${_esc(m.id)}" aria-label="Autres réactions">${_chatIcon('smile')}</button><i></i><button data-action="chatReplyMsg" data-msg="${_esc(m.id)}" aria-label="Répondre">${_chatIcon('reply')}</button>${mine && m.text ? `<button data-action="chatEditMsg" data-msg="${_esc(m.id)}" aria-label="Modifier">${_chatIcon('edit')}</button>` : ''}${mine || STATE.isAdmin ? `<button data-action="chatDeleteMsg" data-msg="${_esc(m.id)}" aria-label="Supprimer">${_deleteArmedId === m.id ? 'Supprimer ?' : _chatIcon('trash')}</button>` : ''}</span>`;
+  return `<div class="chat-msg chat-msg--compact${mine ? ' chat-msg--mine' : ''}${mentionsMe ? ' chat-msg--mention' : ''}${grpCls}" data-mid="${_esc(m.id)}">${av}<span class="chat-msg-content">${author}${quote}<span class="chat-msg-bubble${((m.image || m.imageId) && !m.text) || m.roll ? ' chat-msg-bubble--media' : ''}">${m.roll ? _rollCardHtml(m.roll) : `${img}${txt}`}${edited}</span>${_reactionsHtml(m)}</span>${quickActions}</div>`;
 }
 
 // Vue NOUVELLE DISCUSSION : nom + choix des membres
@@ -585,6 +881,41 @@ function _renderNew() {
   _healMembers(members);
 }
 
+function _sheetPersonRow(uid, control = '') {
+  return `<label class="chat-sheet-person"><img src="${_esc(avatarSrcOf(_profileOf(uid)))}" alt="" data-online-uid="${_esc(uid)}" class="${_isOnline(uid) ? 'is-online' : ''}"><span><b>${_esc(_nameOf(uid))}</b><small>${_isOnline(uid) ? 'En ligne' : 'Hors ligne'}</small></span>${control}</label>`;
+}
+function _renderSheet() {
+  const sheet = document.getElementById('chat-sheet'); if (!sheet) return;
+  if (!_sheet) { sheet.hidden = true; sheet.innerHTML = ''; return; }
+  sheet.hidden = false;
+  if (_sheet === 'new') {
+    const members = _advMembers();
+    sheet.innerHTML = `<header><h2>Nouvelle discussion</h2><button type="button" data-action="chatBack" aria-label="Fermer">${_chatIcon('close')}</button></header>
+      <div class="chat-sheet-body"><p class="chat-sheet-note">Choisis une personne pour un message privé, ou plusieurs pour créer un groupe.</p>
+        <div class="chat-sheet-people" id="chat-members">${members.map(uid => _sheetPersonRow(uid, `<input type="checkbox" value="${_esc(uid)}" ${_sheetSelection.includes(uid) ? 'checked' : ''}>`)).join('') || '<div class="chat-empty">Aucun autre membre.</div>'}</div>
+        ${_sheetSelection.length > 1 ? `<label class="chat-sheet-field">Nom du groupe<input id="chat-new-name" maxlength="40" value="${_esc(_sheetName)}" placeholder="${_esc(_sheetSelection.map(_nameOf).join(', '))}"></label>` : '<input id="chat-new-name" type="hidden" value="">'}
+      </div><footer><button type="button" class="chat-sheet-btn" data-action="chatBack">Annuler</button><button type="button" class="chat-sheet-btn is-primary" data-action="chatCreateGroup" ${_sheetSelection.length ? '' : 'disabled'}>${_sheetSelection.length > 1 ? `Créer le groupe (${_sheetSelection.length + 1})` : _sheetSelection.length ? `Écrire à ${_esc(_nameOf(_sheetSelection[0]))}` : 'Choisis quelqu’un'}</button></footer>`;
+    sheet.querySelectorAll('#chat-members input').forEach(input => input.addEventListener('change', () => {
+      _sheetSelection = [...sheet.querySelectorAll('#chat-members input:checked')].map(el => el.value);
+      _sheetName = document.getElementById('chat-new-name')?.value || _sheetName;
+      _renderSheet();
+    }));
+    sheet.querySelector('#chat-new-name')?.addEventListener('input', e => { _sheetName = e.target.value; });
+    _healMembers(members);
+    return;
+  }
+  const g = _convoById(_openId);
+  if (!g || g.type === 'dm') { _sheet = null; sheet.hidden = true; return; }
+  const members = g.members || [], amCreator = g.createdBy === _uid;
+  const addable = amCreator ? _advMembers().filter(uid => !members.includes(uid)) : [];
+  sheet.innerHTML = `<header><h2>Gérer le groupe</h2><button type="button" data-action="chatManageBack" aria-label="Fermer">${_chatIcon('close')}</button></header><div class="chat-sheet-body">
+    ${amCreator ? `<label class="chat-sheet-field">Nom<input id="chat-mng-name" maxlength="40" value="${_esc(g.name || '')}"></label>` : ''}
+    <section><h3>Membres · ${members.length}</h3><div class="chat-sheet-people">${members.map(uid => _sheetPersonRow(uid, amCreator && uid !== _uid ? `<button type="button" data-action="chatRemoveMember" data-uid="${_esc(uid)}">Retirer</button>` : '')).join('')}</div></section>
+    ${addable.length ? `<section><h3>Ajouter</h3><div class="chat-sheet-people">${addable.map(uid => _sheetPersonRow(uid, `<button type="button" class="is-add" data-action="chatAddMember" data-uid="${_esc(uid)}">Ajouter</button>`)).join('')}</div></section>` : ''}
+    </div><footer><button type="button" class="chat-sheet-btn is-danger" data-action="chatLeaveGroup">Quitter</button>${amCreator ? '<button type="button" class="chat-sheet-btn" data-action="chatRenameGroup">Enregistrer le nom</button>' : ''}<button type="button" class="chat-sheet-btn is-primary" data-action="chatManageBack">Terminé</button></footer>`;
+  _healMembers([...members, ...addable]);
+}
+
 // Super-admin uniquement : complète memberProfiles (pseudo + email + avatar) pour
 // les membres au profil manquant/incomplet en lisant users/{uid} (autorisé au
 // super-admin). Un compte SUPPRIMÉ (doc users absent) est marqué fantôme → masqué.
@@ -612,25 +943,53 @@ async function _healMembers(members) {
       changed = true;
     } catch { /* accès refusé → on ignore, la liste reste bonne */ }
   }
-  if (_open && _view === 'new') _renderNew();
-  else if (_open && _view === 'manage') _renderManage();
+  if (_open && _sheet) _renderSheet();
   if (changed) updateDoc(doc(db, 'adventures', adv.id), patch).catch(() => {});
   void ghostFound;
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 function chatToggle() {
-  _open = !_open;
-  if (_open) { _maybeRequestNotifPerm(); _subscribePresence(); _view = 'list'; _renderList(); }
-  else { if (_openId) _markRead(_openId); _teardownConvo(); _teardownPresence(); _renderBubble(); }
+  if (_open) _closeDrawer(); else _openDrawer();
 }
-function chatBack() { _teardownConvo(); _view = 'list'; _renderList(); }
+function _syncPinnedLayout() {
+  document.body.classList.toggle('chat-drawer-pinned', _open && _pinned);
+  clearTimeout(_syncPinnedLayout._timer);
+  window.dispatchEvent(new Event('resize'));
+  _syncPinnedLayout._timer = setTimeout(() => window.dispatchEvent(new Event('resize')), 380);
+}
+function _openDrawer(convoId = null) {
+  _open = true; _view = 'convo'; _sheet = null;
+  _maybeRequestNotifPerm(); _subscribePresence(); _clearEchoes();
+  _switchConversation(convoId || _openId || ADV, true);
+  _renderDrawer(); _renderTab(); _syncPinnedLayout();
+}
+function _closeDrawer() {
+  if (_openId) _markRead(_openId);
+  _saveDraft(); _open = false; _sheet = null;
+  _teardownConvo(); _teardownPresence(); _closeDicePop();
+  document.getElementById('chat-drawer')?.classList.remove('is-open');
+  document.getElementById('chat-drawer')?.setAttribute('aria-hidden', 'true');
+  _renderTab(); _syncPinnedLayout();
+  document.getElementById('chat-edge-tab')?.focus();
+}
+function chatBack() {
+  if (_sheet) { _sheet = null; _renderSheet(); return; }
+  _closeDrawer();
+}
 
 function chatOpenConvo(btn) {
   const id = btn?.dataset?.convo; if (!id) return;
+  _switchConversation(id);
+}
+function _switchConversation(id, silent = false) {
+  if (!id) return;
+  if (_openId === id && !silent) { _sheet = null; _renderDrawer(); return; }
+  _saveDraft();
   _teardownConvo();
   _openId = id; _view = 'convo';
-  _renderConvo();
+  _sheet = null; _unreadCutoff = _reads[id] || 0;
+  if (!silent) _renderDrawer();
   if (id === ADV) { _markRead(ADV); }
   else {
     _convoLimit = HISTORY;
@@ -639,6 +998,7 @@ function chatOpenConvo(btn) {
   }
   _subscribeTyping(id);
   if (_convoById(id)?.type === 'dm') _subscribeReads(id);
+  if (!silent) setTimeout(() => document.getElementById('chat-input')?.focus(), 0);
 }
 function _teardownConvo() {
   if (_unsubConvo) { try { _unsubConvo(); } catch {} _unsubConvo = null; }
@@ -648,7 +1008,7 @@ function _teardownConvo() {
   clearTimeout(_typingClearTimer); clearTimeout(_typingRenderTimer);
   if (_typingWroteAt) _clearTyping();   // signale qu'on n'écrit plus
   _editingId = null; _replyTo = null; _searchOpen = false; _searchQ = '';   // états liés à la conv
-  _closeEmojiPop(); _closeMentionMenu();
+  _closeEmojiPop(); _closeDicePop(); _closeMentionMenu();
 }
 
 // ── « écrit… » (typing) — quota strict : 1 doc/joueur, write throttlé à 4 s,
@@ -685,10 +1045,9 @@ function _clearTyping() {
 function _renderTyping() {
   const el = document.getElementById('chat-typing'); if (!el) return;
   const names = _typing.map(_nameOf);
-  if (!names.length) { el.textContent = ''; el.hidden = true; return; }
-  el.textContent = '✍️ ' + (names.length === 1
-    ? `${names[0]} écrit…`
-    : `${names.slice(0, 2).join(', ')}${names.length > 2 ? '…' : ''} écrivent…`);
+  if (!names.length) { el.innerHTML = ''; el.hidden = true; return; }
+  const label = names.length === 1 ? `<b>${_esc(names[0])}</b> écrit…` : `<b>${_esc(names.slice(0, 2).join(', '))}${names.length > 2 ? '…' : ''}</b> écrivent…`;
+  el.innerHTML = `<span class="chat-typing-dots"><i></i><i></i><i></i></span><span>${label}</span>`;
   el.hidden = false;
   clearTimeout(_typingRenderTimer);
   _typingRenderTimer = setTimeout(() => { _typing = []; _renderTyping(); }, 6000);
@@ -704,24 +1063,28 @@ function _subscribeReads(convoId) {
   }, err => console.warn('[chat] reads', err?.code || err));
 }
 
-function chatNew() { _view = 'new'; _renderNew(); }
+function chatNew() {
+  _sheet = 'new'; _sheetSelection = []; _sheetName = '';
+  _renderSheet();
+}
 
 async function chatCreateGroup() {
   const name = (document.getElementById('chat-new-name')?.value || '').trim();
   const picked = [...document.querySelectorAll('#chat-members input:checked')].map(c => c.value);
-  if (!name) { showNotif('Donne un nom au groupe.', 'error'); return; }
   if (!picked.length) { showNotif('Choisis au moins un membre.', 'error'); return; }
+  if (picked.length === 1) { await chatStartDm({ dataset: { uid: picked[0] } }); _sheet = null; _renderSheet(); return; }
   const ccol = _convosCol(); if (!ccol) return;
   const members = [...new Set([_uid, ...picked])];
+  const groupName = name || picked.map(_nameOf).join(', ');
   try {
     const ref = await addDoc(ccol, {
-      type: 'group', name, members, createdBy: _uid,
+      type: 'group', name: groupName, members, createdBy: _uid,
       lastText: '', lastSenderName: '', lastSenderId: '', lastAt: serverTimestamp(),
     });
     showNotif('Groupe créé.', 'success');
     // Ouvre directement le nouveau groupe (le listener le fera aussi apparaître dans la liste)
-    _teardownConvo();
-    chatOpenConvo({ dataset: { convo: ref.id } });
+    _sheet = null;
+    _switchConversation(ref.id);
   } catch (e) { console.warn('[chat] createGroup', e?.code || e); showNotif('Création impossible (règles Firestore ?).', 'error'); }
 }
 
@@ -731,6 +1094,25 @@ function _bumpConvoPreview(preview, senderName) {
   if (_openId === ADV) return;
   const ref = _convoRef(_openId);
   if (ref) updateDoc(ref, { lastText: preview, lastSenderName: senderName, lastSenderId: _uid, lastAt: serverTimestamp() }).catch(() => {});
+}
+function _bumpConvoPreviewFor(convoId, preview, senderName) {
+  if (convoId === ADV) return;
+  const ref = _convoRef(convoId);
+  if (ref) updateDoc(ref, { lastText: preview, lastSenderName: senderName, lastSenderId: _uid, lastAt: serverTimestamp() }).catch(() => {});
+}
+async function _sendTextTo(convoId, text) {
+  text = String(text || '').trim();
+  const col = _msgsCol(); if (!text || !convoId || !col || !_uid) return false;
+  const senderName = _senderName();
+  try {
+    await addDoc(col, { convoId, text, senderId: _uid, senderName, at: serverTimestamp() });
+    _bumpConvoPreviewFor(convoId, text, senderName);
+    return true;
+  } catch (error) {
+    console.warn('[chat] quick reply', error?.code || error);
+    showNotif('Réponse non envoyée — règles Firestore ?', 'error');
+    return false;
+  }
 }
 
 // Envoi d'un message texte (réutilisé pour l'envoi direct d'une émote).
@@ -800,9 +1182,10 @@ async function _sendImage(file) {
   const senderName = _senderName();
   const reply = _replyTo; _clearReply();
   try {
-    const imgRef = await addDoc(icol, { convoId: _openId, data: image, senderId: _uid, at: serverTimestamp() });
+    const imageName = String(file.name || 'image.jpg').slice(0, 120);
+    const imgRef = await addDoc(icol, { convoId: _openId, data: image, imageName, senderId: _uid, at: serverTimestamp() });
     _imgCache.set(imgRef.id, image);   // affichage immédiat sans relire
-    const msg = { convoId: _openId, text: '', imageId: imgRef.id, senderId: _uid, senderName, at: serverTimestamp() };
+    const msg = { convoId: _openId, text: '', imageId: imgRef.id, imageName, senderId: _uid, senderName, at: serverTimestamp() };
     if (reply) msg.replyTo = reply;
     await addDoc(col, msg);
     _bumpConvoPreview('📷 Image', senderName);
@@ -840,6 +1223,7 @@ function _markReadLocal(convoId) {
 }
 async function _markRead(convoId) {
   _markReadLocal(convoId);
+  _renderRail(); _renderTab();
   _notify();                       // titre d'onglet à jour après lecture
   const ref = _readRef(); if (!ref) return;
   try { await setDoc(ref, { [convoId]: _reads[convoId] }, { merge: true }); } catch { /* non bloquant */ }
@@ -853,7 +1237,7 @@ async function chatStartDm(btn) {
   // Le DM existe déjà (déjà dans mes convos via le listener array-contains) → on ouvre.
   // On NE lit PAS le doc : lire un doc inexistant fait échouer la règle read
   // (resource == null) → permission-denied. Sinon on le CRÉE (règle create OK).
-  if (_convoById(id)) { _teardownConvo(); chatOpenConvo({ dataset: { convo: id } }); return; }
+  if (_convoById(id)) { chatOpenConvo({ dataset: { convo: id } }); return; }
   const ref = _convoRef(id); if (!ref) return;
   try {
     await setDoc(ref, {
@@ -864,14 +1248,13 @@ async function chatStartDm(btn) {
     });
     // Optimiste : présent tout de suite (le listener le confirmera).
     _groups = [{ id, type: 'dm', members: [_uid, other], name: '', lastAt: 0 }, ..._groups];
-    _teardownConvo();
     chatOpenConvo({ dataset: { convo: id } });
   } catch (e) {
     console.warn('[chat] startDm', e?.code || e);
     // Cas rare : l'autre vient de créer le DM (course) → il apparaîtra via le
     // listener ; on tente une ouverture directe plutôt qu'une erreur.
     if (e?.code === 'permission-denied' || e?.code === 'already-exists') {
-      _teardownConvo(); chatOpenConvo({ dataset: { convo: id } });
+      chatOpenConvo({ dataset: { convo: id } });
     } else {
       showNotif('Ouverture du DM impossible (règles Firestore ?).', 'error');
     }
@@ -900,7 +1283,12 @@ function chatEditMsg(btn) {
   const m = msgs.find(x => x.id === id); if (!m || m.senderId !== _uid || m.deleted) return;
   _editingId = id;
   _setComposer(m.text || '');
-  document.getElementById('chat-edit-bar')?.removeAttribute('hidden');
+  _replyTo = null; _clearReply(); _showEditBar();
+}
+function _showEditBar() {
+  const bar = document.getElementById('chat-edit-bar'); if (!bar || !_editingId) return;
+  bar.innerHTML = `${_chatIcon('edit')}<span><b>Modification</b> · Échap pour annuler</span><button type="button" data-action="chatCancelEdit" aria-label="Annuler">${_chatIcon('close')}</button>`;
+  bar.removeAttribute('hidden');
 }
 function _cancelEditUi() { _editingId = null; document.getElementById('chat-edit-bar')?.setAttribute('hidden', ''); }
 function chatCancelEdit() { _cancelEditUi(); _clearComposer(); }
@@ -921,10 +1309,16 @@ async function _saveEdit(text) {
 
 async function chatDeleteMsg(btn) {
   const id = btn?.dataset?.msg; if (!id) return;
-  _closeMsgMenu();
   const msgs = _openId === ADV ? _advMsgs : _convoMsgs;
   const m = msgs.find(x => x.id === id); if (!m || (m.senderId !== _uid && !STATE.isAdmin)) return;
-  if (!await confirmModal('Supprimer ce message ?')) return;
+  if (_deleteArmedId !== id) {
+    _deleteArmedId = id;
+    clearTimeout(_deleteArmTimer);
+    _deleteArmTimer = setTimeout(() => { _deleteArmedId = null; _renderMessages(); }, 3000);
+    _closeMsgMenu(); _renderMessages();
+    return;
+  }
+  _deleteArmedId = null; clearTimeout(_deleteArmTimer); _closeMsgMenu();
   if (_editingId === id) chatCancelEdit();
   const ref = _msgRef(id); if (!ref) return;
   try {
@@ -935,8 +1329,8 @@ async function chatDeleteMsg(btn) {
 }
 
 // ── Gestion d'un groupe ─────────────────────────────────────────────────────
-function chatManage() { const g = _convoById(_openId); if (!g || g.type === 'dm') return; _view = 'manage'; _renderManage(); }
-function chatManageBack() { _view = 'convo'; _renderConvo(); }
+function chatManage() { const g = _convoById(_openId); if (!g || g.type === 'dm') return; _sheet = 'manage'; _renderSheet(); }
+function chatManageBack() { _sheet = null; _renderSheet(); _renderHead(); }
 
 function _renderManage() {
   const el = document.getElementById('chat-widget'); if (!el) return;
@@ -1008,7 +1402,7 @@ async function chatLeaveGroup() {
   const ref = _convoRef(_openId); if (!ref) return;
   try {
     await updateDoc(ref, { members: (g.members || []).filter(x => x !== _uid) });
-    _teardownConvo(); _view = 'list'; _openId = null; _renderList();
+    _sheet = null; _switchConversation(ADV);
     showNotif('Tu as quitté le groupe.', 'success');
   } catch (e) { console.warn('[chat] leave', e?.code || e); showNotif('Impossible de quitter — règles Firestore ?', 'error'); }
 }
@@ -1018,7 +1412,7 @@ async function chatDeleteGroup() {
   const ref = _convoRef(_openId); if (!ref) return;
   try {
     await deleteDoc(ref);
-    _teardownConvo(); _view = 'list'; _openId = null; _renderList();
+    _sheet = null; _switchConversation(ADV);
     showNotif('Groupe supprimé.', 'success');
   } catch (e) { console.warn('[chat] delGroup', e?.code || e); showNotif('Suppression refusée — règles Firestore ?', 'error'); }
 }
@@ -1090,6 +1484,7 @@ function _emojiPickerHtml() {
 // Popover ancré au body + positionné en JS (comme le menu ⋯) → indépendant du
 // flux du formulaire : s'affiche juste au-dessus du bouton 😊, ne décale rien.
 function chatEmojiToggle() {
+  _closeDicePop();
   if (document.getElementById('chat-emoji-pop')) { _closeEmojiPop(); return; }
   const btn = _emojiBtn(); if (!btn) return;
   const pop = document.createElement('div');
@@ -1103,6 +1498,30 @@ function chatEmojiToggle() {
   pop.style.top = `${Math.max(8, r.top - h - 8)}px`;   // au-dessus du bouton
   _emojiOutside = (e) => { if (!pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)) _closeEmojiPop(); };
   requestAnimationFrame(() => document.addEventListener('mousedown', _emojiOutside, true));
+}
+let _diceOutside = null;
+function _closeDicePop() {
+  document.getElementById('chat-dice-pop')?.remove();
+  if (_diceOutside) { document.removeEventListener('mousedown', _diceOutside, true); _diceOutside = null; }
+}
+function chatDiceToggle() {
+  _closeEmojiPop();
+  if (document.getElementById('chat-dice-pop')) { _closeDicePop(); return; }
+  const btn = document.querySelector('[data-action="chatDiceToggle"]'); if (!btn) return;
+  const pop = document.createElement('div');
+  pop.id = 'chat-dice-pop'; pop.className = 'chat-dice-pop';
+  pop.innerHTML = `<h4>Lancer rapide</h4><div>${[4, 6, 8, 10, 12, 20, 100].map(faces => `<button type="button" data-action="chatQuickRoll" data-die="${faces}">d${faces}</button>`).join('')}</div><p>Ou tape <code>/roll 2d6+3</code> dans le message.</p>`;
+  document.body.appendChild(pop);
+  const rect = btn.getBoundingClientRect(), width = pop.offsetWidth || 300, height = pop.offsetHeight || 120;
+  pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+  pop.style.top = `${Math.max(8, rect.top - height - 8)}px`;
+  _diceOutside = e => { if (!pop.contains(e.target) && !btn.contains(e.target)) _closeDicePop(); };
+  requestAnimationFrame(() => document.addEventListener('mousedown', _diceOutside, true));
+}
+function chatQuickRoll(btn) {
+  const faces = Math.max(2, parseInt(btn?.dataset?.die, 10) || 20);
+  const roll = _rollDice(`1d${faces}`); if (!roll) return;
+  _closeDicePop(); _sendRoll(roll);
 }
 // Composer = div contenteditable : les émotes y sont des <img> (data-emote).
 // Sérialisation → texte + balises :nom: (émotes) + \n (sauts de ligne).
@@ -1179,12 +1598,12 @@ function _renderMentionMenu(mq) {
     .filter(x => !ql || x.name.toLowerCase().includes(ql)).slice(0, 6);
   _closeMentionMenu();
   if (!members.length) return;
-  _mentionQ = mq;
+  _mentionQ = mq; _mentionIndex = 0;
   const el = _composerEl(); if (!el) return;
   const pop = document.createElement('div');
   pop.id = 'chat-mention-menu'; pop.className = 'chat-mention-menu';
-  pop.innerHTML = members.map(x =>
-    `<button type="button" class="chat-mention-item" data-action="chatPickMention" data-uid="${_esc(x.u)}">
+  pop.innerHTML = members.map((x, index) =>
+    `<button type="button" class="chat-mention-item${index === 0 ? ' is-active' : ''}" data-action="chatPickMention" data-uid="${_esc(x.u)}">
        <img class="chat-member-av" src="${_esc(avatarSrcOf(_profileOf(x.u)))}" alt="">
        <span class="chat-member-name">${_esc(x.name)}</span>
      </button>`).join('');
@@ -1213,6 +1632,11 @@ function chatPickMention(btn) {
 function _onComposerInput() {
   _signalTyping();
   _saveDraft();
+  const composer = _composerEl();
+  if (composer) {
+    composer.style.height = 'auto';
+    composer.style.height = `${Math.min(140, Math.max(24, composer.scrollHeight))}px`;
+  }
   const mq = _mentionQuery();
   if (mq) _renderMentionMenu(mq); else _closeMentionMenu();
 }
@@ -1220,7 +1644,7 @@ function _onComposerInput() {
 // ── Répondre / citer ─────────────────────────────────────────────────────────
 function _showReplyBar() {
   const bar = document.getElementById('chat-reply-bar'); if (!bar || !_replyTo) return;
-  bar.innerHTML = `↩︎ <b>${_esc(_replyTo.senderName || '')}</b> <span class="chat-reply-snippet">${_esc(_replyTo.text || '📷 Image')}</span><button type="button" class="chat-edit-cancel" data-action="chatCancelReply" aria-label="Annuler la réponse">✕</button>`;
+  bar.innerHTML = `${_chatIcon('reply')}<span>Réponse à <b>${_esc(_replyTo.senderName || '')}</b> — ${_esc(_replyTo.text || '📷 Image')}</span><button type="button" data-action="chatCancelReply" aria-label="Annuler la réponse">${_chatIcon('close')}</button>`;
   bar.removeAttribute('hidden');
 }
 function _clearReply() {
@@ -1242,6 +1666,7 @@ function chatReplyMsg(btn) {
 function chatSearchToggle() {
   _searchOpen = !_searchOpen;
   if (!_searchOpen) _searchQ = '';
+  _renderHead();
   const bar = document.getElementById('chat-search');
   if (bar) { if (_searchOpen) bar.removeAttribute('hidden'); else bar.setAttribute('hidden', ''); }
   _renderMessages();
@@ -1283,7 +1708,12 @@ function _clearDraft() { try { localStorage.removeItem(_draftKey()); } catch {} 
 function chatToggleMute() {
   _muted = !_muted;
   localStorage.setItem('chat-muted', _muted ? '1' : '0');
-  if (_view === 'list') _renderList();
+  _renderRail(); _renderTab();
+}
+function chatTogglePin() {
+  _pinned = !_pinned;
+  localStorage.setItem('chat-drawer-pinned', _pinned ? '1' : '0');
+  _renderRail(); _syncPinnedLayout();
 }
 function chatClearListSearch() {
   _listQ = '';
@@ -1294,11 +1724,14 @@ registerActions({
   chatToggle:      () => chatToggle(),
   chatBack:        () => chatBack(),
   chatOpenConvo:   (btn) => chatOpenConvo(btn),
+  chatSwitchConvo: (btn) => chatOpenConvo(btn),
   chatNew:         () => chatNew(),
   chatCreateGroup: () => chatCreateGroup(),
   chatStartDm:     (btn) => chatStartDm(btn),
   chatMsgMenu:     (btn) => chatMsgMenu(btn),
   chatEmojiToggle: () => chatEmojiToggle(),
+  chatDiceToggle:  () => chatDiceToggle(),
+  chatQuickRoll:   (btn) => chatQuickRoll(btn),
   chatInsertEmoji: (btn) => chatInsertEmoji(btn),
   chatInsertEmote: (btn) => chatInsertEmote(btn),
   chatPickMention: (btn) => chatPickMention(btn),
@@ -1311,6 +1744,7 @@ registerActions({
   chatLoadMore:    () => chatLoadMore(),
   chatJumpTo:      (btn) => chatJumpTo(btn),
   chatToggleMute:  () => chatToggleMute(),
+  chatTogglePin:   () => chatTogglePin(),
   chatClearListSearch: () => chatClearListSearch(),
   chatReact:       (btn) => chatReact(btn),
   chatEditMsg:     (btn) => chatEditMsg(btn),

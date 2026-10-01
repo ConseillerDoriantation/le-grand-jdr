@@ -39,7 +39,7 @@ Chaque page orchestre son rendu, ses listeners et ses appels aux helpers. Les do
 - `features/characters/` : sous-modules de fiche personnage.
 - `features/map/` : modele propre avec `map.state.js`, repos data, rendu et UI.
 - `features/vtt/` : coeur VTT `vtt.js` + modules peripheriques (fog, musique, butin, des, presence, mini-fiche, timer, tracker combat).
-- `features/chat.js` + `features/chat/` : messagerie flottante toutes pages (aventure/groupes/DM). La logique pure (linkify, emotes, mentions, des) vit dans `chat/chat-format.js`, testee par `tests/chat-format.test.js` ; les images vivent dans la collection `chatImages` (le message ne porte qu'un id).
+- `features/chat.js` + `features/chat/` : messagerie flottante toutes pages (aventure/groupes/DM). La logique pure (linkify, emotes, mentions, des) vit dans `chat/chat-format.js`, testee par `tests/chat-format.test.js` ; les images vivent dans la collection `chatImages` (le message ne porte que l'id et le nom leger du fichier).
 
 ## Patterns UI
 
