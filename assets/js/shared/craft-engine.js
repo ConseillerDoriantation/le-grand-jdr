@@ -192,3 +192,30 @@ export function buildCraftedItem(base = {}, { name, nature, rarete, trait, autho
   delete out.prix;
   return out;
 }
+
+/**
+ * Orchestration PURE d'une tentative de craft. Vérifie les matériaux, lance le
+ * jet, et renvoie le résultat (objet produit en cas de réussite, remboursements
+ * en cas d'échec). N'ÉCRIT RIEN : l'appelant applique ensuite la mutation
+ * d'inventaire (consommer `requirements`, ajouter `item`, ou rendre `refunds`).
+ *
+ * Entrées : inventory, requirements [{itemId,quantite}], d20, competenceBonus,
+ * tier, config, base, trait, name, nature, rarete, author.
+ * Sortie :
+ *   { ok:false, reason:'materials', missing:[…] }            // matériaux manquants
+ *   { ok:true, success:true,  roll, item }                   // réussite
+ *   { ok:true, success:false, roll, refunds:[{itemId,rendu}] } // échec
+ */
+export function resolveCraftAttempt({
+  inventory, requirements, d20, competenceBonus, tier, config,
+  base, trait, name, nature, rarete, author,
+} = {}) {
+  const missing = missingMaterials(inventory, requirements);
+  if (missing.length) return { ok: false, reason: 'materials', missing };
+  const roll = resolveCraftRoll(d20, competenceBonus, tier, config);
+  if (roll.success) {
+    return { ok: true, success: true, roll, item: buildCraftedItem(base, { name, nature, rarete, trait, author }) };
+  }
+  const refunds = (requirements || []).map(r => ({ itemId: r.itemId, rendu: craftRefundOnFail(r.quantite, config) }));
+  return { ok: true, success: false, roll, refunds };
+}
