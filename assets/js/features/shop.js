@@ -42,6 +42,7 @@ import { makeSortable } from '../shared/sortable-helper.js';
 import { compareManualOrder, manualOrderValue, mergeVisibleManualOrder, nextManualOrder } from '../shared/manual-order.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
+import { compressDataUrl } from '../shared/image-upload.js';
 import { shopAffinityScore, shopCartTotals, shopItemBuyState, shopUpgradeGain } from '../shared/shop-cart.js';
 import { atelierApplyBuild, atelierCompactSlots, atelierGainScore, atelierNetCost } from '../shared/shop-atelier.js';
 import { damageProfileToRelations, parseShopItemQuickEntry, relationsToDamageProfile } from '../shared/shop-item-editor.js';
@@ -58,6 +59,8 @@ import {
 const shHandlers = {};
 bindScopedActions('sh', shHandlers);
 document.addEventListener('keydown', _shopKeyboardQol);
+document.addEventListener('keydown', _shopCatKeydown, true);
+document.addEventListener('paste', _shopCatPaste);
 
 // ══════════════════════════════════════════════════════════════════════════════
 function _inventoryHistoryActor() {
@@ -128,16 +131,38 @@ const TEMPLATES = {
       { id:'dispo',       label:'Dispo',         type:'dispo' },
     ],
   },
-  libre: {
-    label: '📦 Libre',
-    fields: [
-      { id:'type',        label:'Type',          type:'text',     placeholder:'Type...' },
-      { id:'description', label:'Description',   type:'textarea', placeholder:'...' },
-      { id:'prix',        label:'Prix 🪙',       type:'number',   placeholder:'0' },
-      { id:'dispo',       label:'Dispo',         type:'dispo' },
-    ],
-  },
 };
+
+function _normalizeShopTemplate(template) {
+  if (template === 'libre') return 'classique';
+  return TEMPLATES[template] ? template : 'classique';
+}
+
+function _normalizeLegacyShopItem(item = {}) {
+  if (item.template !== 'libre') return item;
+  const description = item.effet || item.description || '';
+  return { ...item, template: 'classique', effet: description, description };
+}
+
+async function _persistLegacyShopTemplates(categories = [], items = []) {
+  if (!STATE.isAdmin) return;
+  const updates = [
+    ...categories.filter(category => category.template === 'libre')
+      .map(category => ({ col: 'shopCategories', id: category.id, data: { template: 'classique' } })),
+    ...items.filter(item => item.template === 'libre').map(item => {
+      const description = item.effet || item.description || '';
+      return { col: 'shop', id: item.id, data: { template: 'classique', effet: description, description } };
+    }),
+  ];
+  if (!updates.length) return;
+  try {
+    for (let index = 0; index < updates.length; index += 450) {
+      await batchUpdateInCol(updates.slice(index, index + 450));
+    }
+  } catch (error) {
+    console.warn('[shop] migration du type Libre vers Classique non persistée', error);
+  }
+}
 
 const PRIX_VENTE_RATIO = 0.6; // 60%
 
@@ -164,6 +189,10 @@ const _SHOP_ICONS = {
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
   eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+  image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 16-5-5-9 8"/>',
+  swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>',
 };
 function _shopIcon(name, cls = 'shc-svg') {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${_SHOP_ICONS[name] || ''}</svg>`;
@@ -265,13 +294,14 @@ async function loadShopData() {
     loadWeaponFormats(),
     loadRarities(),
   ]);
-  _cats = cats;
-  _items = items;
+  _cats = cats.map(category => category.template === 'libre' ? { ...category, template: 'classique' } : category);
+  _items = items.map(_normalizeLegacyShopItem);
   _weaponFormats = weaponFormats;
   _cats.sort((a,b) => (a.ordre||0)-(b.ordre||0));
   _items.sort(compareManualOrder);
   _shopSousTypes = [...new Set(_items.filter(i=>i.sousType).map(i=>i.sousType))].sort();
   _rebuildShopSearchIndex();
+  _persistLegacyShopTemplates(cats, items);
 }
 
 async function loadShopCharacters() {
@@ -306,6 +336,18 @@ function _catEmoji(nom) {
   if (n.includes('épicerie') || n.includes('cuisine')) return '🍖';
   if (n.includes('outil'))                         return '🔧';
   return '📦';
+}
+
+function _catImageFocus(cat = {}) {
+  const focus = cat.imageFocus || {};
+  const clamp = value => Math.max(0, Math.min(100, Number.isFinite(Number(value)) ? Number(value) : 50));
+  return { x: clamp(focus.x), y: clamp(focus.y) };
+}
+
+function _catImageStyle(cat = {}) {
+  if (!cat.image) return '';
+  const focus = _catImageFocus(cat);
+  return `background-image:url('${_esc(cat.image)}');background-position:${focus.x}% ${focus.y}%`;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -557,11 +599,12 @@ function _renderRail() {
   const countBy = new Map();
   items.forEach(i => countBy.set(i.categorieId, (countBy.get(i.categorieId) || 0) + 1));
   const orphans = items.filter(i => !_cats.some(c => c.id === i.categorieId)).length;
-  const link = ({ id = null, nom, ico, count, masked = false, sortable = false, accent = 'var(--gold)' }) => {
+  const link = ({ id = null, nom, ico, count, masked = false, sortable = false, accent = 'var(--gold)', image = '', imageFocus = null }) => {
     const active = id ? (_view === 'items' && _activeCat === id) : _view === 'home';
+    const imageCat = image ? { image, imageFocus } : null;
     return `<button type="button" class="shc-rail-link${active ? ' is-active' : ''}${masked ? ' is-masked' : ''}${sortable ? ' sh-sortable-item' : ''}"
       style="--cat-accent:${_esc(accent || 'var(--gold)')}" data-sh-action="${id ? 'goCat' : 'goHome'}"${id ? ` data-id="${_esc(id)}" data-cat-id="${_esc(id)}"` : ''}${active ? ' aria-current="page"' : ''}>
-      <span class="shc-rail-ico" aria-hidden="true">${ico}</span>
+      <span class="shc-rail-ico${imageCat ? ' has-image' : ''}" aria-hidden="true"${imageCat ? ` style="${_catImageStyle(imageCat)}"` : ''}>${imageCat ? '' : ico}</span>
       <span class="shc-rail-name">${_esc(nom)}</span>
       ${masked ? `<span class="shc-rail-eye" title="Masquée aux joueurs">${eyeIcon(true)}</span>` : ''}
       <span class="shc-rail-count">${count}</span>
@@ -573,10 +616,14 @@ function _renderRail() {
       ${_visibleCats().map(cat => link({
         id: cat.id, nom: cat.nom, ico: _esc(cat.emoji || _catEmoji(cat.nom)),
         count: countBy.get(cat.id) || 0, masked: !!cat.masquee, sortable: STATE.isAdmin,
-        accent: cat.couleur || 'var(--gold)',
+        accent: cat.couleur || 'var(--gold)', image: cat.image || '', imageFocus: cat.imageFocus,
       })).join('')}
     </div>
     ${orphans ? link({ id: '__uncategorized__', nom: 'Non classé', ico: '📦', count: orphans, accent: 'var(--text-dim)' }) : ''}
+    ${STATE.isAdmin ? `<button type="button" class="shc-rail-add" data-sh-action="openCatModal">
+      <span class="shc-rail-add-ico" aria-hidden="true">＋</span>
+      <span>Nouvelle catégorie</span>
+    </button>` : ''}
   </nav>`;
 }
 
@@ -751,10 +798,11 @@ function _renderResultsHtml(st) {
   return body + _renderPagination(st.p, st.pages);
 }
 
-function _renderShelf(id, title, icon, color, items, subtitle, more = true, pick = false) {
+function _renderShelf(id, title, icon, color, items, subtitle, more = true, pick = false, category = null) {
+  const categoryImage = category?.image ? _catImageStyle(category) : '';
   return `<section class="shc-shelf${pick ? ' is-pick' : ''}" style="--shelf:${_esc(color || 'var(--gold)')}">
     <div class="shc-shelf-head">
-      <span class="shc-shelf-icon" aria-hidden="true">${icon}</span>
+      <span class="shc-shelf-icon${categoryImage ? ' has-image' : ''}" aria-hidden="true"${categoryImage ? ` style="${categoryImage}"` : ''}>${categoryImage ? '' : icon}</span>
       <div><h2>${title}</h2><small>${subtitle}</small></div>
       <span class="shc-shelf-spacer"></span>
       ${more ? `<button type="button" class="shc-shelf-more" data-sh-action="goCat" data-id="${_esc(id)}">Voir tout ${_shopIcon('chevron')}</button>` : ''}
@@ -794,7 +842,7 @@ function _renderHomeShelves(ctx) {
     const items = visible.filter(item => item.categorieId === cat.id);
     if (!items.length) return;
     html += _renderShelf(cat.id, _esc(cat.nom || 'Catégorie'), _esc(cat.emoji || _catEmoji(cat.nom)), cat.couleur || 'var(--gold)', items.slice(0, 8),
-      `${items.length} article${items.length !== 1 ? 's' : ''}${cat.masquee ? ' · masquée aux joueurs' : ''}`);
+      `${items.length} article${items.length !== 1 ? 's' : ''}${cat.masquee ? ' · masquée aux joueurs' : ''}`, true, false, cat);
   });
   return html || `<div class="shc-empty"><p>La boutique est vide.</p></div>`;
 }
@@ -885,9 +933,9 @@ function _shopRecommendationCompatible(candidate = {}, profile = {}) {
 // Helper : template à utiliser pour rendre un item (priorité item.template,
 // fallback cat.template, fallback 'classique').
 function _resolveItemTemplate(item) {
-  if (item?.template && TEMPLATES[item.template]) return item.template;
+  if (item?.template) return _normalizeShopTemplate(item.template);
   const cat = _cats.find(c => c.id === item?.categorieId);
-  return cat?.template || 'classique';
+  return _normalizeShopTemplate(cat?.template);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1514,7 +1562,7 @@ function _renderCard(item, ctx, { showCat = false, sortable = false } = {}) {
   const typeChips = _itemTypeChips(item);
   const facts = _itemFacts(item);
   const traits = _getItemTraits(item);
-  const desc = (tplKey === 'classique' || tplKey === 'libre') ? (item.effet || item.description || '') : '';
+  const desc = tplKey === 'classique' ? (item.effet || item.description || '') : '';
   const nom = item.nom || '?';
 
   const stock = st.dispo == null ? ''
@@ -1600,7 +1648,7 @@ function _renderItemRow(item, ctx, { showCat = false, sortable = false } = {}) {
     ..._itemFacts(item).map(f => `<span class="shc-row-fact"><i>${f.lbl}</i> ${_esc(f.val)}</span>`),
     ..._getStatBonusEntries(item).map(b => `<span class="shc-bonus" style="--stat:${b.color}">${_esc(b.short)} ${b.val > 0 ? '+' : ''}${b.val}</span>`),
   ];
-  const desc = (tplKey === 'classique' || tplKey === 'libre') ? (item.effet || item.description || '') : '';
+  const desc = tplKey === 'classique' ? (item.effet || item.description || '') : '';
   if (desc) info.push(`<span class="shc-row-desc">${_esc(desc)}</span>`);
 
   const stock = st.dispo == null ? '<span class="shc-row-stock">∞</span>'
@@ -2463,6 +2511,28 @@ function _shopKeyboardQol(event) {
   card.click();
 }
 
+// Capture avant le gestionnaire Escape global de navigation : la modale de
+// catégorie ferme d'abord son popover, puis sa confirmation de suppression.
+function _shopCatKeydown(event) {
+  if (!_catEditorState || !document.querySelector('.shcat')) return;
+  if (event.key === 'Escape') {
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (_catEditorState.emojiOpen) _catEditorMutate(state => { state.emojiOpen = false; });
+    else if (_catEditorState.deleting) _catEditorMutate(state => { state.deleting = false; });
+    else _catClose();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    event.preventDefault(); event.stopImmediatePropagation(); saveCat(); return;
+  }
+  if (event.key === 'Enter' && event.target?.id === 'shcat-name') {
+    event.preventDefault(); event.stopImmediatePropagation(); saveCat(); return;
+  }
+  if (event.target?.classList?.contains('shcat-drop') && ['Enter', ' '].includes(event.key)) {
+    event.preventDefault(); event.stopImmediatePropagation(); document.getElementById('shcat-file')?.click();
+  }
+}
+
 function shopToggleTag(val) {
   if (_filterTags.has(val)) _filterTags.delete(val);
   else _filterTags.add(val);
@@ -2675,129 +2745,266 @@ function _mountSortables() {
 // ══════════════════════════════════════════════════════════════════════════════
 // MODAL CATÉGORIE
 // ══════════════════════════════════════════════════════════════════════════════
-function openCatModal(catId) {
-  const cat        = catId ? _cats.find(c=>c.id===catId) : null;
-  const tplOptions = Object.entries(TEMPLATES).map(([k,v])=>`<option value="${k}" ${(cat?.template||'classique')===k?'selected':''}>${v.label}</option>`).join('');
-  openModal('', `
-  <div class="sh-admin-modal is-cat">
-    <div class="sh-admin-head">
-      <div class="sh-admin-head-ico">${cat ? '✏️' : '📁'}</div>
-      <div class="sh-admin-head-title">
-        <h2>${cat ? `Modifier « ${_esc(cat.nom||'?')} »` : 'Nouvelle catégorie'}</h2>
-        <small>${cat ? 'Édite les méta de cette catégorie boutique.' : 'Crée une nouvelle catégorie pour ranger tes articles.'}</small>
-      </div>
-      <button class="sh-admin-close" data-sh-action="closeModal" title="Fermer">✕</button>
-    </div>
+const CAT_EDITOR_COLORS = ['#4f8cff', '#22c38e', '#f4c430', '#ff9544', '#ff5a7e', '#9d6fff', '#38bdf8', '#a3a3a3'];
+const CAT_EDITOR_EMOJIS = ['⚔️','🗡️','🏹','🪓','🔱','🛡️','⛑️','🥾','💍','📿','🔮','✨','🪄','📜','🧪','⚗️','🌿','🍄','🍖','🍞','🍺','🔧','⛏️','🪢','🧭','🗝️','💎','🪙','🎒','🐎','🐉','💀','🔥','❄️','⚡','📦'];
+let _catEditorState = null;
 
-    <div class="sh-admin-body">
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">📝 Identité</div>
-        <div class="sh-admin-row">
-          <div class="sh-admin-row-line">
-            <span class="sh-admin-row-lbl">Nom de la catégorie</span>
-          </div>
-          <input class="sh-admin-row-input" id="cat-nom" value="${_esc(cat?.nom||'')}"
-            placeholder="Armes physiques, Épicerie…"
-            style="width:100%;text-align:left">
-        </div>
-        <div class="sh-admin-grid-2" style="margin-top:8px">
-          <div class="sh-admin-row">
-            <div class="sh-admin-row-line">
-              <span class="sh-admin-row-lbl">Emoji</span>
-              <input class="sh-admin-row-input small" id="cat-emoji" value="${_esc(cat?.emoji||'')}" placeholder="⚔️">
-            </div>
-          </div>
-          <div class="sh-admin-row">
-            <label class="sh-admin-row-checkbox" style="cursor:pointer">
-              <input type="checkbox" id="cat-masquee" ${cat?.masquee?'checked':''}>
-              <span>👁️ Masquer aux joueurs</span>
-            </label>
-          </div>
-        </div>
-      </div>
+function _catGuessTemplate(nom = '') {
+  const value = _norm(nom);
+  if (value.includes('armure')) return 'armure';
+  if (value.includes('arme')) return 'arme';
+  if (/bijou|anneau|amulette/.test(value)) return 'bijou';
+  return null;
+}
 
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🎯 Type par défaut <small class="sh-label">(fallback pour les anciens items)</small></div>
-        <p class="sh-admin-section-hint">Désormais chaque article a son propre type. Cette valeur sert uniquement de défaut pour les articles créés sans type explicite.</p>
-        <select class="sh-admin-row-input" id="cat-template" style="width:100%;text-align:left;font-family:inherit;font-weight:500">${tplOptions}</select>
-        <div id="cat-tpl-preview" class="sh-admin-preview"></div>
-      </div>
+function _catEditorEmoji(state = _catEditorState) {
+  return state?.emoji || _catEmoji(state?.nom || '');
+}
 
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🖼️ Illustration <small class="sh-label">(optionnelle)</small></div>
-        <p class="sh-admin-section-hint">Affichée en background de la pastille catégorie sur la page d'accueil.</p>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <div id="cat-img-preview" style="width:90px;height:60px;border-radius:8px;background:rgba(0,0,0,.30);border:1px dashed var(--border-md);display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0">
-            ${cat?.image ? `<img src="${cat.image}" alt="${_esc(cat.nom || '')}" style="width:100%;height:100%;object-fit:cover">` : '<span style="color:var(--text-dim);font-size:1.4rem">🖼️</span>'}
-          </div>
-          <label style="flex:1;min-width:0">
-            <input type="file" id="cat-img-file" accept="image/*"
-              data-sh-action="uploadImg" data-sh-on="change" data-preview="cat-img-preview" data-hidden="cat-img-b64"
-              style="font-size:.78rem;color:var(--text-muted);width:100%">
-            <input type="hidden" id="cat-img-b64" value="${cat?.image||''}">
+function _catEditorPersisted(state = _catEditorState) {
+  const focus = _catImageFocus({ imageFocus: state?.imageFocus });
+  return {
+    nom: String(state?.nom || '').trim(),
+    emoji: state?.emoji || '',
+    couleur: state?.couleur || '',
+    template: _normalizeShopTemplate(state?.template),
+    image: state?.image || '',
+    imageFocus: focus,
+    masquee: !!state?.masquee,
+  };
+}
+
+function _catEditorDirty() {
+  return !!_catEditorState && JSON.stringify(_catEditorPersisted()) !== _catEditorState.original;
+}
+
+function _catEditorCount(catId) {
+  return catId ? _items.filter(item => item.categorieId === catId).length : 0;
+}
+
+function _catTemplateParts(key) {
+  const label = TEMPLATES[key]?.label || key;
+  const match = label.match(/^(\p{Extended_Pictographic}(?:\uFE0F)?)[\s\u00a0]+(.+)$/u);
+  return { emoji: match?.[1] || '📦', label: match?.[2] || label };
+}
+
+function _catDeleteFooterHtml(state) {
+  const count = _catEditorCount(state.id);
+  const options = _cats.filter(cat => cat.id !== state.id).map(cat => `<option value="${_esc(cat.id)}"${state.destination === cat.id ? ' selected' : ''}>${_esc(cat.emoji || _catEmoji(cat.nom))} ${_esc(cat.nom || 'Catégorie')}</option>`).join('');
+  return `<div class="shcat-delete-copy">${count
+    ? `<span>Ses <b>${count} article${count > 1 ? 's' : ''}</b> iront dans</span><select data-sh-action="catDeleteDestination" data-sh-on="change"><option value="">📦 Non classé</option>${options}</select>`
+    : '<span>Cette catégorie est vide.</span>'}</div>
+    <span class="shcat-footer-spacer"></span>
+    <button type="button" class="ghost" data-sh-action="catDeleteCancel">Garder</button>
+    <button type="button" class="shcat-delete-confirm" data-sh-action="catDeleteConfirm" data-id="${_esc(state.id)}">${_shopIcon('trash', 'shcat-icon')} Supprimer « ${_esc(state.nom || '?')} »</button>`;
+}
+
+function _catEditorHtml() {
+  const state = _catEditorState;
+  if (!state) return '';
+  const dirty = _catEditorDirty();
+  const focus = _catImageFocus(state);
+  const template = TEMPLATES[state.template] || TEMPLATES.classique;
+  return `<div class="shcat" style="--shcat-accent:${_esc(state.couleur || 'var(--gold)')}">
+    <div class="shcat-body">
+      <section class="shcat-form">
+        <div class="shcat-identity">
+          <button type="button" class="shcat-emoji-btn" data-sh-action="catToggleEmoji" aria-label="Choisir l’icône" aria-expanded="${state.emojiOpen}">${_esc(_catEditorEmoji(state))}</button>
+          <label class="shcat-name"><small>${state.id ? 'Modifier la catégorie' : 'Nouvelle catégorie'}</small>
+            <input id="shcat-name" maxlength="40" placeholder="Nom de la catégorie" value="${_esc(state.nom)}" autocomplete="off" data-sh-action="catName" data-sh-on="input" data-modal-initial-focus>
+            <span class="shcat-error" role="alert">${_esc(state.error || '')}</span>
           </label>
+          <button type="button" class="shcat-close" data-sh-action="catClose" aria-label="Fermer (Échap)">${_shopIcon('x', 'shcat-icon')}</button>
+          <div class="shcat-emoji-popover"${state.emojiOpen ? '' : ' hidden'}>
+            <h4>Icône${state.emoji ? '' : ' · auto d’après le nom'}</h4>
+            <div class="shcat-emoji-grid">${CAT_EDITOR_EMOJIS.map(emoji => `<button type="button" data-sh-action="catEmoji" data-value="${emoji}" class="${emoji === _catEditorEmoji(state) ? 'is-on' : ''}" aria-label="Choisir ${emoji}">${emoji}</button>`).join('')}</div>
+            <div class="shcat-emoji-own"><input maxlength="8" placeholder="Ou colle un emoji…" data-sh-action="catEmojiOwn" data-sh-on="input"><button type="button" class="shcat-btn" data-sh-action="catEmojiAuto">Auto</button></div>
+          </div>
         </div>
-      </div>
+        <section class="shcat-field"><div class="shcat-field-label"><b>Couleur</b><small>teinte le rail, l’étagère et les cartes d’articles</small></div>
+          <div class="shcat-swatches">${CAT_EDITOR_COLORS.map(color => `<button type="button" style="--swatch:${color}" class="${state.couleur === color ? 'is-on' : ''}" data-sh-action="catColor" data-value="${color}" aria-label="Couleur ${color}" aria-pressed="${state.couleur === color}"></button>`).join('')}
+            <button type="button" class="is-none${state.couleur ? '' : ' is-on'}" data-sh-action="catColor" data-value="" aria-label="Aucune couleur" aria-pressed="${!state.couleur}"></button>
+            <label class="shcat-custom-color" title="Couleur personnalisée"${state.couleur && !CAT_EDITOR_COLORS.includes(state.couleur) ? ` style="background:${_esc(state.couleur)};color:#fff"` : ''}>${_shopIcon('plus', 'shcat-icon')}<input type="color" value="${_esc(state.couleur || '#4f8cff')}" data-sh-action="catCustomColor" data-sh-on="change" aria-label="Choisir une couleur personnalisée"></label>
+          </div>
+        </section>
 
-      <p class="sh-admin-intro" style="font-size:.7rem;font-style:italic">
-        💡 Si tu supprimes cette catégorie, ses articles restent disponibles en butin et revendables — ils basculent juste dans « Non classé ».
-      </p>
-    </div>
+        <section class="shcat-field"><div class="shcat-field-label"><b>Type par défaut</b><small>pré-rempli à la création d’un article dans cette catégorie</small></div>
+          <div class="shcat-types">${Object.keys(TEMPLATES).map(key => { const parts = _catTemplateParts(key); return `<button type="button" data-sh-action="catTemplate" data-value="${key}" class="${state.template === key ? 'is-on' : ''}" aria-pressed="${state.template === key}"><span>${parts.emoji}</span>${_esc(parts.label)}</button>`; }).join('')}</div>
+          <div class="shcat-template-fields"><span>Champs proposés :</span>${template.fields.map(field => `<em>${_esc(field.label)}</em>`).join('')}</div>
+        </section>
 
-    <div class="sh-admin-footer">
-      <button class="btn btn-outline btn-sm" data-sh-action="closeModal">Annuler</button>
-      <div class="sh-admin-footer-spacer"></div>
-      ${cat ? `<button class="btn btn-outline btn-sm sh-buy-btn--poor" data-sh-action="deleteCat" data-id="${cat.id}">🗑️ Supprimer</button>` : ''}
-      <button class="btn btn-gold btn-sm" data-sh-action="saveCat" data-id="${catId||''}">
-        ${cat ? '💾 Enregistrer' : '➕ Créer'}
-      </button>
+        <section class="shcat-field"><div class="shcat-field-label"><b>Illustration</b><small>optionnelle · fond de la catégorie sur l’accueil</small></div>
+          <div class="shcat-drop${state.image ? ' has-image' : ''}" tabindex="0" role="button" data-sh-action="catImageZone" aria-label="${state.image ? 'Cliquer pour placer le point focal' : 'Ajouter une illustration'}">
+            ${state.image ? `<img src="${_esc(state.image)}" alt="" style="object-position:${focus.x}% ${focus.y}%"><span class="shcat-focus" style="left:${focus.x}%;top:${focus.y}%"></span>
+              <div class="shcat-image-actions"><button type="button" data-sh-action="catPickImage">${_shopIcon('swap', 'shcat-icon')} Remplacer</button><button type="button" data-sh-action="catRemoveImage">${_shopIcon('trash', 'shcat-icon')} Retirer</button></div><span class="shcat-image-tip">Clique pour cadrer</span>`
+              : `<p>${_shopIcon('image', 'shcat-image-icon')}<span>Glisse une image, colle-la (<kbd>Ctrl</kbd>+<kbd>V</kbd>) ou clique</span><small>JPG, PNG, WebP · recadrée en 16:9</small></p>`}
+          </div><input type="file" id="shcat-file" accept="image/*" hidden data-sh-action="catImageFile" data-sh-on="change">
+        </section>
+
+        <section class="shcat-field"><div class="shcat-field-label"><b>Visibilité</b></div><div class="shcat-visibility">
+          <button type="button" data-sh-action="catVisibility" data-hidden="false" class="${state.masquee ? '' : 'is-on'}" aria-pressed="${!state.masquee}">${_shopIcon('eye', 'shcat-icon')}<span><b>Visible</b><small>Les joueurs la voient en boutique</small></span></button>
+          <button type="button" data-sh-action="catVisibility" data-hidden="true" class="is-hidden${state.masquee ? ' is-on' : ''}" aria-pressed="${state.masquee}">${_shopIcon('eyeOff', 'shcat-icon')}<span><b>Masquée</b><small>MJ seulement · butin et revente disponibles</small></span></button>
+        </div></section>
+      </section>
     </div>
-  </div>
-  `);
-  setTimeout(()=>{
-    document.getElementById('cat-nom')?.focus();
-    _updateTplPreview();
-    document.getElementById('cat-template')?.addEventListener('change', _updateTplPreview);
-  }, 60);
+    <footer class="shcat-footer">${state.deleting ? _catDeleteFooterHtml(state) : `${state.id ? `<button type="button" class="ghost shcat-delete-arm" data-sh-action="catDeleteArm">${_shopIcon('trash', 'shcat-icon')} Supprimer</button>` : ''}<span class="shcat-footer-spacer"></span>${dirty ? '<span class="shcat-dirty"><i></i>Modifications non enregistrées</span>' : ''}<button type="button" class="ghost" data-sh-action="catClose">Annuler</button><button type="button" class="primary" data-sh-action="saveCat"${state.id && !dirty ? ' disabled' : ''}>${state.id ? 'Enregistrer' : 'Créer la catégorie'} <kbd>Ctrl ↵</kbd></button>`}</footer>
+  </div>`;
 }
 
-function _updateTplPreview() {
-  const sel  = document.getElementById('cat-template')?.value;
-  const prev = document.getElementById('cat-tpl-preview');
-  if (!sel || !prev) return;
-  const tpl = TEMPLATES[sel]; if (!tpl) return;
-  prev.innerHTML = tpl.fields.map(f => `<span class="sh-admin-preview-chip">${_esc(f.label)}</span>`).join('');
+function _bindCatEditorDom() {
+  const drop = document.querySelector('.shcat-drop');
+  if (!drop || drop.dataset.bound === 'true') return;
+  drop.dataset.bound = 'true';
+  drop.addEventListener('dragover', event => { event.preventDefault(); drop.classList.add('is-dragging'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('is-dragging'));
+  drop.addEventListener('drop', event => {
+    event.preventDefault(); drop.classList.remove('is-dragging');
+    _catLoadImage([...event.dataTransfer?.files || []].find(file => file.type?.startsWith('image/')));
+  });
 }
 
-async function saveCat(catId) {
+function _renderCatEditor({ focusId = '', selection = null } = {}) {
+  if (!_catEditorState) return;
+  updateModalContent('', _catEditorHtml());
+  _bindCatEditorDom();
+  if (focusId) requestAnimationFrame(() => {
+    const input = document.getElementById(focusId);
+    input?.focus({ preventScroll: true });
+    if (selection != null && input?.setSelectionRange) input.setSelectionRange(selection, selection);
+  });
+}
+
+function openCatModal(catId) {
+  const cat = catId ? _cats.find(entry => entry.id === catId) : null;
+  const focus = _catImageFocus(cat || {});
+  _catEditorState = {
+    id: cat?.id || '', nom: cat?.nom || '', emoji: cat?.emoji || '', couleur: cat?.couleur || (cat ? '' : '#4f8cff'),
+    template: _normalizeShopTemplate(cat?.template), templateAuto: !cat,
+    image: cat?.image || '', imageFocus: focus, masquee: !!cat?.masquee,
+    emojiOpen: false, deleting: false, destination: '', error: '',
+  };
+  _catEditorState.original = JSON.stringify(_catEditorPersisted(_catEditorState));
+  openModal('', _catEditorHtml());
+  setModalCloseGuard(() => {
+    if (!_catEditorState || !_catEditorDirty()) { _catEditorState = null; return false; }
+    const guardedState = _catEditorState;
+    confirmModal('Fermer sans enregistrer les modifications ?', { title: 'Modifications non enregistrées', confirmLabel: 'Fermer', danger: true }).then(ok => {
+      if (!ok || _catEditorState !== guardedState) return;
+      _catEditorState = null; clearModalCloseGuard(); closeModalDirect();
+    });
+    return true;
+  });
+  _bindCatEditorDom();
+}
+
+function _catClose() {
+  closeModalDirect();
+}
+
+async function saveCat() {
+  const state = _catEditorState;
+  if (!state) return false;
   try {
-    const nom=document.getElementById('cat-nom')?.value.trim();
-    if(!nom){showNotif('Nom requis.','error');return;}
-    const data={ nom, template:document.getElementById('cat-template')?.value||'classique', emoji:document.getElementById('cat-emoji')?.value.trim()||'', image:document.getElementById('cat-img-b64')?.value||'', masquee:document.getElementById('cat-masquee')?.checked||false };
-    if(catId) await updateInCol('shopCategories',catId,data);
-    else await addToCol('shopCategories',{...data,ordre:_cats.length,sousCats:[]});
-    closeModalDirect(); showNotif(catId?'Catégorie mise à jour.':'Catégorie créée !','success'); renderShop();
-  } catch (e) { notifySaveError(e); }
+    const nom = state.nom.trim();
+    if (!nom) {
+      state.error = 'Donne un nom à la catégorie.';
+      _renderCatEditor({ focusId: 'shcat-name' });
+      return false;
+    }
+    if (_cats.some(cat => cat.id !== state.id && _norm(cat.nom) === _norm(nom))) {
+      state.error = 'Une catégorie porte déjà ce nom.';
+      _renderCatEditor({ focusId: 'shcat-name' });
+      return false;
+    }
+    const data = { ..._catEditorPersisted(state), nom, emoji: state.emoji || _catEmoji(nom) };
+    if (state.id) await updateInCol('shopCategories', state.id, data);
+    else await addToCol('shopCategories', { ...data, ordre: _cats.length, sousCats: [] });
+    const edited = state.id ? _cats.find(cat => cat.id === state.id) : null;
+    if (edited) Object.assign(edited, data);
+    _catEditorState = null; clearModalCloseGuard(); closeModalDirect();
+    showNotif(state.id ? 'Catégorie mise à jour.' : 'Catégorie créée !', 'success'); renderShop();
+    return true;
+  } catch (error) { notifySaveError(error); return false; }
 }
 
-async function deleteCat(catId) {
+async function _catBatchMove(items, categorieId) {
+  const updates = items.map(item => ({ col: 'shop', id: item.id, data: { categorieId } }));
+  for (let index = 0; index < updates.length; index += 450) await batchUpdateInCol(updates.slice(index, index + 450));
+  items.forEach(item => { item.categorieId = categorieId; });
+}
+
+async function deleteCat(catId, { destination = '', confirmed = false } = {}) {
   try {
     const cat = _cats.find(entry => entry.id === catId);
-    if (!cat) return;
-    const n = _items.filter(i => i.categorieId === catId).length;
+    if (!cat) return false;
+    const affected = _items.filter(item => item.categorieId === catId);
+    const n = affected.length;
     const message = n > 0
       ? `Supprimer cette catégorie ? Ses ${n} article${n > 1 ? 's' : ''} passeront dans « Non classé » et ne seront pas supprimés.`
       : 'Supprimer cette catégorie ?';
+    if (!confirmed && !await confirmModal(message, { title: 'Confirmation de suppression', confirmLabel: 'Supprimer', danger: true })) return false;
+    const validDestination = destination && _cats.some(entry => entry.id === destination && entry.id !== catId) ? destination : '';
+    if (affected.length) await _catBatchMove(affected, validDestination);
     const deleted = await confirmDelete('shopCategories', catId, message, {
+      confirmed: true,
       snapshot: cat,
       title: 'Confirmation de suppression',
       successMessage: n > 0 ? `Catégorie supprimée · ${n} article${n > 1 ? 's' : ''} conservé${n > 1 ? 's' : ''}.` : 'Catégorie supprimée.',
-      onRestore: () => renderShop(),
+      onRestore: async () => { if (affected.length) await _catBatchMove(affected, catId); renderShop(); },
     });
-    if (!deleted) return;
+    if (!deleted) {
+      if (affected.length) await _catBatchMove(affected, catId);
+      return false;
+    }
     if(_activeCat===catId){_view='home';_activeCat=null;}
+    if (_catEditorState?.id === catId) { _catEditorState = null; clearModalCloseGuard(); closeModalDirect(); }
     renderShop();
-  } catch (e) { notifySaveError(e); }
+    return true;
+  } catch (error) { notifySaveError(error); return false; }
+}
+
+function _catEditorMutate(mutator, options = {}) {
+  if (!_catEditorState) return;
+  mutator(_catEditorState);
+  _renderCatEditor(options);
+}
+
+function _catNameInput(input) {
+  if (!_catEditorState) return;
+  _catEditorState.nom = input.value;
+  _catEditorState.error = '';
+  if (_catEditorState.templateAuto) {
+    const guessed = _catGuessTemplate(input.value);
+    if (guessed) _catEditorState.template = guessed;
+  }
+  _renderCatEditor({ focusId: 'shcat-name', selection: input.selectionStart });
+}
+
+function _catReadFile(file) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(file);
+  });
+}
+
+async function _catLoadImage(file) {
+  if (!_catEditorState || !file) return;
+  if (!file.type?.startsWith('image/')) { showNotif('Choisis un fichier image.', 'error'); return; }
+  const dataUrl = await _catReadFile(file);
+  if (!dataUrl || !_catEditorState) return;
+  _catEditorState.image = await compressDataUrl(dataUrl, { max: 1200, quality: 0.78 });
+  _catEditorState.imageFocus = { x: 50, y: 50 };
+  _renderCatEditor();
+}
+
+function _shopCatPaste(event) {
+  if (!_catEditorState || !document.querySelector('.shcat')) return;
+  const file = [...event.clipboardData?.files || []].find(entry => entry.type?.startsWith('image/'));
+  if (!file) return;
+  event.preventDefault();
+  _catLoadImage(file);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3108,7 +3315,6 @@ const _SI_SECTIONS = {
   armure:    ['identite', 'combat', 'bonus', 'traits', 'actions', 'commerce', 'lecture'],
   bijou:     ['identite', 'combat', 'bonus', 'traits', 'actions', 'commerce', 'lecture'],
   classique: ['identite', 'description', 'actions', 'commerce', 'lecture'],
-  libre:     ['identite', 'description', 'commerce', 'lecture'],
 };
 
 const _SI_SECTION_DEF = {
@@ -3454,7 +3660,7 @@ function _siReadDraftFromDom() {
   if (!draft) return null;
   const text = id => document.getElementById(id)?.value ?? '';
   const num = id => parseFloat(text(id)) || 0;
-  draft.nom = text('si-nom').trim(); draft.categorieId = text('si-cat'); draft.template = text('si-template') || draft.template;
+  draft.nom = text('si-nom').trim(); draft.categorieId = text('si-cat'); draft.template = _normalizeShopTemplate(text('si-template') || draft.template);
   draft.image = text('si-img-b64'); draft.rarete = parseInt(text('si-rarete'), 10) || 0;
   ['format','nature','mains','degats','toucherStat','portee','slotArmure','typeArmure','slotBijou','type','effet','description'].forEach(k => {
     const el = document.getElementById(`si-${k}`); if (el) draft[k] = el.value;
@@ -3498,7 +3704,8 @@ function _siRefreshLive() {
   }
   const preview = document.getElementById('si-editor-preview');
   if (preview) preview.innerHTML = _siPreviewHtml(item);
-  (_SI_SECTIONS[item.template] || []).forEach(section => {
+  const sections = _SI_SECTIONS[_normalizeShopTemplate(item.template)] || _SI_SECTIONS.classique;
+  sections.forEach(section => {
     const host = document.getElementById(`si-section-${section}`); if (!host) return;
     const summary = _siSectionSummary(section, item);
     const summaryEl = host.querySelector('.si-section-summary');
@@ -3507,7 +3714,7 @@ function _siRefreshLive() {
     if (stateEl) stateEl.hidden = !!summary;
   });
   const nav = document.getElementById('si-editor-nav');
-  if (nav) nav.innerHTML = _siNavHtml(_SI_SECTIONS[item.template] || _SI_SECTIONS.classique, item);
+  if (nav) nav.innerHTML = _siNavHtml(sections, item);
   const dirty = document.getElementById('si-editor-dirty');
   const changes = _siDiffCount(item, _siEditorState.originalDraft || {});
   _siEditorState.dirty = !!changes;
@@ -3531,7 +3738,7 @@ function _siRenderEditorPanels({ keepScroll = true } = {}) {
   const scroll = document.getElementById('si-editor-scroll');
   const y = keepScroll ? scroll?.scrollTop || 0 : 0;
   const item = state.draft;
-  const tplKey = item.template || 'classique';
+  const tplKey = _normalizeShopTemplate(item.template);
   const tpl = TEMPLATES[tplKey] || TEMPLATES.classique;
   const sections = _SI_SECTIONS[tplKey] || _SI_SECTIONS.classique;
   const nav = document.getElementById('si-editor-nav');
@@ -3588,7 +3795,7 @@ async function openItemModal(itemId, seedItem = null) {
 
   const defCatId = item?.categorieId || _activeCat || '';
   const cat = _cats.find(c => c.id === defCatId);
-  const draft = { ...(item || {}), categorieId: defCatId, template: item?.template || cat?.template || 'classique', readableTitle: _shopReadableDraft.title, readableContent: _shopReadableDraft.html };
+  const draft = { ...(item || {}), categorieId: defCatId, template: _normalizeShopTemplate(item?.template || cat?.template), readableTitle: _shopReadableDraft.title, readableContent: _shopReadableDraft.html };
   _siEditorState = {
     itemId: itemId || '', draft, originalDraft: _siClone(draft), dirty: false, quick: '', open: new Set(), saving: false,
     lastFiniteStock: Number.isFinite(Number(draft.dispo)) && Number(draft.dispo) >= 0 ? Math.trunc(Number(draft.dispo)) : 0,
@@ -4063,7 +4270,7 @@ function refreshItemFields(catId) {
   _siEditorState.draft.categorieId = catId || '';
   // Sur un article encore vide, choisir une catégorie adopte naturellement son
   // type. Une fiche déjà renseignée ne change jamais de structure toute seule.
-  if (!_siEditorState.itemId && !_siEditorState.draft.nom && cat?.template) _siEditorState.draft.template = cat.template;
+  if (!_siEditorState.itemId && !_siEditorState.draft.nom && cat?.template) _siEditorState.draft.template = _normalizeShopTemplate(cat.template);
   _siRenderEditorPanels();
 }
 
@@ -4115,10 +4322,10 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
     // Le template vient désormais du select dédié de la modale ; fallback
     // sur le template de la catégorie (rétrocompat avec les items créés avant
     // l'unification de la modale).
-    const tplKey = document.getElementById('si-template')?.value
+    const tplKey = _normalizeShopTemplate(document.getElementById('si-template')?.value
                 || item?.template
                 || cat?.template
-                || 'classique';
+                || 'classique');
     const tpl=TEMPLATES[tplKey]||TEMPLATES.classique;
     const nom=document.getElementById('si-nom')?.value.trim();
     if(!nom){showNotif('Nom requis.','error');return;}
@@ -4201,8 +4408,11 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
     // Migration douce des anciens articles : la boutique a historiquement
     // alterné entre `effet` et `description`. Les deux restent synchronisés
     // pour qu'un prochain changement de template ne vide plus le champ.
-    if (tplKey === 'classique') data.description = data.effet || '';
-    if (tplKey === 'libre') data.effet = data.description || '';
+    if (tplKey === 'classique') {
+      const description = data.effet || data.description || '';
+      data.effet = description;
+      data.description = description;
+    }
 
     if (tplKey === 'arme') {
       // Le type d'arme (ex-format) alimente aussi sousType : maîtrises, filtres, recettes.
@@ -5102,6 +5312,36 @@ Object.assign(shHandlers, {
   toggleTag:      (el) => shopToggleTag(el.dataset.tag),
   page:           (el) => shopPage(parseInt(el.dataset.page)),
   deleteCat:      (el) => deleteCat(el.dataset.id),
+  catClose:       () => _catClose(),
+  catName:        (el) => _catNameInput(el),
+  catToggleEmoji: () => _catEditorMutate(state => { state.emojiOpen = !state.emojiOpen; }),
+  catEmoji:       (el) => _catEditorMutate(state => { state.emoji = el.dataset.value || ''; state.emojiOpen = false; }),
+  catEmojiOwn:    (el) => {
+    const value = el.value.trim();
+    if (value) _catEditorMutate(state => { state.emoji = value; state.emojiOpen = false; });
+  },
+  catEmojiAuto:   () => _catEditorMutate(state => { state.emoji = ''; state.emojiOpen = false; }),
+  catColor:       (el) => _catEditorMutate(state => { state.couleur = el.dataset.value || ''; }),
+  catCustomColor: (el) => _catEditorMutate(state => { state.couleur = el.value || ''; }),
+  catTemplate:    (el) => {
+    if (!TEMPLATES[el.dataset.value]) return;
+    _catEditorMutate(state => { state.template = el.dataset.value; state.templateAuto = false; });
+  },
+  catVisibility:  (el) => _catEditorMutate(state => { state.masquee = el.dataset.hidden === 'true'; }),
+  catPickImage:   () => document.getElementById('shcat-file')?.click(),
+  catImageFile:   (el) => { const file = el.files?.[0]; el.value = ''; return _catLoadImage(file); },
+  catRemoveImage: () => _catEditorMutate(state => { state.image = ''; state.imageFocus = { x: 50, y: 50 }; }),
+  catImageZone:   (el, event) => {
+    if (!_catEditorState?.image) { document.getElementById('shcat-file')?.click(); return; }
+    const rect = el.getBoundingClientRect();
+    const x = Math.round((event.clientX - rect.left) / rect.width * 100);
+    const y = Math.round((event.clientY - rect.top) / rect.height * 100);
+    _catEditorMutate(state => { state.imageFocus = { x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) }; });
+  },
+  catDeleteArm:    () => _catEditorMutate(state => { state.deleting = true; state.emojiOpen = false; }),
+  catDeleteCancel: () => _catEditorMutate(state => { state.deleting = false; }),
+  catDeleteDestination: (el) => { if (_catEditorState) _catEditorState.destination = el.value || ''; },
+  catDeleteConfirm: (el) => deleteCat(el.dataset.id, { destination: _catEditorState?.destination || '', confirmed: true }),
   // Items
   buyItem:        (el, ev) => { ev?.stopPropagation?.(); _cartAdd(el.dataset.id); },
   confirmBuy:     (el) => confirmBuyItem(el.dataset.id),
@@ -5219,7 +5459,7 @@ Object.assign(shHandlers, {
   skillValue:     (el) => { const chip = el.closest('.sh-skill-chip'); if (chip) chip.dataset.val = String(parseInt(el.value, 10) || 0); _siRefreshLive(); },
   skillRemove:    (el) => { removeSkillBonus(el.dataset.skill); _siRefreshLive(); },
   // Modal catégorie
-  saveCat:        (el) => saveCat(el.dataset.id || ''),
+  saveCat:        () => saveCat(),
   // Export / import
   tabSwitch:      (el) => switchShopExportTab(el.dataset.tab),
   exportSelectAll:(el) => selectAllShopExport(el.dataset.all === 'true'),

@@ -11,8 +11,10 @@ import { notifySaveError, showNotif } from './notifications.js';
  * L'appelant gère showNotif et le re-render.
  */
 export async function confirmDelete(col, id, message, opts = {}) {
-  const { snapshot = null, onRestore = null, successMessage = 'Élément supprimé.', ...modalOpts } = opts;
-  if (!await confirmModal(message, modalOpts)) return false;
+  const { snapshot = null, onRestore = null, successMessage = 'Élément supprimé.', confirmed = false, ...modalOpts } = opts;
+  // `confirmed` sert aux interfaces qui portent déjà une confirmation explicite
+  // dans leur propre pied de page (sans perdre pour autant l'undo commun).
+  if (!confirmed && !await confirmModal(message, modalOpts)) return false;
   try {
     await deleteFromCol(col, id);
     if (snapshot) {
