@@ -21,7 +21,14 @@ import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, cal
          computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
          sortCharactersForDisplay, favoriteFirst } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
-import { loadCollection } from '../../data/firestore.js'; // lecture recettes/boutique (couche quota)
+import { loadCollection, getDocData } from '../../data/firestore.js'; // lecture recettes/boutique (couche quota)
+// ── Craft génératif (« Forger ») ─────────────────────────────────────────────
+import { craftCategoryFor, craftDiscipline, craftDD, resolveCraftAttempt, countInventoryItem } from '../../shared/craft-engine.js';
+import { loadCraftSettings, getCraftSettings, craftRecipeMaterials } from '../../shared/craft-settings.js';
+import { loadRarities, _rareteLabel } from '../../shared/rarity.js';
+import { loadWeaponFormats } from '../../shared/weapon-formats.js';
+import { normalizeWeaponDefaults } from '../../shared/weapon-family.js';
+import { normalizeDiceSkills, DICE_SKILLS_DEFAULT } from '../../shared/dice-skills.js';
 import { shopItemToInvEntry, getInventoryItemImage } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { bumpSkill } from '../../shared/stats.js';
@@ -1473,8 +1480,12 @@ function _msRecipeIngrStatus(recipe, counts) {
 function _msTabCraft(c, uid, canEdit) {
   if (_msCraftRecipes === null) { _msEnsureCraftRecipes(); return loadingHtml('Chargement des recettes…', { compact: true }); }
 
+  const forgeBtn = canEdit
+    ? `<button class="vtt-ms-craft-btn pri vtt-forge-entry" data-vtt-fn="_vttForgeOpen" data-vtt-args="${c.id}|${uid}">🔨 Forger un équipement</button>`
+    : '';
+
   const known = _msKnownRecipes(uid);
-  if (!known.length) return '<div class="vtt-ms-empty">Aucune recette connue.</div>';
+  if (!known.length) return forgeBtn + '<div class="vtt-ms-empty">Aucune recette connue.</div>';
 
   const counts = _msInvNameCounts(c);
   const cards  = known
@@ -1484,7 +1495,7 @@ function _msTabCraft(c, uid, canEdit) {
 
   const intMod = getMod(c, 'intelligence');
   const header = `<div class="vtt-ms-sect-label">Artisanat · INT ${intMod >= 0 ? '+' + intMod : intMod} contre DD ${_MS_CRAFT_DD}</div>`;
-  return header
+  return forgeBtn + header
     + _msFilterBar('craft', [], _msCraftQuery)
     + `<div class="vtt-ms-filter-empty" data-kind="craft" style="display:none">Aucune recette ne correspond.</div>`
     + `<div class="vtt-ms-craft">${cards.map(({ r, st }) => {
@@ -1626,6 +1637,201 @@ async function _vttMsCraft(charId, uid, recipeId) {
 // Confirmation inline « Crafter » (1er clic) puis « Lancer le jet » (2e).
 function _vttMsCraftAsk(recipeId) { _msCraftConfirm = recipeId; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 function _vttMsCraftCancel() { _msCraftConfirm = null; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FORGER UN ÉQUIPEMENT (craft génératif) — APERÇU SANS ÉCRITURE (v1 : armes)
+// Famille + nature → catégorie déduite (craftCategoryFor) → palier (matériaux
+// liés) → 1 trait (tiré des objets boutique de la catégorie × rareté) → nom →
+// jet (d20 + mod de la compétence de discipline vs DD). Prévisualisation seule :
+// AUCUNE mutation d'inventaire tant que le rendu n'est pas validé par le MJ.
+// ══════════════════════════════════════════════════════════════════════════════
+const _FORGE_STAT = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
+let _forgeData = null;      // { formats, skills, shop } | null = pas chargé
+let _forgeLoading = false;
+let _forgeOpen = false;
+let _forgeCtx = null;       // { charId, uid }
+let _forge = { familyId:'', nature:'physique', tier:1, traitName:'', name:'' };
+let _forgeResult = null;    // { success, roll, item?, txt }
+
+async function _forgeEnsureData() {
+  if (_forgeData || _forgeLoading) return;
+  _forgeLoading = true;
+  try {
+    const [formats, , , skillsDoc, shop] = await Promise.all([
+      loadWeaponFormats().catch(() => []),
+      loadCraftSettings().catch(() => null),
+      loadRarities().catch(() => []),
+      getDocData('world', 'dice_skills').catch(() => null),
+      (_msCraftShop !== null ? Promise.resolve(_msCraftShop) : loadCollection('shop').catch(() => [])),
+    ]);
+    _forgeData = {
+      formats: Array.isArray(formats) ? formats : [],
+      skills: normalizeDiceSkills(skillsDoc?.skills || skillsDoc || DICE_SKILLS_DEFAULT, DICE_SKILLS_DEFAULT),
+      shop: Array.isArray(shop) ? shop : [],
+    };
+    if (_msCraftShop === null) _msCraftShop = _forgeData.shop;
+  } catch { _forgeData = { formats: [], skills: [], shop: [] }; }
+  finally { _forgeLoading = false; if (_forgeOpen) _renderForge(); }
+}
+
+function _forgeFamilies() {
+  const EXCL = /bouclier|main\s*libre/i;
+  return (_forgeData?.formats || []).filter(f => f?.label && !EXCL.test(f.label));
+}
+function _forgeFamily() { return _forgeFamilies().find(f => f.id === _forge.familyId) || null; }
+
+function _forgeCategory() {
+  const fam = _forgeFamily(); if (!fam) return null;
+  const def = normalizeWeaponDefaults(fam);
+  const m = String(def.portee || '').replace(',', '.').match(/(\d+(?:\.\d+)?)\s*m/i);
+  const ranged = !!m && parseFloat(m[1]) > 1.5;
+  return craftCategoryFor({ kind: 'arme', nature: _forge.nature, ranged });
+}
+
+function _forgeCompetence(c) {
+  const cat = _forgeCategory();
+  const cfg = getCraftSettings();
+  const disc = cat && cfg.categorieDiscipline?.[cat];
+  const compName = disc && cfg.disciplineCompetence?.[disc];
+  if (!compName) return { bonus: 0, label: disc ? `${disc} — compétence non reliée` : '', disc };
+  const skill = (_forgeData?.skills || []).find(s => s.name === compName);
+  const statFull = _FORGE_STAT[skill?.stat] || 'intelligence';
+  const bonus = getMod(c, statFull);
+  return { bonus, label: `${compName} (${skill?.stat || '—'}) ${bonus >= 0 ? '+' + bonus : bonus}`, disc };
+}
+
+// Pool de traits = traits des objets boutique de catégorie « arme » & rareté = palier.
+function _forgeTraitPool() {
+  const rar = _forge.tier;
+  const names = new Set();
+  for (const it of (_forgeData?.shop || [])) {
+    if ((parseInt(it?.rarete) || 0) !== rar) continue;
+    const isArme = (it.template || '').toLowerCase() === 'arme' || /arme|baguette/i.test(it.format || '');
+    if (!isArme) continue;
+    (Array.isArray(it.traits) ? it.traits : []).forEach(t => { if (t) names.add(String(t)); });
+  }
+  return [...names].sort((a, b) => a.localeCompare(b, 'fr'));
+}
+
+function _forgeRequirements() {
+  const cat = _forgeCategory(); if (!cat) return [];
+  return craftRecipeMaterials(cat, _forge.tier, getCraftSettings());
+}
+function _forgeMatRows(c) {
+  return _forgeRequirements().map(r => {
+    const name = (_forgeData?.shop || []).find(it => it.id === r.itemId)?.nom || r.itemId;
+    const have = countInventoryItem(c.inventaire, r.itemId);
+    return { itemId: r.itemId, name, need: r.quantite, have, ok: have >= r.quantite };
+  });
+}
+
+function _openForgeModal(charId, uid) {
+  _forge = { familyId: '', nature: 'physique', tier: 1, traitName: '', name: '' };
+  _forgeResult = null;
+  _forgeOpen = true;
+  _forgeCtx = { charId, uid };
+  if (!_forgeData) { _forgeEnsureData(); }
+  _renderForge();
+}
+
+function _renderForge() {
+  if (!_forgeOpen) return;
+  const { charId } = _forgeCtx || {};
+  const c = VS.characters[charId]; if (!c) { _forgeOpen = false; return; }
+  if (!_forgeData) { openModal('🔨 Forger un équipement', loadingHtml('Chargement du forgeron…', { compact: true })); return; }
+
+  const families = _forgeFamilies();
+  const fam = _forgeFamily();
+  const cat = _forgeCategory();
+  const base = fam ? normalizeWeaponDefaults(fam) : null;
+  const matRows = _forgeMatRows(c);
+  const matsOk = matRows.length > 0 && matRows.every(m => m.ok);
+  const traitPool = _forgeTraitPool();
+  const comp = _forgeCompetence(c);
+  const dd = craftDD(_forge.tier) || '—';
+  const canForge = !!fam && !!_forge.traitName && matsOk;
+
+  const famOpts = `<option value="">— type d'arme —</option>` +
+    families.map(f => `<option value="${_esc(f.id)}" ${f.id === _forge.familyId ? 'selected' : ''}>${_esc(f.label)}</option>`).join('');
+  const traitOpts = traitPool.length
+    ? `<option value="">— choisir —</option>` + traitPool.map(t => `<option value="${_esc(t)}" ${t === _forge.traitName ? 'selected' : ''}>${_esc(t)}</option>`).join('')
+    : `<option value="">aucun trait pour cette catégorie/palier</option>`;
+  const matHtml = matRows.length
+    ? matRows.map(m => `<span class="vtt-ms-craft-ingr">${_esc(m.name)}<b class="${m.ok ? 'ok' : 'ko'}">${m.have}/${m.need}</b></span>`).join('')
+    : `<span class="vtt-forge-warn">Aucun matériau lié pour « ${cat || '?'} » ${_rareteLabel(_forge.tier)} — à définir dans Réglages du craft.</span>`;
+  const baseHtml = base
+    ? [base.degats && `⚔️ ${_esc(base.degats)}`, base.portee && `🎯 ${_esc(base.portee)}`, base.mains && _esc(base.mains)].filter(Boolean).join(' · ')
+    : '';
+
+  openModal('🔨 Forger un équipement', `
+    <div class="vtt-forge">
+      <p class="vtt-forge-hint">Aperçu — <b>aucun matériau n'est consommé</b> tant que le MJ n'a pas validé le rendu.</p>
+      <label class="vtt-forge-row"><span>Type d'arme</span><select id="forge-family">${famOpts}</select></label>
+      <label class="vtt-forge-row"><span>Nature</span>
+        <select id="forge-nature">
+          <option value="physique" ${_forge.nature === 'physique' ? 'selected' : ''}>Physique</option>
+          <option value="magique" ${_forge.nature === 'magique' ? 'selected' : ''}>Magique</option>
+        </select></label>
+      <label class="vtt-forge-row"><span>Palier</span>
+        <select id="forge-tier">
+          ${[1, 2, 3].map(t => `<option value="${t}" ${t === _forge.tier ? 'selected' : ''}>${'★'.repeat(t)} — ${_esc(_rareteLabel(t) || t)}</option>`).join('')}
+        </select></label>
+      ${cat ? `<div class="vtt-forge-meta">Catégorie : <b>${cat}</b> · Discipline : <b>${comp.disc || '—'}</b> · Jet : d20 + ${_esc(comp.label || '—')} vs DD <b>${dd}</b></div>` : ''}
+      ${baseHtml ? `<div class="vtt-forge-base">Base (${_esc(fam.label)}) : ${baseHtml}</div>` : ''}
+      <div class="vtt-forge-mats"><span class="vtt-forge-lbl">Matériaux requis</span><div class="vtt-ms-craft-ingrs">${matHtml}</div></div>
+      <label class="vtt-forge-row"><span>Trait</span><select id="forge-trait">${traitOpts}</select></label>
+      <label class="vtt-forge-row"><span>Nom</span><input id="forge-name" type="text" maxlength="40" placeholder="Nom de ton objet" value="${_esc(_forge.name)}"></label>
+      ${_forgeResult ? `<div class="vtt-ms-craft-res ${_forgeResult.success ? 'win' : 'lose'}">${_esc(_forgeResult.txt)}</div>` : ''}
+      <div class="vtt-forge-ft">
+        <button class="vtt-ms-craft-btn" id="forge-run" ${canForge ? '' : 'disabled'} title="${canForge ? 'Simuler le jet' : 'Choisis type, matériaux et trait'}">🎲 Forger (aperçu)</button>
+      </div>
+    </div>`, { subtitle: 'Craft génératif · aperçu', accent: '#e8b84b' });
+
+  _bindForge();
+}
+
+// Liaison manuelle des contrôles (le dispatcher VTT est au clic, pas au change).
+function _bindForge() {
+  const set = (id, key, cast) => {
+    const el = document.getElementById(id); if (!el) return;
+    el.onchange = () => { _forge[key] = cast ? cast(el.value) : el.value; if (key !== 'name') _renderForge(); };
+  };
+  set('forge-family', 'familyId');
+  set('forge-nature', 'nature');
+  set('forge-tier', 'tier', v => Math.max(1, Math.min(3, parseInt(v, 10) || 1)));
+  set('forge-trait', 'traitName');
+  const nameEl = document.getElementById('forge-name');
+  if (nameEl) nameEl.oninput = () => { _forge.name = nameEl.value; };
+  const run = document.getElementById('forge-run');
+  if (run) run.onclick = () => _forgeRun();
+}
+
+// Aperçu : lance le jet et montre l'objet qui SERAIT produit. N'écrit rien.
+function _forgeRun() {
+  const { charId } = _forgeCtx || {};
+  const c = VS.characters[charId]; if (!c) return;
+  const fam = _forgeFamily(); if (!fam) return;
+  const nameEl = document.getElementById('forge-name'); if (nameEl) _forge.name = nameEl.value;
+  const comp = _forgeCompetence(c);
+  const d20 = Math.floor(Math.random() * 20) + 1;
+  const res = resolveCraftAttempt({
+    inventory: c.inventaire || [],
+    requirements: _forgeRequirements(),
+    d20, competenceBonus: comp.bonus, tier: _forge.tier, config: getCraftSettings(),
+    base: { ...normalizeWeaponDefaults(fam), typeArme: fam.label, sousType: fam.label, format: fam.label, template: 'arme' },
+    trait: _forge.traitName ? { nom: _forge.traitName } : null,
+    name: _forge.name, nature: _forge.nature, rarete: _forge.tier,
+    author: STATE.user?.uid || '',
+  });
+  const dd = craftDD(_forge.tier);
+  if (!res.ok) { _forgeResult = { success: false, txt: 'Matériaux insuffisants.' }; _renderForge(); return; }
+  _forgeResult = res.success
+    ? { success: true,  txt: `✅ d20[${res.roll.d20}]+${comp.bonus} = ${res.roll.total} ≥ DD ${dd} → « ${res.item.nom || fam.label} » serait créé (aperçu).` }
+    : { success: false, txt: `❌ d20[${res.roll.d20}]+${comp.bonus} = ${res.roll.total} < DD ${dd} → échec (aperçu, matériaux perdus en réel).` };
+  _renderForge();
+}
+
+function _vttForgeOpen(charId, uid) { if (!_msCanEdit(uid)) return; _openForgeModal(charId, uid); }
 
 // ── Onglet Notes (modèle notesList partagé avec la vraie fiche) ──────────
 // Carnet (refonte) : + note ouvre directement, titre éditable sur place,
@@ -2011,6 +2217,7 @@ export {
   _vttMsCraft,
   _vttMsCraftAsk,
   _vttMsCraftCancel,
+  _vttForgeOpen,
   _vttMsCraftSearch,
   _vttMsCraftClear,
   _vttMsDeleteItem,
