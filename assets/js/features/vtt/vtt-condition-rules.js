@@ -39,6 +39,13 @@ export function conditionDamageReductionApplies(effects = {}, damageTypeId = '')
   return !allowed.length || allowed.includes(String(damageTypeId || 'physique'));
 }
 
+/** Un état se dissipe-t-il à l'issue de cette attaque ? */
+export function conditionConsumedByAttack(effects = {}, { attacker = false, hit = false } = {}) {
+  return attacker
+    ? effects.breakOnAttack === true
+    : (hit && (effects.breakOnHit === true || effects.consumedByAttackAgainst === true));
+}
+
 /** Avantage/désavantage accordé par les états pour un test ou un JS de stat. */
 export function conditionStatRollMode(activeConditions = [], statKey = '', kind = 'check') {
   const advKey = kind === 'save' ? 'saveAdvantageStats' : 'checkAdvantageStats';

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   combinedTechniqueTargetCA,
@@ -11,6 +12,7 @@ import {
   techniqueActiveForMode,
   techniqueCritRangeBonus,
   techniqueDamageMalus,
+  techniqueEligibilityMode,
   techniqueScalingSteps,
   techniqueTriggerApplies,
   weaponTechniqueTargetCA,
@@ -149,6 +151,25 @@ test('seuil critique, malus plat et avantage requis', () => {
   assert.equal(techniqueActiveForMode(dagger, 'normal'), false);
   assert.equal(techniqueActiveForMode(sword, 'dis'), true);
   assert.equal(normalizeWeaponTechnique({ critRangeBonus: 99, armorIgnorePct: 500 }).critRangeBonus, 5);
+});
+
+test('Coup sournois exige un avantage réel et non le bouton manuel', () => {
+  const sneak = normalizeWeaponTechnique({ label: 'Coup sournois', requiresAdvantage: true });
+  assert.equal(techniqueActiveForMode(sneak, techniqueEligibilityMode({
+    requestedMode: 'adv',
+  })), false, 'le bouton Avantage seul ne crée pas une ouverture');
+  assert.equal(techniqueActiveForMode(sneak, techniqueEligibilityMode({
+    hasAdvantage: true,
+  })), true, 'un avantage du lanceur ou contre la cible autorise la technique');
+  assert.equal(techniqueActiveForMode(sneak, techniqueEligibilityMode({
+    hasAdvantage: true,
+    hasDisadvantage: true,
+  })), false, 'avantage et désavantage se neutralisent');
+});
+
+test('la validation finale de Coup sournois conserve la cible et ses debuffs', () => {
+  const source = readFileSync(new URL('../assets/js/features/vtt/vtt.js', import.meta.url), 'utf8');
+  assert.match(source, /_vttTechniqueAvailability\(technique,\s*src,\s*tgt,\s*opt,\s*mode\)/);
 });
 
 test('le rayon entoure toute l’empreinte de la cible sans toucher au-delà', () => {
