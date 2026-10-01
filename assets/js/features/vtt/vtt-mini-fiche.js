@@ -29,6 +29,7 @@ import { loadRarities, _rareteLabel } from '../../shared/rarity.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { normalizeWeaponDefaults } from '../../shared/weapon-family.js';
 import { normalizeDiceSkills, DICE_SKILLS_DEFAULT } from '../../shared/dice-skills.js';
+import { getArmorTypeOptions } from '../../shared/armor-set-settings.js';
 import { shopItemToInvEntry, getInventoryItemImage } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { bumpSkill } from '../../shared/stats.js';
@@ -1646,12 +1647,14 @@ function _vttMsCraftCancel() { _msCraftConfirm = null; if (VS.miniUid) _renderMi
 // AUCUNE mutation d'inventaire tant que le rendu n'est pas validé par le MJ.
 // ══════════════════════════════════════════════════════════════════════════════
 const _FORGE_STAT = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
-let _forgeData = null;      // { formats, skills, shop } | null = pas chargé
+const _FORGE_ARMOR_SLOTS = ['Tête', 'Torse', 'Pieds'];
+const _FORGE_BIJOU_SLOTS = ['Anneau', 'Amulette'];
+let _forgeData = null;      // { formats, skills, shop, armorTypes } | null = pas chargé
 let _forgeLoading = false;
 let _forgeOpen = false;
 let _forgeCtx = null;       // { charId, uid }
-let _forge = { familyId:'', nature:'physique', tier:1, traitName:'', name:'' };
-let _forgeResult = null;    // { success, roll, item?, txt }
+let _forge = { kind:'arme', familyId:'', nature:'physique', armorType:'', armorSlot:'Torse', bijouSlot:'Anneau', tier:1, traitName:'', name:'' };
+let _forgeResult = null;    // { success, txt }
 
 async function _forgeEnsureData() {
   if (_forgeData || _forgeLoading) return;
@@ -1664,28 +1667,45 @@ async function _forgeEnsureData() {
       getDocData('world', 'dice_skills').catch(() => null),
       (_msCraftShop !== null ? Promise.resolve(_msCraftShop) : loadCollection('shop').catch(() => [])),
     ]);
+    let armorTypes = [];
+    try { armorTypes = getArmorTypeOptions() || []; } catch { armorTypes = []; }
+    if (!armorTypes.length) armorTypes = ['Légère', 'Intermédiaire', 'Lourde'];
     _forgeData = {
       formats: Array.isArray(formats) ? formats : [],
       skills: normalizeDiceSkills(skillsDoc?.skills || skillsDoc || DICE_SKILLS_DEFAULT, DICE_SKILLS_DEFAULT),
       shop: Array.isArray(shop) ? shop : [],
+      armorTypes,
     };
     if (_msCraftShop === null) _msCraftShop = _forgeData.shop;
-  } catch { _forgeData = { formats: [], skills: [], shop: [] }; }
+    if (!_forge.armorType) _forge.armorType = armorTypes[0] || '';
+  } catch { _forgeData = { formats: [], skills: [], shop: [], armorTypes: ['Légère', 'Intermédiaire', 'Lourde'] }; }
   finally { _forgeLoading = false; if (_forgeOpen) _renderForge(); }
 }
 
-function _forgeFamilies() {
-  const EXCL = /bouclier|main\s*libre/i;
-  return (_forgeData?.formats || []).filter(f => f?.label && !EXCL.test(f.label));
-}
+// Toutes les familles d'armes (bouclier et main libre INCLUS : mappés à part).
+function _forgeFamilies() { return (_forgeData?.formats || []).filter(f => f?.label); }
 function _forgeFamily() { return _forgeFamilies().find(f => f.id === _forge.familyId) || null; }
 
+// Catégorie-matériau (bucket) déduite selon le genre + nature (+ portée).
+// Cas particuliers d'armes : Bouclier → armure lourde (résistants) ;
+// Main libre (gants/poings) → armes distance (souples).
 function _forgeCategory() {
+  if (_forge.kind === 'armure') return craftCategoryFor({ kind: 'armure', armorType: _forge.armorType });
+  if (_forge.kind === 'bijou')  return craftCategoryFor({ kind: 'bijou', bijouSlot: _forge.bijouSlot });
   const fam = _forgeFamily(); if (!fam) return null;
+  if (/bouclier/i.test(fam.label))       return 'armureLourde';
+  if (/main\s*libre/i.test(fam.label))   return 'armeDist';
   const def = normalizeWeaponDefaults(fam);
   const m = String(def.portee || '').replace(',', '.').match(/(\d+(?:\.\d+)?)\s*m/i);
   const ranged = !!m && parseFloat(m[1]) > 1.5;
   return craftCategoryFor({ kind: 'arme', nature: _forge.nature, ranged });
+}
+
+// Slot de fragment pour le pool de traits (arme / Tête-Torse-Pieds / Anneau-Amulette).
+function _forgeFragSlot() {
+  if (_forge.kind === 'armure') return _forge.armorSlot;
+  if (_forge.kind === 'bijou')  return _forge.bijouSlot;
+  return 'arme';
 }
 
 function _forgeCompetence(c) {
@@ -1700,15 +1720,18 @@ function _forgeCompetence(c) {
   return { bonus, label: `${compName} (${skill?.stat || '—'}) ${bonus >= 0 ? '+' + bonus : bonus}`, disc };
 }
 
-// Pool de traits = traits des objets boutique de catégorie « arme » & rareté = palier.
+// Pool de traits = traits des objets boutique du même slot de fragment & rareté = palier.
 function _forgeTraitPool() {
-  const rar = _forge.tier;
+  const rar = _forge.tier, slot = _forgeFragSlot();
+  const match = (it) => {
+    if ((parseInt(it?.rarete) || 0) !== rar) return false;
+    if (_forge.kind === 'arme')   return (it.template || '').toLowerCase() === 'arme' || /arme|baguette|bouclier|main\s*libre/i.test(it.format || '');
+    if (_forge.kind === 'armure') return it.slotArmure === slot;
+    return it.slotBijou === slot;
+  };
   const names = new Set();
   for (const it of (_forgeData?.shop || [])) {
-    if ((parseInt(it?.rarete) || 0) !== rar) continue;
-    const isArme = (it.template || '').toLowerCase() === 'arme' || /arme|baguette/i.test(it.format || '');
-    if (!isArme) continue;
-    (Array.isArray(it.traits) ? it.traits : []).forEach(t => { if (t) names.add(String(t)); });
+    if (match(it)) (Array.isArray(it.traits) ? it.traits : []).forEach(t => { if (t) names.add(String(t)); });
   }
   return [...names].sort((a, b) => a.localeCompare(b, 'fr'));
 }
@@ -1725,12 +1748,40 @@ function _forgeMatRows(c) {
   });
 }
 
+// Socle de stats de l'objet produit. Armes : défauts du type (weapon_formats).
+// Armures/bijoux : objet boutique représentatif de la catégorie × rareté (champs
+// de la boutique), slot imposé par le choix joueur.
+function _forgeBase() {
+  const tier = _forge.tier, shop = _forgeData?.shop || [];
+  if (_forge.kind === 'arme') {
+    const fam = _forgeFamily(); if (!fam) return null;
+    return { ...normalizeWeaponDefaults(fam), typeArme: fam.label, sousType: fam.label, format: fam.label, template: 'arme' };
+  }
+  if (_forge.kind === 'armure') {
+    const rep = shop.find(it => it.slotArmure && _norm(it.typeArmure || '') === _norm(_forge.armorType) && (parseInt(it.rarete) || 0) === tier)
+             || shop.find(it => it.slotArmure && _norm(it.typeArmure || '') === _norm(_forge.armorType));
+    return { ...(rep || {}), typeArmure: _forge.armorType, slotArmure: _forge.armorSlot, template: 'armure' };
+  }
+  const rep = shop.find(it => it.slotBijou === _forge.bijouSlot && (parseInt(it.rarete) || 0) === tier)
+           || shop.find(it => it.slotBijou === _forge.bijouSlot);
+  return { ...(rep || {}), slotBijou: _forge.bijouSlot, template: 'bijou' };
+}
+
+// Résumé lisible du socle (pour l'aperçu).
+function _forgeBaseSummary(base) {
+  if (!base) return '';
+  if (_forge.kind === 'arme') return [base.degats && `⚔️ ${base.degats}`, base.portee && `🎯 ${base.portee}`, base.mains].filter(Boolean).map(_esc).join(' · ');
+  if (_forge.kind === 'armure') return [base.slotArmure, base.typeArmure, (base.ca || base.caBonus) && `🛡️ CA +${(parseInt(base.ca) || 0) + (parseInt(base.caBonus) || 0)}`].filter(Boolean).map(_esc).join(' · ');
+  return _esc(base.slotBijou || '');
+}
+
 function _openForgeModal(charId, uid) {
-  _forge = { familyId: '', nature: 'physique', tier: 1, traitName: '', name: '' };
+  _forge = { kind:'arme', familyId:'', nature:'physique', armorType:'', armorSlot:'Torse', bijouSlot:'Anneau', tier:1, traitName:'', name:'' };
   _forgeResult = null;
   _forgeOpen = true;
   _forgeCtx = { charId, uid };
-  if (!_forgeData) { _forgeEnsureData(); }
+  if (!_forgeData) _forgeEnsureData();
+  else if (!_forge.armorType) _forge.armorType = _forgeData.armorTypes?.[0] || '';
   _renderForge();
 }
 
@@ -1740,44 +1791,61 @@ function _renderForge() {
   const c = VS.characters[charId]; if (!c) { _forgeOpen = false; return; }
   if (!_forgeData) { openModal('🔨 Forger un équipement', loadingHtml('Chargement du forgeron…', { compact: true })); return; }
 
-  const families = _forgeFamilies();
-  const fam = _forgeFamily();
   const cat = _forgeCategory();
-  const base = fam ? normalizeWeaponDefaults(fam) : null;
+  const base = _forgeBase();
   const matRows = _forgeMatRows(c);
   const matsOk = matRows.length > 0 && matRows.every(m => m.ok);
   const traitPool = _forgeTraitPool();
   const comp = _forgeCompetence(c);
   const dd = craftDD(_forge.tier) || '—';
-  const canForge = !!fam && !!_forge.traitName && matsOk;
+  const typeChosen = _forge.kind === 'arme' ? !!_forgeFamily() : true;
+  const canForge = typeChosen && !!_forge.traitName && matsOk;
 
-  const famOpts = `<option value="">— type d'arme —</option>` +
-    families.map(f => `<option value="${_esc(f.id)}" ${f.id === _forge.familyId ? 'selected' : ''}>${_esc(f.label)}</option>`).join('');
+  const opt = (v, cur, lbl) => `<option value="${_esc(v)}" ${v === cur ? 'selected' : ''}>${_esc(lbl)}</option>`;
+  const kindSeg = `<label class="vtt-forge-row"><span>Objet</span><select id="forge-kind">
+      ${opt('arme', _forge.kind, '⚔️ Arme')}${opt('armure', _forge.kind, '🛡️ Armure')}${opt('bijou', _forge.kind, '💍 Bijou')}
+    </select></label>`;
+
+  let specific = '';
+  if (_forge.kind === 'arme') {
+    specific = `<label class="vtt-forge-row"><span>Type d'arme</span><select id="forge-family">
+        <option value="">— type d'arme —</option>
+        ${_forgeFamilies().map(f => opt(f.id, _forge.familyId, f.label)).join('')}
+      </select></label>
+      <label class="vtt-forge-row"><span>Nature</span><select id="forge-nature">
+        ${opt('physique', _forge.nature, 'Physique')}${opt('magique', _forge.nature, 'Magique')}
+      </select></label>`;
+  } else if (_forge.kind === 'armure') {
+    specific = `<label class="vtt-forge-row"><span>Type d'armure</span><select id="forge-armorType">
+        ${(_forgeData.armorTypes || []).map(t => opt(t, _forge.armorType, t)).join('')}
+      </select></label>
+      <label class="vtt-forge-row"><span>Emplacement</span><select id="forge-armorSlot">
+        ${_FORGE_ARMOR_SLOTS.map(s => opt(s, _forge.armorSlot, s)).join('')}
+      </select></label>`;
+  } else {
+    specific = `<label class="vtt-forge-row"><span>Bijou</span><select id="forge-bijouSlot">
+        ${_FORGE_BIJOU_SLOTS.map(s => opt(s, _forge.bijouSlot, s)).join('')}
+      </select></label>`;
+  }
+
   const traitOpts = traitPool.length
-    ? `<option value="">— choisir —</option>` + traitPool.map(t => `<option value="${_esc(t)}" ${t === _forge.traitName ? 'selected' : ''}>${_esc(t)}</option>`).join('')
-    : `<option value="">aucun trait pour cette catégorie/palier</option>`;
+    ? `<option value="">— choisir —</option>` + traitPool.map(t => opt(t, _forge.traitName, t)).join('')
+    : `<option value="">aucun trait pour ce slot/palier</option>`;
   const matHtml = matRows.length
     ? matRows.map(m => `<span class="vtt-ms-craft-ingr">${_esc(m.name)}<b class="${m.ok ? 'ok' : 'ko'}">${m.have}/${m.need}</b></span>`).join('')
     : `<span class="vtt-forge-warn">Aucun matériau lié pour « ${cat || '?'} » ${_rareteLabel(_forge.tier)} — à définir dans Réglages du craft.</span>`;
-  const baseHtml = base
-    ? [base.degats && `⚔️ ${_esc(base.degats)}`, base.portee && `🎯 ${_esc(base.portee)}`, base.mains && _esc(base.mains)].filter(Boolean).join(' · ')
-    : '';
+  const baseSum = _forgeBaseSummary(base);
 
   openModal('🔨 Forger un équipement', `
     <div class="vtt-forge">
       <p class="vtt-forge-hint">Aperçu — <b>aucun matériau n'est consommé</b> tant que le MJ n'a pas validé le rendu.</p>
-      <label class="vtt-forge-row"><span>Type d'arme</span><select id="forge-family">${famOpts}</select></label>
-      <label class="vtt-forge-row"><span>Nature</span>
-        <select id="forge-nature">
-          <option value="physique" ${_forge.nature === 'physique' ? 'selected' : ''}>Physique</option>
-          <option value="magique" ${_forge.nature === 'magique' ? 'selected' : ''}>Magique</option>
-        </select></label>
-      <label class="vtt-forge-row"><span>Palier</span>
-        <select id="forge-tier">
-          ${[1, 2, 3].map(t => `<option value="${t}" ${t === _forge.tier ? 'selected' : ''}>${'★'.repeat(t)} — ${_esc(_rareteLabel(t) || t)}</option>`).join('')}
-        </select></label>
+      ${kindSeg}
+      ${specific}
+      <label class="vtt-forge-row"><span>Palier</span><select id="forge-tier">
+        ${[1, 2, 3].map(t => opt(String(t), String(_forge.tier), `${'★'.repeat(t)} — ${_rareteLabel(t) || t}`)).join('')}
+      </select></label>
       ${cat ? `<div class="vtt-forge-meta">Catégorie : <b>${cat}</b> · Discipline : <b>${comp.disc || '—'}</b> · Jet : d20 + ${_esc(comp.label || '—')} vs DD <b>${dd}</b></div>` : ''}
-      ${baseHtml ? `<div class="vtt-forge-base">Base (${_esc(fam.label)}) : ${baseHtml}</div>` : ''}
+      ${baseSum ? `<div class="vtt-forge-base">Base : ${baseSum}</div>` : ''}
       <div class="vtt-forge-mats"><span class="vtt-forge-lbl">Matériaux requis</span><div class="vtt-ms-craft-ingrs">${matHtml}</div></div>
       <label class="vtt-forge-row"><span>Trait</span><select id="forge-trait">${traitOpts}</select></label>
       <label class="vtt-forge-row"><span>Nom</span><input id="forge-name" type="text" maxlength="40" placeholder="Nom de ton objet" value="${_esc(_forge.name)}"></label>
@@ -1794,14 +1862,18 @@ function _renderForge() {
 function _bindForge() {
   const set = (id, key, cast) => {
     const el = document.getElementById(id); if (!el) return;
-    el.onchange = () => { _forge[key] = cast ? cast(el.value) : el.value; if (key !== 'name') _renderForge(); };
+    el.onchange = () => { _forge[key] = cast ? cast(el.value) : el.value; _renderForge(); };
   };
+  set('forge-kind', 'kind');
   set('forge-family', 'familyId');
   set('forge-nature', 'nature');
+  set('forge-armorType', 'armorType');
+  set('forge-armorSlot', 'armorSlot');
+  set('forge-bijouSlot', 'bijouSlot');
   set('forge-tier', 'tier', v => Math.max(1, Math.min(3, parseInt(v, 10) || 1)));
   set('forge-trait', 'traitName');
   const nameEl = document.getElementById('forge-name');
-  if (nameEl) nameEl.oninput = () => { _forge.name = nameEl.value; };
+  if (nameEl) nameEl.oninput = () => { _forge.name = nameEl.value; };   // pas de re-render : garde le focus
   const run = document.getElementById('forge-run');
   if (run) run.onclick = () => _forgeRun();
 }
@@ -1810,7 +1882,7 @@ function _bindForge() {
 function _forgeRun() {
   const { charId } = _forgeCtx || {};
   const c = VS.characters[charId]; if (!c) return;
-  const fam = _forgeFamily(); if (!fam) return;
+  const base = _forgeBase(); if (!base) return;
   const nameEl = document.getElementById('forge-name'); if (nameEl) _forge.name = nameEl.value;
   const comp = _forgeCompetence(c);
   const d20 = Math.floor(Math.random() * 20) + 1;
@@ -1818,15 +1890,16 @@ function _forgeRun() {
     inventory: c.inventaire || [],
     requirements: _forgeRequirements(),
     d20, competenceBonus: comp.bonus, tier: _forge.tier, config: getCraftSettings(),
-    base: { ...normalizeWeaponDefaults(fam), typeArme: fam.label, sousType: fam.label, format: fam.label, template: 'arme' },
+    base,
     trait: _forge.traitName ? { nom: _forge.traitName } : null,
-    name: _forge.name, nature: _forge.nature, rarete: _forge.tier,
+    name: _forge.name, nature: _forge.kind === 'arme' ? _forge.nature : '', rarete: _forge.tier,
     author: STATE.user?.uid || '',
   });
   const dd = craftDD(_forge.tier);
   if (!res.ok) { _forgeResult = { success: false, txt: 'Matériaux insuffisants.' }; _renderForge(); return; }
+  const label = res.item?.nom || base.typeArme || base.typeArmure || base.slotBijou || 'objet';
   _forgeResult = res.success
-    ? { success: true,  txt: `✅ d20[${res.roll.d20}]+${comp.bonus} = ${res.roll.total} ≥ DD ${dd} → « ${res.item.nom || fam.label} » serait créé (aperçu).` }
+    ? { success: true,  txt: `✅ d20[${res.roll.d20}]+${comp.bonus} = ${res.roll.total} ≥ DD ${dd} → « ${label} » serait créé (aperçu).` }
     : { success: false, txt: `❌ d20[${res.roll.d20}]+${comp.bonus} = ${res.roll.total} < DD ${dd} → échec (aperçu, matériaux perdus en réel).` };
   _renderForge();
 }
