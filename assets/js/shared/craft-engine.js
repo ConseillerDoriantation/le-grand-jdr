@@ -39,6 +39,33 @@ const _TRAIT_POOL = {
 const _CFG = (config) => ({ ...DEFAULT_CRAFT_CONFIG, ...(config || {}) });
 const _tier = (t) => { const n = parseInt(t, 10); return (n === 1 || n === 2 || n === 3) ? n : null; };
 
+/**
+ * Déduit la CATÉGORIE de craft (bucket matériaux/discipline) d'un objet à partir
+ * de sa NATURE (+ portée pour les armes), PAS de sa famille. Ainsi une « Épée »
+ * physique → 'armeCaC' (bestiaux) et une « Épée » magique → 'armeMagique'
+ * (mystiques), sans config par famille.
+ *   kind: 'arme'|'armure'|'bijou' · nature: 'physique'|'magique'
+ *   ranged: bool (arme à distance) · armorType: libellé type d'armure
+ *   bijouSlot: 'Anneau'|'Amulette'…
+ */
+export function craftCategoryFor({ kind, nature, ranged, armorType, bijouSlot } = {}) {
+  const k = String(kind || '').toLowerCase();
+  if (k === 'arme' || k === 'weapon') {
+    if (String(nature || '').toLowerCase() === 'magique') return 'armeMagique';
+    return ranged ? 'armeDist' : 'armeCaC';
+  }
+  if (k === 'armure' || k === 'armor') {
+    const t = String(armorType || '').toLowerCase();
+    if (t.includes('lourd')) return 'armureLourde';
+    if (t.includes('inter') || t.includes('tann') || t.includes('moyen')) return 'armureIntermediaire';
+    return 'armureLegere';
+  }
+  if (k === 'bijou' || k === 'accessory') {
+    return String(bijouSlot || '').toLowerCase().includes('amulet') ? 'amulette' : 'anneau';
+  }
+  return null;
+}
+
 /** Discipline (forge/confection/orfevre) requise pour fabriquer ce type d'objet. */
 export function craftDiscipline(objType, config) {
   return _CFG(config).categorieDiscipline?.[objType] || null;

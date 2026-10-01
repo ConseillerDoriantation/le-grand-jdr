@@ -26,15 +26,18 @@ const DISCIPLINES = [
   { id: 'confection', label: '🧵 Confection' },
   { id: 'orfevre',    label: '💎 Orfèvre' },
 ];
+// Catégories = « buckets » de matériaux/discipline, dérivés de la NATURE (+ portée
+// pour les armes) et NON de la famille. Le craft mappe automatiquement :
+// épée physique → « Armes physiques · mêlée » ; épée magique → « Armes magiques ».
 const OBJ_CATEGORIES = [
-  { id: 'armeCaC',              label: '⚔️ Arme CaC (physique)' },
-  { id: 'armeDist',            label: '🏹 Arme à distance (physique)' },
-  { id: 'armeMagique',         label: '🔮 Arme magique' },
-  { id: 'armureLegere',        label: '🥋 Armure légère' },
-  { id: 'armureIntermediaire', label: '🧥 Armure intermédiaire' },
-  { id: 'armureLourde',        label: '🛡️ Armure lourde' },
-  { id: 'anneau',              label: '💍 Anneau' },
-  { id: 'amulette',            label: '📿 Amulette' },
+  { id: 'armeCaC',              label: '⚔️ Armes physiques · mêlée' },
+  { id: 'armeDist',            label: '🏹 Armes physiques · distance' },
+  { id: 'armeMagique',         label: '🔮 Armes magiques (toutes)' },
+  { id: 'armureLegere',        label: '🥋 Armures légères' },
+  { id: 'armureIntermediaire', label: '🧥 Armures intermédiaires' },
+  { id: 'armureLourde',        label: '🛡️ Armures lourdes' },
+  { id: 'anneau',              label: '💍 Anneaux' },
+  { id: 'amulette',            label: '📿 Amulettes' },
 ];
 
 // Fusion défensive : tout champ manquant retombe sur les défauts du moteur.
@@ -154,12 +157,13 @@ function _renderModal() {
 
       <div class="sh-admin-section">
         <div class="sh-admin-section-title">🗂️ Catégorie d'objet → discipline</div>
+        <p class="sh-admin-section-hint">Catégories basées sur la <b>nature</b> (+ portée pour les armes), pas sur la famille : une <em>épée physique</em> compte comme « mêlée physique », une <em>épée magique</em> comme « armes magiques ». Le craft déduit la catégorie automatiquement.</p>
         ${OBJ_CATEGORIES.map(c => catRow(c.id, c.label)).join('')}
       </div>
 
       <div class="sh-admin-section">
-        <div class="sh-admin-section-title">🧱 Matériaux requis par recette</div>
-        <p class="sh-admin-section-hint">Pour chaque type d'objet × palier, choisis l'objet-matériau requis (créé en Boutique) et la quantité (vide = défaut du palier).</p>
+        <div class="sh-admin-section-title">🧱 Matériaux requis par catégorie</div>
+        <p class="sh-admin-section-hint">Par catégorie (= nature + portée) × palier, choisis l'objet-matériau requis (créé en Boutique) et la quantité (vide = défaut du palier). Ex. « Armes physiques · mêlée ★★ » → <em>Matériaux bestiaux ★★</em> ; « Armes magiques ★★ » → <em>Matériaux mystiques ★★</em>. Toutes les épées physiques partagent donc le même matériau, les magiques un autre.</p>
         ${OBJ_CATEGORIES.map(c => `
           <div style="margin-top:8px;padding-top:6px;border-top:1px dashed var(--border-md)">
             <div class="sh-admin-section-title" style="font-size:.78rem;margin-bottom:4px">${c.label}</div>

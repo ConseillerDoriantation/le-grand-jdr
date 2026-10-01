@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   DEFAULT_CRAFT_CONFIG,
+  craftCategoryFor,
   craftDiscipline, craftCompetenceId,
   craftDD, craftMaterialQty,
   normalizeMaterialRequirements, countInventoryItem, missingMaterials, hasCraftMaterials,
@@ -19,6 +20,23 @@ const TRAITS = [
   { id: 'anneauMin', portee: 'anneau',  tier: 1 },
   { id: 'souffle',   portee: 'amulette',tier: 1 },
 ];
+
+test('catégorie déduite de la nature, pas de la famille', () => {
+  // Même famille « Épée » : la nature décide du bucket.
+  assert.equal(craftCategoryFor({ kind: 'arme', nature: 'physique', ranged: false }), 'armeCaC');
+  assert.equal(craftCategoryFor({ kind: 'arme', nature: 'magique',  ranged: false }), 'armeMagique');
+  // Arc physique → distance ; arc magique → magique (la portée n'importe plus).
+  assert.equal(craftCategoryFor({ kind: 'arme', nature: 'physique', ranged: true }), 'armeDist');
+  assert.equal(craftCategoryFor({ kind: 'arme', nature: 'magique',  ranged: true }), 'armeMagique');
+  // Armures par type.
+  assert.equal(craftCategoryFor({ kind: 'armure', armorType: 'Lourde' }), 'armureLourde');
+  assert.equal(craftCategoryFor({ kind: 'armure', armorType: 'Intermédiaire' }), 'armureIntermediaire');
+  assert.equal(craftCategoryFor({ kind: 'armure', armorType: 'Légère' }), 'armureLegere');
+  // Bijoux.
+  assert.equal(craftCategoryFor({ kind: 'bijou', bijouSlot: 'Amulette' }), 'amulette');
+  assert.equal(craftCategoryFor({ kind: 'bijou', bijouSlot: 'Anneau' }), 'anneau');
+  assert.equal(craftCategoryFor({ kind: 'autre' }), null);
+});
 
 test('discipline : défauts (Forge/Confection/Orfèvre) selon le type', () => {
   assert.equal(craftDiscipline('armeCaC'), 'forge');
