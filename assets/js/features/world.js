@@ -13,9 +13,10 @@ import { openModal, closeModal, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, _nl2br, _norm, _searchIncludes } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
+import { richTextContentHtml } from '../shared/rich-text.js';
 import {
-  richTextContentHtml, richTextEditorHtml, bindRichTextEditors, getRichTextHtml,
-} from '../shared/rich-text.js';
+  quillEditorHtml, bindQuillEditors, getQuillHtml,
+} from '../shared/rich-text-quill.js';
 import { attachDropAndCrop } from '../shared/image-crop.js';
 import {
   freePageEditorHtml, bindFreePageEditor, getFreePageData,
@@ -590,7 +591,7 @@ function _sectionActionsHtml(s, { editing, slides }) {
 function _renderContentEditor(s) {
   const rich = _sectionContentMode(s) === 'rich';
   return `<div class="world-editor${rich ? ' world-editor--rich' : ''}">${rich
-    ? richTextEditorHtml({
+    ? quillEditorHtml({
         id: `world-rich-${s.id}`,
         html: _contentToHtml(s.contenu || ''),
         placeholder: 'Rédige le contenu de cette section…',
@@ -609,8 +610,9 @@ function _afterReaderRender() {
   if (host && _editingContentId) {
     const section = STORE.sections.find(s => s.id === _editingContentId);
     if (_sectionContentMode(section) === 'rich') {
-      bindRichTextEditors(host);
-      _richInitialHtml = getRichTextHtml(`world-rich-${_editingContentId}`);
+      bindQuillEditors(host).then(() => {
+        _richInitialHtml = getQuillHtml(`world-rich-${_editingContentId}`);
+      });
     } else {
       bindFreePageEditor(host);
       fitFreePageEditorIfOverflowing(host);   // diapo entière visible dès l'ouverture
@@ -622,7 +624,7 @@ function _afterReaderRender() {
 function _hasUnsavedContent() {
   const host = document.getElementById('world-main-content');
   if (!_editingContentId || !host) return false;
-  if (_richInitialHtml !== null) return getRichTextHtml(`world-rich-${_editingContentId}`) !== _richInitialHtml;
+  if (_richInitialHtml !== null) return getQuillHtml(`world-rich-${_editingContentId}`) !== _richInitialHtml;
   return hasUnsavedFreePageChanges(host);
 }
 
@@ -750,7 +752,7 @@ async function worldSaveContent(id) {
   const section = STORE.sections.find(s => s.id === id);
   if (!section) return showNotif('Section introuvable.', 'error');
   if (_sectionContentMode(section) === 'rich') {
-    const contenu = getRichTextHtml(`world-rich-${id}`);
+    const contenu = getQuillHtml(`world-rich-${id}`);
     if (!await _commit(() => { STORE.sections = STORE.sections.map(x => x.id === id ? { ...x, contenu } : x); })) return;
     _editingContentId = null;
     showNotif('Texte enregistré.', 'success');
