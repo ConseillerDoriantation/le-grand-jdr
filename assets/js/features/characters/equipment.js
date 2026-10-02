@@ -293,7 +293,7 @@ export async function saveEquipSlot(slot) {
 // ══════════════════════════════════════════════
 // VIDER UN SLOT
 // ══════════════════════════════════════════════
-export async function clearEquipSlot(slot) {
+export async function clearEquipSlot(slot, { renderTab = 'combat' } = {}) {
   const c = STATE.activeChar; if(!c) return;
   const equip = c.equipement||{};
   delete equip[slot];
@@ -307,7 +307,7 @@ export async function clearEquipSlot(slot) {
   } catch (e) {
     showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
   }
-  _renderEquipmentChar(c);
+  _renderEquipmentChar(c, renderTab);
 }
 
 registerActions({
@@ -326,6 +326,6 @@ registerActions({
     }
   },
   saveEquipSlot:  (btn) => saveEquipSlot(btn.dataset.slot),
-  clearEquipSlot: (btn) => clearEquipSlot(btn.dataset.slot),
+  clearEquipSlot: (btn) => clearEquipSlot(btn.dataset.slot, { renderTab: btn.dataset.renderTab || 'combat' }),
   _eqClose:       ()    => closeModal(),
 });
