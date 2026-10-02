@@ -75,7 +75,7 @@ import {
   editInvItem, saveInvItem,
   renderInvPersonalLine, saveInvPersonalLine,
   filterInvRows, openInventoryItemDetail, inventoryHistoryButton, openInventoryHistoryModal,
-  ensureInventoryCatalog, isInventoryCatalogReady, getInventoryCatalogItem,
+  ensureInventoryCatalog, isInventoryCatalogReady, getInventoryCatalogItem, renderCharInventaire,
 } from './characters/inventory.js';
 import { openCreateItemModal } from './characters/item-forge.js';
 import {
@@ -1255,7 +1255,7 @@ function _renderTabV3(tab, c, canEdit) {
     combat:    () => renderCharCombatV3(c, canEdit),
     capacites: () => renderCharCapacites(c, canEdit),
     sorts:     () => renderCharDeck(c, canEdit),
-    inv:     () => renderCharInventaireV3(c, canEdit),
+    inv:     () => renderCharInventaire(c, canEdit),
     compte:  () => renderCharLedger(c, canEdit),
     journal: () => renderCharJournal(c, canEdit, sub),
     profil:  () => renderCharProfilV3(c, canEdit),
@@ -1263,9 +1263,11 @@ function _renderTabV3(tab, c, canEdit) {
   area.innerHTML = renders[tab]?.() || '';
   area.dataset.renderedTab = tab;
   area.dataset.renderedCharId = c?.id || '';
-  area.classList.remove('cs-tab-fadein');
-  void area.offsetWidth;
-  area.classList.add('cs-tab-fadein');
+  if (!samePanel) {
+    area.classList.remove('cs-tab-fadein');
+    void area.offsetWidth;
+    area.classList.add('cs-tab-fadein');
+  }
   if (tab === 'profil') {
     bindCharProfilV3(area);
   }
