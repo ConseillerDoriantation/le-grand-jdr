@@ -2,7 +2,7 @@ import { STATE } from '../core/state.js';
 import { charSession } from '../shared/char-session.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
-import { pickImageFile } from '../shared/image-upload.js';
+import { compressDataUrl, pickImageFile } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { saveBuildPatch } from '../shared/character-builds.js';
 
@@ -16,11 +16,13 @@ const VIEW_SIZE   = 300;
 const OUTPUT_SIZE = 300;
 
 let _activePhotoCrop = null;
+let _activePhotoSource = null;
 let _unbindModalCleanup = null;
 
 function _destroyCharacterPhotoCrop() {
   _activePhotoCrop?.destroy();
   _activePhotoCrop = null;
+  _activePhotoSource = null;
   _unbindModalCleanup?.();
   _unbindModalCleanup = null;
 }
@@ -54,6 +56,7 @@ function _showCropModal(dataUrl, charId) {
   // L'image et le slider doivent être présents dans le DOM avant le binding.
   requestAnimationFrame(() => {
     _destroyCharacterPhotoCrop();
+    _activePhotoSource = dataUrl;
     _activePhotoCrop = attachPanZoomCrop({
       idPrefix: 'crop', dataUrl,
       viewSize: VIEW_SIZE, outputSize: OUTPUT_SIZE,
@@ -71,14 +74,20 @@ function cancelCharacterPhotoCrop() {
 
 async function saveCroppedCharacterPhoto(charId) {
   const dataUrl = _activePhotoCrop?.getBase64();
+  const sourceDataUrl = _activePhotoSource;
   if (!dataUrl) { showNotif('Erreur : cropper non initialisé.', 'error'); return; }
 
   const c = getCharacterById(charId);
   if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
 
-  c.photo = dataUrl; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
+  // `photo` reste la miniature carrée légère utilisée partout dans l'app.
+  // `photoOriginal` conserve la composition complète avant cadrage, bornée en
+  // taille pour ne pas approcher inutilement la limite de document Firestore.
+  const photoOriginal = await compressDataUrl(sourceDataUrl || dataUrl);
+  c.photo = dataUrl; c.photoOriginal = photoOriginal;
+  c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
   try {
-    await saveBuildPatch(charId, c, { photo: dataUrl, photoZoom: 1, photoX: 0, photoY: 0 });
+    await saveBuildPatch(charId, c, { photo: dataUrl, photoOriginal, photoZoom: 1, photoX: 0, photoY: 0 });
     _destroyCharacterPhotoCrop();
     closeModal();
     showNotif('Photo enregistrée !', 'success');
@@ -91,9 +100,10 @@ async function saveCroppedCharacterPhoto(charId) {
 async function deleteCharPhoto(charId) {
   const c = getCharacterById(charId);
   if (!c) return;
-  c.photo = null; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
+  c.photo = null; c.photoOriginal = null;
+  c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
   try {
-    await saveBuildPatch(charId, c, { photo: null, photoZoom: 1, photoX: 0, photoY: 0 });
+    await saveBuildPatch(charId, c, { photo: null, photoOriginal: null, photoZoom: 1, photoX: 0, photoY: 0 });
     showNotif('Photo supprimée.', 'success');
     charSession.renderSheet(c, charSession.getCurrentCharTab() || 'combat');
   } catch (e) {

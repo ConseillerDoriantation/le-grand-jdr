@@ -348,19 +348,25 @@ export function openCharExportMenu(charId, btn) {
 
   const menu = document.createElement('div');
   menu.className = 'cs-export-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', 'Exporter la fiche');
   menu.innerHTML = `
+    <div class="cs-export-head">
+      <strong>Exporter la fiche</strong>
+      <small>Choisissez le format souhaité</small>
+    </div>
     <button class="cs-export-opt" data-action="_exportMenuJSON" data-id="${charId}">
-      <span class="cs-export-opt-ico">💾</span>
+      <span class="cs-export-opt-ico json" aria-hidden="true">JSON</span>
       <span class="cs-export-opt-txt">
-        <strong>Sauvegarde JSON</strong>
-        <small>fichier restaurable (backup)</small>
+        <strong>Sauvegarder les données</strong>
+        <small>Copie complète et restaurable du personnage</small>
       </span>
     </button>
     <button class="cs-export-opt" data-action="_exportMenuPDF" data-id="${charId}">
-      <span class="cs-export-opt-ico">🖨️</span>
+      <span class="cs-export-opt-ico pdf" aria-hidden="true">PDF</span>
       <span class="cs-export-opt-txt">
-        <strong>Imprimer / PDF</strong>
-        <small>feuille complète mise en page</small>
+        <strong>Imprimer la fiche</strong>
+        <small>Ouvre la mise en page imprimable ou PDF</small>
       </span>
     </button>
   `;
