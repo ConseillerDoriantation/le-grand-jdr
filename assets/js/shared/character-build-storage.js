@@ -2,7 +2,7 @@
 // Helper pur : aucune dépendance Firebase/DOM, afin de garder la règle testable.
 
 const ACTIVE_BUILD_ROOT_FIELDS = [
-  'photo', 'photoZoom', 'photoX', 'photoY',
+  'photo', 'photoOriginal', 'photoZoom', 'photoX', 'photoY',
   'equipement', 'statsBonus',
   'stats', 'statsBase', 'statsLevelUps',
   'pvBase', 'pmBase',

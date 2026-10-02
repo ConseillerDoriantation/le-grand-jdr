@@ -22353,3 +22353,211 @@ body .modal:has(.inv-history-modal-shell) {
   .cs-v3 .inv5-item-row > :nth-child(2) { display: none; }
   .cs-v3 .inv5-item-name em { display: none; }
 }
+
+/* ── Identité v7 : colonne gauche, grammaire de la mini-fiche VTT ───────── */
+.cs-v3 .id-side.ids {
+  position: sticky;
+  top: calc(var(--top-h) + 14px);
+  max-height: calc(100dvh - var(--top-h) - 28px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  gap: 0;
+  padding: 0;
+  background: var(--surface-1);
+  background-image: none;
+  border-radius: 18px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.28);
+  scrollbar-width: thin;
+  scrollbar-gutter: stable both-edges;
+}
+.cs-v3 .ids button,
+.cs-v3 .ids input,
+.cs-v3 .ids select { font-family: var(--font-body, Inter, sans-serif); }
+.cs-v3 .ids-top { display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 9px 10px 8px 14px; }
+.cs-v3 .ids-owner { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 190px; padding: 3px 9px 3px 3px; border: 0; border-radius: 999px; background: transparent; color: var(--text-muted); font-size: .72rem; cursor: pointer; }
+.cs-v3 .ids-owner.readonly { cursor: default; }
+.cs-v3 button.ids-owner:hover { background: var(--surface-2); color: var(--text); }
+.cs-v3 .ids-owner img { width: 23px; height: 23px; flex: 0 0 23px; border-radius: 50%; object-fit: cover; }
+.cs-v3 .ids-owner span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-v3 .ids-tools { display: flex; gap: 2px; margin-left: auto; }
+.cs-v3 .ids-tools > button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.cs-v3 .ids-tools > button:hover { background: var(--surface-3); color: var(--text); }
+.cs-v3 .ids-tools > button.on { color: var(--amber); }
+.cs-v3 .ids-tools > button.danger:hover { background: rgba(255,90,126,.1); color: var(--crimson-light); }
+
+.cs-v3 .ids-hero { display: flex; flex-direction: column; align-items: center; padding: 2px 16px 0; text-align: center; }
+.cs-v3 .ids-portrait { position: relative; width: 184px; height: 184px; flex: 0 0 184px; border-radius: 50%; }
+.cs-v3 .ids-portrait > svg { position: absolute; inset: 0; z-index: 2; width: 184px; height: 184px; overflow: visible; transform: rotate(-90deg); pointer-events: none; }
+.cs-v3 .ids-ring-bg,
+.cs-v3 .ids-ring { fill: none; stroke-width: 5px; }
+.cs-v3 .ids-ring-bg { stroke: color-mix(in srgb,var(--surface-3) 82%,#000); }
+.cs-v3 .ids-ring { stroke: var(--aura); stroke-width: 6px; stroke-linecap: round; filter: drop-shadow(0 0 2.5px color-mix(in srgb,var(--aura) 55%,transparent)); transition: stroke-dasharray .45s ease; }
+.cs-v3 .ids-portrait.is-ready .ids-ring { stroke: var(--amber); }
+.cs-v3 .ids-portrait.is-ready::after { content: ''; position: absolute; inset: -3px; border-radius: 50%; box-shadow: 0 0 0 2px color-mix(in srgb,var(--amber) 45%,transparent); animation: ids-glow 1.8s ease-in-out infinite; pointer-events: none; }
+@keyframes ids-glow { 50% { box-shadow: 0 0 18px 3px color-mix(in srgb,var(--amber) 45%,transparent); } }
+.cs-v3 .ids-portrait-in { position: absolute; inset: 12px; z-index: 1; display: grid; place-items: center; overflow: hidden; padding: 0; border: 0; border-radius: 50%; background: radial-gradient(circle at 34% 28%,color-mix(in srgb,var(--aura) 50%,#1a2535),color-mix(in srgb,var(--aura) 16%,#0d1520)); box-shadow: 0 0 0 2px var(--surface-1),0 0 0 3px color-mix(in srgb,var(--aura) 70%,transparent); color: #fff; font: 600 3.35rem var(--font-display, Cinzel, serif); }
+.cs-v3 button.ids-portrait-in.is-clickable { cursor: zoom-in; }
+.cs-v3 button.ids-portrait-in.is-clickable:hover { box-shadow: 0 0 0 2px var(--surface-1),0 0 0 4px color-mix(in srgb,var(--aura) 86%,transparent),0 0 20px color-mix(in srgb,var(--aura) 28%,transparent); }
+.cs-v3 button.ids-portrait-in.is-clickable:focus-visible { outline: 2px solid var(--aura); outline-offset: 4px; }
+.cs-v3 .ids-portrait-in img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.cs-v3 .ids-portrait-edit { position: absolute; right: 6px; bottom: 16px; z-index: 4; width: 31px; height: 31px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border-md); border-radius: 50%; background: var(--surface-1); color: var(--text-muted); cursor: pointer; }
+.cs-v3 .ids-portrait-edit:hover { border-color: var(--border-strong); color: var(--text); }
+.cs-v3 .ids-level { position: absolute; left: 50%; bottom: -12px; z-index: 4; transform: translateX(-50%); height: 25px; display: flex; align-items: center; gap: 5px; padding: 0 12px; border: 1px solid var(--border-md); border-radius: 999px; background: var(--surface-1); color: var(--text); font: 600 .92rem var(--font-display, Cinzel, serif); cursor: pointer; }
+.cs-v3 .ids-level small { color: var(--text-muted); font: 700 .55rem var(--font-body, Inter, sans-serif); letter-spacing: .12em; }
+.cs-v3 .ids-portrait.is-ready .ids-level { border-color: var(--amber); background: var(--amber); color: #1a1200; }
+.cs-v3 .ids-portrait.is-ready .ids-level small { color: #4a3500; }
+.cs-v3 .ids-copy { width: 100%; margin-top: 22px; }
+.cs-v3 .ids-copy h2 { margin: 0; color: var(--text); font: 700 1.28rem/1.2 var(--font-display, Cinzel, serif); letter-spacing: .015em; text-transform: uppercase; text-wrap: balance; }
+.cs-v3 .ids-copy > p { margin: 5px 0 0; color: var(--text-muted); font-size: .79rem; font-weight: 500; }
+.cs-v3 .ids-titles { margin-top: 7px; color: var(--text-soft); font-family: Georgia, 'Times New Roman', serif; font-size: .75rem; font-style: italic !important; font-weight: 400; line-height: 1.35; text-wrap: balance; }
+.cs-v3 .ids-titles span { color: var(--text-dim); font-style: italic !important; }
+.cs-v3 .ids-xp-line { width: auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; margin-top: 9px; padding: 4px 9px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text-dim); font-size: .68rem; cursor: pointer; }
+.cs-v3 .ids-xp-line:hover { border-color: var(--border-md); color: var(--text-muted); }
+.cs-v3 .ids-xp-line b { color: var(--text-soft); }
+.cs-v3 .ids-xp-line.ready { border-color: color-mix(in srgb,var(--amber) 35%,transparent); color: var(--amber); }
+.cs-v3 .ids-xp-line.ready b { color: var(--amber); }
+.cs-v3 .ids-edit-open { display: flex; align-items: center; width: max-content; margin: 10px auto 0; min-height: 27px; padding: 4px 10px; border: 1px solid var(--border-md); border-radius: 999px; background: transparent; color: var(--text-muted); font-size: .68rem; cursor: pointer; }
+.cs-v3 .ids-edit-open:hover { border-color: var(--border-strong); background: var(--surface-2); color: var(--text); }
+
+.cs-v3 .ids-edit { width: 100%; margin-top: 20px; padding: 11px; border: 1px solid var(--border-md); border-radius: 9px; background: var(--surface-2); text-align: left; }
+.cs-v3 .ids-edit > label,
+.cs-v3 .ids-edit-pair label { display: flex; flex-direction: column; gap: 4px; color: var(--text-muted); font-size: .65rem; }
+.cs-v3 .ids-edit > label + *,
+.cs-v3 .ids-edit-pair { margin-top: 8px; }
+.cs-v3 .ids-edit-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.cs-v3 .ids-edit input { min-width: 0; width: 100%; height: 31px; padding: 5px 8px; border: 1px solid var(--border-md); border-radius: 7px; outline: none; background: var(--surface-sunken); color: var(--text); font-size: .76rem; }
+.cs-v3 .ids-edit input:focus { border-color: var(--aura-border); }
+.cs-v3 .ids-title-list { display: flex; flex-direction: column; gap: 4px; }
+.cs-v3 .ids-title-item { display: flex; align-items: center; gap: 4px; padding: 0 4px 0 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-sunken); }
+.cs-v3 .ids-title-item input { height: 28px; padding-inline: 3px; border: 0; background: transparent; font-style: italic; }
+.cs-v3 .ids-title-handle { color: var(--text-dim); cursor: grab; touch-action: none; }
+.cs-v3 .ids-title-item button,
+.cs-v3 .ids-title-new button { width: 24px; height: 24px; flex: none; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-dim); cursor: pointer; }
+.cs-v3 .ids-title-item button:hover { background: rgba(255,90,126,.12); color: var(--crimson-light); }
+.cs-v3 .ids-title-new { display: flex; gap: 5px; margin-top: 5px; }
+.cs-v3 .ids-title-new input { border-style: dashed; }
+.cs-v3 .ids-title-new button { height: 31px; border: 1px dashed var(--border-md); color: var(--text-soft); }
+.cs-v3 .ids-edit-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.cs-v3 .ids-edit-actions button { min-height: 29px; padding: 4px 10px; border: 1px solid var(--border-md); border-radius: 7px; background: var(--surface-3); color: var(--text-soft); font-size: .7rem; font-weight: 600; cursor: pointer; }
+.cs-v3 .ids-edit-actions button.primary { border-color: var(--gold); background: var(--gold); color: #fff; }
+
+.cs-v3 .ids-build { display: flex; align-items: center; gap: 7px; min-height: 39px; margin: 14px 12px 0; padding: 5px 5px 5px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
+.cs-v3 .ids-build > span { color: var(--text-dim); font-size: .56rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.cs-v3 .ids-build select { min-width: 0; flex: 1; padding: 3px 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: .76rem; font-weight: 600; cursor: pointer; }
+.cs-v3 .ids-build select option { background: var(--surface-2); }
+.cs-v3 .ids-build em { color: var(--text-dim); font-size: .62rem; font-style: normal; }
+.cs-v3 .ids-build button { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.cs-v3 .ids-build button:hover { background: var(--surface-3); color: var(--text); }
+
+.cs-v3 .ids-section { display: flex; flex-direction: column; gap: 14px; margin-top: 13px; padding: 13px 14px 0; border-top: 1px solid var(--border); }
+.cs-v3 .ids-vital { display: flex; flex-direction: column; gap: 7px; padding-bottom: 1px; }
+.cs-v3 .ids-vital-head,
+.cs-v3 .ids-vital-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cs-v3 .ids-vital-value { min-width: 0; display: flex; align-items: baseline; gap: 4px; }
+.cs-v3 .ids-vital-value > span { width: 25px; flex: none; color: var(--text-dim); font-size: .57rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.cs-v3 .ids-vital-value mark { margin-left: 3px; padding: 0; background: transparent; color: var(--crimson-light); font-size: .62rem; font-weight: 700; }
+.cs-v3 .ids-vital-value > button,
+.cs-v3 .ids-vital-value > b { padding: 0; border: 0; background: transparent; color: var(--text); font-size: 1.24rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.cs-v3 .ids-vital-value > button { cursor: pointer; }
+.cs-v3 .ids-vital-value > em { color: var(--text-dim); font-size: .7rem; font-style: normal; }
+.cs-v3 .ids-vital.danger .ids-vital-value > button,
+.cs-v3 .ids-vital.danger .ids-vital-value > b { color: var(--crimson-light); }
+.cs-v3 .ids-vital-bar { height: 5px; }
+.cs-v3 .ids-vital.pv .ids-vital-bar > div { background: var(--crimson); }
+.cs-v3 .ids-vital.pm .ids-vital-bar > div { background: var(--gold); }
+.cs-v3 .ids-vital-foot { justify-content: flex-start; }
+.cs-v3 .ids-vital-foot > button { padding: 1px 0; border: 0; background: transparent; color: var(--text-dim); font-size: .64rem; cursor: pointer; }
+.cs-v3 .ids-vital-foot > button b { color: var(--text-soft); font-weight: 700; }
+.cs-v3 .ids-vital-foot > button:hover { color: var(--gold-2); }
+.cs-v3 .ids-step { display: flex; overflow: hidden; border: 1px solid var(--border-md); border-radius: 7px; }
+.cs-v3 .ids-step button { width: 32px; height: 29px; padding: 0; border: 0; background: var(--surface-2); color: var(--text-muted); cursor: pointer; }
+.cs-v3 .ids-step button + button { border-left: 1px solid var(--border-md); }
+.cs-v3 .ids-step button:hover { background: var(--surface-3); color: var(--text); }
+.cs-v3 .ids-vital-detail { padding: 12px; border: 1px solid var(--border-md); border-radius: 14px; background: var(--surface-sunken); font-size: .72rem; }
+.cs-v3 .ids-vital-detail-head,
+.cs-v3 .ids-base-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cs-v3 .ids-vital-detail-head { align-items: flex-start; margin-bottom: 9px; color: var(--text); }
+.cs-v3 .ids-vital-detail-head > b { width: 72px; flex: 0 0 72px; color: var(--text); font-size: .72rem; line-height: 1.45; }
+.cs-v3 .ids-vital-detail-head > span { color: var(--text-dim); font-size: .62rem; line-height: 1.45; }
+.cs-v3 .ids-base-row,
+.cs-v3 .ids-calc-row { min-height: 29px; color: var(--gold-2, #7eb0ff); }
+.cs-v3 .ids-base-row > div { display: flex; overflow: hidden; border: 1px solid var(--border-md); border-radius: 6px; }
+.cs-v3 .ids-base-row button { width: 24px; height: 24px; padding: 0; border: 0; background: var(--surface-2); color: var(--text-muted); cursor: pointer; }
+.cs-v3 .ids-base-row button + button { border-left: 1px solid var(--border-md); }
+.cs-v3 .ids-base-row button.ids-base-value { width: 35px; color: var(--text); font-weight: 700; }
+.cs-v3 .ids-base-row > b { color: var(--text); }
+.cs-v3 .ids-calc-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cs-v3 .ids-calc-row b { color: var(--text); font-size: .72rem; font-variant-numeric: tabular-nums; }
+.cs-v3 .ids-vital-total { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; padding-top: 9px; border-top: 1px solid var(--border); color: var(--text); font-weight: 700; }
+.cs-v3 .ids-vital-total b { font-size: .78rem; font-variant-numeric: tabular-nums; }
+
+.cs-v3 .ids-facts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--border); }
+.cs-v3 .ids-facts > button { min-width: 0; min-height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 6px 2px 5px; border: 0; background: var(--surface-2); color: inherit; cursor: pointer; }
+.cs-v3 .ids-facts > button:hover { background: var(--surface-3); }
+.cs-v3 .ids-facts > button.on { background: var(--gold-glow); box-shadow: inset 0 -2px 0 var(--gold); }
+.cs-v3 .ids-facts > button > span { color: var(--text-dim); font-size: .53rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
+.cs-v3 .ids-facts b { color: var(--text); font-size: 1rem; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cs-v3 .ids-facts b small { margin-left: 2px; color: var(--text-dim); font-size: .62rem; font-weight: 600; }
+.cs-v3 .ids-facts button:last-child b { color: var(--amber); }
+.cs-v3 .ids-facts i { display: none; }
+.cs-v3 .ids-breakdown { border-radius: 14px; background: var(--surface-sunken); }
+.cs-v3 .ids-breakdown.on { padding: 12px; }
+.cs-v3 .ids-breakdown:not(.on) { display: none; }
+.cs-v3 .ids-breakdown .ids-vital-detail-head { margin-bottom: 8px; }
+.cs-v3 .ids-breakdown .ids-vital-detail-head > b { width: 66px; flex-basis: 66px; font-size: .62rem; line-height: 1.35; }
+.cs-v3 .ids-breakdown .ids-vital-detail-head > span { font-size: .55rem; }
+.cs-v3 .ids-breakdown .ids-calc-row { min-height: 25px; font-size: .63rem; }
+.cs-v3 .ids-breakdown .ids-calc-row b { font-size: .63rem; }
+.cs-v3 .ids-breakdown .ids-vital-total { padding-top: 7px; font-size: .64rem; }
+.cs-v3 .ids-breakdown .ids-vital-total b { font-size: .7rem; }
+.cs-v3 .ids-section:last-of-type { padding-bottom: 14px; }
+.cs-v3 .ids-brk-a { display: flex; gap: 6px; margin-top: 7px; }
+.cs-v3 .ids-btn { flex: 1; min-height: 29px; padding: 4px 9px; border: 1px solid var(--border-md); border-radius: 7px; background: var(--surface-3); color: var(--text-soft); font-size: .68rem; font-weight: 600; cursor: pointer; }
+.cs-v3 .ids-btn.gold { color: var(--amber); border-color: color-mix(in srgb,var(--amber) 35%,transparent); }
+
+.ids-pop-layer { position: fixed; inset: 0; z-index: var(--z-picker, 999); pointer-events: none; }
+.cs-v3.ids-pop-layer .ids-pop { pointer-events: auto; }
+.cs-v3 .ids-pop { position: fixed; top: 165px; left: 50%; z-index: 1; width: 252px; max-height: calc(100dvh - 24px); overflow-y: auto; padding: 8px; transform: translateX(-50%); border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-2); box-shadow: 0 18px 44px rgba(0,0,0,.46); text-align: left; animation: ids-pop-in .16s ease-out; }
+@keyframes ids-pop-in { from { opacity: 0; transform: translate(-50%,-5px); } }
+.cs-v3 .ids-pop header { display: flex; align-items: center; justify-content: space-between; padding: 2px 3px 7px; }
+.cs-v3 .ids-pop header b { color: var(--text); font-size: .74rem; }
+.cs-v3 .ids-pop header button { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-dim); cursor: pointer; }
+.cs-v3 .ids-pop header button:hover { background: var(--surface-3); color: var(--text); }
+.cs-v3 .ids-photo-btn,
+.cs-v3 .ids-levelup { width: 100%; min-height: 32px; padding: 5px 9px; border: 1px solid var(--border-md); border-radius: 7px; background: var(--surface-3); color: var(--text-soft); font-size: .72rem; font-weight: 600; cursor: pointer; }
+.cs-v3 .ids-photo-btn:hover { border-color: var(--border-strong); color: var(--text); }
+.cs-v3 .ids-pop-look { width: 246px; padding: 12px 13px 13px; }
+.cs-v3 .ids-pop-kicker { display: block; color: var(--text-dim); font-size: .56rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+.cs-v3 .ids-pop-look .ids-photo-btn { min-height: 31px; margin-top: 11px; background: var(--surface-3); color: var(--text); font-size: .7rem; }
+.cs-v3 .ids-pop-divider { height: 1px; margin: 11px 0 10px; background: var(--border); }
+.cs-v3 .ids-aura-help { margin: 10px 0 8px; color: var(--gold-2, #70a8e8); font-size: .66rem; line-height: 1.45; }
+.cs-v3 .ids-pop-label { display: block; margin: 11px 3px 7px; color: var(--text-dim); font-size: .58rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.cs-v3 .ids-aura { display: flex; align-items: center; gap: 9px; padding: 2px 1px 0; }
+.cs-v3 .ids-dot { width: 20px; height: 20px; position: relative; padding: 0; border: 0; border-radius: 50%; outline: 2px solid transparent; outline-offset: 2px; background: var(--dot-c); cursor: pointer; }
+.cs-v3 .ids-dot:hover { outline-color: var(--border-strong); }
+.cs-v3 .ids-dot.active { outline-color: var(--dot-c); box-shadow: 0 0 0 1px var(--surface-2),0 0 0 3px var(--dot-c); }
+.cs-v3 .ids-dot.custom { overflow: hidden; background: conic-gradient(#ff5a7e,#f4c430,#22c38e,#4f8cff,#9d6fff,#ff5a7e); }
+.cs-v3 .ids-dot.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.cs-v3 .ids-xp-pop-head,
+.cs-v3 .ids-manual-level { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-muted); font-size: .7rem; }
+.cs-v3 .ids-xp-pop-head b { color: var(--text); }
+.cs-v3 .ids-xp-track { height: 5px; margin-top: 7px; overflow: hidden; border-radius: 4px; background: var(--surface-3); }
+.cs-v3 .ids-xp-track i { display: block; height: 100%; border-radius: inherit; background: var(--aura); }
+.cs-v3 .ids-pop-xp > p { margin: 6px 0 9px; color: var(--text-dim); font-size: .66rem; }
+.cs-v3 .ids-xp-add { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+.cs-v3 .ids-xp-add input { min-width: 0; height: 31px; padding: 5px 8px; border: 1px solid var(--border-md); border-radius: 7px; outline: none; background: var(--surface-sunken); color: var(--text); font-size: .72rem; }
+.cs-v3 .ids-xp-add button { padding: 5px 9px; border: 1px solid var(--border-md); border-radius: 7px; background: var(--surface-3); color: var(--text-soft); font-size: .7rem; font-weight: 600; cursor: pointer; }
+.cs-v3 .ids-levelup { margin-top: 7px; border-color: color-mix(in srgb,var(--amber) 45%,transparent); background: color-mix(in srgb,var(--amber) 13%,transparent); color: var(--amber); }
+.cs-v3 .ids-levelup small { display: block; color: inherit; font-size: .58rem; font-weight: 500; }
+.cs-v3 .ids-manual-level { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border); }
+.cs-v3 .ids-manual-level > div { display: flex; align-items: center; overflow: hidden; border: 1px solid var(--border-md); border-radius: 6px; }
+.cs-v3 .ids-manual-level button { width: 25px; height: 25px; padding: 0; border: 0; background: var(--surface-3); color: var(--text-muted); cursor: pointer; }
+.cs-v3 .ids-manual-level button.ids-level-value { min-width: 31px; width: auto; border-inline: 1px solid var(--border-md); color: var(--text); font-weight: 700; }
+
+@media (max-width: 1080px) {
+  .cs-v3 .id-side.ids { position: relative !important; top: auto !important; max-height: none; overflow: visible; scrollbar-gutter: auto; }
+}
+@media (max-width: 620px) {
+  .cs-v3 .ids-edit-pair { grid-template-columns: 1fr; }
+  .cs-v3 .ids-pop { width: min(290px,calc(100vw - 28px)); }
+}

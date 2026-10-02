@@ -6593,6 +6593,10 @@ body.ach-dragging * { cursor:grabbing !important; }
   width: min(100%, 1080px);
   margin-inline: auto;
 }
+.shared-image-lightbox-hint {
+  max-width: calc(100vw - 120px);
+  text-align: center;
+}
 html:has(.world-editor--rich),
 body:has(.world-editor--rich) {
   /* `overflow-x:hidden` sur la racine crée un conteneur de scroll qui neutralise

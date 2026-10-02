@@ -7,6 +7,7 @@ import { updateInCol } from '../data/firestore.js';
 import { _esc, _norm, loadingHtml } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { characterPortraitContent } from '../shared/portraits.js';
+import { openImageLightbox } from '../shared/image-lightbox.js';
 import { avatarSrcOf } from '../shared/avatar.js';
 import {
   applyActiveBuild, buildProjectionPatch, createBuild, deleteBuild,
@@ -157,6 +158,24 @@ const _auraColor = (key) => AURA_PALETTE[key] || AURA_PALETTE.blue;
 const _charBlurActions = {};
 let _charCalcPopover = null;
 let _charCalcAnchor = null;
+const _identityUi = {
+  charId: null,
+  popover: null,
+  editing: false,
+  draft: null,
+  vitalBreakdown: null,
+};
+
+function _identityStateFor(c) {
+  if (_identityUi.charId !== c?.id) {
+    _identityUi.charId = c?.id || null;
+    _identityUi.popover = null;
+    _identityUi.editing = false;
+    _identityUi.draft = null;
+    _identityUi.vitalBreakdown = null;
+  }
+  return _identityUi;
+}
 
 const _calcRow = (label, value, detail = '') => `
   <div class="cs-calc-row">
@@ -275,6 +294,11 @@ function _computeCharCalculation(btn) {
   let result = '';
   let rows = '';
   let note = '';
+  let identityRows = '';
+  let baseField = '';
+  let baseValue = null;
+  let identityFormula = '';
+  let identityItems = [];
 
   if (type === 'pv' || type === 'pm') {
     const isPv = type === 'pv';
@@ -292,6 +316,20 @@ function _computeCharCalculation(btn) {
         mod > 0 ? `${modStr(mod)} × ${level - 1} niveau(x) gagné(s)` : `Malus ${modStr(mod)} appliqué une fois`),
       _calcEquipmentRows(c, derivedKey),
     ].join('');
+    identityRows = [
+      _calcRow(`Progression de ${statLabel}`, modStr(progression),
+        mod > 0 ? `${modStr(mod)} × ${level - 1} niveau(x) gagné(s)` : `Malus ${modStr(mod)} appliqué une fois`),
+      _calcEquipmentRows(c, derivedKey),
+    ].join('');
+    baseField = isPv ? 'pvBase' : 'pmBase';
+    baseValue = base;
+    const statShort = isPv ? 'CON' : 'SAG';
+    const levelFactor = mod > 0 ? Math.max(0, level - 1) : 1;
+    identityFormula = `Base + ${statShort} × niveau + talents`;
+    identityItems = [
+      { label: `${statShort} ${modStr(mod)} × niv. ${levelFactor}`, value: modStr(progression) },
+      ..._derivedBonusSources(c, derivedKey).map(source => ({ label: source.label, value: modStr(source.value) })),
+    ];
     note = `Le modificateur de ${statLabel} provient de la valeur totale de la caractéristique.`;
   } else if (type === 'ca') {
     const equip = c.equipement || {};
@@ -314,6 +352,14 @@ function _computeCharCalculation(btn) {
       _calcEquipmentRows(c, 'caBonus'),
       hasShield && !shieldOwnBonus ? _calcRow('Bouclier', '+2', 'Bonus par défaut') : '',
     ].join('');
+    identityFormula = 'Base + DEX + équipement';
+    identityItems = [
+      { label: 'Base de CA', value: String(armorBase) },
+      { label: `DEX ${modStr(dex)}`, value: modStr(dex) },
+      ...rawCaSources.map(({ slot, item, value }) => ({ label: item.nom || slot, value: modStr(value) })),
+      ..._derivedBonusSources(c, 'caBonus').map(source => ({ label: source.label, value: modStr(source.value) })),
+      ...(hasShield && !shieldOwnBonus ? [{ label: 'Bouclier', value: '+2' }] : []),
+    ];
     note = 'La CA additionne une base unique, la Dextérité et les bonus explicites de l’équipement. Le type d’armure sert à classer l’objet, pas à ajouter une CA automatique.';
   } else if (type === 'speed') {
     const strength = getMod(c, 'force');
@@ -324,6 +370,12 @@ function _computeCharCalculation(btn) {
       _calcRow('Modificateur de Force', `${modStr(strength)} m`),
       _calcEquipmentRows(c, 'vitesseBonus'),
     ].join('');
+    identityFormula = 'Base + FOR + équipement';
+    identityItems = [
+      { label: 'Vitesse de base', value: '3 m' },
+      { label: `FOR ${modStr(strength)}`, value: `${modStr(strength)} m` },
+      ..._derivedBonusSources(c, 'vitesseBonus').map(source => ({ label: source.label, value: `${modStr(source.value)} m` })),
+    ];
     note = 'La vitesse ne peut pas descendre sous 0 m.';
   } else if (type === 'deck') {
     const intMod = getMod(c, 'intelligence');
@@ -338,7 +390,34 @@ function _computeCharCalculation(btn) {
       _calcRow('Progression', modStr(progression), `Intelligence ${modStr(intMod)} · niveau ${level}`),
       usage.free ? _calcRow('Toujours prêts', usage.free, 'Ne consomment aucun emplacement') : '',
     ].join('');
+    identityFormula = 'Base + INT + niveau';
+    identityItems = [
+      { label: 'Capacité de base', value: '3' },
+      ...(penalty ? [{ label: 'Malus d’INT', value: modStr(penalty) }] : []),
+      { label: `INT ${modStr(intMod)} · niv. ${level}`, value: modStr(progression) },
+      ...(usage.free ? [{ label: 'Toujours prêts', value: `+${usage.free}` }] : []),
+    ];
     note = 'Le premier nombre correspond aux emplacements utilisés. Les sorts « Toujours prêts » restent disponibles sans réduire cette capacité.';
+  } else if (type === 'or') {
+    const compte = c.compte || { recettes: [], depenses: [] };
+    const totalR = (compte.recettes || []).reduce((sum, item) => sum + (parseFloat(item?.montant) || 0), 0);
+    const totalD = (compte.depenses || []).reduce((sum, item) => sum + (parseFloat(item?.montant) || 0), 0);
+    title = 'Bourse';
+    result = `${calcOr(c)} or`;
+    rows = totalR > 0 || totalD > 0
+      ? [
+          _calcRow('Recettes', `+${Math.round(totalR * 100) / 100} or`),
+          _calcRow('Dépenses', `−${Math.round(totalD * 100) / 100} or`),
+        ].join('')
+      : _calcRow('Or disponible', `${calcOr(c)} or`, 'Solde direct du personnage');
+    identityFormula = 'Recettes − dépenses';
+    identityItems = totalR > 0 || totalD > 0
+      ? [
+          { label: 'Recettes', value: `+${Math.round(totalR * 100) / 100} or` },
+          { label: 'Dépenses', value: `−${Math.round(totalD * 100) / 100} or` },
+        ]
+      : [{ label: 'Or disponible', value: `${calcOr(c)} or` }];
+    note = 'La bourse correspond aux recettes moins les dépenses enregistrées dans le journal du trésor.';
   } else if (type?.startsWith('weapon-')) {
     const slot = btn.dataset.slot || getPrimaryWeaponSlotId();
     const item = _weaponForSlot(c, slot);
@@ -385,7 +464,7 @@ function _computeCharCalculation(btn) {
     return null;
   }
 
-  return { title, result, rows, note };
+  return { title, result, rows, note, identityRows, baseField, baseValue, identityFormula, identityItems };
 }
 
 function openCharCalculation(btn) {
@@ -400,17 +479,23 @@ function toggleCharDerivative(btn) {
   if (!panel) { openCharCalculation(btn); return; }
   const key = btn.dataset.calc || '';
   const isSame = panel.classList.contains('on') && panel.dataset.calc === key;
-  btn.closest('.cs-mini-grid')?.querySelectorAll('.cs-mini.on').forEach(b => b.classList.remove('on'));
+  const group = btn.closest('.ids-facts') || btn.closest('.cs-mini-grid');
+  group?.querySelectorAll('.on').forEach(b => b.classList.remove('on'));
   if (isSame) { panel.classList.remove('on'); panel.dataset.calc = ''; panel.innerHTML = ''; return; }
   const d = _computeCharCalculation(btn);
   if (!d) { panel.classList.remove('on'); panel.dataset.calc = ''; panel.innerHTML = ''; return; }
   btn.classList.add('on');
   panel.dataset.calc = key;
   panel.innerHTML = `
-    <div class="cs-brk-hd"><b>${_esc(d.title)}</b><i>Calcul</i></div>
-    <div class="cs-calc-rows">${d.rows}</div>
-    <div class="cs-brk-total"><span>Total</span><b>${_esc(String(d.result))}</b></div>
-    ${d.note ? `<p class="cs-brk-note">${_esc(d.note)}</p>` : ''}`;
+    <div class="ids-vital-detail-head"><b>${_esc(d.title)}</b><span>${_esc(d.identityFormula || 'Détail du calcul')}</span></div>
+    ${(d.identityItems || []).map(item => `<div class="ids-calc-row"><span>${_esc(item.label)}</span><b>${_esc(item.value)}</b></div>`).join('')}
+    <div class="ids-vital-total"><span>Total</span><b>${_esc(String(d.result))}</b></div>
+    ${key === 'or' ? `<div class="ids-brk-a">
+      ${canControlCharacter(getCharacterById(btn.dataset.id) || charSession.getCurrentChar())
+        ? `<button class="ids-btn gold" data-action="openSendGoldModal" data-id="${_esc(btn.dataset.id)}">↗ Envoyer</button>`
+        : ''}
+      <button class="ids-btn" data-action="showCharTab" data-tab="compte">Historique</button>
+    </div>` : ''}`;
   panel.classList.add('on');
 }
 
@@ -514,6 +599,9 @@ function _applyAuraVars(c) {
   document.querySelectorAll('.aura-dot:not(.aura-dot--custom)').forEach(d =>
     d.classList.toggle('active', !isCustom && d.dataset.auraKey === (c.aura || 'blue')));
   document.querySelector('.aura-dot--custom')?.classList.toggle('active', isCustom);
+  document.querySelectorAll('.ids-dot:not(.custom)').forEach(dot =>
+    dot.classList.toggle('active', !isCustom && dot.dataset.auraKey === (c.aura || 'blue')));
+  document.querySelector('.ids-dot.custom')?.classList.toggle('active', isCustom);
 }
 
 const PLAYER_PORTRAIT_SWITCH_MAX = 5;
@@ -819,181 +907,129 @@ function _buildTabsHtml(c, v3Tab) {
   </button>`).join('');
 }
 
-function _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckFree, deckMax, titresChips }) {
-  const buildSwitcher = _buildBuildSwitcherHtml(c, canEdit);
+const _identityNumber = value => Number(value || 0).toLocaleString('fr-FR');
+
+function _identityPopoverHtml(c, canEdit, { xpCur, xpPalier, xpPct }) {
+  const ui = _identityStateFor(c);
+  if (!ui.popover) return '';
+  if (ui.popover === 'appearance') {
+    if (!canEdit) return '';
+    const isCustom = !!c.auraColor;
+    return `<section class="ids-pop ids-pop-look" role="dialog" aria-label="Apparence du personnage">
+      <span class="ids-pop-kicker">Apparence</span>
+      <button class="ids-photo-btn" data-action="open-character-photo" data-charid="${c.id}">Choisir une photo</button>
+      <div class="ids-pop-divider"></div>
+      <span class="ids-pop-kicker">Aura</span>
+      <p class="ids-aura-help">Couleur de l'anneau d'expérience autour du portrait.</p>
+      <div class="ids-aura">
+        ${Object.entries(AURA_PALETTE).map(([key, color]) => `<button class="ids-dot${!isCustom && (c.aura || 'blue') === key ? ' active' : ''}"
+          style="--dot-c:${color}" data-aura-key="${key}" data-action="setCharAura" data-id="${c.id}" title="${key}"></button>`).join('')}
+        <label class="ids-dot custom${isCustom ? ' active' : ''}" style="--dot-c:${_auraHex(c)}" title="Couleur personnalisée">
+          <input type="color" value="${_auraHex(c)}" data-change="setCharAuraColor" data-id="${c.id}">
+        </label>
+      </div>
+    </section>`;
+  }
+  const ready = xpPalier > 0 && xpCur >= xpPalier;
+  return `<section class="ids-pop ids-pop-xp" role="dialog" aria-label="Progression du personnage">
+    <header><b>Progression</b><button data-action="closeIdentityPopover" aria-label="Fermer">×</button></header>
+    <div class="ids-xp-pop-head"><span>Niveau ${c.niveau || 1}</span><b>${xpPct}%</b></div>
+    <div class="ids-xp-track"><i style="width:${xpPct}%"></i></div>
+    <p>${_identityNumber(xpCur)} / ${_identityNumber(xpPalier)} XP</p>
+    ${canEdit ? `<div class="ids-xp-add"><input type="number" id="xp-add-input-${c.id}" placeholder="Gain d'XP" data-char-id="${c.id}" data-xp-input><button data-action="addXpDelta" data-id="${c.id}">Ajouter</button></div>
+    ${ready ? `<button class="ids-levelup" data-action="identityLevelUp" data-id="${c.id}">Niveau ${(c.niveau || 1) + 1}<small>Garde ${xpCur - xpPalier} XP</small></button>` : ''}` : ''}
+    ${STATE.isAdmin ? `<div class="ids-manual-level"><span>Niveau manuel</span><div>
+      <button data-action="adjustIdentityLevel" data-id="${c.id}" data-delta="-1" aria-label="Baisser le niveau">−</button>
+      <button class="ids-level-value" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Saisir le niveau">${c.niveau || 1}</button>
+      <button data-action="adjustIdentityLevel" data-id="${c.id}" data-delta="1" aria-label="Monter le niveau">+</button>
+    </div></div>` : ''}
+  </section>`;
+}
+
+function _identityVitalBreakdownHtml(c, canEdit) {
+  const key = _identityStateFor(c).vitalBreakdown;
+  if (!key) return '';
+  const d = _computeCharCalculation({ dataset: { id: c.id, calc: key } });
+  if (!d) return '';
+  const shortLabel = key === 'pv' ? 'PV' : 'PM';
+  return `<div class="ids-vital-detail" data-vital-detail="${key}">
+    <div class="ids-vital-detail-head"><b>${shortLabel}<br>maximum</b><span>${_esc(d.identityFormula)}</span></div>
+    <div class="ids-base-row"><span>${shortLabel} de base</span>${canEdit ? `<div>
+      <button data-action="_adjVitalBase" data-id="${c.id}" data-field="${d.baseField}" data-delta="-1">−</button>
+      <button class="ids-base-value" data-action="inlineEditNum" data-id="${c.id}" data-field="${d.baseField}" data-min="1" data-max="999">${d.baseValue}</button>
+      <button data-action="_adjVitalBase" data-id="${c.id}" data-field="${d.baseField}" data-delta="1">+</button>
+    </div>` : `<b>${d.baseValue}</b>`}</div>
+    ${(d.identityItems || []).map(item => `<div class="ids-calc-row"><span>${_esc(item.label)}</span><b>${_esc(item.value)}</b></div>`).join('')}
+    <div class="ids-vital-total"><span>Total</span><b>${_esc(String(d.result))}</b></div>
+  </div>`;
+}
+
+function _identityFormHtml(c) {
+  const ui = _identityStateFor(c);
+  const draft = ui.draft || { nom: c.nom || '', classe: c.classe || '', race: c.race || '', titres: [...(c.titres || [])] };
+  ui.draft = draft;
+  return `<div class="ids-edit" data-identity-edit="${c.id}">
+    <label>Nom<input data-identity-field="nom" maxlength="80" value="${_esc(draft.nom)}"></label>
+    <div class="ids-edit-pair">
+      <label>Classe<input data-identity-field="classe" maxlength="60" value="${_esc(draft.classe)}" list="identity-class-list"></label>
+      <label>Race<input data-identity-field="race" maxlength="60" value="${_esc(draft.race)}" list="identity-race-list"></label>
+    </div>
+    <datalist id="identity-class-list"><option>Guerrier</option><option>Mage</option><option>Voleur</option><option>Clerc</option><option>Rôdeur</option><option>Barde</option></datalist>
+    <datalist id="identity-race-list"><option>Humain</option><option>Elfe</option><option>Demi-Elfe</option><option>Nain</option><option>Halfelin</option><option>Tieffelin</option></datalist>
+    <label>Titres</label>${_characterTitlesHtml(c, true, draft.titres, true)}
+    <div class="ids-edit-actions"><button data-action="identityCancelEdit">Annuler</button><button class="primary" data-action="identitySaveEdit" data-id="${c.id}">Enregistrer</button></div>
+  </div>`;
+}
+
+function _buildSidebarHtml(c, canEdit, { pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckFree, deckMax }) {
+  const ui = _identityStateFor(c);
   const owner = _characterOwnerMeta(c);
-  return `<aside class="id-side" id="cs-sidebar" data-aura="${c.auraColor?'custom':(c.aura||'blue')}">
+  const ready = xpPalier > 0 && xpCur >= xpPalier;
+  const classRace = [c.classe, c.race].filter(Boolean).map(_esc).join(' · ') || 'Identité à compléter';
+  const vital = (key, label, current, max, percent, barClass) => `<div class="ids-vital ${key}${percent < 25 ? ' danger' : ''}"${key === 'pv' ? ' id="vital-hp"' : ''}>
+    <div class="ids-vital-head"><div class="ids-vital-value"><span>${label}</span>${canEdit ? `<button id="${key}-val" data-action="editVital" data-field="${key === 'pv' ? 'pvActuel' : 'pmActuel'}" data-id="${c.id}" title="Saisir la valeur exacte">${current}</button>` : `<b id="${key}-val">${current}</b>`}<em>/ ${max}</em>${key === 'pv' && percent < 25 ? '<mark>Critique</mark>' : ''}</div>${canEdit ? `<div class="ids-step"><button data-action="adjustStat" data-field="${key === 'pv' ? 'pvActuel' : 'pmActuel'}" data-delta="-1" data-id="${c.id}" aria-label="Retirer 1 ${label}">−</button><button data-action="adjustStat" data-field="${key === 'pv' ? 'pvActuel' : 'pmActuel'}" data-delta="1" data-id="${c.id}" aria-label="Ajouter 1 ${label}">＋</button></div>` : ''}</div>
+    <div class="vital-bar ids-vital-bar"><div class="${barClass}" id="${key}-bar" style="width:${percent}%"></div></div>
+    <div class="ids-vital-foot"><button data-action="toggleIdentityVitalBreakdown" data-calc="${key}" data-id="${c.id}">Base <b>${key === 'pv' ? (c.pvBase || 10) : (c.pmBase || 10)}</b> · calcul du max</button></div>
+  </div>`;
 
-    <div class="id-identity">
-      <div class="id-actions-mini" aria-label="Propriétaire et actions du personnage">
-        ${STATE.isAdmin
-          ? `<button class="id-owner-btn" data-action="reassignCharOwner" data-id="${c.id}" title="Réassigner à un autre compte joueur">
-              <img class="id-owner-avatar" src="${_esc(owner.avatar)}" alt="">
-              <span class="id-owner-label">${_esc(owner.label)}</span>
-            </button>`
-          : `<span class="id-owner-readonly" title="Propriétaire : ${_esc(owner.label)}">
-              <img class="id-owner-avatar" src="${_esc(owner.avatar)}" alt="">
-              <span class="id-owner-label">${_esc(owner.label)}</span>
-            </span>`}
-        ${canEdit ? `<button class="id-default-btn${c.isDefault?' is-on':''}"
-          title="${c.isDefault?"Personnage favori — sélectionné d'office dans les sélecteurs et le VTT":'Mettre ce personnage en favori'}"
-          data-action="_setDefaultCharacter" data-id="${c.id}">${c.isDefault?'★':'☆'}</button>
-        <button title="Exporter" data-action="openCharExportMenu" data-id="${c.id}">⇩</button>
-        <button class="id-del-btn" title="Supprimer ce personnage" data-action="deleteChar" data-id="${c.id}">⌫</button>` : ''}
-      </div>
-      <div class="id-portrait-wrap">
-        <div class="id-portrait"
-             ${canEdit ? `data-action="open-character-photo" data-charid="${c.id}"` : ''}>
-          ${characterPortraitContent(c, {
-            imgStyle: `transform:scale(${c.photoZoom||1}) translate(${c.photoX||0}px,${c.photoY||0}px);transform-origin:center`,
-            fallbackTag: 'span',
-          })}
-        </div>
-        <div class="id-lvl-badge">${canEdit
-          ? `<button type="button" class="id-lvl-edit" data-action="inlineEditNum" data-id="${c.id}" data-field="niveau" data-min="1" data-max="20" title="Modifier le niveau" style="background:none;border:none;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0">Niv. <strong>${c.niveau||1}</strong></button>`
-          : `Niv. <strong>${c.niveau||1}</strong>`}</div>
-      </div>
-
-      <div class="id-name-row">
-        ${canEdit
-          ? `<span class="id-name" data-action="inlineEditText" data-id="${c.id}" data-field="nom" title="Renommer">${_esc(c.nom||'Sans nom')}</span>`
-          : `<span class="id-name">${_esc(c.nom||'Sans nom')}</span>`}
-      </div>
-
-      ${titresChips}
-
-      <div class="id-chips">
-        ${canEdit
-          ? `<span class="id-chip classe" data-action="inlineEditChip" data-id="${c.id}" data-field="classe" data-label="Classe">${_esc(c.classe||'Classe')}</span>`
-          : (c.classe?`<span class="id-chip classe">${_esc(c.classe)}</span>`:'')}
-        ${canEdit
-          ? `<span class="id-chip race" data-action="inlineEditChip" data-id="${c.id}" data-field="race" data-label="Race">${_esc(c.race||'Race')}</span>`
-          : (c.race?`<span class="id-chip race">${_esc(c.race)}</span>`:'')}
-      </div>
-
-      ${buildSwitcher}
+  return `<aside class="id-side ids" id="cs-sidebar" data-aura="${c.auraColor ? 'custom' : (c.aura || 'blue')}">
+    <div class="ids-top">
+      ${STATE.isAdmin ? `<button class="ids-owner" data-action="reassignCharOwner" data-id="${c.id}" title="Réassigner ce personnage"><img src="${_esc(owner.avatar)}" alt=""><span>${_esc(owner.label)}</span></button>` : `<span class="ids-owner readonly" title="Propriétaire : ${_esc(owner.label)}"><img src="${_esc(owner.avatar)}" alt=""><span>${_esc(owner.label)}</span></span>`}
+      ${canEdit ? `<div class="ids-tools"><button class="${c.isDefault ? 'on' : ''}" data-action="_setDefaultCharacter" data-id="${c.id}" title="Personnage favori">${c.isDefault ? '★' : '☆'}</button><button data-action="openCharExportMenu" data-id="${c.id}" title="Exporter">⇩</button><button class="danger" data-action="deleteChar" data-id="${c.id}" title="Supprimer">⌫</button></div>` : ''}
     </div>
 
-    <!-- XP -->
-    <div class="xp-block">
-      <div class="xp-head">
-        <div>
-          <span class="xp-kicker">Progression</span>
-          <strong>Niveau ${c.niveau||1}</strong>
-        </div>
-        <span class="xp-pct">${xpPct}%</span>
+    <div class="ids-hero">
+      <div class="ids-portrait${ready ? ' is-ready' : ''}">
+        <svg viewBox="0 0 144 144" aria-label="${xpPct}% d'expérience"><circle class="ids-ring-bg" cx="72" cy="72" r="65"></circle><circle class="ids-ring" cx="72" cy="72" r="65" pathLength="100" stroke-dasharray="${xpPct} ${Math.max(0, 100 - xpPct)}"></circle></svg>
+        ${c.photo
+          ? `<button type="button" class="ids-portrait-in is-clickable" data-action="openCharacterPortraitViewer" data-id="${c.id}" title="Afficher le portrait en entier" aria-label="Afficher le portrait de ${_esc(c.nom || 'ce personnage')} en entier">${characterPortraitContent(c, { imgStyle: `transform:scale(${c.photoZoom || 1}) translate(${c.photoX || 0}px,${c.photoY || 0}px);transform-origin:center`, fallbackTag: 'span' })}</button>`
+          : `<div class="ids-portrait-in">${characterPortraitContent(c, { fallbackTag: 'span' })}</div>`}
+        ${canEdit ? `<button class="ids-portrait-edit" data-action="toggleIdentityPopover" data-popover="appearance" data-id="${c.id}" title="Modifier l'apparence">✎</button>` : ''}
+        <button class="ids-level" data-action="toggleIdentityPopover" data-popover="xp" data-id="${c.id}" title="Voir la progression"><small>NIV</small>${c.niveau || 1}</button>
       </div>
-      <div class="xp-track" aria-label="Progression d'expérience">
-        <div class="xp-fill" id="xp-bar-fill" style="width:${xpPct}%"></div>
-      </div>
-      <div class="xp-meta">
-        <span>${canEdit
-          ? `<button type="button" class="xp-set-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="exp" data-min="0" data-max="${xpPalier}" title="Définir l'XP total">${xpCur.toLocaleString('fr-FR').replace(/ /g,' ')}</button>`
-          : xpCur.toLocaleString('fr-FR').replace(/ /g,' ')} / ${xpPalier.toLocaleString('fr-FR').replace(/ /g,' ')} XP</span>
-        <span>Prochain : Niv. ${(c.niveau||1)+1}</span>
-      </div>
-      ${canEdit && xpPalier > 0 && xpCur >= xpPalier ? `<button class="cs-xp-levelup-btn" data-action="_csLevelUp" data-id="${c.id}">⬆️ Niveau ${(c.niveau||1)+1}<span class="cs-xp-levelup-keep">garde ${xpCur - xpPalier} XP</span></button>` : ''}
-      ${canEdit?`<div class="xp-add">
-        <label for="xp-add-input-${c.id}">Gain d'XP</label>
-        <div class="xp-add-control">
-          <input type="number" id="xp-add-input-${c.id}" placeholder="0" data-char-id="${c.id}" data-xp-input>
-          <button data-action="addXpDelta" data-id="${c.id}">Ajouter</button>
-        </div>
-      </div>`:''}
+      ${ui.editing ? _identityFormHtml(c) : `<div class="ids-copy"><h2>${_esc(c.nom || 'Sans nom')}</h2><p>${classRace}</p>${_characterTitlesHtml(c, false)}
+        <button class="ids-xp-line${ready ? ' ready' : ''}" data-action="toggleIdentityPopover" data-popover="xp" data-id="${c.id}">${ready ? `<b>Niveau ${(c.niveau || 1) + 1} prêt</b><span>· gérer</span>` : `<b>${_identityNumber(xpCur)}</b><span>/ ${_identityNumber(xpPalier)} XP · encore ${_identityNumber(Math.max(0, xpPalier - xpCur))}</span>`}</button>
+        ${canEdit ? `<button class="ids-edit-open" data-action="identityStartEdit" data-id="${c.id}">✎ Modifier l'identité</button>` : ''}
+      </div>`}
     </div>
 
-    <!-- PV -->
-    <div class="vital hp ${pvPct<25?'danger':''}" id="vital-hp">
-      <div class="vital-icon">❤</div>
-      <div class="vital-body">
-        <div class="vital-head">
-          <span class="vital-label">Points de Vie</span>
-          <span class="vital-num">${canEdit
-            ? `<button class="vital-val-btn" id="pv-val" data-action="editVital" data-field="pvActuel" data-id="${c.id}" title="Cliquer pour saisir la valeur exacte">${pvCur}</button>`
-            : `<span id="pv-val">${pvCur}</span>`}<button class="cs-calc-inline" data-action="openCharCalculation" data-calc="pv" data-id="${c.id}" title="Voir le calcul des PV maximum">/ ${pvMax} ⓘ</button></span>
-        </div>
-        <div class="vital-bar"><div class="${hpBarCls}" id="pv-bar" style="width:${pvPct}%"></div></div>
-        <div class="vital-ctrls">
-          ${canEdit ? `<div class="vital-current-control">
-            <span class="vital-control-label">Valeur actuelle</span>
-            <span class="vital-stepper">
-              <button class="vital-btn" data-action="adjustStat" data-field="pvActuel" data-delta="-1" data-id="${c.id}" title="Retirer 1 PV">−</button>
-              <button class="vital-btn plus" data-action="adjustStat" data-field="pvActuel" data-delta="1" data-id="${c.id}" title="Ajouter 1 PV">+</button>
-            </span>
-          </div>
-          <button class="cs-vital-base-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="pvBase"
-            data-min="1" data-max="999" title="Modifier les PV de base">
-            <span class="cs-vital-base-copy"><span>PV de base</span><strong>${c.pvBase||10}</strong></span>
-            <span class="cs-vital-base-edit" aria-hidden="true">✎</span>
-          </button>` : `<div class="cs-vital-base-readonly"><span>PV de base</span><strong>${c.pvBase||10}</strong></div>`}
-        </div>
+    ${_buildBuildSwitcherHtml(c, canEdit)}
+
+    <section class="ids-section ids-vitals">
+      ${vital('pv', 'PV', pvCur, pvMax, pvPct, hpBarCls)}
+      ${vital('pm', 'PM', pmCur, pmMax, pmPct, 'vital-bar-fill')}
+      ${_identityVitalBreakdownHtml(c, canEdit)}
+    </section>
+
+    <section class="ids-section">
+      <div class="ids-facts">
+        <button data-action="toggleCharDerivative" data-calc="ca" data-id="${c.id}"><b>${calcCA(c)}</b><span>CA</span></button>
+        <button data-action="toggleCharDerivative" data-calc="speed" data-id="${c.id}"><b>${calcVitesse(c)}<small>m</small></b><span>Vitesse</span></button>
+        <button data-action="toggleCharDerivative" data-calc="deck" data-id="${c.id}" title="${deckFree ? `${deckFree} sort${deckFree > 1 ? 's' : ''} toujours prêt${deckFree > 1 ? 's' : ''}` : ''}"><b>${deckActifs}<small>/${deckMax}</small></b><span>Deck</span></button>
+        <button data-action="toggleCharDerivative" data-calc="or" data-id="${c.id}"><b class="or-card-amount">${calcOr(c)}</b><span>Or</span></button>
       </div>
-    </div>
-
-    <!-- PM -->
-    <div class="vital mp">
-      <div class="vital-icon">✦</div>
-      <div class="vital-body">
-        <div class="vital-head">
-          <span class="vital-label">Points de Magie</span>
-          <span class="vital-num">${canEdit
-            ? `<button class="vital-val-btn" id="pm-val" data-action="editVital" data-field="pmActuel" data-id="${c.id}" title="Cliquer pour saisir la valeur exacte">${pmCur}</button>`
-            : `<span id="pm-val">${pmCur}</span>`}<button class="cs-calc-inline" data-action="openCharCalculation" data-calc="pm" data-id="${c.id}" title="Voir le calcul des PM maximum">/ ${pmMax} ⓘ</button></span>
-        </div>
-        <div class="vital-bar"><div class="vital-bar-fill" id="pm-bar" style="width:${pmPct}%"></div></div>
-        <div class="vital-ctrls">
-          ${canEdit ? `<div class="vital-current-control">
-            <span class="vital-control-label">Valeur actuelle</span>
-            <span class="vital-stepper">
-              <button class="vital-btn" data-action="adjustStat" data-field="pmActuel" data-delta="-1" data-id="${c.id}" title="Retirer 1 PM">−</button>
-              <button class="vital-btn plus" data-action="adjustStat" data-field="pmActuel" data-delta="1" data-id="${c.id}" title="Ajouter 1 PM">+</button>
-            </span>
-          </div>
-          <button class="cs-vital-base-btn" data-action="inlineEditNum" data-id="${c.id}" data-field="pmBase"
-            data-min="1" data-max="999" title="Modifier les PM de base">
-            <span class="cs-vital-base-copy"><span>PM de base</span><strong>${c.pmBase||10}</strong></span>
-            <span class="cs-vital-base-edit" aria-hidden="true">✎</span>
-          </button>` : `<div class="cs-vital-base-readonly"><span>PM de base</span><strong>${c.pmBase||10}</strong></div>`}
-        </div>
-      </div>
-    </div>
-
-    <!-- Mini stats : CA · Vit. · Deck (3 colonnes) -->
-    <div class="cs-mini-grid cs-mini-grid-3">
-      <button class="cs-mini cs-calc-trigger" data-action="toggleCharDerivative" data-calc="ca" data-id="${c.id}" title="Voir le calcul de la CA"><span class="cs-mini-icon">🛡️</span><span class="cs-mini-body"><span class="cs-mini-lbl">CA</span><span class="cs-mini-val">${calcCA(c)}</span></span><span class="cs-mini-arrow" aria-hidden="true">›</span></button>
-      <button class="cs-mini cs-calc-trigger" data-action="toggleCharDerivative" data-calc="speed" data-id="${c.id}" title="Voir le calcul de la vitesse"><span class="cs-mini-icon">🏃</span><span class="cs-mini-body"><span class="cs-mini-lbl">Vit.</span><span class="cs-mini-val">${calcVitesse(c)}m</span></span><span class="cs-mini-arrow" aria-hidden="true">›</span></button>
-      <button class="cs-mini cs-calc-trigger" data-action="toggleCharDerivative" data-calc="deck" data-id="${c.id}" title="Voir le calcul de la capacité du deck"><span class="cs-mini-icon">✦</span><span class="cs-mini-body"><span class="cs-mini-lbl">Deck</span><span class="cs-mini-val">${deckActifs}<small style="font-size:.62rem;color:var(--text-dim);font-weight:600;margin-left:1px">/${deckMax}${deckFree ? ` +${deckFree} libre${deckFree > 1 ? 's' : ''}` : ''}</small></span></span><span class="cs-mini-arrow" aria-hidden="true">›</span></button>
-    </div>
-    <div class="brk cs-brk" id="cs-brk-panel"></div>
-
-    <!-- Or -->
-    <div class="or-card">
-      <div class="or-card-left">
-        <div class="or-card-icon">💰</div>
-        <div>
-          <div class="or-card-lbl">Bourse</div>
-          <div class="or-card-val"><span class="or-card-amount">${calcOr(c)}</span> <small style="font-size:.65rem;color:var(--text-dim)">or</small></div>
-        </div>
-      </div>
-      ${canEdit?`<button class="or-card-btn" data-action="openSendGoldModal" data-id="${c.id}">↗ Envoyer</button>`:''}
-    </div>
-
-    ${canEdit?(() => {
-      const isCustom = !!c.auraColor, curHex = _auraHex(c);
-      return `<div class="aura-row">
-        <span class="aura-lbl">Aura</span>
-        <div class="aura-dots">
-          ${Object.entries(AURA_PALETTE).map(([k,col]) => `
-            <button class="aura-dot${(!isCustom && (c.aura||'blue')===k)?' active':''}"
-              style="--dot-c:${col}" data-aura-key="${k}"
-              data-action="setCharAura" data-id="${c.id}"
-              title="${k}"></button>`).join('')}
-          <label class="aura-dot aura-dot--custom${isCustom?' active':''}" style="--dot-c:${curHex}" title="Couleur personnalisée">
-            <input type="color" class="aura-color-input" value="${curHex}" data-change="setCharAuraColor" data-id="${c.id}">
-          </label>
-        </div>
-      </div>`;})():''}
-
+      <div class="brk cs-brk ids-breakdown" id="cs-brk-panel"></div>
+    </section>
   </aside>`;
 }
 
@@ -1001,13 +1037,13 @@ function _buildBuildSwitcherHtml(c, canEdit) {
   const { builds, activeBuildId } = normalizeCharacterBuilds(c);
   const active = builds.find(b => b.id === activeBuildId) || builds[0];
   if (!canEdit && builds.length <= 1) return '';
-  return `<div class="cs-build-box" title="${_esc(`${active?.name || 'Principal'} modifie image, équipement, stats et bases PV/PM.`)}">
-    <span class="cs-build-label">Build</span>
-    <select class="cs-build-select" data-change="switchCharacterBuild" data-id="${c.id}" ${canEdit ? '' : 'disabled'}>
+  return `<div class="ids-build" title="${_esc(`${active?.name || 'Principal'} modifie image, équipement, stats et bases PV/PM.`)}">
+    <span>Build</span>
+    <select data-change="switchCharacterBuild" data-id="${c.id}" ${canEdit ? '' : 'disabled'}>
       ${builds.map(b => `<option value="${_esc(b.id)}" ${b.id === activeBuildId ? 'selected' : ''}>${_esc(b.name || 'Build')}</option>`).join('')}
     </select>
-    ${builds.length > 1 ? `<span class="cs-build-count" title="${builds.length} builds">${builds.length}</span>` : ''}
-    ${canEdit ? `<button type="button" class="cs-build-manage" data-action="openCharacterBuildsModal" data-id="${c.id}" title="Gérer les builds" aria-label="Gérer les builds">⚙</button>` : ''}
+    ${builds.length > 1 ? `<em title="${builds.length} builds">${builds.length}</em>` : ''}
+    ${canEdit ? `<button type="button" data-action="openCharacterBuildsModal" data-id="${c.id}" title="Gérer les builds" aria-label="Gérer les builds">⚙</button>` : ''}
   </div>`;
 }
 
@@ -1030,123 +1066,237 @@ function _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v
   </section>`;
 }
 
-function _characterTitlesHtml(c, canEdit) {
-  const titres = Array.isArray(c.titres) ? c.titres : [];
+function _characterTitlesHtml(c, canEdit, values = c.titres, draftMode = false) {
+  const titres = Array.isArray(values) ? values : [];
   if (!titres.length && !canEdit) return '';
-  return `<div class="id-titres${canEdit ? ' is-editable' : ''}" id="char-titles-${_esc(c.id)}">
-    ${titres.map((titre, index) => canEdit
-      ? `<span class="id-titre-item">
-          <span class="id-titre-drag" title="Glisser pour réordonner" aria-hidden="true">⠿</span>
-          <input class="id-titre id-titre-input-inline" value="${_esc(titre)}"
-            aria-label="Modifier le titre ${_esc(titre)}"
-            data-change="renameCharTitle" data-id="${c.id}" data-index="${index}"
-            data-enter="change-blur" data-esc="revert-blur">
-          <button type="button" class="id-titre-remove" data-action="removeCharTitle"
-            data-id="${c.id}" data-index="${index}" title="Retirer ${_esc(titre)}" aria-label="Retirer ${_esc(titre)}">×</button>
-        </span>`
-      : `<span class="id-titre">${_esc(titre)}</span>`).join('')}
-    ${canEdit ? `<span class="id-titre-new">
-      <input id="char-title-new-${_esc(c.id)}" placeholder="Ajouter un titre…" maxlength="80"
-        aria-label="Nouveau titre" data-enter-click="#char-title-add-${_esc(c.id)}">
-      <button type="button" id="char-title-add-${_esc(c.id)}" data-action="addCharTitle"
-        data-id="${c.id}" title="Ajouter le titre" aria-label="Ajouter le titre">＋</button>
-    </span>` : ''}
+  if (!draftMode) return `<div class="ids-titles">${titres.map(_esc).join('<span aria-hidden="true"> · </span>')}</div>`;
+  return `<div class="ids-title-editor">
+    <div class="ids-title-list" id="identity-title-list-${_esc(c.id)}">
+      ${titres.map((titre, index) => `<div class="ids-title-item">
+        <span class="ids-title-handle" title="Glisser pour réordonner" aria-hidden="true">⠿</span>
+        <input data-identity-title data-index="${index}" value="${_esc(titre)}" maxlength="80" aria-label="Titre ${index + 1}">
+        <button data-action="identityRemoveTitle" data-index="${index}" title="Retirer ce titre" aria-label="Retirer ce titre">×</button>
+      </div>`).join('')}
+    </div>
+    <div class="ids-title-new"><input id="identity-title-new-${_esc(c.id)}" placeholder="Nouveau titre…" maxlength="80" data-enter-click="#identity-title-add-${_esc(c.id)}"><button id="identity-title-add-${_esc(c.id)}" data-action="identityAddTitle" data-id="${c.id}" aria-label="Ajouter le titre">＋</button></div>
   </div>`;
 }
 
 let _characterTitlesSortable = null;
 
 function _initCharacterTitlesSortable(c) {
-  const host = document.getElementById(`char-titles-${c.id}`);
+  const host = document.getElementById(`identity-title-list-${c.id}`);
   if (!host) return;
   try { _characterTitlesSortable?.destroy(); } catch {}
   _characterTitlesSortable = makeSortable(host, {
     prefix: 'char-title',
-    draggable: '.id-titre-item',
-    handle: '.id-titre-drag',
+    draggable: '.ids-title-item',
+    handle: '.ids-title-handle',
     fallbackOnBody: false,
-    onEnd: async () => {
-      const previous = [...(c.titres || [])];
-      const next = [...host.querySelectorAll('.id-titre-input-inline')]
+    onEnd: () => {
+      _identityUi.draft.titres = [...host.querySelectorAll('[data-identity-title]')]
         .map(input => input.value.trim())
         .filter(Boolean);
-      if (next.length !== previous.length || next.every((titre, index) => titre === previous[index])) return;
-      if (await _saveCharacterTitles(c, next, previous)) _refreshCharacterTitles(c);
     },
   });
 }
 
-function _refreshCharacterTitles(c) {
-  const host = document.getElementById(`char-titles-${c.id}`);
-  if (!host) return;
+function _rerenderIdentity(c, focusSelector = '') {
+  const current = document.getElementById('cs-sidebar');
+  if (!current) { renderCharSheet(c, charSession.getCurrentCharTab() || 'combat'); return; }
+  const scrollTop = current.scrollTop || 0;
+  const pvMax = calcPVMax(c);
+  const pmMax = calcPMMax(c);
+  const pvCur = c.hp ?? c.pvActuel ?? pvMax;
+  const pmCur = c.pmActuel ?? c.pm ?? pmMax;
+  const pvPct = pct(pvCur, pvMax);
+  const pmPct = pct(pmCur, pmMax);
+  const xpCur = c.exp || 0;
+  const xpPalier = calcPalier(c.niveau || 1);
+  const deckUsage = getDeckUsage(c.deck_sorts);
   const wrap = document.createElement('div');
-  wrap.innerHTML = _characterTitlesHtml(c, true);
-  host.replaceWith(wrap.firstElementChild);
-  _initCharacterTitlesSortable(c);
+  wrap.innerHTML = _buildSidebarHtml(c, canControlCharacter(c), {
+    pvCur, pvMax, pvPct,
+    hpBarCls: pvPct < 25 ? 'vital-bar-fill low' : pvPct < 50 ? 'vital-bar-fill mid' : 'vital-bar-fill',
+    pmCur, pmMax, pmPct,
+    xpCur, xpPalier, xpPct: pct(xpCur, xpPalier),
+    deckActifs: deckUsage.used,
+    deckFree: deckUsage.free,
+    deckMax: calcDeckMax(c),
+  });
+  const next = wrap.firstElementChild;
+  current.replaceWith(next);
+  if (canControlCharacter(c)) _initCharacterTitlesSortable(c);
+  requestAnimationFrame(() => {
+    const side = document.getElementById('cs-sidebar');
+    if (side) side.scrollTop = scrollTop;
+    if (focusSelector) {
+      const field = side?.querySelector(focusSelector) || document.querySelector(focusSelector);
+      field?.focus();
+      field?.select?.();
+    }
+  });
 }
 
-async function _saveCharacterTitles(c, nextTitles, previousTitles) {
-  c.titres = nextTitles;
+function _readIdentityDraft(c) {
+  const ui = _identityStateFor(c);
+  if (!ui.draft) ui.draft = { nom: c.nom || '', classe: c.classe || '', race: c.race || '', titres: [...(c.titres || [])] };
+  document.querySelectorAll('[data-identity-field]').forEach(input => { ui.draft[input.dataset.identityField] = input.value; });
+  const titleInputs = [...document.querySelectorAll('[data-identity-title]')];
+  if (titleInputs.length) ui.draft.titres = titleInputs.map(input => input.value.trim()).filter(Boolean);
+  return ui.draft;
+}
+
+function _removeIdentityPopover() {
+  document.getElementById('identity-popover-layer')?.remove();
+}
+
+function _toggleIdentityPopover(btn) {
+  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
+  if (!c) return;
+  const ui = _identityStateFor(c);
+  ui.popover = ui.popover === btn.dataset.popover ? null : btn.dataset.popover;
+  const side = document.getElementById('cs-sidebar');
+  _removeIdentityPopover();
+  if (!ui.popover || !side) return;
+  const xpCur = c.exp || 0;
+  const xpPalier = calcPalier(c.niveau || 1);
+  const layer = document.createElement('div');
+  layer.id = 'identity-popover-layer';
+  layer.className = 'cs-v3 ids-pop-layer';
+  layer.setAttribute('style', _auraStyleVars(c));
+  layer.innerHTML = _identityPopoverHtml(c, canControlCharacter(c), {
+    xpCur,
+    xpPalier,
+    xpPct: pct(xpCur, xpPalier),
+  });
+  document.body.appendChild(layer);
+  requestAnimationFrame(() => {
+    const popover = layer.querySelector('.ids-pop');
+    if (!popover) return;
+    const anchor = ui.popover === 'appearance'
+      ? side.querySelector('.ids-portrait') || btn
+      : side.querySelector('.ids-hero') || btn;
+    const rect = anchor.getBoundingClientRect();
+    const halfWidth = popover.offsetWidth / 2;
+    const left = Math.max(halfWidth + 12, Math.min(window.innerWidth - halfWidth - 12, rect.left + rect.width / 2 + 10));
+    popover.style.left = `${Math.round(left)}px`;
+    popover.style.top = `${Math.round(rect.bottom + 8)}px`;
+    if (ui.popover === 'xp') layer.querySelector(`#xp-add-input-${CSS.escape(c.id)}`)?.focus({ preventScroll: true });
+  });
+}
+
+function _openCharacterPortraitViewer(btn) {
+  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
+  if (!c?.photo) return;
+  openImageLightbox({
+    src: c.photoOriginal || c.photo,
+    alt: `Portrait complet de ${c.nom || 'ce personnage'}`,
+  });
+}
+
+function _identityStartEdit(btn) {
+  const c = getCharacterById(btn.dataset.id);
+  if (!c || !canControlCharacter(c)) return;
+  const ui = _identityStateFor(c);
+  ui.editing = true;
+  ui.popover = null;
+  ui.draft = { nom: c.nom || '', classe: c.classe || '', race: c.race || '', titres: [...(c.titres || [])] };
+  _rerenderIdentity(c, '[data-identity-field="nom"]');
+}
+
+function _identityCancelEdit() {
+  const c = charSession.getCurrentChar();
+  if (!c) return;
+  const ui = _identityStateFor(c);
+  ui.editing = false;
+  ui.draft = null;
+  _rerenderIdentity(c);
+}
+
+function _identityAddTitle(btn) {
+  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
+  if (!c) return;
+  const draft = _readIdentityDraft(c);
+  const input = document.getElementById(`identity-title-new-${c.id}`);
+  const title = input?.value.trim();
+  if (!title) { input?.focus(); return; }
+  if (draft.titres.some(item => _norm(item) === _norm(title))) { showNotif('Ce titre est déjà présent.', 'info'); input.select(); return; }
+  draft.titres.push(title);
+  _rerenderIdentity(c, `#identity-title-new-${c.id}`);
+}
+
+function _identityRemoveTitle(btn) {
+  const c = charSession.getCurrentChar();
+  if (!c) return;
+  const draft = _readIdentityDraft(c);
+  draft.titres.splice(Number(btn.dataset.index), 1);
+  _rerenderIdentity(c);
+}
+
+async function _identitySaveEdit(btn) {
+  const c = getCharacterById(btn.dataset.id);
+  if (!c || !canControlCharacter(c)) return;
+  const previous = { nom: c.nom, classe: c.classe, race: c.race, titres: [...(c.titres || [])] };
+  const draft = _readIdentityDraft(c);
+  const payload = {
+    nom: draft.nom.trim() || 'Sans nom',
+    classe: draft.classe.trim(),
+    race: draft.race.trim(),
+    titres: [...new Map(draft.titres.map(title => [title.trim().toLocaleLowerCase('fr'), title.trim()])).values()].filter(Boolean),
+  };
+  Object.assign(c, payload);
   try {
-    await updateInCol('characters', c.id, { titres: nextTitles });
-    return true;
+    await updateInCol('characters', c.id, payload);
+    _identityUi.editing = false;
+    _identityUi.draft = null;
+    showNotif('Identité mise à jour.', 'success');
   } catch (error) {
-    c.titres = previousTitles;
+    Object.assign(c, previous);
     notifySaveError(error);
-    _refreshCharacterTitles(c);
-    return false;
   }
+  renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
 }
 
-async function _addCharTitle(btn) {
+function _toggleIdentityVitalBreakdown(btn) {
+  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
+  if (!c) return;
+  const ui = _identityStateFor(c);
+  ui.vitalBreakdown = ui.vitalBreakdown === btn.dataset.calc ? null : btn.dataset.calc;
+  _rerenderIdentity(c);
+}
+
+function _closeIdentityPopover() {
+  const c = charSession.getCurrentChar();
+  if (!c) return;
+  _identityStateFor(c).popover = null;
+  _removeIdentityPopover();
+}
+
+async function _adjustIdentityLevel(btn) {
   const c = getCharacterById(btn.dataset.id);
-  const input = document.getElementById(`char-title-new-${btn.dataset.id}`);
-  const titre = input?.value.trim();
-  if (!c || !titre) { input?.focus(); return; }
-  const previous = [...(c.titres || [])];
-  if (previous.some(t => _norm(t) === _norm(titre))) {
-    showNotif('Ce titre est déjà présent.', 'info');
-    input.select();
-    return;
+  if (!c || !STATE.isAdmin) return;
+  const next = Math.max(1, Math.min(20, (Number(c.niveau) || 1) + Number(btn.dataset.delta || 0)));
+  if (next === Number(c.niveau || 1)) return;
+  const previous = c.niveau;
+  c.niveau = next;
+  try {
+    await updateInCol('characters', c.id, { niveau: next });
+  } catch (error) {
+    c.niveau = previous;
+    notifySaveError(error);
   }
-  if (await _saveCharacterTitles(c, [...previous, titre], previous)) {
-    _refreshCharacterTitles(c);
-    document.getElementById(`char-title-new-${c.id}`)?.focus();
-  }
+  renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
 }
 
-async function _renameCharTitle(input) {
-  const c = getCharacterById(input.dataset.id);
-  const index = Number(input.dataset.index);
-  if (!c || !Number.isInteger(index)) return;
-  const previous = [...(c.titres || [])];
-  if (index < 0 || index >= previous.length) return;
-  const titre = input.value.trim();
-  if (!titre) {
-    input.value = previous[index];
-    return;
-  }
-  if (titre === previous[index]) return;
-  const next = [...previous];
-  next[index] = titre;
-  if (await _saveCharacterTitles(c, next, previous)) {
-    input.value = titre;
-    input.classList.add('is-saved');
-    setTimeout(() => input.classList.remove('is-saved'), 500);
-  }
-}
-
-async function _removeCharTitle(btn) {
-  const c = getCharacterById(btn.dataset.id);
-  const index = Number(btn.dataset.index);
-  if (!c || !Number.isInteger(index)) return;
-  const previous = [...(c.titres || [])];
-  if (index < 0 || index >= previous.length) return;
-  const next = previous.filter((_, i) => i !== index);
-  if (await _saveCharacterTitles(c, next, previous)) _refreshCharacterTitles(c);
+async function _identityLevelUp(btn) {
+  _identityUi.popover = null;
+  await levelUpChar(btn.dataset.id);
 }
 
 function renderCharSheet(c, keepTab) {
+  _identityUi.popover = null;
+  _removeIdentityPopover();
   const area = document.getElementById('char-sheet-area');
   if (!area) return;
   clearSpellHost();   // fiche perso affichée → moteur de sorts sur STATE.activeChar (annule un éventuel override PNJ)
@@ -1188,13 +1338,11 @@ function renderCharSheet(c, keepTab) {
 
   // ── Sous-composants HTML ───────────────────────
   const charSwitchHtml = _buildCharSwitchHtml(c.id, canEdit);
-  const { auraGlow, auraBd, auraSh } = _auraVars(_auraHex(c));
   const tilesHtml      = _buildStatTilesHtml(c, canEdit, lvlPointsRemaining);
   const tabsHtml       = _buildTabsHtml(c, v3Tab);
 
-  const titresChips = _characterTitlesHtml(c, canEdit);
-
-  const sidebarHtml = _buildSidebarHtml(c, canEdit, { auraGlow, auraBd, auraSh, pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckFree, deckMax, titresChips });
+  _identityStateFor(c);
+  const sidebarHtml = _buildSidebarHtml(c, canEdit, { pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckFree, deckMax });
   const mainColHtml = _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v3Tab });
 
   area.innerHTML = `<div class="cs-v3" style="${_auraStyleVars(c)}">
@@ -2463,9 +2611,17 @@ registerActions({
   addXpDelta:              (btn)    => addXpDelta(btn.dataset.id),
 
   // Actions identité
-  addCharTitle:            (btn)    => _addCharTitle(btn),
-  renameCharTitle:         (input)  => _renameCharTitle(input),
-  removeCharTitle:         (btn)    => _removeCharTitle(btn),
+  openCharacterPortraitViewer: (btn) => _openCharacterPortraitViewer(btn),
+  toggleIdentityPopover:   (btn)    => _toggleIdentityPopover(btn),
+  closeIdentityPopover:    ()       => _closeIdentityPopover(),
+  identityStartEdit:       (btn)    => _identityStartEdit(btn),
+  identityCancelEdit:      ()       => _identityCancelEdit(),
+  identitySaveEdit:        (btn)    => _identitySaveEdit(btn),
+  identityAddTitle:        (btn)    => _identityAddTitle(btn),
+  identityRemoveTitle:     (btn)    => _identityRemoveTitle(btn),
+  identityLevelUp:         (btn)    => _identityLevelUp(btn),
+  adjustIdentityLevel:     (btn)    => _adjustIdentityLevel(btn),
+  toggleIdentityVitalBreakdown: (btn) => _toggleIdentityVitalBreakdown(btn),
   openCharExportMenu:      (btn)    => openCharExportMenu(btn.dataset.id, btn),
   deleteChar:              (btn)    => deleteChar(btn.dataset.id),
   setCharAura:             (btn)    => setCharAura(btn.dataset.id, btn.dataset.auraKey),
@@ -2575,10 +2731,33 @@ registerActions({
 
 charSession.bindRender(_renderTab, renderCharSheet, refreshOrDisplay);
 
+// Les popovers de l'identité se ferment au clic extérieur sans re-rendre toute
+// la fiche : la cible extérieure reste en place et reçoit normalement son clic.
+document.addEventListener('pointerdown', (e) => {
+  if (!_identityUi.popover) return;
+  if (e.target.closest?.('.ids-pop, [data-action="toggleIdentityPopover"]')) return;
+  _identityUi.popover = null;
+  _removeIdentityPopover();
+}, true);
+
 // Navigation clavier des onglets de fiche (pattern WAI-ARIA tablist) :
 // ← → bouclent, Home/End vont au premier/dernier, activation automatique au focus.
 // Listener délégué unique (module importé une seule fois en lazy).
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && (_identityUi.popover || _identityUi.editing)) {
+    const c = charSession.getCurrentChar();
+    if (!c) return;
+    e.preventDefault();
+    if (_identityUi.popover) {
+      _identityUi.popover = null;
+      _removeIdentityPopover();
+      if (!_identityUi.editing) return;
+    }
+    _identityUi.editing = false;
+    _identityUi.draft = null;
+    _rerenderIdentity(c);
+    return;
+  }
   const tab = e.target.closest?.('#char-tabs-v3 .tab-v3[role="tab"]');
   if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
   e.preventDefault();

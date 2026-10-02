@@ -4,7 +4,7 @@ import { saveCharacterPage } from './character-pages.js';
 import { compactActiveBuildForStorage } from './character-build-storage.js';
 
 export const BUILD_FIELDS = [
-  'photo', 'photoZoom', 'photoX', 'photoY',
+  'photo', 'photoOriginal', 'photoZoom', 'photoX', 'photoY',
   'equipement', 'statsBonus',
   'stats', 'statsBase', 'statsLevelUps',
   'pvBase', 'pmBase',
@@ -19,6 +19,7 @@ export function snapshotBuildFromChar(c = {}, overrides = {}) {
   const equipement = clone(pick(overrides, 'equipement', c.equipement ?? {}));
   return {
     photo: pick(overrides, 'photo', c.photo ?? null),
+    photoOriginal: pick(overrides, 'photoOriginal', c.photoOriginal ?? null),
     photoZoom: pick(overrides, 'photoZoom', c.photoZoom ?? 1),
     photoX: pick(overrides, 'photoX', c.photoX ?? 0),
     photoY: pick(overrides, 'photoY', c.photoY ?? 0),
