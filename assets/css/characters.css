@@ -21449,22 +21449,23 @@ body .modal:has(.inv-history-modal-shell) {
   max-width: 100%;
   box-sizing: border-box;
 }
-.note-modal-content .rtq-wrap { overflow: hidden; }
+.note-modal-content .rtq-wrap { overflow: visible; }
 .note-modal-content .ql-toolbar.ql-snow {
-  display: flex;
-  padding: 7px;
+  padding: 6px;
   overflow: visible;
   border: 0;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-  gap: 3px 0;
+  border-bottom: 1px solid var(--rtq-border-soft);
+  border-radius: 14px 14px 0 0;
+  flex-wrap: nowrap;
+  gap: 2px;
 }
-.note-modal-content .ql-toolbar.ql-snow .ql-formats { margin-right: 8px; }
-.note-modal-content .ql-container.ql-snow { border: 0; }
+.note-modal-content .ql-toolbar.ql-snow .ql-formats { margin-right: 0; }
+.note-modal-content .ql-container.ql-snow {
+  border: 0;
+}
 .note-modal-content .ql-editor {
-  max-height: min(48vh, 500px);
-  overflow-x: hidden;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
   overflow-wrap: anywhere;
 }
 .note-modal-content .ql-editor img { max-width: 100%; }
@@ -21521,7 +21522,7 @@ body .modal:has(.inv-history-modal-shell) {
   .note-modal-summary { align-items: flex-start; }
   .note-modal-summary > .note-v3-tag { display: none; }
   .note-modal-title, .note-modal-title-ro { font-size: .9rem; }
-  .note-modal-content .ql-editor { max-height: 45vh; }
+  .note-modal-content .ql-editor { max-height: none; }
   .note-modal-footer { align-items: stretch; flex-direction: column; }
   .note-modal-footer > div { justify-content: flex-end; }
 }

@@ -11,6 +11,7 @@
 import { _esc } from './html.js';
 import { promptModal } from './modal.js';
 import { showNotif } from './notifications.js';
+import { STATE } from '../core/state.js';
 
 const COLORS = [
   { name: 'Défaut', value: 'initial' },
@@ -34,6 +35,20 @@ const HIGHLIGHTS = [
   { name: 'Rose',   value: 'rgba(244,114,182,.28)' },
   { name: 'Gris',   value: 'rgba(148,163,184,.28)' },
 ];
+
+// Les jets intégrés restent interactifs dans les rendus de lecture. L'éditeur
+// Quill possède son propre gestionnaire afin de conserver sa sélection.
+if (typeof document !== 'undefined' && !globalThis.__RICH_TEXT_DICE_BOUND__) {
+  globalThis.__RICH_TEXT_DICE_BOUND__ = true;
+  document.addEventListener('click', (event) => {
+    if (event.target.closest('.rtq-wrap')) return;
+    const dice = event.target.closest('.rtc .rt-dice[data-dice]');
+    if (!dice) return;
+    document.dispatchEvent(new CustomEvent('app:rich-text-dice', {
+      detail: { formula: dice.dataset.dice, source: 'rich-text' },
+    }));
+  });
+}
 
 const FONTS = [
   { name: 'Défaut',  value: 'inherit' },
@@ -234,9 +249,17 @@ export function richTextContentHtml({
   attrs = {},
   sanitize = true,
 } = {}) {
-  const safe = sanitize ? sanitizeRichTextHtml(html || '') : String(html || '');
+  let safe = sanitize ? sanitizeRichTextHtml(html || '') : String(html || '');
+  // Les encadrés « Secret MJ » restent dans le document sauvegardé mais ne
+  // doivent jamais apparaître dans un rendu de lecture destiné aux joueurs.
+  if (!STATE.isAdmin && safe.includes('data-kind="secret"') && typeof document !== 'undefined') {
+    const template = document.createElement('template');
+    template.innerHTML = safe;
+    template.content.querySelectorAll('.rt-callout[data-kind="secret"]').forEach(node => node.remove());
+    safe = template.innerHTML;
+  }
   const content = safe || fallback;
-  const cls = ['rte-content', className].filter(Boolean).join(' ');
+  const cls = ['rte-content', 'rtc', className].filter(Boolean).join(' ');
   const attrHtml = attrsHtml({ class: cls, ...attrs });
   return `<div ${attrHtml}>${content}</div>`;
 }
@@ -308,6 +331,18 @@ function richTextToolbarEntryHtml(entry, { editorId, commandAttr, buttonClass, m
   }
   if (spec.type === 'size') {
     return richTextTextSizePickerHtml({
+      id: spec.editorId || editorId,
+      buttonClass: spec.buttonClass || buttonClass,
+    });
+  }
+  if (spec.type === 'block') {
+    return richTextBlockStylePickerHtml({
+      id: spec.editorId || editorId,
+      buttonClass: spec.buttonClass || buttonClass,
+    });
+  }
+  if (spec.type === 'align') {
+    return richTextAlignPickerHtml({
       id: spec.editorId || editorId,
       buttonClass: spec.buttonClass || buttonClass,
     });

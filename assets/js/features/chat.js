@@ -68,6 +68,14 @@ let _unreadCutoff = 0;                             // lecture connue avant l'ouv
 let _deleteArmedId = null, _deleteArmTimer = null; // suppression en deux clics
 let _mentionIndex = 0;
 let _tabDrag = null;
+// Les puces de dés insérées dans un texte enrichi utilisent le même moteur et
+// le même canal que la commande /roll : le jet est donc visible de tous.
+if (typeof document !== 'undefined') document.addEventListener('app:rich-text-dice', (event) => {
+  const roll = _rollDice(event.detail?.formula || '');
+  if (!roll) { showNotif('Jet invalide. Ex : 1d20+3', 'error'); return; }
+  if (!_uid || !_openId) { showNotif('Ouvre une aventure pour lancer ce jet.', 'info'); return; }
+  _sendRoll(roll);
+});
 let _tabBound = false, _keyboardBound = false;
 const _echoKeys = new Set();
 
