@@ -1,592 +1,750 @@
-// ══════════════════════════════════════════════
-// AVENTURES — Page de gestion (admin)
-// ══════════════════════════════════════════════
+// AVENTURES — hub de campagnes, invitations et configuration.
 
 import { STATE, setAdventures } from '../core/state.js';
-import { confirmModal } from '../shared/modal.js';
 import { registerActions } from '../core/actions.js';
-import { openModal, closeModal }              from '../shared/modal.js';
-import { showNotif }                          from '../shared/notifications.js';
-import { _esc }                               from '../shared/html.js';
+import { navigate } from '../core/navigation.js';
+import { openModal, closeModal, confirmModal } from '../shared/modal.js';
+import { showNotif } from '../shared/notifications.js';
+import { _esc } from '../shared/html.js';
+import { avatarSrcOf, resolveAvatarUrl } from '../shared/avatar.js';
+import { getDefaultCharForUser } from '../shared/char-stats.js';
+import { characterAvatarHtml } from '../shared/portraits.js';
 import {
-  createAdventure,
-  updateAdventureMeta,
-  deleteAdventure,
-  removePlayerFromAdventure,
-  removeSelfFromAdventure,
-  loadMyCharacters,
-  promoteToAdmin,
-  relinkPlayerAccount,
-  setAdventureFeatures,
-  inviteByEmail,
-  cancelInvite,
-  loadAllUsers,
-  loadUserAdventures,
-  selectAdventure,
+  createAdventure, updateAdventureMeta, deleteAdventure,
+  removePlayerFromAdventure, removeSelfFromAdventure, loadMyCharacters,
+  promoteToAdmin, relinkPlayerAccount, setAdventureFeatures,
+  inviteByEmail, cancelInvite, loadAllUsers, loadUserAdventures,
+  loadUserInvitations, acceptInvitation, declineInvitation, selectAdventure,
 } from '../core/adventure.js';
-import { exportAdventure, importAdventure } from '../data/firestore.js';
-import { unwatchAll } from '../shared/realtime.js';
-import { TOGGLEABLE_FEATURES, enabledFeaturesOf, isPremiumFeature, isFeatureAllowedByPlan } from '../shared/features.js';
+import { exportAdventure, getCachedCollection, importAdventure } from '../data/firestore.js';
+import { unwatchAll, watchPageDoc } from '../shared/realtime.js';
+import { agendaSessionsFromDoc, isAgendaSessionUpcoming } from '../shared/agenda-sessions.js';
+import {
+  TOGGLEABLE_FEATURES, enabledFeaturesOf, isPremiumFeature, isFeatureAllowedByPlan,
+} from '../shared/features.js';
 import { hasAdventurePremiumAccess, hasPremiumAccess } from '../shared/premium.js';
 
-const ADVENTURE_EMOJIS = [
-  '⚔️','🛡️','🏰','🗺️','📜','🧭','🏕️','⛩️','🏛️','🗝️',
-  '🐉','🦄','🦉','🐺','🦁','🐍','🕷️','🦇','🦅','🐾',
-  '🌙','☀️','⭐','🌌','🌋','🏔️','🌲','🌊','🔥','❄️',
-  '⚡','🌪️','🌿','🍄','💎','🔮','✨','🪄','🧙','🧝',
-  '👑','💀','👁️','🩸','🕯️','⚙️','🏴','🚩','🎭','🎲',
+const COLORS = ['#4f8cff', '#22c38e', '#a970ff', '#ff9544', '#ff5a7e', '#f4c430', '#62c6e8', '#9ca3af'];
+const FALLBACK_COLOR = '#4f8cff';
+const ARTICLES = new Set(['le', 'la', 'les', 'un', 'une', 'des', 'de', 'du', 'd', 'l', 'au', 'aux']);
+const MANAGE_TABS = [
+  ['presentation', 'Présentation'],
+  ['members', 'Membres'],
+  ['pages', 'Pages'],
+  ['backup', 'Sauvegarde'],
+  ['danger', 'Zone sensible'],
 ];
 
-function _renderAdventureEmojiPicker(targetId, currentEmoji = '', className = '') {
-  const selected = String(currentEmoji ?? '');
-  return `
-    <div class="${className}">
-      ${ADVENTURE_EMOJIS.map(e => `<button type="button" class="adv-emoji-btn ${e === selected ? 'selected' : ''}"
-        data-action="_advPickEmoji" data-emoji="${e}" data-target-id="${targetId}" title="Cliquer à nouveau pour retirer">${e}</button>`).join('')}
-      <input type="hidden" id="${targetId}" value="${_esc(selected)}">
-    </div>`;
+const _hub = {
+  filter: 'all',
+  query: '',
+  sort: 'recent',
+  selectedId: '',
+  detailClosed: false,
+  leaveId: '',
+  invitations: null,
+  invitationsPromise: null,
+  agendaAdventureId: '',
+  agendaSession: undefined,
+};
+
+const _manage = {
+  id: '',
+  tab: 'presentation',
+  usersByAdventure: new Map(),
+};
+
+const _email = () => STATE.profile?.email || STATE.user?.email || '';
+const _isAdventureAdmin = adv => !!adv?.admins?.includes(STATE.user?.uid);
+const _canManage = adv => !!(STATE.isSuperAdmin || _isAdventureAdmin(adv));
+const _isArchived = adv => adv?.status === 'archived';
+
+function _role(adv) {
+  const uid = STATE.user?.uid;
+  if (adv?.createdBy === uid) return 'Créateur';
+  return adv?.admins?.includes(uid) ? 'MJ' : 'Joueur';
 }
 
-// ── Page principale ────────────────────────────
+function _members(adv) {
+  return [...new Set([
+    ...(adv?.admins || []),
+    ...(adv?.players || []),
+    ...(adv?.accessList || []),
+  ].filter(Boolean))];
+}
+
+function _profileOf(adv, uid) {
+  const profile = adv?.memberProfiles?.[uid];
+  const normalized = typeof profile === 'string' ? { pseudo: profile } : (profile || {});
+  if (uid !== STATE.user?.uid || normalized.avatarIcon) return normalized;
+  return { ...normalized, avatarIcon: STATE.profile?.avatarIcon || '' };
+}
+
+function _nameOf(adv, uid) {
+  const profile = _profileOf(adv, uid);
+  return profile.pseudo || profile.displayName || profile.name || profile.email || ('Joueur ' + String(uid || '').slice(0, 6));
+}
+
+function _characterOf(adv, uid) {
+  const profile = _profileOf(adv, uid);
+  const denorm = profile.character || profile.personnage || profile.characterName || profile.personnageNom;
+  const cachedCharacters = getCachedCollection('characters') || STATE.characters || [];
+  const local = adv?.id === STATE.adventure?.id
+    ? getDefaultCharForUser(cachedCharacters, uid)
+    : null;
+  const char = local || (typeof denorm === 'object' ? denorm : null);
+  if (char) {
+    return {
+      name: char.nom || char.name || 'Personnage',
+      detail: [char.classe || char.class, char.niveau || char.level ? 'niv. ' + (char.niveau || char.level) : ''].filter(Boolean).join(' · '),
+      photo: char.photo || char.portrait || char.portraitUrl || char.imageUrl || '',
+      photoX: char.photoX,
+      photoY: char.photoY,
+    };
+  }
+  return denorm ? { name: String(denorm), detail: '' } : null;
+}
+
+function _characterAvatar(char) {
+  return characterAvatarHtml({ ...char, nom: char?.name }, {
+    size: 30,
+    className: 'av-character-avatar',
+    border: '1px solid rgba(139, 164, 196, .28)',
+    background: '#17263a',
+  });
+}
+
+function _monogram(name) {
+  const words = String(name || '').trim().split(/[\s'’\-]+/).filter(Boolean);
+  const significant = words.filter(word => !ARTICLES.has(word.toLocaleLowerCase('fr-FR')));
+  const selected = (significant.length ? significant : words).slice(0, 2);
+  return selected.map(word => word.charAt(0).toLocaleUpperCase('fr-FR')).join('') || '?';
+}
+
+function _hashColor(value) {
+  const text = String(value || '');
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) hash = ((hash * 31) + text.charCodeAt(i)) | 0;
+  return COLORS[Math.abs(hash) % COLORS.length] || FALLBACK_COLOR;
+}
+
+function _colorOf(adv) {
+  return adv?.color || _hashColor(adv?.id || adv?.nom);
+}
+
+function _toDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value?.toDate === 'function') return value.toDate();
+  if (typeof value === 'object') return _toDate(value.date || value.at || value.start || value.startsAt || value.datetime);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return new Date(String(value) + 'T12:00:00');
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function _todayIso() {
+  const now = new Date();
+  const pad = value => String(value).padStart(2, '0');
+  return now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+}
+
+function _agendaSessionFor(adv) {
+  if (!adv?.id || adv.id !== STATE.adventure?.id || _hub.agendaAdventureId !== adv.id) return null;
+  const uid = STATE.user?.uid;
+  return agendaSessionsFromDoc(_hub.agendaSession)
+    .filter(session => STATE.isAdmin || !Array.isArray(session?.participantUids) || !session.participantUids.length || session.participantUids.includes(uid))
+    .filter(session => isAgendaSessionUpcoming(session, _todayIso()))
+    .sort((a, b) => String(a?.date || '').localeCompare(String(b?.date || '')) || String(a?.slot || '').localeCompare(String(b?.slot || '')))[0] || null;
+}
+
+function _nextSession(adv) {
+  const agendaSession = _agendaSessionFor(adv);
+  const raw = agendaSession || adv?.nextSession || adv?.nextSessionAt || adv?.prochaineSession || null;
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const slotLabel = { m: 'Matin', a: 'Après-midi', s: 'Soir' }[source.slot] || source.timeLabel || '';
+  return {
+    date: _toDate(raw),
+    title: source.title || source.nom || source.label || source.questTitle || '',
+    slotLabel,
+  };
+}
+
+function _watchAgendaSession() {
+  const adventureId = STATE.adventure?.id || '';
+  if (!adventureId) return;
+  if (_hub.agendaAdventureId !== adventureId) {
+    _hub.agendaAdventureId = adventureId;
+    _hub.agendaSession = undefined;
+  }
+  watchPageDoc('adventures-agenda-session', 'agenda_session', 'next', 'aventures', data => {
+    if (STATE.adventure?.id !== adventureId || _hub.agendaSession === data) return;
+    _hub.agendaSession = data;
+    renderAventuresPage();
+  });
+}
+
+function _dateLabel(date, withTime = false) {
+  if (!date) return 'Non planifiée';
+  const opts = { weekday: 'short', day: 'numeric', month: 'short' };
+  if (withTime) {
+    opts.hour = '2-digit';
+    opts.minute = '2-digit';
+  }
+  return new Intl.DateTimeFormat('fr-FR', opts).format(date).replace(',', ' ·');
+}
+
+function _relativeDay(date) {
+  if (!date) return '';
+  const days = Math.ceil((date.getTime() - Date.now()) / 86400000);
+  if (days === 0) return 'Aujourd’hui';
+  if (days === 1) return 'Demain';
+  if (days > 1) return 'Dans ' + days + ' j';
+  return 'Il y a ' + Math.abs(days) + ' j';
+}
+
+function _lastActivity(adv) {
+  const date = _toDate(adv?.lastActivityAt || adv?.updatedAt || adv?.createdAt);
+  if (!date) return 'Activité non renseignée';
+  const days = Math.max(0, Math.floor((Date.now() - date.getTime()) / 86400000));
+  if (days === 0) return 'Dernière activité aujourd’hui';
+  if (days === 1) return 'Dernière activité hier';
+  return 'Dernière activité il y a ' + days + ' j';
+}
+
+function _pendingEmails(adv) {
+  const byLower = new Map();
+  (adv?.invitedEmails || []).forEach(email => {
+    const key = String(email).toLocaleLowerCase();
+    if (!byLower.has(key) || email !== key) byLower.set(key, email);
+  });
+  return [...byLower.values()];
+}
+
+function _avatar(adv, uid, compact = false) {
+  const profile = _profileOf(adv, uid);
+  const name = _nameOf(adv, uid);
+  const legacyImage = profile.photoURL || profile.photo || profile.avatar || profile.image || '';
+  const image = profile.avatarIcon ? avatarSrcOf(profile) : resolveAvatarUrl(legacyImage);
+  const content = image
+    ? '<img src="' + _esc(image) + '" alt="">'
+    : _esc(name.trim().charAt(0).toLocaleUpperCase('fr-FR') || '?');
+  return '<span class="av-avatar' + (compact ? ' is-compact' : '') + '" title="' + _esc(name) + '" style="--avatar-color:' + _hashColor(uid) + '">' + content + '</span>';
+}
+
+function _avatarStack(adv, limit = 4) {
+  const members = _members(adv);
+  const shown = members.slice(0, limit).map(uid => _avatar(adv, uid, true)).join('');
+  const remaining = members.length - limit;
+  return '<span class="av-avatar-stack">' + shown + (remaining > 0 ? '<span class="av-avatar-more">+' + remaining + '</span>' : '') + '</span>';
+}
+
+function _emblem(adv, className = '') {
+  return '<span class="av-emblem ' + className + '" style="--adventure-color:' + _esc(_colorOf(adv)) + '">' + _esc(_monogram(adv?.nom)) + '</span>';
+}
+
+function _colorButtons(targetId, selected) {
+  return '<div class="av-color-row">' + COLORS.map(color =>
+    '<button type="button" class="av-color' + (color === selected ? ' is-selected' : '') + '" style="--swatch:' + color + '" aria-label="Couleur ' + color + '" data-action="_advPickColor" data-color="' + color + '" data-target-id="' + targetId + '"></button>'
+  ).join('') + '<input id="' + targetId + '" type="hidden" value="' + _esc(selected) + '"></div>';
+}
+
+async function _refreshAdventures() {
+  const adventures = await loadUserAdventures(STATE.user.uid, { email: _email() });
+  setAdventures(adventures);
+  return adventures;
+}
+
+async function _ensureInvitations() {
+  if (_hub.invitations) return _hub.invitations;
+  if (!_hub.invitationsPromise) {
+    _hub.invitationsPromise = loadUserInvitations(_email())
+      .then(items => {
+        _hub.invitations = items;
+        return items;
+      })
+      .catch(() => {
+        _hub.invitations = [];
+        return [];
+      })
+      .finally(() => { _hub.invitationsPromise = null; });
+  }
+  return _hub.invitationsPromise;
+}
+
+function _counts(adventures) {
+  const live = adventures.filter(adv => !_isArchived(adv));
+  return {
+    all: live.length,
+    gm: live.filter(_isAdventureAdmin).length,
+    player: live.filter(adv => !_isAdventureAdmin(adv)).length,
+    archived: adventures.filter(_isArchived).length,
+  };
+}
+
+function _matchesSearch(adv, query) {
+  if (!query) return true;
+  const members = _members(adv).flatMap(uid => {
+    const char = _characterOf(adv, uid);
+    return [_nameOf(adv, uid), char?.name || '', char?.detail || ''];
+  });
+  return [adv.nom, adv.description, ...members].join(' ').toLocaleLowerCase('fr-FR').includes(query);
+}
+
+function _visibleAdventures(adventures) {
+  const query = _hub.query.trim().toLocaleLowerCase('fr-FR');
+  const filtered = adventures.filter(adv => {
+    if (_hub.filter === 'archived' && !_isArchived(adv)) return false;
+    if (_hub.filter !== 'archived' && _isArchived(adv)) return false;
+    if (_hub.filter === 'gm' && !_isAdventureAdmin(adv)) return false;
+    if (_hub.filter === 'player' && _isAdventureAdmin(adv)) return false;
+    return _matchesSearch(adv, query);
+  });
+  const activeId = STATE.adventure?.id;
+  return filtered.sort((a, b) => {
+    if (a.id === activeId) return -1;
+    if (b.id === activeId) return 1;
+    if (_hub.sort === 'name') return String(a.nom || '').localeCompare(String(b.nom || ''), 'fr');
+    if (_hub.sort === 'next') {
+      const ad = _nextSession(a).date?.getTime() || Number.MAX_SAFE_INTEGER;
+      const bd = _nextSession(b).date?.getTime() || Number.MAX_SAFE_INTEGER;
+      return ad - bd;
+    }
+    const ad = _toDate(a.lastActivityAt || a.updatedAt || a.createdAt)?.getTime() || 0;
+    const bd = _toDate(b.lastActivityAt || b.updatedAt || b.createdAt)?.getTime() || 0;
+    return bd - ad;
+  });
+}
+
+function _renderInvitations() {
+  const invitations = _hub.invitations || [];
+  if (!invitations.length) return '';
+  return '<section class="av-invitations" aria-label="Invitations en attente">' +
+    '<div class="av-inv-title"><span>Invitation en attente</span><b>' + invitations.length + '</b></div>' +
+    invitations.map(adv => {
+      const members = _members(adv).length;
+      return '<article class="av-invite">' +
+        _emblem(adv, 'is-small') +
+        '<div class="av-invite-copy"><strong>' + _esc(adv.nom || 'Aventure sans nom') + '</strong><span>' +
+          _esc((adv.invitedByName || 'Un MJ') + ' t’invite · ' + members + ' membre' + (members > 1 ? 's' : '')) +
+          (adv.description ? ' · ' + _esc(adv.description) : '') +
+        '</span></div>' +
+        '<div class="av-invite-actions">' +
+          '<button class="av-btn is-quiet" data-action="_advDeclineInvitation" data-id="' + adv.id + '">Refuser</button>' +
+          '<button class="av-btn is-primary" data-action="_advAcceptInvitation" data-id="' + adv.id + '">Rejoindre</button>' +
+        '</div>' +
+      '</article>';
+    }).join('') +
+  '</section>';
+}
+
+function _renderFilters(counts) {
+  const filters = [
+    ['all', 'Toutes', counts.all],
+    ['gm', 'MJ', counts.gm],
+    ['player', 'Joueur', counts.player],
+    ['archived', 'Archivées', counts.archived],
+  ];
+  return '<div class="av-tools">' +
+    '<div class="av-segments" role="group" aria-label="Filtrer les aventures">' +
+      filters.map(([key, label, count]) =>
+        '<button class="' + (_hub.filter === key ? 'is-active' : '') + '" data-action="_advFilter" data-filter="' + key + '">' +
+          _esc(label) + '<span>' + count + '</span>' +
+        '</button>'
+      ).join('') +
+    '</div>' +
+    '<div class="av-search-sort">' +
+      '<label class="av-search"><span aria-hidden="true"></span><input type="search" value="' + _esc(_hub.query) + '" placeholder="Aventure, joueur, personnage…" aria-label="Rechercher une aventure" data-input="_advSearch"></label>' +
+      '<select aria-label="Trier les aventures" data-change="_advSort">' +
+        '<option value="recent"' + (_hub.sort === 'recent' ? ' selected' : '') + '>Activité récente</option>' +
+        '<option value="next"' + (_hub.sort === 'next' ? ' selected' : '') + '>Prochaine séance</option>' +
+        '<option value="name"' + (_hub.sort === 'name' ? ' selected' : '') + '>Nom</option>' +
+      '</select>' +
+    '</div>' +
+  '</div>';
+}
+
+function _renderAdventureList(adventures) {
+  if (!adventures.length) {
+    const hasAny = (STATE.adventures || []).length > 0;
+    return '<div class="av-list-empty"><strong>' + (hasAny ? 'Aucun résultat' : 'Aucune aventure') + '</strong><p>' +
+      (hasAny ? 'Modifie la recherche ou le filtre actif.' : 'Crée ta première aventure ou restaure une sauvegarde.') +
+      '</p>' + (!hasAny ? '<button class="av-btn is-primary" data-action="openCreateAdventureModal">Créer une aventure</button>' : '') + '</div>';
+  }
+  return '<div class="av-table">' +
+    '<div class="av-table-head"><span>Aventure</span><span>Ton rôle</span><span>Prochaine séance</span><span>Membres</span></div>' +
+    '<div class="av-rows">' + adventures.map(adv => {
+      const selected = _hub.selectedId === adv.id;
+      const active = STATE.adventure?.id === adv.id;
+      const session = _nextSession(adv);
+      const char = _characterOf(adv, STATE.user?.uid);
+      const role = _role(adv);
+      return '<button type="button" class="av-row' + (selected ? ' is-selected' : '') + (active ? ' is-active' : '') + '" data-action="_advSelect" data-id="' + adv.id + '">' +
+        '<span class="av-row-main">' + _emblem(adv, 'is-small') +
+          '<span><strong>' + _esc(adv.nom || 'Aventure sans nom') + '</strong>' +
+          (active ? '<em>Active</em>' : '') +
+          '<small>' + _esc(adv.description || 'Aucune description renseignée.') + '</small></span>' +
+        '</span>' +
+        '<span class="av-row-role' + (role === 'Joueur' && char ? ' has-character' : '') + '">' +
+          (role === 'Joueur' && char
+            ? _characterAvatar(char) + '<span><strong>' + _esc(char.name) + '</strong><small>' + _esc(char.detail || 'Joueur') + '</small></span>'
+            : '<strong>' + role + '</strong><small>' + (_isArchived(adv) ? 'Archivée' : (role === 'Joueur' ? 'Membre' : _members(adv).length + ' PJ')) + '</small>') +
+        '</span>' +
+        '<span class="av-row-session"><strong>' + _esc(_dateLabel(session.date)) + '</strong><small>' + _esc(_relativeDay(session.date) || 'À planifier') + '</small></span>' +
+        '<span class="av-row-members">' + _avatarStack(adv) + '</span>' +
+      '</button>';
+    }).join('') + '</div>' +
+  '</div>';
+}
+
+function _renderDetail(adv) {
+  if (!adv) return '<aside class="av-detail is-empty"><div><strong>Sélectionne une aventure</strong><p>Ses membres, ses pages et sa prochaine séance apparaîtront ici.</p></div></aside>';
+  const role = _role(adv);
+  const members = _members(adv);
+  const enabled = enabledFeaturesOf(adv);
+  const session = _nextSession(adv);
+  const current = STATE.adventure?.id === adv.id;
+  const canManage = _canManage(adv);
+  const canLeave = adv.createdBy !== STATE.user?.uid;
+  const leaving = _hub.leaveId === adv.id;
+  const char = _characterOf(adv, STATE.user?.uid);
+  const playIcon = '<svg class="av-btn-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
+  const primary = current
+    ? '<button class="av-btn is-primary" data-navigate="' + (enabled.includes('vtt') ? 'vtt' : 'dashboard') + '">' + playIcon + (enabled.includes('vtt') ? 'Jouer' : 'Ouvrir') + '</button>'
+    : '<button class="av-btn is-primary" data-action="pickAdventure" data-id="' + adv.id + '">' + playIcon + 'Entrer</button>';
+  return '<aside class="av-detail" style="--adventure-color:' + _esc(_colorOf(adv)) + '">' +
+    '<button type="button" class="av-detail-close" aria-label="Fermer le détail" data-action="_advCloseDetail">Fermer</button>' +
+    '<header class="av-detail-head">' + _emblem(adv) +
+      '<div><span class="av-detail-role">' + _esc(role + (_isArchived(adv) ? ' · archivée' : (current ? ' · active' : ''))) + '</span>' +
+      '<h2>' + _esc(adv.nom || 'Aventure sans nom') + '</h2></div>' +
+    '</header>' +
+    '<div class="av-detail-scroll">' +
+      '<p class="av-detail-desc">' + _esc(adv.description || 'Aucune description renseignée pour cette aventure.') + '</p>' +
+      (role === 'Joueur' && char ? '<section class="av-detail-card"><span>Ton personnage</span><strong>' + _esc(char.name) + '</strong><small>' + _esc(char.detail || 'Personnage joueur') + '</small></section>' : '') +
+      '<section class="av-detail-section"><div class="av-detail-title"><h3>Prochaine séance</h3><span>' + _esc(_relativeDay(session.date)) + '</span></div>' +
+        '<div class="av-session"><strong>' + _esc(_dateLabel(session.date) + (session.slotLabel ? ' · ' + session.slotLabel : '')) + '</strong><span>' + _esc(session.title || (session.date ? 'Séance planifiée' : 'Aucune séance planifiée')) + '</span></div>' +
+        '<p class="av-activity">' + _esc(_lastActivity(adv)) + '</p>' +
+      '</section>' +
+      '<section class="av-detail-section"><div class="av-detail-title"><h3>Membres</h3><span>' + members.length + '</span></div>' +
+        '<div class="av-detail-members">' + members.map(uid => {
+          const memberRole = uid === adv.createdBy ? 'Créateur' : (adv.admins?.includes(uid) ? 'MJ' : 'Joueur');
+          const memberChar = _characterOf(adv, uid);
+          return '<div class="av-detail-member">' + _avatar(adv, uid) +
+            '<span><strong>' + _esc(_nameOf(adv, uid)) + (uid === STATE.user?.uid ? ' (toi)' : '') + '</strong><small>' + _esc(memberChar ? memberChar.name + (memberChar.detail ? ' · ' + memberChar.detail : '') : 'Pas de personnage') + '</small></span>' +
+            '<em>' + memberRole + '</em></div>';
+        }).join('') + '</div>' +
+        (_pendingEmails(adv).length ? '<p class="av-pending">' + _pendingEmails(adv).length + ' invitation' + (_pendingEmails(adv).length > 1 ? 's' : '') + ' en attente</p>' : '') +
+      '</section>' +
+      (canManage ? '<section class="av-detail-section"><div class="av-detail-title"><h3>Pages actives</h3><span>' + enabled.length + '/' + TOGGLEABLE_FEATURES.length + '</span></div>' +
+        '<div class="av-page-tags">' + enabled.map(key => {
+          const feature = TOGGLEABLE_FEATURES.find(item => item.key === key);
+          return '<span>' + _esc(feature?.label || key) + '</span>';
+        }).join('') + '</div></section>' : '') +
+      (leaving ? '<section class="av-leave-confirm"><strong>Quitter ' + _esc(adv.nom || 'cette aventure') + ' ?</strong><p>Ton personnage et son contenu seront définitivement supprimés.</p><div><button class="av-btn is-danger" data-action="_advLeaveConfirm" data-id="' + adv.id + '">Quitter et supprimer</button><button class="av-btn is-quiet" data-action="_advLeaveCancel">Annuler</button></div></section>' : '') +
+    '</div>' +
+    '<footer class="av-detail-actions">' + primary +
+      (canManage ? '<button class="av-btn is-secondary" data-action="openManageAdventureModal" data-id="' + adv.id + '">Gérer</button>' : '') +
+      (canLeave && !leaving ? '<button class="av-btn is-detail-danger" data-action="_advLeaveAsk" data-id="' + adv.id + '">Quitter</button>' : '') +
+    '</footer>' +
+  '</aside>';
+}
+
 async function renderAventuresPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
-
+  await _ensureInvitations();
+  if (STATE.currentPage !== 'aventures' || !document.getElementById('main-content')) return;
   const adventures = Array.isArray(STATE.adventures) ? STATE.adventures : [];
-  const uid        = STATE.user?.uid;
-  const current    = adventures.find(a => a.id === STATE.adventure?.id) || STATE.adventure || null;
-  const adminCount = adventures.filter(a => a.admins?.includes(uid)).length;
-  const playerCount = adventures.filter(a => !a.admins?.includes(uid)).length;
-  const totalMembers = adventures.reduce((sum, a) => sum + (a.accessList || []).length, 0);
-
-  let html = `
-  <div class="adv-page-v2">
-    <section class="adv-command">
-      <div class="adv-command-main">
-        <span class="adv-kicker">Campagnes</span>
-        <h1>Aventures</h1>
-        <p>Choisis la campagne active, gère les membres et crée un nouvel espace de jeu.</p>
-      </div>
-      <div class="adv-command-actions">
-        <button class="adv-primary-action" data-action="openCreateAdventureModal">
-          <span>+</span>
-          <strong>Nouvelle aventure</strong>
-        </button>
-      </div>
-    </section>
-
-    <section class="adv-overview">
-      <article class="adv-current-panel">
-        ${current ? _renderCurrentAdventure(current) : _renderNoCurrentAdventure()}
-      </article>
-      <aside class="adv-side-panel">
-        <div class="adv-side-title">Repères</div>
-        <div class="adv-side-stats">
-          ${_renderStat('Aventures', adventures.length)}
-          ${_renderStat('MJ', adminCount)}
-          ${_renderStat('Joueur', playerCount)}
-          ${_renderStat('Membres', totalMembers)}
-        </div>
-        <button class="adv-secondary-action" data-action="_advCreateFromBackup">Créer depuis un backup</button>
-      </aside>
-    </section>`;
-
-  if (adventures.length === 0) {
-    html += _renderAdventureEmpty();
-  } else {
-    html += `<section class="adv-library">
-      <div class="adv-section-head">
-        <div>
-          <span class="adv-kicker">Bibliothèque</span>
-          <h2>Toutes tes aventures</h2>
-        </div>
-        <span>${adventures.length} campagne${adventures.length > 1 ? 's' : ''}</span>
-      </div>
-      <div class="adv-manage-list">`;
-    for (const adv of adventures) {
-      const isAdvAdmin = adv.admins?.includes(uid);
-      const isCurrent  = STATE.adventure?.id === adv.id;
-      html += _renderAdventureCard(adv, isAdvAdmin, isCurrent);
-    }
-    html += `</div></section>`;
+  const visible = _visibleAdventures([...adventures]);
+  if (!_hub.detailClosed && !visible.some(adv => adv.id === _hub.selectedId)) {
+    _hub.selectedId = visible.find(adv => adv.id === STATE.adventure?.id)?.id || visible[0]?.id || '';
   }
-
-  html += `</div>`;
-  content.innerHTML = html;
+  const selected = _hub.detailClosed ? null : (adventures.find(adv => adv.id === _hub.selectedId) || null);
+  content.innerHTML = '<div class="av-page">' +
+    '<header class="av-header"><div><span>Campagnes</span><h1>Aventures</h1></div><div class="av-header-actions">' +
+      '<button class="av-btn is-quiet" data-action="_advCreateFromBackup">Depuis un backup</button>' +
+      '<button class="av-btn is-primary" data-action="openCreateAdventureModal"><b>+</b> Nouvelle aventure</button>' +
+    '</div></header>' +
+    _renderInvitations() + _renderFilters(_counts(adventures)) +
+    '<div class="av-split"><main class="av-list-panel">' + _renderAdventureList(visible) + '</main>' + _renderDetail(selected) + '</div>' +
+  '</div>';
+  _watchAgendaSession();
 }
 
-function _renderStat(label, value) {
-  return `<div class="adv-stat">
-    <strong>${value}</strong>
-    <span>${label}</span>
-  </div>`;
+function _renderCreateModal() {
+  const color = FALLBACK_COLOR;
+  openModal('Créer une aventure', '<div class="av-create-v3">' +
+    '<header class="av-modal-head"><div><span>Nouvelle campagne</span><h2>Créer une aventure</h2></div><button data-action="_advClose" aria-label="Fermer">Fermer</button></header>' +
+    '<div class="av-create-body">' +
+      '<div class="av-create-preview" style="--adventure-color:' + color + '">' +
+        '<span class="av-emblem" id="adv-create-emblem" style="--adventure-color:' + color + '">?</span>' +
+        '<div><strong id="adv-create-preview-name">Nom de l’aventure</strong><small>' + _esc(STATE.profile?.pseudo || 'Créateur') + ' · MJ</small></div>' +
+      '</div>' +
+      '<label class="av-field"><span>Nom</span><input id="adv-nom" data-input="_advCreatePreview" maxlength="60" placeholder="ex. La Chute des Dieux" data-modal-initial-focus></label>' +
+      '<div class="av-field"><span>Couleur de l’emblème</span>' + _colorButtons('adv-color', color) + '</div>' +
+      '<label class="av-field"><span>Description <small>optionnelle</small></span><textarea id="adv-desc" rows="4" placeholder="Ambiance, promesse, ton général…"></textarea></label>' +
+    '</div>' +
+    '<footer class="av-modal-footer"><button class="av-link-btn" data-action="_advCreateFromBackup">Depuis un backup</button><div><button class="av-btn is-quiet" data-action="_advClose">Annuler</button><button class="av-btn is-primary" data-action="_doCreateAdventure">Créer</button></div></footer>' +
+  '</div>');
 }
 
-function _roleLabel(adv) {
-  const uid = STATE.user?.uid;
-  if (adv.createdBy === uid) return 'Créateur';
-  if (adv.admins?.includes(uid)) return 'MJ';
-  return 'Joueur';
-}
-
-function _memberInitials(adv) {
-  const profiles = adv.memberProfiles || {};
-  const uids = [...new Set([...(adv.admins || []), ...(adv.players || []), ...(adv.accessList || [])])].slice(0, 5);
-  return uids.map(uid => {
-    const p = profiles[uid];
-    const label = typeof p === 'string' ? p : (p?.pseudo || p?.email || uid);
-    const initial = String(label || '?').trim().charAt(0).toUpperCase() || '?';
-    return `<span class="adv-member-dot" title="${_esc(label)}">${_esc(initial)}</span>`;
-  }).join('');
-}
-
-function _renderCurrentAdventure(adv) {
-  const members = (adv.accessList || []).length;
-  const enabledCount = enabledFeaturesOf(adv).length;
-  return `
-    <div class="adv-current-badge">Aventure active</div>
-    <div class="adv-current-body">
-      <div class="adv-current-emoji">${adv.emoji || '⚔️'}</div>
-      <div class="adv-current-copy">
-        <span class="adv-kicker">${_esc(_roleLabel(adv))}</span>
-        <h2>${_esc(adv.nom || 'Aventure sans nom')}</h2>
-        <p>${_esc(adv.description || 'Aucune description renseignée pour cette aventure.')}</p>
-      </div>
-    </div>
-    <div class="adv-current-foot">
-      <span>${members} membre${members > 1 ? 's' : ''}</span>
-      <span>${enabledCount} page${enabledCount > 1 ? 's' : ''} active${enabledCount > 1 ? 's' : ''}</span>
-      <span class="adv-current-members">${_memberInitials(adv)}</span>
-    </div>`;
-}
-
-function _renderNoCurrentAdventure() {
-  return `
-    <div class="adv-current-badge">Aucune active</div>
-    <div class="adv-current-body">
-      <div class="adv-current-emoji">◇</div>
-      <div class="adv-current-copy">
-        <span class="adv-kicker">Sélection</span>
-        <h2>Choisis une aventure</h2>
-        <p>La campagne sélectionnée devient le contexte de toutes les pages.</p>
-      </div>
-    </div>`;
-}
-
-function _renderAdventureEmpty() {
-  return `<section class="adv-empty-v2">
-    <div class="adv-empty-mark">◇</div>
-    <h2>Aucune aventure disponible</h2>
-    <p>Crée une première campagne ou restaure un backup JSON si tu repars d'une sauvegarde.</p>
-    <div class="adv-empty-actions">
-      <button class="btn btn-gold" data-action="openCreateAdventureModal">Créer une aventure</button>
-      <button class="btn btn-outline" data-action="_advCreateFromBackup">Créer depuis un backup</button>
-    </div>
-  </section>`;
-}
-
-function _renderAdventureCard(adv, isAdvAdmin, isCurrent) {
-  const members  = (adv.accessList || []).length;
-  const adminCnt = (adv.admins    || []).length;
-  const enabledCount = enabledFeaturesOf(adv).length;
-  const pendingCount = new Set((adv.invitedEmails || []).map(e => String(e).toLowerCase())).size;
-  const canLeave = adv.createdBy !== STATE.user?.uid;
-  return `
-  <div class="adv-manage-card ${isCurrent ? 'adv-manage-card--active' : ''}">
-    <div class="adv-card-topline">
-      <span class="adv-role-pill">${_esc(_roleLabel(adv))}</span>
-      ${isCurrent ? `<span class="adv-badge-active">Active</span>` : ''}
-    </div>
-    <div class="adv-manage-card-hdr">
-      <span class="adv-manage-emoji">${adv.emoji || '⚔️'}</span>
-      <div class="adv-manage-info">
-        <span class="adv-manage-nom">${_esc(adv.nom || 'Aventure sans nom')}</span>
-        <span class="adv-manage-meta">${members} membre${members>1?'s':''} · ${adminCnt} MJ · ${enabledCount} page${enabledCount>1?'s':''}</span>
-      </div>
-    </div>
-    <p class="adv-manage-desc">${_esc(adv.description || 'Aucune description renseignée.')}</p>
-    <div class="adv-card-metrics">
-      <span>${_memberInitials(adv) || '<i>Aucun membre</i>'}</span>
-      ${pendingCount ? `<span>${pendingCount} invitation${pendingCount>1?'s':''}</span>` : ''}
-    </div>
-    <div class="adv-manage-actions">
-      ${isCurrent
-        ? `<button class="adv-card-action is-current" type="button" disabled>Campagne active</button>`
-        : `<button class="adv-card-action" data-action="pickAdventure" data-id="${adv.id}">Entrer</button>`}
-      ${isAdvAdmin ? `<button class="adv-card-action adv-card-action--muted" data-action="openManageAdventureModal" data-id="${adv.id}">Gérer</button>` : ''}
-      ${canLeave ? `<button class="adv-card-action adv-card-action--danger" data-action="_advLeave" data-id="${adv.id}" title="Quitter cette aventure et supprimer ton personnage">Quitter</button>` : ''}
-    </div>
-  </div>`;
-}
-// ── Modal création d'aventure ──────────────────
 export function openCreateAdventureModal() {
-  openModal('Nouvelle aventure', `
-    <div class="adv-create-modal">
-      <div class="adv-create-head">
-        <div class="adv-create-mark">✦</div>
-        <div>
-          <span class="adv-kicker">Nouvelle campagne</span>
-          <h3>Prépare un nouvel espace de jeu</h3>
-          <p>Tu pourras ensuite inviter les joueurs, choisir les pages actives et importer un backup si besoin.</p>
-        </div>
-      </div>
-
-      <div class="adv-create-grid">
-        <div class="adv-create-field adv-create-field--wide">
-          <label>Nom de l'aventure *</label>
-          <input type="text" id="adv-nom" placeholder="Ex : La Chute des Dieux" maxlength="60">
-        </div>
-
-        <div class="adv-create-field adv-create-field--wide">
-          <label>Emblème</label>
-          ${_renderAdventureEmojiPicker('adv-emoji', '⚔️', 'adv-create-emojis')}
-          <small class="adv-emoji-hint">Clique une seconde fois sur l'emblème choisi pour le retirer.</small>
-        </div>
-
-        <div class="adv-create-field adv-create-field--wide">
-          <label>Description</label>
-          <textarea id="adv-desc" rows="4" placeholder="Ambiance, promesse de campagne, ton général..."></textarea>
-        </div>
-      </div>
-
-      <div class="adv-create-actions">
-        <button class="btn btn-outline btn-sm" data-action="_advClose">Annuler</button>
-        <button class="btn btn-gold btn-sm" data-action="_doCreateAdventure">Créer l'aventure</button>
-      </div>
-
-      <div class="adv-create-backup">
-        <div>
-          <strong>Repartir d'une sauvegarde</strong>
-          <span>Crée une nouvelle aventure puis restaure le contenu du fichier JSON.</span>
-        </div>
-        <button class="btn btn-outline btn-sm" data-action="_advCreateFromBackup">Créer depuis un backup</button>
-      </div>
-    </div>
-  `, { subtitle: 'Campagne, accès et sauvegarde', accent: '#7fb2ff' });
+  _renderCreateModal();
 }
 
 async function doCreateAdventure() {
-  const nom   = document.getElementById('adv-nom')?.value?.trim();
-  const emoji = document.getElementById('adv-emoji')?.value?.trim() ?? '⚔️';
-  const desc  = document.getElementById('adv-desc')?.value?.trim() || '';
-
-  if (!nom) { showNotif('Donne un nom à ton aventure.', 'error'); return; }
-
+  const nom = document.getElementById('adv-nom')?.value?.trim();
+  const description = document.getElementById('adv-desc')?.value?.trim() || '';
+  const color = document.getElementById('adv-color')?.value || FALLBACK_COLOR;
+  if (!nom) {
+    showNotif('Donne un nom à ton aventure.', 'error');
+    return;
+  }
   try {
-    const adv = await createAdventure({ nom, emoji, description: desc });
+    const adv = await createAdventure({ nom, emoji: '', description, color });
+    await _refreshAdventures();
+    _hub.selectedId = adv.id;
+    _hub.detailClosed = false;
     closeModal();
-    showNotif(`Aventure "${nom}" créée !`, 'success');
-    // Rafraîchir la liste
-    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
-    setAdventures(adventures);
+    showNotif('Aventure créée.', 'success');
     renderAventuresPage();
-  } catch (e) {
-    showNotif(e.message || 'Erreur lors de la création.', 'error');
+  } catch (error) {
+    showNotif(error.message || 'Erreur lors de la création.', 'error');
   }
 }
 
-// ── Modal gestion d'une aventure (membres + infos) ──────
-export async function openManageAdventureModal(adventureId) {
-  const adv = STATE.adventures.find(a => a.id === adventureId);
-  if (!adv) return;
-
-  // Noms des membres : memberProfiles (dénormalisé) suffit pour un MJ non super-admin.
-  // loadAllUsers n'est utile qu'au super-admin (données cross-user + détection de
-  // doublon) ; pour un MJ normal il ne ferait que N lectures users/{uid} refusées.
-  const allUsers = STATE.isSuperAdmin ? await loadAllUsers(adv) : [];
-  const admins   = adv.admins   || [];
-  const players  = adv.players  || [];
-  const access   = adv.accessList || [];
+function _manageContext(adv, allUsers) {
+  const admins = adv.admins || [];
+  const members = _members(adv);
   const profiles = adv.memberProfiles || {};
-  const absorbedUids = new Set(Object.keys(adv.accountRelinks || {}));
-
-  const memberUids = new Set([...access, ...players, ...admins]);
-  const usersById  = new Map(allUsers.map(u => [u.id, u]));
-
-  // Nom affichable d'un membre par uid, SANS dépendre de la lecture de users/{uid}
-  // (bloquée pour un MJ non super-admin) : priorité au pseudo dénormalisé sur le doc
-  // aventure (memberProfiles), puis aux users lus (super-admin / soi), puis fallback.
-  const _nameFor = (uid) => {
-    const p = profiles[uid];
-    const denorm = typeof p === 'string' ? p : (p?.pseudo || p?.email);
-    const u = usersById.get(uid);
-    return denorm || u?.pseudo || u?.email || `Joueur ${uid.slice(0, 6)}…`;
-  };
-
-  // Détection des comptes en double : un MEMBRE (ancien uid) dont l'email possède
-  // un AUTRE compte non-membre (nouvel uid) → proposer la réassociation. Sert au
-  // cas "mdp oublié → nouvel uid → En attente d'invitation". Ne fonctionne que si on
-  // a pu lire les users (super-admin). Pour un MJ standard, on complète avec
-  // memberProfiles ; sinon le bouton reste disponible en saisie manuelle d'UID.
-  const _emailToUsers = {};
-  allUsers.forEach(u => { if (u.email) (_emailToUsers[u.email.toLowerCase()] ||= []).push(u); });
-  const _userEmailByUid = new Map();
-  allUsers.forEach(u => {
-    if (u?.id && u?.email) _userEmailByUid.set(u.id, String(u.email).trim().toLowerCase());
+  const absorbed = new Set(Object.keys(adv.accountRelinks || {}));
+  const memberSet = new Set(members);
+  const charCount = new Map();
+  (STATE.characters || []).forEach(char => {
+    if (char?.uid) charCount.set(char.uid, (charCount.get(char.uid) || 0) + 1);
   });
-  const charCountByUid = new Map();
-  (STATE.characters || []).forEach(c => {
-    if (!c?.uid) return;
-    charCountByUid.set(c.uid, (charCountByUid.get(c.uid) || 0) + 1);
+  const emailByUid = new Map();
+  allUsers.forEach(user => {
+    if (user?.id && user?.email) emailByUid.set(user.id, String(user.email).trim().toLocaleLowerCase());
   });
-
-  const _profileEmail = (uid) => {
-    const p = profiles[uid];
-    const email = typeof p === 'string' ? '' : (p?.email || '');
-    return _userEmailByUid.get(uid) || String(email).trim().toLowerCase();
+  const emailOf = uid => {
+    const profile = profiles[uid];
+    return emailByUid.get(uid) || String(typeof profile === 'object' ? profile?.email || '' : '').trim().toLocaleLowerCase();
   };
-
-  const _newUidFor = (uid) => {
-    if (absorbedUids.has(uid)) return null;
-    const u = usersById.get(uid);
-    if (u?.email) {
-      const dupe = (_emailToUsers[u.email.toLowerCase()] || [])
-        .find(d => d.id !== uid && !memberUids.has(d.id));
-      if (dupe) return dupe.id;
-    }
-
-    const email = _profileEmail(uid);
-    if (!email) return null;
-    const dupes = [...memberUids].filter(other => other !== uid && !absorbedUids.has(other) && _profileEmail(other) === email);
-    if (!dupes.length) return null;
-    const srcCount = charCountByUid.get(uid) || 0;
-    const target = dupes.sort((a, b) => (charCountByUid.get(a) || 0) - (charCountByUid.get(b) || 0))[0];
-    return srcCount > 0 && srcCount > (charCountByUid.get(target) || 0) ? target : null;
+  const replacementFor = uid => {
+    if (absorbed.has(uid)) return '';
+    const email = emailOf(uid);
+    if (!email) return '';
+    const candidates = allUsers.filter(user =>
+      user.id !== uid && !memberSet.has(user.id) && String(user.email || '').toLocaleLowerCase() === email
+    ).map(user => user.id);
+    if (candidates.length) return candidates[0];
+    const duplicates = members.filter(other => other !== uid && !absorbed.has(other) && emailOf(other) === email);
+    if (!duplicates.length) return '';
+    const target = duplicates.sort((a, b) => (charCount.get(a) || 0) - (charCount.get(b) || 0))[0];
+    return (charCount.get(uid) || 0) > (charCount.get(target) || 0) ? target : '';
   };
+  return { admins, members, replacementFor };
+}
 
-  const _memberLine = (uid, isAdmin) => {
-    const isCreator = uid === adv.createdBy;
-    const newUid    = _newUidFor(uid);
-    return `<div class="adv-member-row" id="mbr-${uid}">
-      <span class="adv-member-pseudo">${_esc(_nameFor(uid))}</span>
-      ${isAdmin ? '<span class="adv-role adv-role--mj">MJ</span>' : '<span class="adv-role adv-role--joueur">Joueur</span>'}
-      <div class="adv-member-actions">
-        ${newUid && !isCreator ? `<button class="btn-icon" title="Réassocier au compte détecté" style="color:#4f8cff" data-action="_advRelink" data-adv-id="${adventureId}" data-old-uid="${uid}" data-new-uid="${newUid}">🔗</button>` : ''}
-        ${!isAdmin && !isCreator ? `<button class="btn-icon" title="Promouvoir MJ" data-action="_advPromote" data-adv-id="${adventureId}" data-uid="${uid}">⬆️</button>` : ''}
-        ${!isCreator ? `<button class="btn-icon" title="Retirer" style="color:#ff6b6b" data-action="_advRemove" data-adv-id="${adventureId}" data-uid="${uid}">✕</button>` : ''}
-      </div>
-    </div>`;
-  };
+function _managePresentation(adv) {
+  const color = _colorOf(adv);
+  return '<section class="av-manage-pane">' +
+    '<div class="av-manage-preview" style="--adventure-color:' + _esc(color) + '">' + _emblem(adv) +
+      '<div><strong id="adv-edit-preview-name">' + _esc(adv.nom || 'Aventure sans nom') + '</strong><small>' + _members(adv).length + ' membres</small></div>' +
+    '</div>' +
+    '<label class="av-field"><span>Nom</span><input id="adv-edit-nom" value="' + _esc(adv.nom || '') + '" maxlength="60" data-input="_advEditPreview"></label>' +
+    '<div class="av-field"><span>Couleur de l’emblème</span>' + _colorButtons('adv-edit-color', color) + '</div>' +
+    '<label class="av-field"><span>Description</span><textarea id="adv-edit-desc" rows="5">' + _esc(adv.description || '') + '</textarea></label>' +
+    '<div class="av-pane-actions"><button class="av-btn is-primary" data-action="_advSaveMeta" data-id="' + adv.id + '">Enregistrer</button></div>' +
+  '</section>';
+}
 
-  // Rendu piloté par les tableaux d'uid du doc (fiables) plutôt que par les users lus.
-  const playerUids = players.filter(uid => !admins.includes(uid));
-  const memberLines = [
-    ...admins.map(uid => _memberLine(uid, true)),
-    ...playerUids.map(uid => _memberLine(uid, false)),
-  ];
-
-  // Invitations en attente : emails ajoutés à invitedEmails, pas encore acceptés.
-  // On dédoublonne l'affichage (invitedEmails stocke raw+lower → on garde 1 forme
-  // par email, en préférant la forme avec majuscules si présente).
-  const pendingByLower = new Map();
-  (adv.invitedEmails || []).forEach(e => {
-    const lower = String(e).toLowerCase();
-    if (!pendingByLower.has(lower) || e !== lower) pendingByLower.set(lower, e);
-  });
-  const pendingInvites = [...pendingByLower.values()];
-  const currentEmoji = adv.emoji ?? '⚔️';
-  const displayEmoji = currentEmoji || '◇';
-
-  const enabled = new Set(enabledFeaturesOf(adv));
-  const backupLocked = !hasAdventurePremiumAccess(adv);
-  const featuresHtml = TOGGLEABLE_FEATURES.map(f => {
-    const premiumLocked = isPremiumFeature(f.key) && !isFeatureAllowedByPlan(f.key, STATE.profile, adv);
-    return `
-    <button type="button" class="adv-feat-toggle ${enabled.has(f.key) ? 'is-on' : ''}${premiumLocked ? ' is-premium-locked' : ''}"
-      data-action="_advToggleFeature" data-adv-id="${adventureId}" data-feature="${f.key}"
-      aria-pressed="${enabled.has(f.key)}" ${premiumLocked ? 'aria-disabled="true"' : ''}>
-      <span class="adv-feat-ico">${f.icon}</span>
-      <span class="adv-feat-name">${_esc(f.label)}</span>
-      ${premiumLocked ? '<span class="adv-feat-plan">Premium</span>' : ''}
-      <span class="adv-feat-switch" aria-hidden="true"></span>
-    </button>`;
+function _manageMembers(adv, context) {
+  const memberRows = context.members.map(uid => {
+    const creator = uid === adv.createdBy;
+    const admin = context.admins.includes(uid);
+    const replacement = context.replacementFor(uid);
+    return '<div class="av-manage-member">' + _avatar(adv, uid) +
+      '<div><strong>' + _esc(_nameOf(adv, uid)) + '</strong><small>' + (creator ? 'Créateur' : (admin ? 'MJ' : 'Joueur')) + '</small></div>' +
+      '<div class="av-member-buttons">' +
+        (replacement && !creator ? '<button data-action="_advRelink" data-adv-id="' + adv.id + '" data-old-uid="' + uid + '" data-new-uid="' + replacement + '">Réassocier</button>' : '') +
+        (!admin && !creator ? '<button data-action="_advPromote" data-adv-id="' + adv.id + '" data-uid="' + uid + '">Nommer MJ</button>' : '') +
+        (!creator ? '<button class="is-danger" data-action="_advRemove" data-adv-id="' + adv.id + '" data-uid="' + uid + '">Retirer</button>' : '') +
+      '</div></div>';
   }).join('');
+  const pending = _pendingEmails(adv);
+  return '<section class="av-manage-pane">' +
+    '<div class="av-pane-title"><div><span>Membres</span><h3>Accès à l’aventure</h3></div><b>' + context.members.length + '</b></div>' +
+    '<div class="av-members-list">' + (memberRows || '<p class="av-muted">Aucun membre.</p>') + '</div>' +
+    '<div class="av-invite-form"><label class="av-field"><span>Inviter par email</span><div><input type="email" id="adv-invite-email" placeholder="email@exemple.com" inputmode="email" autocomplete="email"><button class="av-btn is-primary" data-action="_advInvite" data-id="' + adv.id + '">Inviter</button></div></label></div>' +
+    (pending.length ? '<div class="av-pending-list"><h4>Invitations en attente</h4>' + pending.map(email =>
+      '<div><span>' + _esc(email) + '</span><button data-action="_advCancelInvite" data-adv-id="' + adv.id + '" data-email="' + _esc(email) + '">Annuler</button></div>'
+    ).join('') + '</div>' : '') +
+  '</section>';
+}
 
-  const pendingHtml = pendingInvites.length ? `
-    <section class="adv-manage-panel adv-manage-panel--compact">
-      <div class="adv-panel-head">
-        <div>
-          <span class="adv-kicker">Invitations</span>
-          <h3>En attente</h3>
-        </div>
-        <span class="adv-panel-count">${pendingInvites.length}</span>
-      </div>
-      <div class="adv-manage-stack">
-        ${pendingInvites.map(e => `<div class="adv-member-row adv-member-row--pending">
-          <span class="adv-member-pseudo">${_esc(e)}</span>
-          <span class="adv-role adv-role--joueur">Invité</span>
-          <div class="adv-member-actions">
-            <button class="btn-icon" title="Annuler l'invitation"
-              data-action="_advCancelInvite" data-adv-id="${adventureId}" data-email="${_esc(e)}">×</button>
-          </div>
-        </div>`).join('')}
-      </div>
-    </section>` : '';
+function _managePages(adv) {
+  const enabled = new Set(enabledFeaturesOf(adv));
+  return '<section class="av-manage-pane">' +
+    '<div class="av-pane-title"><div><span>Pages</span><h3>Fonctionnalités actives</h3></div><b>' + enabled.size + '</b></div>' +
+    '<p class="av-pane-intro">Choisis les sections accessibles dans cette aventure. Chaque changement est enregistré immédiatement.</p>' +
+    '<div class="av-feature-grid">' + TOGGLEABLE_FEATURES.map(feature => {
+      const locked = isPremiumFeature(feature.key) && !isFeatureAllowedByPlan(feature.key, STATE.profile, adv);
+      return '<button type="button" class="av-feature-toggle' + (enabled.has(feature.key) ? ' is-on' : '') + (locked ? ' is-premium-locked' : '') + '" data-action="_advToggleFeature" data-adv-id="' + adv.id + '" data-feature="' + feature.key + '" aria-pressed="' + enabled.has(feature.key) + '"' + (locked ? ' aria-disabled="true"' : '') + '>' +
+        '<span class="av-feature-mark">' + _esc(String(feature.label || feature.key).charAt(0)) + '</span><strong>' + _esc(feature.label) + '</strong>' +
+        (locked ? '<small>Premium</small>' : '') + '<i aria-hidden="true"></i>' +
+      '</button>';
+    }).join('') + '</div></section>';
+}
 
-  const dangerHtml = STATE.isSuperAdmin ? `
-    <section class="adv-manage-panel adv-manage-panel--danger">
-      <div class="adv-panel-head">
-        <div>
-          <span class="adv-kicker">Danger</span>
-          <h3>Suppression</h3>
-        </div>
-      </div>
-      <p>Supprimer l'aventure efface définitivement ses données. Cette action est réservée au super-admin.</p>
-      <div id="adv-delete-confirm" class="adv-delete-confirm" style="display:none">
-        <strong>Supprimer ${_esc(adv.nom)} ?</strong>
-        <span>Cette action est irréversible.</span>
-        <div class="adv-danger-actions">
-          <button class="adv-danger-confirm" data-action="_advDelete" data-id="${adventureId}">Supprimer définitivement</button>
-          <button class="btn btn-outline btn-sm" data-action="_advHideDeleteConfirm">Annuler</button>
-        </div>
-      </div>
-      <button class="adv-danger-trigger" data-action="_advShowDeleteConfirm">Supprimer l'aventure</button>
-    </section>` : '';
+function _manageBackup(adv) {
+  const locked = !hasAdventurePremiumAccess(adv);
+  return '<section class="av-manage-pane">' +
+    '<div class="av-pane-title"><div><span>Sauvegarde</span><h3>Backup JSON</h3></div></div>' +
+    '<p class="av-pane-intro">Exporte une copie complète de la campagne ou restaure les données d’une sauvegarde existante.</p>' +
+    '<div class="av-backup-cards">' +
+      '<article><strong>Exporter la campagne</strong><p>Crée un fichier JSON contenant les documents de l’aventure.</p><button class="av-btn' + (locked ? ' is-locked' : '') + '" data-action="_advExport" data-id="' + adv.id + '">' + (locked ? 'Premium requis' : 'Exporter') + '</button></article>' +
+      '<article><strong>Restaurer un backup</strong><p>Réécrit les documents présents dans le fichier sans supprimer les autres.</p><button class="av-btn' + (locked ? ' is-locked' : '') + '" data-action="_advImport" data-id="' + adv.id + '">' + (locked ? 'Premium requis' : 'Restaurer') + '</button></article>' +
+    '</div></section>';
+}
 
-  openModal(`Gérer — ${displayEmoji} ${adv.nom}`, `
-    <div class="adv-manage-modal">
-      <header class="adv-manage-hero">
-        <div class="adv-manage-hero-mark">${displayEmoji}</div>
-        <div class="adv-manage-hero-copy">
-          <span class="adv-kicker">Configuration</span>
-          <h3>${_esc(adv.nom || 'Aventure sans nom')}</h3>
-          <p>${access.length} membre${access.length > 1 ? 's' : ''} · ${admins.length} MJ · ${enabled.size} page${enabled.size > 1 ? 's' : ''} active${enabled.size > 1 ? 's' : ''}</p>
-        </div>
-      </header>
+function _manageDanger(adv) {
+  return '<section class="av-manage-pane">' +
+    '<div class="av-pane-title"><div><span>Zone sensible</span><h3>Archivage et suppression</h3></div></div>' +
+    '<div class="av-danger-card"><div><strong>' + (_isArchived(adv) ? 'Réactiver l’aventure' : 'Archiver l’aventure') + '</strong><p>' + (_isArchived(adv) ? 'L’aventure réapparaîtra dans la liste principale.' : 'L’aventure reste accessible depuis le filtre Archivées.') + '</p></div><button class="av-btn" data-action="_advArchive" data-id="' + adv.id + '">' + (_isArchived(adv) ? 'Réactiver' : 'Archiver') + '</button></div>' +
+    (STATE.isSuperAdmin ? '<div class="av-danger-card is-destructive"><div><strong>Supprimer définitivement</strong><p>Saisis exactement le nom de l’aventure pour confirmer.</p><input id="adv-delete-name" placeholder="' + _esc(adv.nom || '') + '"></div><button class="av-btn is-danger" data-action="_advDelete" data-id="' + adv.id + '">Supprimer</button></div>' : '') +
+  '</section>';
+}
 
-      <div class="adv-manage-grid">
-        <section class="adv-manage-panel adv-manage-panel--identity">
-          <div class="adv-panel-head">
-            <div>
-              <span class="adv-kicker">Identité</span>
-              <h3>Présentation</h3>
-            </div>
-            <button class="adv-panel-save" data-action="_advSaveMeta" data-id="${adventureId}">Enregistrer</button>
-          </div>
-          ${_renderAdventureEmojiPicker('adv-edit-emoji', currentEmoji, 'adv-edit-emojis')}
-          <small class="adv-emoji-hint">Clique une seconde fois sur l'emblème choisi pour le retirer.</small>
-          <label class="adv-edit-field">
-            <span>Nom</span>
-            <input type="text" id="adv-edit-nom" value="${_esc(adv.nom || '')}" maxlength="60">
-          </label>
-          <label class="adv-edit-field">
-            <span>Description</span>
-            <textarea id="adv-edit-desc" rows="4" placeholder="Description optionnelle">${_esc(adv.description || '')}</textarea>
-          </label>
-        </section>
+function _renderManageModal(adv, allUsers) {
+  const context = _manageContext(adv, allUsers);
+  let pane = _managePresentation(adv);
+  if (_manage.tab === 'members') pane = _manageMembers(adv, context);
+  if (_manage.tab === 'pages') pane = _managePages(adv);
+  if (_manage.tab === 'backup') pane = _manageBackup(adv);
+  if (_manage.tab === 'danger') pane = _manageDanger(adv);
+  const body = '<div class="adv-manage-v3">' +
+    '<header class="av-modal-head is-manage">' + _emblem(adv, 'is-small') + '<div><span>Gérer</span><h2>' + _esc(adv.nom || 'Aventure sans nom') + '</h2></div><button data-action="_advClose" aria-label="Fermer">Fermer</button></header>' +
+    '<div class="av-manage-layout"><nav>' + MANAGE_TABS.map(([key, label]) => {
+      const count = key === 'members' ? context.members.length : (key === 'pages' ? enabledFeaturesOf(adv).length : '');
+      return '<button class="' + (_manage.tab === key ? 'is-active' : '') + (key === 'danger' ? ' is-danger' : '') + '" data-action="_advManageTab" data-tab="' + key + '">' + label + (count !== '' ? '<span>' + count + '</span>' : '') + '</button>';
+    }).join('') + '</nav><main>' + pane + '</main></div></div>';
+  openModal('Gérer ' + (adv.nom || 'l’aventure'), body);
+}
 
-        <section class="adv-manage-panel adv-manage-panel--members">
-          <div class="adv-panel-head">
-            <div>
-              <span class="adv-kicker">Membres</span>
-              <h3>Accès joueurs</h3>
-            </div>
-            <span class="adv-panel-count">${access.length}</span>
-          </div>
-          <div id="adv-members-list" class="adv-manage-stack adv-members-list-v2">
-            ${memberLines.join('') || '<div class="adv-muted-line">Aucun membre</div>'}
-          </div>
-          <div class="adv-invite-box">
-            <label for="adv-invite-email">Inviter par email</label>
-            <div class="adv-invite-row">
-              <input type="email" id="adv-invite-email" placeholder="email@exemple.com" inputmode="email" autocomplete="email" maxlength="254" required data-enter-click="#_advInvite-${adventureId}">
-              <button class="adv-panel-save" id="_advInvite-${adventureId}" data-action="_advInvite" data-id="${adventureId}">Inviter</button>
-            </div>
-            <p>L'invitation sera visible à la prochaine connexion du joueur.</p>
-          </div>
-        </section>
-
-        ${pendingHtml}
-
-        <section class="adv-manage-panel adv-manage-panel--features">
-          <div class="adv-panel-head">
-            <div>
-              <span class="adv-kicker">Pages</span>
-              <h3>Fonctionnalités actives</h3>
-            </div>
-            <span class="adv-panel-count">${enabled.size}</span>
-          </div>
-          <p class="adv-panel-note">Choisis les sections accessibles pour cette aventure. Les changements sont sauvegardés immédiatement.</p>
-          <div class="adv-feat-grid adv-feat-grid--modal">${featuresHtml}</div>
-        </section>
-
-        <section class="adv-manage-panel adv-manage-panel--backup">
-          <div class="adv-panel-head">
-            <div>
-              <span class="adv-kicker">Sauvegarde</span>
-              <h3>Backup JSON</h3>
-            </div>
-          </div>
-          <p>Exporter crée une copie complète. Restaurer réécrit les documents du backup sans supprimer ce qui existe déjà.</p>
-          <div class="adv-backup-actions">
-            <button class="adv-card-action adv-card-action--muted${backupLocked ? ' is-premium-locked' : ''}" data-action="_advExport" data-id="${adventureId}" title="${backupLocked ? 'Premium requis' : 'Exporter un backup JSON'}">Exporter${backupLocked ? ' · Premium' : ''}</button>
-            <button class="adv-card-action adv-card-action--muted${backupLocked ? ' is-premium-locked' : ''}" data-action="_advImport" data-id="${adventureId}" title="${backupLocked ? 'Premium requis' : 'Restaurer un backup JSON'}">Restaurer${backupLocked ? ' · Premium' : ''}</button>
-          </div>
-        </section>
-
-        ${dangerHtml}
-      </div>
-
-      <footer class="adv-manage-footer">
-        <button class="btn btn-outline btn-sm" data-action="_advClose">Fermer</button>
-      </footer>
-    </div>
-  `, { subtitle: 'Membres, pages actives et sauvegardes', accent: '#7fb2ff' });
+export async function openManageAdventureModal(adventureId, tab = 'presentation') {
+  const adv = STATE.adventures.find(item => item.id === adventureId);
+  if (!adv || !_canManage(adv)) return;
+  _manage.id = adventureId;
+  _manage.tab = tab;
+  if (STATE.isSuperAdmin && !_manage.usersByAdventure.has(adventureId)) {
+    _manage.usersByAdventure.set(adventureId, await loadAllUsers(adv));
+  }
+  _renderManageModal(adv, _manage.usersByAdventure.get(adventureId) || []);
 }
 
 async function saveAdventureMeta(advId) {
-  const nom   = document.getElementById('adv-edit-nom')?.value?.trim();
-  const emoji = document.getElementById('adv-edit-emoji')?.value?.trim() ?? '⚔️';
-  const desc  = document.getElementById('adv-edit-desc')?.value?.trim() || '';
-
-  if (!nom) { showNotif('Le nom ne peut pas être vide.', 'error'); return; }
-
-  try {
-    await updateAdventureMeta(advId, { nom, emoji, description: desc });
-    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
-    setAdventures(adventures);
-    showNotif('Aventure mise à jour.', 'success');
-    closeModal();
-    renderAventuresPage();
-  } catch (e) { showNotif(e.message, 'error'); }
-}
-
-// Backup JSON complet d'une campagne (export seul — la restauration est une étape
-// dédiée). Lecture directe via firestore.js, puis téléchargement Blob (cf. bastion).
-async function exportAdventureBackup(advId, btn) {
-  const adv = STATE.adventures.find(a => a.id === advId);
-  if (!hasAdventurePremiumAccess(adv)) {
-    showNotif('Les backups JSON complets sont réservés aux aventures Premium.', 'info');
+  const nom = document.getElementById('adv-edit-nom')?.value?.trim();
+  const description = document.getElementById('adv-edit-desc')?.value?.trim() || '';
+  const color = document.getElementById('adv-edit-color')?.value || FALLBACK_COLOR;
+  if (!nom) {
+    showNotif('Le nom ne peut pas être vide.', 'error');
     return;
   }
-  const label = btn ? btn.textContent : null;
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Export en cours…'; }
   try {
-    const payload = await exportAdventure(advId);
-    const total = Object.values(payload.collections).reduce((n, arr) => n + arr.length, 0);
-    const slug = (adv?.nom || 'campagne')
-      .normalize('NFD').replace(/[̀-ͯ]/g, '')
-      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'campagne';
-    const filename = `campagne-${slug}-${new Date().toISOString().slice(0, 10)}.json`;
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click();
-    setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, 100);
-    showNotif(`💾 ${filename} — ${total} document(s) sauvegardé(s)`, 'success');
-  } catch (e) {
-    showNotif(`Échec de l'export : ${e.message}`, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; if (label != null) btn.textContent = label; }
+    await updateAdventureMeta(advId, { nom, description, color });
+    await _refreshAdventures();
+    showNotif('Aventure mise à jour.', 'success');
+    openManageAdventureModal(advId, 'presentation');
+    renderAventuresPage();
+  } catch (error) {
+    showNotif(error.message || 'Échec de la modification.', 'error');
   }
 }
 
-// Crée une NOUVELLE aventure à partir d'un backup, puis y restaure tout le contenu.
-// Sert à récupérer une campagne entièrement supprimée (la restauration "dans une
-// aventure existante" suppose qu'elle existe encore). Super-admin uniquement, comme
-// la création normale. Le créateur devient l'unique MJ : les anciens membres ne
-// sont pas recopiés (doc racine reconstruit par createAdventure, pas restauré).
+async function archiveAdventure(advId) {
+  const adv = STATE.adventures.find(item => item.id === advId);
+  if (!adv) return;
+  try {
+    await updateAdventureMeta(advId, { status: _isArchived(adv) ? 'active' : 'archived' });
+    await _refreshAdventures();
+    closeModal();
+    _hub.filter = _isArchived(adv) ? 'all' : 'archived';
+    _hub.selectedId = advId;
+    _hub.detailClosed = false;
+    showNotif(_isArchived(adv) ? 'Aventure réactivée.' : 'Aventure archivée.', 'success');
+    renderAventuresPage();
+  } catch (error) {
+    showNotif(error.message || 'Échec de la modification.', 'error');
+  }
+}
+
+async function acceptHubInvitation(id) {
+  const invitation = (_hub.invitations || []).find(item => item.id === id);
+  if (!invitation) return;
+  try {
+    const joined = await acceptInvitation(invitation);
+    _hub.invitations = (_hub.invitations || []).filter(item => item.id !== id);
+    _hub.selectedId = id;
+    localStorage.setItem('jdr-last-adventure', id);
+    await selectAdventure(joined);
+    showNotif('Invitation acceptée.', 'success');
+    await navigate('dashboard');
+  } catch (error) {
+    showNotif(error.message || 'Impossible d’accepter cette invitation.', 'error');
+  }
+}
+
+async function declineHubInvitation(id) {
+  const invitation = (_hub.invitations || []).find(item => item.id === id);
+  if (!invitation) return;
+  try {
+    await declineInvitation(invitation);
+    _hub.invitations = (_hub.invitations || []).filter(item => item.id !== id);
+    showNotif('Invitation refusée.', 'success');
+    renderAventuresPage();
+  } catch (error) {
+    showNotif(error.message || 'Impossible de refuser cette invitation.', 'error');
+  }
+}
+
+async function exportAdventureBackup(advId, button) {
+  const adv = STATE.adventures.find(item => item.id === advId);
+  if (!hasAdventurePremiumAccess(adv)) {
+    showNotif('Les backups complets sont réservés aux aventures Premium.', 'info');
+    return;
+  }
+  const label = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Export en cours…';
+  }
+  try {
+    const payload = await exportAdventure(advId);
+    const total = Object.values(payload.collections).reduce((count, items) => count + items.length, 0);
+    const slug = (adv?.nom || 'campagne').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'campagne';
+    const filename = 'campagne-' + slug + '-' + new Date().toISOString().slice(0, 10) + '.json';
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => {
+      link.remove();
+      URL.revokeObjectURL(url);
+    }, 100);
+    showNotif(filename + ' — ' + total + ' document(s) sauvegardé(s).', 'success');
+  } catch (error) {
+    showNotif('Échec de l’export : ' + error.message, 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = label;
+    }
+  }
+}
+
 function createAdventureFromBackup() {
   if (!hasPremiumAccess()) {
     showNotif('La création depuis backup est réservée aux comptes Premium.', 'info');
@@ -595,313 +753,314 @@ function createAdventureFromBackup() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'application/json,.json';
-  input.style.display = 'none';
+  input.hidden = true;
   input.addEventListener('change', async () => {
     const file = input.files?.[0];
     input.remove();
     if (!file) return;
-
     let payload;
-    try { payload = JSON.parse(await file.text()); }
-    catch { showNotif('Fichier illisible (JSON invalide).', 'error'); return; }
-
-    if (payload?.type !== 'le-grand-jdr.campaign' || !payload.collections) {
-      showNotif("Ce fichier n'est pas un backup de campagne.", 'error'); return;
+    try {
+      payload = JSON.parse(await file.text());
+    } catch {
+      showNotif('Fichier JSON invalide.', 'error');
+      return;
     }
-
-    const meta  = payload.adventure || {};
-    const nom   = (meta.nom || '').trim() || 'Campagne restaurée';
-    const total = Object.values(payload.collections)
-      .reduce((n, arr) => n + (Array.isArray(arr) ? arr.length : 0), 0);
-    const when  = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString('fr-FR') : '?';
-
+    if (payload?.type !== 'le-grand-jdr.campaign' || !payload.collections) {
+      showNotif('Ce fichier n’est pas un backup de campagne.', 'error');
+      return;
+    }
+    const meta = payload.adventure || {};
+    const nom = String(meta.nom || '').trim() || 'Campagne restaurée';
+    const total = Object.values(payload.collections).reduce((count, items) => count + (Array.isArray(items) ? items.length : 0), 0);
     const ok = await confirmModal(
-      `Créer une <strong>nouvelle</strong> aventure « ${_esc(nom)} » et y restaurer
-       <strong>${total}</strong> document(s) (backup du ${when}).<br><br>
-       • Tu en seras l'<strong>unique MJ</strong> ; les anciens membres ne sont pas recopiés (à ré-inviter ensuite).<br>
-       • Une aventure neuve est créée : l'éventuelle aventure d'origine n'est pas touchée.`,
-      { title: '📥 Créer depuis un backup', confirmLabel: 'Créer et restaurer', danger: false, icon: '📥' }
+      'Créer une nouvelle aventure « ' + _esc(nom) + ' » et restaurer <strong>' + total + '</strong> document(s) ?<br><br>Tu en seras l’unique MJ. Les anciens membres devront être invités de nouveau.',
+      { title: 'Créer depuis un backup', confirmLabel: 'Créer et restaurer', danger: false, icon: '' }
     );
     if (!ok) return;
-
     try {
-      const adv = await createAdventure({ nom, emoji: meta.emoji || '⚔️', description: meta.description || '' });
+      const adv = await createAdventure({ nom, emoji: '', description: meta.description || '', color: meta.color || FALLBACK_COLOR });
       closeModal();
-      const res = await importAdventure(adv.id, payload);
-      const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
-      setAdventures(adventures);
+      const result = await importAdventure(adv.id, payload);
+      await _refreshAdventures();
+      _hub.selectedId = adv.id;
       renderAventuresPage();
-      if (res.failed.length) {
-        showNotif(`« ${nom} » créée. Restauré ${res.written} doc(s). Échecs : ${res.failed.map(f => f.col).join(', ')}`, 'error');
-      } else {
-        showNotif(`✅ « ${nom} » recréée — ${res.written} document(s) restauré(s).`, 'success');
-      }
-    } catch (e) {
-      showNotif(`Échec : ${e.message}`, 'error');
+      showNotif(result.failed.length ? 'Aventure créée avec certains échecs de restauration.' : 'Aventure restaurée.', result.failed.length ? 'error' : 'success');
+    } catch (error) {
+      showNotif('Échec : ' + error.message, 'error');
     }
   });
   document.body.appendChild(input);
   input.click();
 }
 
-// Restauration (phase 2) : choisit un fichier, valide, confirme fortement, puis
-// réécrit via firestore.js (upsert, aucune suppression, doc racine intouché).
 function importAdventureBackup(advId) {
-  const adv = STATE.adventures.find(a => a.id === advId);
+  const adv = STATE.adventures.find(item => item.id === advId);
   if (!hasAdventurePremiumAccess(adv)) {
-    showNotif('La restauration de backup est réservée aux aventures Premium.', 'info');
+    showNotif('La restauration est réservée aux aventures Premium.', 'info');
     return;
   }
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'application/json,.json';
-  input.style.display = 'none';
+  input.hidden = true;
   input.addEventListener('change', async () => {
     const file = input.files?.[0];
     input.remove();
     if (!file) return;
-
     let payload;
-    try { payload = JSON.parse(await file.text()); }
-    catch { showNotif('Fichier illisible (JSON invalide).', 'error'); return; }
-
-    if (payload?.type !== 'le-grand-jdr.campaign' || !payload.collections) {
-      showNotif("Ce fichier n'est pas un backup de campagne.", 'error'); return;
+    try {
+      payload = JSON.parse(await file.text());
+    } catch {
+      showNotif('Fichier JSON invalide.', 'error');
+      return;
     }
-
-    const adv      = STATE.adventures.find(a => a.id === advId);
-    const total    = Object.values(payload.collections)
-      .reduce((n, arr) => n + (Array.isArray(arr) ? arr.length : 0), 0);
+    if (payload?.type !== 'le-grand-jdr.campaign' || !payload.collections) {
+      showNotif('Ce fichier n’est pas un backup de campagne.', 'error');
+      return;
+    }
+    const total = Object.values(payload.collections).reduce((count, items) => count + (Array.isArray(items) ? items.length : 0), 0);
     const mismatch = payload.adventureId && payload.adventureId !== advId;
-    const when     = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString('fr-FR') : '?';
-
     const ok = await confirmModal(
-      `Restaurer <strong>${total}</strong> document(s) dans <strong>${_esc(adv?.nom || advId)}</strong>
-       (backup du ${when}).<br><br>
-       • Les docs du backup <strong>écrasent</strong> ceux de même identifiant.<br>
-       • <strong>Aucune suppression</strong> : ce qui a été ajouté depuis est conservé.<br>
-       • Membres, MJ et dispos joueurs ne sont pas modifiés.
-       ${mismatch ? `<br><br>⚠️ Ce backup provient d'une <strong>autre aventure</strong> (${_esc(payload.adventureId)}).` : ''}`,
-      { title: '♻️ Restaurer la campagne', confirmLabel: 'Restaurer', icon: '♻️' }
+      'Restaurer <strong>' + total + '</strong> document(s) dans <strong>' + _esc(adv?.nom || advId) + '</strong> ?<br><br>Les documents portant le même identifiant seront écrasés. Aucune donnée absente du backup ne sera supprimée.' + (mismatch ? '<br><br>Attention : ce backup vient d’une autre aventure.' : ''),
+      { title: 'Restaurer la campagne', confirmLabel: 'Restaurer', icon: '' }
     );
     if (!ok) return;
-
-    // confirmModal a empilé/restauré la modale Gérer → le bouton d'origine est
-    // détaché. On re-cible le bouton vivant pour le retour visuel pendant l'import.
-    const liveBtn = document.querySelector('[data-action="_advImport"]');
-    const label = liveBtn ? liveBtn.textContent : null;
-    if (liveBtn) { liveBtn.disabled = true; liveBtn.textContent = '♻️ Restauration…'; }
     try {
-      const res = await importAdventure(advId, payload);
-      if (res.failed.length) {
-        showNotif(`Restauré ${res.written} doc(s). Échecs : ${res.failed.map(f => f.col).join(', ')}`, 'error');
-      } else {
-        showNotif(`✅ ${res.written} document(s) restauré(s) sur ${res.collections} collection(s). Recharge la page pour voir les données.`, 'success');
-      }
-    } catch (e) {
-      showNotif(`Échec de la restauration : ${e.message}`, 'error');
-    } finally {
-      if (liveBtn) { liveBtn.disabled = false; if (label != null) liveBtn.textContent = label; }
+      const result = await importAdventure(advId, payload);
+      showNotif(result.failed.length ? 'Restauration partielle : ' + result.written + ' document(s).' : result.written + ' document(s) restauré(s).', result.failed.length ? 'error' : 'success');
+    } catch (error) {
+      showNotif('Échec de la restauration : ' + error.message, 'error');
     }
   });
   document.body.appendChild(input);
   input.click();
 }
 
-// Quitter une aventure : supprime le(s) perso(s) du joueur (cascade complète) puis
-// le retire de l'aventure. La cascade opère sur l'aventure ACTIVE → on s'y place
-// d'abord si besoin. Réservé aux membres non créateurs (garde + règle Firestore).
 async function leaveAdventure(advId) {
-  const adv = STATE.adventures.find(a => a.id === advId);
-  if (!adv) return;
-  if (adv.createdBy === STATE.user?.uid) {
-    showNotif("Tu es le créateur : supprime l'aventure au lieu de la quitter.", 'error');
-    return;
-  }
-
-  const ok = await confirmModal(
-    `Quitter <strong>${_esc(adv.nom)}</strong> ?<br><br>
-     • Ton personnage et <strong>tout son contenu</strong> (objets, quêtes, hauts-faits, relations…)
-       seront <strong>définitivement supprimés</strong> de cette aventure.<br>
-     • Tu perdras l'accès à l'aventure.<br><br>
-     Cette action est <strong>irréversible</strong>.`,
-    { title: '🚪 Quitter l\'aventure', confirmLabel: 'Quitter et supprimer mon perso', danger: true, icon: '🚪' }
-  );
-  if (!ok) return;
-
+  const adv = STATE.adventures.find(item => item.id === advId);
+  if (!adv || adv.createdBy === STATE.user?.uid) return;
   try {
-    // La cascade purgeCharacter cible l'aventure active → s'y placer si nécessaire.
     if (STATE.adventure?.id !== advId) await selectAdventure(adv);
-
-    // Requête directe (pas le cache-live qui peut bloquer sur une collection vide).
-    const myChars = await loadMyCharacters(advId);
-    if (myChars.length) {
+    const characters = await loadMyCharacters(advId);
+    if (characters.length) {
       const { purgeCharacter } = await import('./characters/forms.js');
-      for (const c of myChars) {
-        try { await purgeCharacter(c.id); }
-        catch (e) { console.warn('[leaveAdventure] purge perso ignorée', c.id, e?.code || e); }
+      for (const character of characters) {
+        try {
+          await purgeCharacter(character.id);
+        } catch (error) {
+          console.warn('[leaveAdventure] purge ignorée', character.id, error?.code || error);
+        }
       }
     }
-
     await removeSelfFromAdventure(advId);
-
-    closeModal();
     unwatchAll();
-    showNotif(`Tu as quitté « ${adv.nom} ».`, 'success');
-
-    // Router hors de l'aventure : recharger la liste et afficher le picker.
-    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
-    setAdventures(adventures);
+    const adventures = await _refreshAdventures();
+    _hub.leaveId = '';
+    showNotif('Tu as quitté « ' + adv.nom + ' ».', 'success');
     const { showAdventurePicker } = await import('../core/layout.js');
     showAdventurePicker(adventures);
-  } catch (e) {
-    console.error('[leaveAdventure] échec :', e);
-    showNotif(e.message || 'Échec — impossible de quitter.', 'error');
+  } catch (error) {
+    console.error('[leaveAdventure]', error);
+    showNotif(error.message || 'Impossible de quitter cette aventure.', 'error');
   }
 }
 
 async function deleteAdventureAndRefresh(advId) {
+  const adv = STATE.adventures.find(item => item.id === advId);
+  const typed = document.getElementById('adv-delete-name')?.value?.trim();
+  if (!adv || typed !== String(adv.nom || '').trim()) {
+    showNotif('Saisis exactement le nom de l’aventure.', 'error');
+    return;
+  }
   try {
     await deleteAdventure(advId);
     closeModal();
     showNotif('Aventure supprimée.', 'success');
-    // Si c'était l'aventure courante, retourner au picker
-    const adventures = STATE.adventures; // déjà mis à jour par deleteAdventure
-    if (adventures.length === 0) {
+    if (!STATE.adventures.length) {
       const { showAdventurePicker } = await import('../core/layout.js');
       showAdventurePicker([]);
-    } else {
-      renderAventuresPage();
+      return;
     }
-  } catch (e) { showNotif(e.message, 'error'); }
+    _hub.selectedId = STATE.adventure?.id || STATE.adventures[0]?.id || '';
+    renderAventuresPage();
+  } catch (error) {
+    showNotif(error.message || 'Échec de la suppression.', 'error');
+  }
 }
 
 async function inviteAdventurePlayer(advId) {
-  const emailInput = document.getElementById('adv-invite-email');
-  if (emailInput && !emailInput.checkValidity()) { emailInput.reportValidity(); return; }
-  const email = emailInput?.value?.trim();
-  if (!email) { showNotif('Saisis un email à inviter.', 'error'); return; }
+  const input = document.getElementById('adv-invite-email');
+  const email = input?.value?.trim();
+  if (!email || !input.checkValidity()) {
+    input?.reportValidity();
+    return;
+  }
   try {
     await inviteByEmail(advId, email);
-    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
-    setAdventures(adventures);
-    showNotif(`Invitation envoyée à ${email}.`, 'success');
-    openManageAdventureModal(advId);
-  } catch (e) { showNotif(e.message, 'error'); }
+    await _refreshAdventures();
+    showNotif('Invitation envoyée à ' + email + '.', 'success');
+    openManageAdventureModal(advId, 'members');
+  } catch (error) {
+    showNotif(error.message || 'Échec de l’invitation.', 'error');
+  }
 }
 
-// Toggle optimiste d'une fonctionnalité : flip visuel immédiat, collecte des clés
-// actives depuis le DOM, sauvegarde, ré-application de la visibilité de la nav.
-// Revert visuel en cas d'échec. Pas de re-render de la modale (fluide).
-async function toggleAdventureFeature(btn) {
-  const advId = btn.dataset.advId;
-  const feature = btn.dataset.feature;
-  const adv = STATE.adventures.find(a => a.id === advId) || STATE.adventure;
+async function toggleAdventureFeature(button) {
+  const advId = button.dataset.advId;
+  const feature = button.dataset.feature;
+  const adv = STATE.adventures.find(item => item.id === advId) || STATE.adventure;
   if (isPremiumFeature(feature) && !isFeatureAllowedByPlan(feature, STATE.profile, adv)) {
     showNotif('Cette page est réservée aux aventures Premium.', 'info');
     return;
   }
-  const on = btn.classList.toggle('is-on');
-  btn.setAttribute('aria-pressed', String(on));
-  const keys = [...document.querySelectorAll('.adv-feat-toggle.is-on[data-feature]')]
-    .map(b => b.dataset.feature);
+  const on = button.classList.toggle('is-on');
+  button.setAttribute('aria-pressed', String(on));
+  const keys = [...document.querySelectorAll('.av-feature-toggle.is-on[data-feature]')].map(item => item.dataset.feature);
   try {
     await setAdventureFeatures(advId, keys);
-    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
-    setAdventures(adventures);
+    await _refreshAdventures();
     const { applyFeatureVisibility } = await import('../core/layout.js');
     applyFeatureVisibility();
-  } catch (e) {
-    btn.classList.toggle('is-on');
-    btn.setAttribute('aria-pressed', String(!on));
-    showNotif(e.message || 'Échec de la modification.', 'error');
+  } catch (error) {
+    button.classList.toggle('is-on');
+    button.setAttribute('aria-pressed', String(!on));
+    showNotif(error.message || 'Échec de la modification.', 'error');
   }
 }
 
 async function cancelAdventureInvite(advId, email) {
   try {
     await cancelInvite(advId, email);
-    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
-    setAdventures(adventures);
+    await _refreshAdventures();
     showNotif('Invitation annulée.', 'success');
-    openManageAdventureModal(advId);
-  } catch (e) { showNotif(e.message, 'error'); }
-}
-
-async function removeAdventurePlayer(advId, targetUid) {
-  try {
-    await removePlayerFromAdventure(advId, targetUid);
-    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
-    setAdventures(adventures);
-    showNotif('Joueur retiré.', 'success');
-    openManageAdventureModal(advId);
-  } catch (e) { showNotif(e.message, 'error'); }
-}
-
-async function promoteAdventurePlayer(advId, targetUid) {
-  try {
-    await promoteToAdmin(advId, targetUid);
-    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
-    setAdventures(adventures);
-    showNotif('Joueur promu MJ.', 'success');
-    openManageAdventureModal(advId);
-  } catch (e) { showNotif(e.message, 'error'); }
-}
-
-async function relinkAdventurePlayer(advId, oldUid, newUid = '') {
-  let targetUid = String(newUid || '').trim();
-  if (!targetUid || targetUid === oldUid) {
-    showNotif('Identifiant de destination invalide.', 'error');
-    return;
+    openManageAdventureModal(advId, 'members');
+  } catch (error) {
+    showNotif(error.message || 'Échec de l’annulation.', 'error');
   }
-  if (!await confirmModal('Réassocier ce joueur à son nouveau compte ?<br><br><span style="opacity:.8;font-size:.88em">Son accès à l\'aventure et ses personnages seront transférés de l\'ancien identifiant vers le nouveau. À faire après qu\'il se soit reconnecté avec son nouveau compte.</span>', { title: 'Réassocier le joueur', confirmLabel: 'Réassocier', danger: false, icon: '🔗' })) return;
-  try {
-    const { migrated } = await relinkPlayerAccount(advId, oldUid, targetUid);
-    const adventures = await loadUserAdventures(STATE.user.uid, { email: STATE.profile?.email || STATE.user?.email });
-    setAdventures(adventures);
-    showNotif(`Compte réassocié — ${migrated} personnage(s) transféré(s).`, 'success');
-    openManageAdventureModal(advId);
-  } catch (e) { showNotif(e.message || 'Échec de la réassociation.', 'error'); }
 }
 
+async function removeAdventurePlayer(advId, uid) {
+  try {
+    await removePlayerFromAdventure(advId, uid);
+    await _refreshAdventures();
+    showNotif('Joueur retiré.', 'success');
+    openManageAdventureModal(advId, 'members');
+  } catch (error) {
+    showNotif(error.message || 'Échec du retrait.', 'error');
+  }
+}
 
+async function promoteAdventurePlayer(advId, uid) {
+  try {
+    await promoteToAdmin(advId, uid);
+    await _refreshAdventures();
+    showNotif('Joueur nommé MJ.', 'success');
+    openManageAdventureModal(advId, 'members');
+  } catch (error) {
+    showNotif(error.message || 'Échec de la promotion.', 'error');
+  }
+}
 
-// ── Enregistrement de la page ──────────────────
+async function relinkAdventurePlayer(advId, oldUid, newUid) {
+  if (!newUid || newUid === oldUid) return;
+  const ok = await confirmModal(
+    'Réassocier ce joueur à son nouveau compte ? Son accès et ses personnages seront transférés.',
+    { title: 'Réassocier le joueur', confirmLabel: 'Réassocier', danger: false, icon: '' }
+  );
+  if (!ok) return;
+  try {
+    const result = await relinkPlayerAccount(advId, oldUid, newUid);
+    await _refreshAdventures();
+    showNotif('Compte réassocié — ' + result.migrated + ' personnage(s) transféré(s).', 'success');
+    openManageAdventureModal(advId, 'members');
+  } catch (error) {
+    showNotif(error.message || 'Échec de la réassociation.', 'error');
+  }
+}
+
 import PAGES from './pages.js';
-PAGES['aventures'] = renderAventuresPage;
+PAGES.aventures = renderAventuresPage;
 
 registerActions({
   openCreateAdventureModal: () => openCreateAdventureModal(),
-  openManageAdventureModal: (btn) => openManageAdventureModal(btn.dataset.id),
-  _advPickEmoji: (btn) => {
-    const picker = btn.closest('.adv-create-emojis, .adv-edit-emojis');
-    const wasSelected = btn.classList.contains('selected');
-    picker?.querySelectorAll('.adv-emoji-btn').forEach(b => b.classList.remove('selected'));
-    const target = document.getElementById(btn.dataset.targetId);
-    if (wasSelected) {
-      if (target) target.value = '';
-      return;
-    }
-    btn.classList.add('selected');
-    if (target) target.value = btn.dataset.emoji || '';
-  },
+  openManageAdventureModal: button => openManageAdventureModal(button.dataset.id),
   _advClose: () => closeModal(),
+  _advFilter: button => {
+    _hub.filter = button.dataset.filter || 'all';
+    _hub.leaveId = '';
+    _hub.detailClosed = false;
+    renderAventuresPage();
+  },
+  _advSort: select => {
+    _hub.sort = select.value || 'recent';
+    _hub.detailClosed = false;
+    renderAventuresPage();
+  },
+  _advSearch: input => {
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    _hub.query = input.value;
+    renderAventuresPage().then(() => {
+      const live = document.querySelector('[data-input="_advSearch"]');
+      if (!live) return;
+      live.focus({ preventScroll: true });
+      try { live.setSelectionRange(start, end); } catch {}
+    });
+  },
+  _advSelect: button => {
+    _hub.selectedId = button.dataset.id;
+    _hub.leaveId = '';
+    _hub.detailClosed = false;
+    renderAventuresPage();
+  },
+  _advCloseDetail: () => {
+    _hub.selectedId = '';
+    _hub.detailClosed = true;
+    renderAventuresPage();
+  },
+  _advLeaveAsk: button => {
+    _hub.leaveId = button.dataset.id;
+    renderAventuresPage();
+  },
+  _advLeaveCancel: () => {
+    _hub.leaveId = '';
+    renderAventuresPage();
+  },
+  _advLeaveConfirm: button => leaveAdventure(button.dataset.id),
+  _advAcceptInvitation: button => acceptHubInvitation(button.dataset.id),
+  _advDeclineInvitation: button => declineHubInvitation(button.dataset.id),
+  _advCreatePreview: input => {
+    const name = input.value.trim() || 'Nom de l’aventure';
+    const label = document.getElementById('adv-create-preview-name');
+    const emblem = document.getElementById('adv-create-emblem');
+    if (label) label.textContent = name;
+    if (emblem) emblem.textContent = _monogram(input.value);
+  },
+  _advEditPreview: input => {
+    const label = document.getElementById('adv-edit-preview-name');
+    const emblem = document.querySelector('.av-manage-preview .av-emblem');
+    if (label) label.textContent = input.value.trim() || 'Aventure sans nom';
+    if (emblem) emblem.textContent = _monogram(input.value);
+  },
+  _advPickColor: button => {
+    const target = document.getElementById(button.dataset.targetId);
+    if (target) target.value = button.dataset.color || FALLBACK_COLOR;
+    button.parentElement?.querySelectorAll('.av-color').forEach(item => item.classList.toggle('is-selected', item === button));
+    const scope = button.closest('.av-create-v3, .adv-manage-v3');
+    scope?.querySelectorAll('.av-emblem, .av-create-preview, .av-manage-preview').forEach(item => item.style.setProperty('--adventure-color', button.dataset.color || FALLBACK_COLOR));
+  },
   _doCreateAdventure: () => doCreateAdventure(),
   _advCreateFromBackup: () => createAdventureFromBackup(),
-  _advSaveMeta: (btn) => saveAdventureMeta(btn.dataset.id),
-  _advExport: (btn) => exportAdventureBackup(btn.dataset.id, btn),
-  _advImport: (btn) => importAdventureBackup(btn.dataset.id),
-  _advInvite: (btn) => inviteAdventurePlayer(btn.dataset.id),
-  _advCancelInvite: (btn) => cancelAdventureInvite(btn.dataset.advId, btn.dataset.email),
-  _advLeave: (btn) => leaveAdventure(btn.dataset.id),
-  _advToggleFeature: (btn) => toggleAdventureFeature(btn),
-  _advDelete: (btn) => deleteAdventureAndRefresh(btn.dataset.id),
-  _advHideDeleteConfirm: () => { document.getElementById('adv-delete-confirm').style.display = 'none'; },
-  _advShowDeleteConfirm: (btn) => {
-    document.getElementById('adv-delete-confirm').style.display = 'grid';
-    btn.style.display = 'none';
-  },
-  _advPromote: (btn) => promoteAdventurePlayer(btn.dataset.advId, btn.dataset.uid),
-  _advRemove: (btn) => removeAdventurePlayer(btn.dataset.advId, btn.dataset.uid),
-  _advRelink: (btn) => relinkAdventurePlayer(btn.dataset.advId, btn.dataset.oldUid, btn.dataset.newUid),
+  _advManageTab: button => openManageAdventureModal(_manage.id, button.dataset.tab),
+  _advSaveMeta: button => saveAdventureMeta(button.dataset.id),
+  _advArchive: button => archiveAdventure(button.dataset.id),
+  _advDelete: button => deleteAdventureAndRefresh(button.dataset.id),
+  _advExport: button => exportAdventureBackup(button.dataset.id, button),
+  _advImport: button => importAdventureBackup(button.dataset.id),
+  _advInvite: button => inviteAdventurePlayer(button.dataset.id),
+  _advCancelInvite: button => cancelAdventureInvite(button.dataset.advId, button.dataset.email),
+  _advToggleFeature: button => toggleAdventureFeature(button),
+  _advPromote: button => promoteAdventurePlayer(button.dataset.advId, button.dataset.uid),
+  _advRemove: button => removeAdventurePlayer(button.dataset.advId, button.dataset.uid),
+  _advRelink: button => relinkAdventurePlayer(button.dataset.advId, button.dataset.oldUid, button.dataset.newUid),
 });

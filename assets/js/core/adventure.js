@@ -418,7 +418,7 @@ export async function selectAdventure(adv) {
 // ── Créer une aventure ──────────────────────────
 // Ouvert à tout utilisateur connecté : le créateur en devient l'unique MJ.
 // (Les règles Firestore imposent createdBy/admins/accessList == [uid] à la création.)
-export async function createAdventure({ nom, emoji = '⚔️', description = '' }) {
+export async function createAdventure({ nom, emoji = '⚔️', description = '', color = '' }) {
   const uid = STATE.user?.uid;
   if (!uid) throw new Error('Non connecté');
 
@@ -428,6 +428,7 @@ export async function createAdventure({ nom, emoji = '⚔️', description = '' 
     nom,
     emoji,
     description,
+    ...(color ? { color } : {}),
     createdAt:  new Date().toISOString(),
     createdBy:  uid,
     admins:     [uid],
@@ -753,7 +754,7 @@ export async function relinkPlayerAccount(adventureId, oldUid, newUid) {
 }
 
 // ── Mettre à jour nom / emoji / description ────
-export async function updateAdventureMeta(adventureId, { nom, emoji, description }) {
+export async function updateAdventureMeta(adventureId, { nom, emoji, description, color, status }) {
   const uid = STATE.user?.uid;
   if (!uid) throw new Error('Non connecté');
 
@@ -770,6 +771,11 @@ export async function updateAdventureMeta(adventureId, { nom, emoji, description
   if (nom)         update.nom         = nom;
   if (emoji !== undefined) update.emoji = emoji;
   if (description !== undefined) update.description = description;
+  if (color !== undefined) update.color = color;
+  if (status !== undefined) {
+    if (!['active', 'archived'].includes(status)) throw new Error('Statut d\'aventure invalide');
+    update.status = status;
+  }
 
   await updateDoc(ref, update);
 

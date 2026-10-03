@@ -22445,9 +22445,34 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-v3 .ids-build > span { color: var(--text-dim); font-size: .56rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
 .cs-v3 .ids-build select { min-width: 0; flex: 1; padding: 3px 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: .76rem; font-weight: 600; cursor: pointer; }
 .cs-v3 .ids-build select option { background: var(--surface-2); }
-.cs-v3 .ids-build em { color: var(--text-dim); font-size: .62rem; font-style: normal; }
 .cs-v3 .ids-build button { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .cs-v3 .ids-build button:hover { background: var(--surface-3); color: var(--text); }
+.cs-v3 .ids-build button.ids-build-more { width: 26px; color: var(--text-dim); font-size: .72rem; font-weight: 700; letter-spacing: 0; line-height: 1; }
+.cs-v3 .ids-build button.ids-build-more.is-open { background: var(--surface-3); color: var(--text); }
+
+.cs-v3 .ids-pop-builds { width: 304px; padding: 10px; }
+.cs-v3 .ids-pop-builds header > div { display: flex; align-items: baseline; gap: 7px; }
+.cs-v3 .ids-pop-builds header small { color: var(--text-dim); font-size: .58rem; font-weight: 500; }
+.cs-v3 .ids-pop-builds > p { margin: 0 3px 9px; color: var(--text-dim); font-size: .62rem; line-height: 1.45; }
+.cs-v3 .ids-build-options { display: flex; flex-direction: column; gap: 5px; }
+.cs-v3 .ids-build-option { display: grid; grid-template-columns: 25px minmax(0,1fr) 25px 25px; align-items: center; gap: 4px; min-height: 39px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-sunken); }
+.cs-v3 .ids-build-option.is-active { border-color: color-mix(in srgb,var(--aura) 45%,var(--border)); background: color-mix(in srgb,var(--aura) 8%,var(--surface-sunken)); }
+.cs-v3 .ids-build-option > label { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.cs-v3 .ids-build-option input { min-width: 0; width: 100%; padding: 2px 3px; border: 0; border-bottom: 1px solid transparent; outline: 0; background: transparent; color: var(--text); font-size: .7rem; font-weight: 600; }
+.cs-v3 .ids-build-option input:focus { border-bottom-color: var(--aura); }
+.cs-v3 .ids-build-option label small { padding-left: 3px; color: var(--aura); font-size: .52rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.cs-v3 .ids-build-option > button { width: 25px; height: 25px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-dim); cursor: pointer; }
+.cs-v3 .ids-build-option > button:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.cs-v3 .ids-build-option .ids-build-activate { border: 1px solid var(--border-md); border-radius: 50%; }
+.cs-v3 .ids-build-option.is-active .ids-build-activate { border-color: var(--aura); background: var(--aura); color: #fff; }
+.cs-v3 .ids-build-option .ids-build-save { color: var(--emerald); }
+.cs-v3 .ids-build-option .ids-build-delete:hover:not(:disabled) { background: rgba(255,90,126,.12); color: var(--crimson-light); }
+.cs-v3 .ids-build-option > button:disabled { cursor: default; opacity: .55; }
+.cs-v3 .ids-build-create { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 40px; margin-top: 7px; padding: 6px 9px; border: 1px dashed var(--border-md); border-radius: 8px; background: transparent; color: var(--text-soft); cursor: pointer; text-align: left; }
+.cs-v3 .ids-build-create:hover { border-color: var(--aura); background: color-mix(in srgb,var(--aura) 7%,transparent); }
+.cs-v3 .ids-build-create > b { display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 24px; border-radius: 6px; background: color-mix(in srgb,var(--aura) 14%,transparent); color: var(--aura); font-size: .9rem; }
+.cs-v3 .ids-build-create > span { display: flex; flex-direction: column; gap: 1px; font-size: .7rem; font-weight: 700; }
+.cs-v3 .ids-build-create small { color: var(--text-dim); font-size: .56rem; font-weight: 500; }
 
 .cs-v3 .ids-section { display: flex; flex-direction: column; gap: 14px; margin-top: 13px; padding: 13px 14px 0; border-top: 1px solid var(--border); }
 .cs-v3 .ids-vital { display: flex; flex-direction: column; gap: 7px; padding-bottom: 1px; }
