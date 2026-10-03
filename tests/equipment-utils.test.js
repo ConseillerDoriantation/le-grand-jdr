@@ -120,4 +120,31 @@ test('équiper respecte les slots configurés et conserve les données d arme', 
   assert.equal(patch.equipement['Arme active'].portee, 12);
 });
 
+test('équiper une arme à deux mains libère strictement la main secondaire', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  const character = {
+    inventaire: [{ nom: 'Espadon', template: 'arme', degats: '2d6', mains: '2 mains' }],
+    equipement: {
+      'Main secondaire': { nom: 'Bouclier ancien', sousType: 'Bouclier', sourceInvIndex: 4 },
+    },
+  };
+
+  const patch = buildInventoryEquipPatch(character, 0, 'Main principale');
+  assert.equal(patch.equipement['Main principale'].nom, 'Espadon');
+  assert.equal(patch.equipement['Main secondaire'], undefined);
+  assert.deepEqual(patch.displacedItems.map(item => item.nom), ['Bouclier ancien']);
+});
+
+test('une arme secondaire ne peut pas être équipée tant que la principale exige deux mains', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  const character = {
+    inventaire: [{ nom: 'Dague', template: 'arme', degats: '1d4', mains: '1 main' }],
+    equipement: {
+      'Main principale': { nom: 'Arc long', degats: '1d8', mains: '2 mains' },
+    },
+  };
+
+  assert.equal(buildInventoryEquipPatch(character, 0, 'Main secondaire'), null);
+});
+
 test.after(() => setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS));
