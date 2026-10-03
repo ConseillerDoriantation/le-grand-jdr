@@ -914,6 +914,7 @@ const _identityNumber = value => Number(value || 0).toLocaleString('fr-FR');
 function _identityPopoverHtml(c, canEdit, { xpCur, xpPalier, xpPct }) {
   const ui = _identityStateFor(c);
   if (!ui.popover) return '';
+  if (ui.popover === 'builds') return canEdit ? _buildBuildManagerHtml(c) : '';
   if (ui.popover === 'appearance') {
     if (!canEdit) return '';
     const isCustom = !!c.auraColor;
@@ -1039,14 +1040,35 @@ function _buildBuildSwitcherHtml(c, canEdit) {
   const { builds, activeBuildId } = normalizeCharacterBuilds(c);
   const active = builds.find(b => b.id === activeBuildId) || builds[0];
   if (!canEdit && builds.length <= 1) return '';
-  return `<div class="ids-build" title="${_esc(`${active?.name || 'Principal'} modifie image, équipement, stats et bases PV/PM.`)}">
+  const menuOpen = _identityStateFor(c).popover === 'builds';
+  return `<div class="ids-build${menuOpen ? ' is-open' : ''}" title="${_esc(`${active?.name || 'Principal'} modifie image, équipement, stats et bases PV/PM.`)}">
     <span>Build</span>
     <select data-change="switchCharacterBuild" data-id="${c.id}" ${canEdit ? '' : 'disabled'}>
       ${builds.map(b => `<option value="${_esc(b.id)}" ${b.id === activeBuildId ? 'selected' : ''}>${_esc(b.name || 'Build')}</option>`).join('')}
     </select>
-    ${builds.length > 1 ? `<em title="${builds.length} builds">${builds.length}</em>` : ''}
-    ${canEdit ? `<button type="button" data-action="openCharacterBuildsModal" data-id="${c.id}" title="Gérer les builds" aria-label="Gérer les builds">⚙</button>` : ''}
+    ${canEdit ? `<button type="button" class="ids-build-more${menuOpen ? ' is-open' : ''}" data-action="toggleIdentityPopover" data-popover="builds" data-id="${c.id}" title="Gérer les builds" aria-label="Gérer les builds" aria-expanded="${menuOpen}">⋯</button>` : ''}
   </div>`;
+}
+
+function _buildBuildManagerHtml(c) {
+  const { builds, activeBuildId } = normalizeCharacterBuilds(c);
+  return `<section class="ids-pop ids-pop-builds" role="dialog" aria-label="Gestion des builds">
+    <header><div><b>Builds</b><small>${builds.length} configuration${builds.length > 1 ? 's' : ''}</small></div><button data-action="closeIdentityPopover" aria-label="Fermer">×</button></header>
+    <p>Le build actif définit le portrait, l’équipement et les statistiques de base.</p>
+    <div class="ids-build-options">
+      ${builds.map((build, index) => {
+        const isActive = build.id === activeBuildId;
+        const name = build.name || `Build ${index + 1}`;
+        return `<div class="ids-build-option${isActive ? ' is-active' : ''}">
+          <button class="ids-build-activate" data-action="switchCharacterBuild" data-id="${c.id}" data-build-id="${_esc(build.id)}" ${isActive ? 'disabled' : ''} title="${isActive ? 'Build actif' : 'Activer ce build'}" aria-label="${isActive ? 'Build actif' : `Activer ${_esc(name)}`}">${isActive ? '✓' : ''}</button>
+          <label><input value="${_esc(name)}" data-build-name="${_esc(build.id)}" maxlength="32" aria-label="Nom du build">${isActive ? '<small>Actif</small>' : ''}</label>
+          <button class="ids-build-save" data-action="renameCharacterBuild" data-id="${c.id}" data-build-id="${_esc(build.id)}" title="Enregistrer le nom" aria-label="Enregistrer le nom">✓</button>
+          <button class="ids-build-delete" data-action="deleteCharacterBuild" data-id="${c.id}" data-build-id="${_esc(build.id)}" ${builds.length <= 1 ? 'disabled' : ''} title="${builds.length <= 1 ? 'Le dernier build ne peut pas être supprimé' : 'Supprimer ce build'}" aria-label="Supprimer ce build">×</button>
+        </div>`;
+      }).join('')}
+    </div>
+    <button class="ids-build-create" data-action="createCharacterBuild" data-id="${c.id}"><b>+</b><span>Nouveau build<small>Copie la configuration actuelle</small></span></button>
+  </section>`;
 }
 
 function _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v3Tab }) {
@@ -1178,7 +1200,9 @@ function _toggleIdentityPopover(btn) {
     if (!popover) return;
     const anchor = ui.popover === 'appearance'
       ? side.querySelector('.ids-portrait') || btn
-      : side.querySelector('.ids-hero') || btn;
+      : ui.popover === 'builds'
+        ? side.querySelector('.ids-build') || btn
+        : side.querySelector('.ids-hero') || btn;
     const rect = anchor.getBoundingClientRect();
     const halfWidth = popover.offsetWidth / 2;
     const left = Math.max(halfWidth + 12, Math.min(window.innerWidth - halfWidth - 12, rect.left + rect.width / 2 + 10));
@@ -2353,43 +2377,6 @@ async function _persistCharacterBuildState(c) {
   if (STATE.activeChar?.id === c.id) Object.assign(STATE.activeChar, payload);
 }
 
-function _renderBuildsModalBody(c) {
-  const { builds, activeBuildId } = normalizeCharacterBuilds(c);
-  return `<div class="cs-build-modal">
-    <div class="cs-build-modal-head">
-      <div>
-        <span>Configurations</span>
-        <strong>${_esc(c.nom || 'Personnage')}</strong>
-      </div>
-      <button class="btn btn-gold btn-sm" data-action="createCharacterBuild" data-id="${c.id}">+ Nouveau build</button>
-    </div>
-    <p>Chaque build garde sa propre image, son équipement, ses stats de base, ses points par niveau et ses bases PV/PM. Le reste de la fiche reste partagé.</p>
-    <div class="cs-build-list">
-      ${builds.map((b, idx) => `<div class="cs-build-row ${b.id === activeBuildId ? 'is-active' : ''}">
-        <div class="cs-build-row-main">
-          <span class="cs-build-row-badge">${b.id === activeBuildId ? 'Actif' : `#${idx + 1}`}</span>
-          <input value="${_esc(b.name || `Build ${idx + 1}`)}" data-build-name="${_esc(b.id)}" maxlength="32">
-        </div>
-        <div class="cs-build-row-actions">
-          ${b.id === activeBuildId ? '<span class="cs-build-row-lock">sélectionné</span>' : `<button class="btn btn-outline btn-sm" data-action="switchCharacterBuild" data-id="${c.id}" data-build-id="${_esc(b.id)}">Activer</button>`}
-          <button class="btn btn-outline btn-sm" data-action="renameCharacterBuild" data-id="${c.id}" data-build-id="${_esc(b.id)}">Renommer</button>
-          ${builds.length > 1 ? `<button class="btn btn-danger btn-sm" data-action="deleteCharacterBuild" data-id="${c.id}" data-build-id="${_esc(b.id)}">Supprimer</button>` : ''}
-        </div>
-      </div>`).join('')}
-    </div>
-  </div>`;
-}
-
-function openCharacterBuildsModal(charId) {
-  const c = getCharacterById(charId);
-  if (!c) return;
-  applyActiveBuild(c);
-  openModal('Builds du personnage', _renderBuildsModalBody(c), {
-    subtitle: 'Image, équipement et statistiques alternatives',
-    accent: '#7c3aed',
-  });
-}
-
 async function switchCharacterBuild(charId, buildId) {
   const c = getCharacterById(charId);
   if (!c || !buildId) return;
@@ -2397,6 +2384,7 @@ async function switchCharacterBuild(charId, buildId) {
   if (!target) return;
   try {
     await _persistCharacterBuildState(c);
+    _closeIdentityPopover();
     showNotif(`Build actif : ${target.name || 'Build'}`, 'success');
     renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
   } catch (e) {
@@ -2410,10 +2398,9 @@ async function createCharacterBuild(charId) {
   const build = createBuild(c, { fromActive: true });
   try {
     await _persistCharacterBuildState(c);
-    closeModalDirect();
+    _closeIdentityPopover();
     showNotif(`Build créé : ${build.name}`, 'success');
     renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
-    openCharacterBuildsModal(charId);
   } catch (e) {
     notifySaveError(e);
   }
@@ -2428,7 +2415,7 @@ async function renameCharacterBuild(charId, buildId) {
   try {
     await _persistCharacterBuildState(c);
     showNotif('Build renommé.', 'success');
-    openCharacterBuildsModal(charId);
+    _closeIdentityPopover();
     renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
   } catch (e) {
     notifySaveError(e);
@@ -2445,10 +2432,9 @@ async function deleteCharacterBuild(charId, buildId) {
   }
   try {
     await _persistCharacterBuildState(c);
-    closeModalDirect();
+    _closeIdentityPopover();
     showNotif('Build supprimé.', 'success');
     renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
-    openCharacterBuildsModal(charId);
   } catch (e) {
     notifySaveError(e);
   }
@@ -2603,7 +2589,6 @@ registerActions({
   charPickSearch:          ()       => _charPickFilter(),
   charPickAccount:         (btn)    => charPickAccount(btn),
   _setDefaultCharacter:    (btn)    => _setDefaultCharacter(btn.dataset.id),
-  openCharacterBuildsModal: (btn)    => openCharacterBuildsModal(btn.dataset.id),
   switchCharacterBuild:    (el)     => switchCharacterBuild(el.dataset.id, el.dataset.buildId || el.value),
   createCharacterBuild:    (btn)    => createCharacterBuild(btn.dataset.id),
   renameCharacterBuild:    (btn)    => renameCharacterBuild(btn.dataset.id, btn.dataset.buildId),

@@ -111,7 +111,7 @@ test('le menu export conserve des options lisibles dans les outils compacts', ()
 test('les contrôles identité réutilisent les actions métier existantes', () => {
   for (const action of [
     'reassignCharOwner', '_setDefaultCharacter', 'openCharExportMenu', 'deleteChar',
-    'open-character-photo', 'switchCharacterBuild', 'openCharacterBuildsModal',
+    'open-character-photo', 'switchCharacterBuild', 'createCharacterBuild', 'deleteCharacterBuild',
     'adjustStat', '_adjVitalBase', 'toggleCharDerivative', 'openSendGoldModal',
   ]) assert.match(source, new RegExp(`data-(?:action|change)="${action}"`));
   assert.match(source, /data-change="setCharAuraColor"/);
@@ -127,6 +127,16 @@ test('l’édition groupée de l’identité persiste nom, classe, race et titre
   assert.equal((save.match(/updateInCol\('characters'/g) || []).length, 1);
   assert.match(source, /makeSortable\(host/);
   assert.doesNotMatch(source.slice(source.indexOf('function _initCharacterTitlesSortable'), source.indexOf('function _rerenderIdentity')), /updateInCol/);
+});
+
+test('les builds se créent, changent et se suppriment depuis la fiche sans modale', () => {
+  assert.match(source, /data-popover="builds"/);
+  assert.match(source, /class="ids-pop ids-pop-builds"/);
+  assert.match(source, /data-action="renameCharacterBuild"/);
+  assert.doesNotMatch(source, /function openCharacterBuildsModal/);
+  assert.doesNotMatch(source, /openModal\('Builds du personnage'/);
+  assert.match(css, /\.cs-v3 \.ids-build-option\.is-active/);
+  assert.match(css, /\.cs-v3 \.ids-build-create/);
 });
 
 test('les modes lecture et mobile restent sûrs', () => {
