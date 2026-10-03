@@ -11,7 +11,10 @@ import {
   buildInventoryEquipPatch,
   inferAttackStatFromItem,
 } from '../../shared/equipment-utils.js';
-import { equipmentSlotAcceptsItem, getEquipmentSlot } from '../../shared/equipment-slots.js';
+import {
+  equipmentSlotAcceptsItem, getEquipmentSlot, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId,
+} from '../../shared/equipment-slots.js';
+import { weaponHands } from '../../shared/weapon-family.js';
 
 let _equipCompatibles = [];
 let _equipSelectedMeta = {};
@@ -38,6 +41,12 @@ export async function equipInventoryItem(invIndex, requestedSlot = '', {
   const c = STATE.activeChar;
   if (!c) return false;
 
+  if (requestedSlot === getSecondaryWeaponSlotId()
+    && weaponHands(c.equipement?.[getPrimaryWeaponSlotId()]) === 2) {
+    showNotif('La main secondaire est prise par l’arme à deux mains.', 'error');
+    return false;
+  }
+
   const change = buildInventoryEquipPatch(c, invIndex, requestedSlot);
   if (!change) {
     showNotif("Cet objet ne correspond à aucun emplacement d'équipement actif.", 'error');
@@ -60,7 +69,10 @@ export async function equipInventoryItem(invIndex, requestedSlot = '', {
     const replaced = change.replacedItem && change.replacedItem.sourceInvIndex !== invIndex
       ? ` · ${change.replacedItem.nom} déséquipé`
       : '';
-    showNotif(`${change.item.nom || 'Objet'} équipé · ${change.slotDef.label}${replaced}`, 'success');
+    const displaced = (change.displacedItems || []).length
+      ? ` · ${(change.displacedItems || []).map(item => item.nom).filter(Boolean).join(', ')} rangé${change.displacedItems.length > 1 ? 's' : ''}`
+      : '';
+    showNotif(`${change.item.nom || 'Objet'} équipé · ${change.slotDef.label}${replaced}${displaced}`, 'success');
   } catch (e) {
     c.equipement = previousEquipement;
     c.statsBonus = previousStatsBonus;
