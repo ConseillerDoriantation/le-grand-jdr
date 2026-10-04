@@ -1908,9 +1908,14 @@ function _vttForgeOpen(charId, uid) { if (!_msCanEdit(uid)) return; _openForgeMo
 
 // ── Onglet Notes (modèle notesList partagé avec la vraie fiche) ──────────
 // Carnet (refonte) : + note ouvre directement, titre éditable sur place,
-// textarea AUTOSAVE (débounce 600 ms, sans re-render pendant la frappe).
+// textarea AUTOSAVE (débounce, sans re-render pendant la frappe).
 function _msTabNotes(c, uid, canEdit) {
-  const notes = c?.notesList || [];
+  // Un re-rendu pendant la frappe (PV du perso modifiés…) réaffiche le brouillon
+  // en attente plutôt que la dernière version enregistrée.
+  const notes = (c?.notesList || []).map((note, i) => {
+    const draft = _msNoteDrafts.get(`${c.id}|${i}`);
+    return draft ? { ...note, titre: draft.titre, contenu: draft.contenu } : note;
+  });
   let html = `<div class="vtt-ms-notes">`;
   if (canEdit) html += `<button class="vtt-ms-note-add" data-vtt-fn="_vttMsAddNote" data-vtt-args="${c.id}|${uid}">+ Nouvelle note</button>`;
   if (!notes.length) return html + `<div class="vtt-ms-empty">${canEdit ? 'Carnet vide. Crée une note.' : 'Carnet vide.'}</div></div>`;
@@ -1938,35 +1943,56 @@ function _msTabNotes(c, uid, canEdit) {
   return html + '</div>';
 }
 
-// Autosave du Carnet — lie le titre + le textarea de la note ouverte, débounce
-// 600 ms, écrit sans re-render (focus/caret préservés). Appelé après le rendu.
+// Autosave du Carnet — lie le titre + le textarea de la note ouverte, écrit sans
+// re-render (focus/caret préservés). Appelé après le rendu.
+// Quota : chaque écriture renvoie la fiche entière (gros doc) à tous les clients
+// du VTT → 1,5 s de pause (au lieu de 600 ms), et enregistrement immédiat quand
+// le champ perd le focus. Le texte est capturé À LA FRAPPE (brouillon) : fermer
+// ou re-rendre la mini-fiche avant l'échéance ne fait plus perdre la saisie.
+const _MS_NOTE_SAVE_MS = 1500;
 const _msNoteTimers = {};
+const _msNoteDrafts = new Map();   // `${charId}|${idx}` → { charId, uid, idx, titre, contenu }
 function _bindMiniNotes(charId, uid) {
   const idx = _msOpenNote; if (idx === null || idx === undefined) return;
   const t = document.getElementById(`vtt-ms-nt-t-${idx}`);
   const x = document.getElementById(`vtt-ms-nt-x-${idx}`);
+  const key = `${charId}|${idx}`;
   const onInput = (el) => {
     const s = document.getElementById(`vtt-ms-nt-s-${idx}`);
     if (s) { s.textContent = 'Enregistrement…'; s.classList.remove('saved'); }
     if (el === t) { const h = el.closest('.vtt-ms-note-card')?.querySelector('.vtt-ms-note-title'); if (h) h.textContent = el.value.trim() || 'Sans titre'; }
-    clearTimeout(_msNoteTimers[idx]);
-    _msNoteTimers[idx] = setTimeout(() => _msNoteAutosave(charId, uid, idx), 600);
+    const note = VS.characters[charId]?.notesList?.[idx] || {};
+    _msNoteDrafts.set(key, {
+      charId, uid, idx,
+      titre: t ? t.value : (note.titre || ''),
+      contenu: x ? x.value : (note.contenu || ''),
+    });
+    clearTimeout(_msNoteTimers[key]);
+    _msNoteTimers[key] = setTimeout(() => _msNoteAutosave(key), _MS_NOTE_SAVE_MS);
   };
-  if (t) t.oninput = () => onInput(t);
-  if (x) x.oninput = () => onInput(x);
+  const onBlur = () => { if (_msNoteDrafts.has(key)) void _msNoteAutosave(key); };
+  if (t) { t.oninput = () => onInput(t); t.onblur = onBlur; }
+  if (x) { x.oninput = () => onInput(x); x.onblur = onBlur; }
 }
-async function _msNoteAutosave(charId, uid, idx) {
+async function _msNoteAutosave(key) {
+  clearTimeout(_msNoteTimers[key]); delete _msNoteTimers[key];
+  const draft = _msNoteDrafts.get(key); if (!draft) return;
+  _msNoteDrafts.delete(key);
+  const { charId, uid, idx } = draft;
   if (!_msCanEdit(uid)) return;
   const c = VS.characters[charId]; if (!c) return;
-  const t = document.getElementById(`vtt-ms-nt-t-${idx}`);
-  const x = document.getElementById(`vtt-ms-nt-x-${idx}`);
   const notes = [...(c.notesList || [])];
   if (!notes[idx]) return;
-  notes[idx] = { ...notes[idx], titre: (t ? (t.value.trim() || 'Sans titre') : notes[idx].titre), contenu: x ? x.value : notes[idx].contenu };
+  notes[idx] = { ...notes[idx], titre: draft.titre.trim() || 'Sans titre', contenu: draft.contenu };
   c.notesList = notes;   // reflet local, PAS de re-render → frappe non interrompue
   const ok = await updateDoc(_chrRef(charId), { notesList: notes }).then(() => true).catch(() => false);
   const s = document.getElementById(`vtt-ms-nt-s-${idx}`);
-  if (s) { s.textContent = ok ? 'Enregistré' : 'Non enregistré'; s.classList.toggle('saved', ok); }
+  if (s && !_msNoteDrafts.has(key)) { s.textContent = ok ? 'Enregistré' : 'Non enregistré'; s.classList.toggle('saved', ok); }
+}
+// Enregistre tout brouillon en attente (avant ajout/suppression/repli d'une note,
+// dont les index changent, et à la sortie du VTT avant le vidage des caches).
+function _msFlushNoteDrafts() {
+  return Promise.all([..._msNoteDrafts.keys()].map(_msNoteAutosave));
 }
 
 // Texte affiché dans le textarea : si la note vient de l'éditeur riche de la vraie
@@ -1981,6 +2007,7 @@ function _msNoteText(contenu) {
 
 async function _vttMsAddNote(charId, uid) {
   if (!_msCanEdit(uid)) return;
+  void _msFlushNoteDrafts();
   const c = VS.characters[charId]; if (!c) return;
   const notes = [...(c.notesList || [])];
   notes.push({ titre: '', contenu: '', date: new Date().toLocaleDateString('fr-FR') });
@@ -1994,6 +2021,7 @@ async function _vttMsAddNote(charId, uid) {
 
 function _vttMsToggleNote(idx) {
   idx = parseInt(idx);
+  void _msFlushNoteDrafts();
   _msOpenNote = _msOpenNote === idx ? null : idx;
   if (VS.miniUid) _renderMiniSheet(VS.miniUid);
 }
@@ -2002,6 +2030,7 @@ function _vttMsToggleNote(idx) {
 async function _vttMsDeleteNote(charId, uid, idx) {
   if (!_msCanEdit(uid)) return;
   idx = parseInt(idx);
+  void _msFlushNoteDrafts();
   const c = VS.characters[charId]; if (!c) return;
   const prev = [...(c.notesList || [])];
   if (!prev[idx]) return;
@@ -2265,6 +2294,7 @@ export {
   _msBuildEquipItem,
   _msCanEdit,
   _msCanEditVitals,
+  _msFlushNoteDrafts,
   _msCatItem,
   _msFilterBar,
   _msItemFitsSlot,

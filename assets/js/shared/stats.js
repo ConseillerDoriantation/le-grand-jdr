@@ -3,8 +3,9 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // Un seul doc par aventure : adventures/{aid}/stats/main. À chaque action
 // (jet de compétence, attaque, soin, émote…) on INCRÉMENTE des compteurs via
-// FieldValue.increment — pas de read-modify-write, sûr en concurrence et quasi
-// gratuit en quota (1 petite écriture / action, 1 seule lecture pour la page).
+// FieldValue.increment — pas de read-modify-write, sûr en concurrence.
+// Quota : les événements sont cumulés quelques secondes (stats-pending.js) puis
+// écrits en UNE fois → 1 écriture par rafale d'actions, 1 seule lecture pour la page.
 //
 // Modèle (tout en compteurs) :
 //   chars: {
@@ -27,6 +28,9 @@ import { db, doc, getDoc, setDoc, updateDoc, increment, deleteField, runTransact
 import { getCurrentAdventureId, deleteFromCol, getDocDataSilent, updateInCol } from '../data/firestore.js';
 import { patchStatsRollupScopes } from './stats-analysis.js';
 import { buildCombatCorrectionDeltas } from './stats-corrections.js';
+import {
+  createStatsPending, isStatsPendingEmpty, addStatsIncrement, addStatsMax, buildStatsPatch,
+} from './stats-pending.js';
 import {
   statsSessionEntryForChar as _sessionEntryForChar,
   sumStatsSessionsRaw as _sumByDatesRaw,
@@ -108,6 +112,53 @@ async function bumpStats(patch) {
   catch { return false; }
 }
 
+// ── Tampon d'écriture (quota) ────────────────────────────────────────────────
+// Les compteurs d'actions sont cumulés puis écrits en un seul setDoc : 3 s après
+// la dernière action (10 s au plus après la première), ou tout de suite quand
+// l'onglet passe en arrière-plan, à la navigation, à la déconnexion et avant
+// toute lecture/mutation MJ du doc. Le setDoc est mis en file par le SDK
+// (persistée en IndexedDB) : un onglet fermé juste après garde l'écriture.
+const _FLUSH_DELAY_MS = 3000;
+const _FLUSH_MAX_WAIT_MS = 10_000;
+let _pending = null;
+let _pendingRef = null;      // doc visé, capturé au 1er ajout (changement d'aventure sûr)
+let _pendingSince = 0;
+let _flushTimer = null;
+
+export function flushStats() {
+  clearTimeout(_flushTimer);
+  _flushTimer = null;
+  const pending = _pending, ref = _pendingRef;
+  _pending = null; _pendingRef = null; _pendingSince = 0;
+  const patch = buildStatsPatch(pending, increment);
+  if (!ref || !patch) return Promise.resolve(true);
+  return setDoc(ref, patch, { merge: true }).then(() => true, () => false);
+}
+
+function _queueStats(apply) {
+  const ref = _statsRef();
+  if (!ref) return Promise.resolve(false);
+  if (_pendingRef && _pendingRef.path !== ref.path) void flushStats();
+  _pending ??= createStatsPending();
+  _pendingRef ??= ref;
+  apply(_pending);
+  if (isStatsPendingEmpty(_pending)) return Promise.resolve(true);
+  const now = Date.now();
+  if (!_pendingSince) _pendingSince = now;
+  clearTimeout(_flushTimer);
+  const wait = Math.max(0, Math.min(_FLUSH_DELAY_MS, _pendingSince + _FLUSH_MAX_WAIT_MS - now));
+  _flushTimer = setTimeout(() => { void flushStats(); }, wait);
+  return Promise.resolve(true);
+}
+
+if (typeof document !== 'undefined') {
+  const flushNow = () => { if (_pending) void flushStats(); };
+  document.addEventListener('visibilitychange', () => { if (document.hidden) flushNow(); });
+  document.addEventListener('app:page-changed', flushNow);
+  document.addEventListener('app:session-releasing', flushNow);
+  window.addEventListener('pagehide', flushNow);
+}
+
 export async function registerStatsSession({ key = '', date = '', startedAt = Date.now() } = {}) {
   const sessionKey = String(key || '').trim();
   if (!sessionKey) return false;
@@ -120,6 +171,7 @@ export async function registerStatsSession({ key = '', date = '', startedAt = Da
 }
 
 export async function loadStats() {
+  void flushStats();   // la lecture locale inclut alors les compteurs encore en tampon
   const ref = _statsRef();
   if (!ref) return null;
   const snap = await getDoc(ref).catch(() => null);
@@ -130,6 +182,7 @@ export async function loadStats() {
 
 // Remise à zéro de toutes les statistiques de l'aventure (MJ).
 export async function resetStats() {
+  void flushStats();
   const ref = _statsRef();
   if (!ref) return false;
   try { await setDoc(ref, {}, { merge: false }); await _invalidateStatsRollup(); _mem = {}; return true; }
@@ -138,6 +191,7 @@ export async function resetStats() {
 
 // Supprime les stats d'UN personnage (ex. jets de test) sans toucher aux autres.
 export async function deleteCharStats(charId) {
+  void flushStats();
   const ref = _statsRef();
   if (!ref || !charId) return false;
   try {
@@ -154,6 +208,7 @@ export async function deleteCharStats(charId) {
 // Le cutoff empêche le journal VTT historique de reconstruire les moyennes que
 // le MJ vient volontairement de retirer ; les nouvelles actions restent suivies.
 export async function deleteCharDateStats(charId, dateKey) {
+  void flushStats();
   const ref = _statsRef();
   if (!ref || !charId || !dateKey) return false;
   const snap = await getDoc(ref).catch(() => null);
@@ -198,6 +253,7 @@ export async function setSessionMission(dateKey, { mission = '', missionId = '',
 // des compteurs ; le journal permet de retrouver le maximum des scopes restants.
 // Réservé au MJ (règle doc stats).
 export async function deleteDatesStats(dates) {
+  void flushStats();
   const ref = _statsRef();
   if (!ref || !Array.isArray(dates) || !dates.length) return false;
   const sessionKeys = [...new Set(dates.filter(Boolean))];
@@ -236,6 +292,7 @@ export function peekStats() { return _mem; }
 // « plus gros coup » doivent être réécrits : les autres corrections restent dans
 // le rollup immuable et sont appliquées à l'affichage aux compteurs futurs.
 export async function applyStatsLegacyRollup(scopes = {}, version = 1) {
+  void flushStats();
   const ref = _statsRef();
   if (!ref || !scopes || typeof scopes !== 'object') return false;
   const patch = { legacyRollupVersion: version, legacyRollupAt: Date.now() };
@@ -283,6 +340,7 @@ export const deleteDateStats = (dateKey) => deleteDatesStats(dateKey ? [dateKey]
 // répercutée sur le miroir daté ET sur le total campagne, afin que tous les scopes
 // restent cohérents. Les totaux servant aux moyennes suivent les dégâts corrigés.
 export async function correctDateCombatStats(charId, dateKey, values = {}) {
+  void flushStats();
   const ref = _statsRef();
   if (!ref || !charId || !dateKey) return false;
   const snap = await getDoc(ref).catch(() => null);
@@ -318,6 +376,7 @@ export async function correctDateCombatStats(charId, dateKey, values = {}) {
 
 // Supprime toutes les stats liées à une mission (toutes ses séances datées).
 export async function deleteMissionStats(missionId) {
+  void flushStats();
   const ref = _statsRef();
   if (!ref || !missionId) return false;
   const snap = await getDoc(ref).catch(() => null);
@@ -428,7 +487,7 @@ function _incTree(node, sign) {
 }
 export function applyStatsDelta(delta, sign = 1) {
   if (!delta?.chars || !Object.keys(delta.chars).length) return;
-  return bumpStats({ chars: _incTree(delta.chars, sign) });
+  return _queueStats(p => addStatsIncrement(p, { chars: delta.chars }, sign));
 }
 
 // ── Records "max" (plus gros coup infligé / reçu) ────────────────────────────
@@ -454,47 +513,47 @@ async function _bumpMaxField(charId, charName, field, val) {
     (((char[bucket.field] ??= {})[bucket.key] ??= {}).combat ??= {})[field] = val;
     patch.chars[charId][bucket.field] = { [bucket.key]: { combat: { [field]: val } } };
   }
-  return bumpStats(patch);
+  return _queueStats(p => addStatsMax(p, patch));
 }
 export const bumpBiggestHit   = (charId, name, dmg) => _bumpMaxField(charId, name, 'biggestHit', dmg);
 export const bumpBiggestTaken = (charId, name, dmg) => _bumpMaxField(charId, name, 'biggestTaken', dmg);
 
 // ── Soin direct (ex. tick de Régénération) ───────────────────────────────────
-// Écriture directe (un HoT par tour ne se « défait » pas proprement à l'annulation).
+// Non réversible (un HoT par tour ne se « défait » pas proprement à l'annulation).
 export function bumpHeal(charId, charName, amount) {
   if (!charId || !(amount > 0)) return;
   const bucket = _statsBucket();
-  return bumpStats({ chars: { [charId]: {
+  return _queueStats(p => addStatsIncrement(p, { chars: { [charId]: {
     name: charName || '',
-    combat: { heal: increment(amount) },
-    [bucket.field]: { [bucket.key]: { combat: { heal: increment(amount) } } },
-  } } });
+    combat: { heal: amount },
+    [bucket.field]: { [bucket.key]: { combat: { heal: amount } } },
+  } } }));
 }
 
 // ── Émote utilisée (par perso) ───────────────────────────────────────────────
-// Pas d'annulation possible → écriture directe.
+// Pas d'annulation possible.
 export function bumpDamageTaken(charId, charName, amount, { ko = false } = {}) {
   const dmg = Math.max(0, Number(amount) || 0);
   if (!charId || (dmg <= 0 && !ko)) return;
   const bucket = _statsBucket();
   const combat = {};
-  if (dmg > 0) combat.dmgTaken = increment(dmg);
-  if (ko) combat.kosTaken = increment(1);
-  return bumpStats({ chars: { [charId]: {
+  if (dmg > 0) combat.dmgTaken = dmg;
+  if (ko) combat.kosTaken = 1;
+  return _queueStats(p => addStatsIncrement(p, { chars: { [charId]: {
     name: charName || '',
     combat,
     [bucket.field]: { [bucket.key]: { combat } },
-  } } });
+  } } }));
 }
 
 export function bumpEmote(charId, charName, emoteName) {
   if (!charId || !emoteName) return;
   const bucket = _statsBucket();
-  return bumpStats({ chars: { [charId]: {
+  return _queueStats(p => addStatsIncrement(p, { chars: { [charId]: {
     name: charName || '',
-    emotes: { [emoteName]: increment(1) },
-    [bucket.field]: { [bucket.key]: { emotes: { [emoteName]: increment(1) } } },
-  } } });
+    emotes: { [emoteName]: 1 },
+    [bucket.field]: { [bucket.key]: { emotes: { [emoteName]: 1 } } },
+  } } }));
 }
 
 export function bumpSkill(charId, charName, skill, { crit = false, fumble = false, natural = null, total = null } = {}) {
@@ -505,16 +564,16 @@ export function bumpSkill(charId, charName, skill, { crit = false, fumble = fals
   const hasDetail = natural !== null && natural !== '' && total !== null && total !== ''
     && Number.isFinite(Number(natural)) && Number.isFinite(Number(total));
   const sk = () => ({
-    rolls: increment(1),
-    crits: increment(crit ? 1 : 0),
-    fumbles: increment(fumble ? 1 : 0),
-    trackedRolls: increment(hasDetail ? 1 : 0),
-    naturalTotal: increment(hasDetail ? Number(natural) : 0),
-    resultTotal: increment(hasDetail ? Number(total) : 0),
+    rolls: 1,
+    crits: crit ? 1 : 0,
+    fumbles: fumble ? 1 : 0,
+    trackedRolls: hasDetail ? 1 : 0,
+    naturalTotal: hasDetail ? Number(natural) : 0,
+    resultTotal: hasDetail ? Number(total) : 0,
   });
-  return bumpStats({ chars: { [charId]: {
+  return _queueStats(p => addStatsIncrement(p, { chars: { [charId]: {
     name: charName || '',
     skills: { [skill]: sk() },
     [bucket.field]: { [bucket.key]: { skills: { [skill]: sk() } } },
-  } } });
+  } } }));
 }

@@ -159,8 +159,19 @@ function _cacheInvalidateWhere(path) {
   }
 }
 
-function _cachePatchAdd(path, docData) {
+// Toute écriture réussie de cette couche passe par un _cachePatch* : on y
+// invalide les requêtes `where` et on signale la collection modifiée (le
+// résumé du dashboard tenu par le MJ s'y accroche).
+function _afterWrite(path) {
   _cacheInvalidateWhere(path);
+  if (typeof document === 'undefined') return;
+  document.dispatchEvent(new CustomEvent('app:data-written', {
+    detail: { path, col: String(path).split('/').pop() },
+  }));
+}
+
+function _cachePatchAdd(path, docData) {
+  _afterWrite(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) {
@@ -177,7 +188,7 @@ function _cachePatchAdd(path, docData) {
 }
 
 function _cachePatchUpdate(path, id, partial) {
-  _cacheInvalidateWhere(path);
+  _afterWrite(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) {
@@ -191,7 +202,7 @@ function _cachePatchUpdate(path, id, partial) {
 }
 
 function _cachePatchSave(path, id, partial) {
-  _cacheInvalidateWhere(path);
+  _afterWrite(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) {
@@ -209,7 +220,7 @@ function _cachePatchSave(path, id, partial) {
 }
 
 function _cachePatchReplace(path, id, data) {
-  _cacheInvalidateWhere(path);
+  _afterWrite(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   const docData = { id, ...data };
@@ -227,7 +238,7 @@ function _cachePatchReplace(path, id, data) {
 }
 
 function _cachePatchDelete(path, id) {
-  _cacheInvalidateWhere(path);
+  _afterWrite(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) _cache.set(allKey, { data: all.data.filter(d => d.id !== id), ts: all.ts });
@@ -411,6 +422,11 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   // Bestiaire principal : lu par la page Bestiaire, la palette Ctrl+K et le VTT.
   // Lazy-session → 0 lecture en repeat-visit (au prix de la RAM, cf. note ci-dessus).
   'bestiary',
+  // Sources complètes MJ SEULEMENT (règles : lecture admin). Sans cache, chaque
+  // visite des pages Hauts-faits / Collection relisait tout (base64 compris).
+  // Un joueur ne les demande jamais ; un refus éventuel → failed → [].
+  'achievements_secret',
+  'collection_secret',
 ]);
 const _SESSION_DOCS = [];
 const _LAZY_SESSION_DOCS = new Set([
@@ -421,6 +437,13 @@ const _LAZY_SESSION_DOCS = new Set([
   'world/dice_skills',      // histoire.js, shop.js, vtt.js
   'world/rarities',         // boutique/inventaire, stable par aventure
   'world/map',              // config fond de carte, stable mais image potentiellement lourde
+  // Résumé compact du dashboard (tenu par le client MJ) : remplace côté joueur la
+  // lecture complète de story/achievements/collection. Session-live → la porte
+  // « trustworthy » ne conclut jamais « absent » sur un simple snapshot cache.
+  'settings/dashboardSummary',
+  // Pastille « Mur du Bastion » de la navigation (shared/bastion-signal.js) :
+  // écoutée sur toutes les pages, elle doit survivre aux navigations.
+  'bastionWall/meta',
 ]);
 const _sessionDocKey = (col, id) => `${col}/${id}`;
 

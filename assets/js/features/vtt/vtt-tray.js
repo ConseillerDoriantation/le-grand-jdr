@@ -10,6 +10,7 @@
 // appelés à l'exécution, pas au chargement du module.
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../../core/state.js';
+import { PRESENCE_TTL_MS } from '../../shared/presence-ttl.js';
 import { VS } from './vtt-state.js';
 import Sortable from '../../vendor/sortable.esm.js';
 import { db, setDoc, updateDoc, writeBatch } from '../../config/firebase.js';
@@ -122,7 +123,7 @@ export function _vttPlaceOnlineReserve() {
   const now = Date.now();
   const ids = Object.values(VS.tokens || {}).map(entry => entry?.data).filter(token =>
     token?.type === 'player' && token.pageId !== VS.activePage?.id && token.ownerId
-      && VS.presence[token.ownerId] && now - (VS.presence[token.ownerId].lastSeen || 0) < 120_000
+      && VS.presence[token.ownerId] && now - (VS.presence[token.ownerId].lastSeen || 0) < PRESENCE_TTL_MS
   ).map(token => token.id);
   return _placeReserveTokens([...new Set(ids)]);
 }
@@ -172,7 +173,7 @@ export function _renderTrayImpl() {
   _renderLibSection();
 
   const onlineTs = Date.now();
-  const isOnline = uid => !!(uid && VS.presence[uid] && onlineTs - (VS.presence[uid].lastSeen || 0) < 120_000);
+  const isOnline = uid => !!(uid && VS.presence[uid] && onlineTs - (VS.presence[uid].lastSeen || 0) < PRESENCE_TTL_MS);
   const inCombat = !!VS.session?.combat?.active;
 
   const all     = Object.values(VS.tokens).map(e => e.data);

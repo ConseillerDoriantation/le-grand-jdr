@@ -20,6 +20,7 @@ import {
 import { STATE } from '../core/state.js';
 import { lsJson } from './local-storage.js';
 import { getDocDataSilent, subscribeRecentCollection } from '../data/firestore.js';
+import { subscribeRecentWhere } from '../data/firestore-queries.js';
 
 let _initialized = false;
 let _onlineTimer = null;
@@ -300,10 +301,22 @@ function _mountBastionWallNotifications() {
       readReady = true;
       process();
     }).catch(() => { readReady = true; process(); });
-    _wallNotificationUnsubs.push(subscribeRecentCollection('bastionWallNotifications', docs => {
+    const onEvents = docs => {
       events = docs || [];
       process();
-    }, { field: 'ts', max: 100, silent: true }));
+    };
+    // Quota : seulement MES événements (index composite targetUid + ts), au lieu
+    // des 100 derniers de tout le monde relus à chaque ouverture. Les 10 plus
+    // récents non vus restent ceux notifiés. Sans l'index → requête historique.
+    _wallNotificationUnsubs.push(subscribeRecentWhere('bastionWallNotifications',
+      { field: 'targetUid', value: uid },
+      { orderField: 'ts', max: 30 },
+      onEvents,
+      { onUnavailable: () => {
+        _wallNotificationUnsubs.push(subscribeRecentCollection('bastionWallNotifications', onEvents,
+          { field: 'ts', max: 100, silent: true }));
+      } },
+    ));
   };
   document.addEventListener('app:adventure-changed', () => setTimeout(start, 0));
   start();

@@ -13,11 +13,12 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { STATE } from '../core/state.js';
-import { watchDoc } from './realtime.js';
-import { saveDoc } from '../data/firestore.js';
+import { saveDoc, subscribeDoc } from '../data/firestore.js';
+import { isFeatureEnabled } from './features.js';
 import { bastionWallSeenKey } from './bastion-wall.js';
 
 let _lastActivityAt = 0;
+let _unsubActivity = null;
 
 // Marque une nouvelle activité du mur (appelé à chaque publication / réponse).
 export function touchBastionWallActivity() {
@@ -42,13 +43,20 @@ export function refreshBastionWallDot() {
   document.querySelectorAll('.bastion-nav-dot').forEach((el) => { el.hidden = !has; });
 }
 
-// Abonnement session-live au doc d'activité, ré-armé à chaque changement
-// d'aventure (watchDoc remplace l'abonnement du même nom).
+// Abonnement au doc d'activité pour toute la session, ré-armé à chaque
+// changement d'aventure. Il passe par subscribeDoc (doc session-live, cf.
+// _LAZY_SESSION_DOCS de firestore.js) et NON par watchDoc : realtime.js coupe
+// ses abonnements à chaque navigation, ce qui figeait la pastille dès le premier
+// changement de page. Bastion désactivé → aucun abonnement (pastille masquée,
+// pas de lecture refusée facturée).
 export function initBastionWallSignal() {
+  _unsubActivity?.();
+  _unsubActivity = null;
   _lastActivityAt = 0;
   refreshBastionWallDot();
-  watchDoc('bastionWallMeta', 'bastionWall', 'meta', (data) => {
+  if (!isFeatureEnabled('bastion')) return;
+  _unsubActivity = subscribeDoc('bastionWall', 'meta', (data) => {
     _lastActivityAt = Number(data?.lastActivityAt) || 0;
     refreshBastionWallDot();
-  });
+  }, { silent: true });
 }

@@ -38,6 +38,31 @@ function _turnOrderForActivePage() {
   );
 }
 
+// Remise à zéro des drapeaux de tour (début de combat, round suivant). Quota : on
+// ne réinitialise un drapeau QUE s'il était posé (sinon il vaut déjà false/0 côté
+// doc) ; un token qui n'a ni bougé ni agi ne génère donc AUCUNE écriture.
+function _turnResetPatch(tokData) {
+  const updates = {};
+  if (tokData.movedThisTurn)       updates.movedThisTurn = false;
+  if (tokData.movedCells)          updates.movedCells = 0;
+  if (tokData.bonusMvt)            updates.bonusMvt = 0;
+  if (tokData.moveOrigin != null)  updates.moveOrigin = deleteField();
+  if (tokData.attackedThisTurn)    updates.attackedThisTurn = false;
+  if (tokData.bonusActionThisTurn) updates.bonusActionThisTurn = false;
+  if (tokData.reactionThisTurn)    updates.reactionThisTurn = false;
+  return updates;
+}
+
+// Commit par lots de 400 opérations (limite Firestore : 500 par batch). Un seul
+// batch géant échouait en bloc — silencieusement — au-delà de 500 tokens.
+async function _commitTokenOps(ops) {
+  for (let offset = 0; offset < ops.length; offset += 400) {
+    const b = writeBatch(db);
+    ops.slice(offset, offset + 400).forEach(op => op.del ? b.delete(_tokRef(op.id)) : b.update(_tokRef(op.id), op.data));
+    await b.commit().catch(() => {});
+  }
+}
+
 async function _saveTurnOrder(order, activeTokenId=VS.session?.combat?.activeTokenId ?? null) {
   const pageId=VS.activePage?.id;
   if (!pageId) return;
@@ -166,7 +191,7 @@ export async function _vttToggleCombat() {
     return;
   }
   if (active) {
-    const b=writeBatch(db);
+    const ops=[];
     // Au démarrage du combat (round 1), on convertit les conditions à durée
     // différée (pendingDuration, posées hors combat) en expiresAtRound réel.
     // Sinon ces états resteraient indéfiniment.
@@ -174,7 +199,7 @@ export async function _vttToggleCombat() {
     Object.keys(VS.tokens).forEach(id => {
       const tokData = VS.tokens[id]?.data;
       if (!tokData) return;
-      const updates = { movedThisTurn:false, movedCells:0, bonusMvt:0, moveOrigin:deleteField(), attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false };
+      const updates = _turnResetPatch(tokData);
       if (Array.isArray(tokData.conditions) && tokData.conditions.length) {
         let changed = false;
         const newConds = tokData.conditions.map(c => {
@@ -188,9 +213,9 @@ export async function _vttToggleCombat() {
         });
         if (changed) updates.conditions = newConds;
       }
-      b.update(_tokRef(id), updates);
+      if (Object.keys(updates).length) ops.push({ id, data: updates });
     });
-    await b.commit().catch(()=>{});
+    await _commitTokenOps(ops);
     showNotif('⚔️ Combat démarré !','success');
   } else showNotif('Combat terminé.','success');
 }
@@ -294,7 +319,7 @@ export async function _vttNextRound() {
     }
   }));
 
-  const b=writeBatch(db);
+  const ops=[];
   const expiredNotifs = [];
   const expiredConcentrations = [];
   Object.keys(VS.tokens).forEach(id => {
@@ -308,21 +333,10 @@ export async function _vttNextRound() {
     if (tokData.summonExpiresAtRound != null && round > tokData.summonExpiresAtRound) {
       expiredNotifs.push(`${tokData.summonKind === 'invocation' ? '🐾' : tokData.summonKind === 'sentinelle' ? '🪤' : '⚔️'} ${tokData.name} dissipé`);
       _persistInvocationState(tokData);   // PV/PM persistants avant dissipation (invocations)
-      b.delete(_tokRef(id));
+      ops.push({ id, del: true });
       return; // skip buff cleanup pour token supprimé
     }
-    // On ne réécrit QUE les tokens réellement « sales » : réinitialiser un drapeau
-    // seulement s'il était posé (sinon il vaut déjà false/0 côté doc), et ne pousser
-    // buffs/conditions que s'ils changent. Un token inactif ne génère AUCUNE écriture
-    // → fin des rafales d'écritures (et de snapshots) au passage de round.
-    const updates = {};
-    if (tokData.movedThisTurn)       updates.movedThisTurn = false;
-    if (tokData.movedCells)          updates.movedCells = 0;
-    if (tokData.bonusMvt)            updates.bonusMvt = 0;
-    if (tokData.moveOrigin != null)  updates.moveOrigin = deleteField();
-    if (tokData.attackedThisTurn)    updates.attackedThisTurn = false;
-    if (tokData.bonusActionThisTurn) updates.bonusActionThisTurn = false;
-    if (tokData.reactionThisTurn)    updates.reactionThisTurn = false;
+    const updates = _turnResetPatch(tokData);
     if (tokData.buffs?.length) {
       const remaining = tokData.buffs.filter(bf => {
         const isExpired =
@@ -356,9 +370,9 @@ export async function _vttNextRound() {
       });
       if (remainingConds.length !== tokData.conditions.length) updates.conditions = remainingConds;
     }
-    if (Object.keys(updates).length) b.update(_tokRef(id), updates);
+    if (Object.keys(updates).length) ops.push({ id, data: updates });
   });
-  await b.commit().catch(()=>{});
+  await _commitTokenOps(ops);
   for (const item of expiredConcentrations) {
     await _vttBreakConcentrationEffects(item.casterId, item.cond);
   }

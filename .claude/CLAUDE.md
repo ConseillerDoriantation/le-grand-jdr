@@ -11,7 +11,7 @@ App web de gestion de campagne JDR multi-joueurs. Réponses **directement exploi
 
 ## Carte du repo
 - `index.html` — entrée · `assets/js/app.js` — entrée JS · `assets/css/` — styles globaux + par domaine
-- `assets/js/config/` — Firebase · `assets/js/data/firestore.js` — **toute** la couche d'accès Firestore
+- `assets/js/config/` — Firebase · `assets/js/data/firestore.js` — **toute** la couche d'accès Firestore (+ `data/firestore-queries.js` : requêtes ciblées `where`+`orderBy` avec repli si index absent)
 - `assets/js/core/` — état global + câblage · `assets/js/shared/` — helpers · `assets/js/features/` — métier (découplés)
 - `docs/` — `architecture.md`, `migration-plan.md`, `firestore-rules.md`, `security.md`, `vtt-decomposition.md`, `window-globals-inventory.md`
 
@@ -59,7 +59,8 @@ But : réduire taille/duplication/verbosité **sans changer le comportement obse
 **Toujours passer par `assets/js/data/firestore.js`.** Ne jamais importer `config/firebase.js` dans une feature pour lire/écrire. API : `loadCollection`, `getDocData`, `subscribeCollection`, `saveDoc`, `addToCol`, `updateInCol`, `deleteFromCol`, ou `shared/realtime.js` (`watch`/`watchDoc`/`watchPageCollection`/`watchPageDoc`). Seules exceptions assumées : `features/vtt/vtt.js` / `features/vtt/vtt-fog.js` et petits modules VTT temps réel tactique.
 
 Cache déjà en place (ne pas réinventer) :
-1. **Session-live** : un `onSnapshot` unique par collection/doc vivant toute la session → page qui le consomme = **0 lecture en plus**. Couvre `story`, `achievements`, `quests`, `characters`, `collection` + lazy (`shop`, `shopCategories`, `npcs`, `organizations`, `players`) + docs (`bastion/main`, `world/main`, `agenda_session/next`…).
+1. **Session-live** : un `onSnapshot` unique par collection/doc vivant toute la session → page qui le consomme = **0 lecture en plus**. Couvre `story`, `achievements`, `quests`, `characters`, `collection` + lazy (`shop`, `shopCategories`, `npcs`, `organizations`, `players`, `*_secret` MJ) + docs (`bastion/main`, `world/main`, `agenda_session/next`, `settings/dashboardSummary`…).
+   - **Dashboard joueur** : lit le résumé `settings/dashboardSummary` (helpers purs `shared/dashboard-summary.js`, tenu par le client MJ via `features/dashboard-summary-maintainer.js`) au lieu de Trame/Hauts-faits/Collection complètes ; repli automatique si absent.
 2. **Cache TTL mémoire** (`_CACHE_TTL`/`_DOC_CACHE_TTL`) pour le page-scoped.
 3. **Cache IndexedDB Firestore** à froid. + coalescing in-flight + patch chirurgical du cache après écriture.
 

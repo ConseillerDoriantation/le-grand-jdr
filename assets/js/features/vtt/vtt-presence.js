@@ -8,6 +8,7 @@
 
 import { setDoc, deleteDoc, serverTimestamp } from '../../config/firebase.js';
 import { subscribeCollection } from '../../data/firestore.js';
+import { PRESENCE_TTL_MS } from '../../shared/presence-ttl.js';
 import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc } from '../../shared/html.js';
@@ -41,7 +42,7 @@ function _startPresence() {
     VS.presence = {};
     rows.forEach(p => {
       const ts = p.lastSeen?.toMillis?.() ?? (typeof p.lastSeen === 'number' ? p.lastSeen : 0);
-      if (ts > 0 && now - ts < 120_000) {
+      if (ts > 0 && now - ts < PRESENCE_TTL_MS) {
         VS.presence[p.id] = { uid: p.id, pseudo: p.pseudo || '?', lastSeen: ts };
       }
     });
@@ -61,7 +62,7 @@ function _resetPresence() {
 // MJ : retire un joueur de la présence du VTT en supprimant sa présence app-wide.
 // Effet : il disparaît de la colonne pour tout le monde, et son doc cesse d'être
 // relu à chaque ouverture du VTT (utile pour les entrées fantômes). Un joueur
-// encore actif se ré-annonce à son prochain heartbeat (≤90 s) — c'est voulu.
+// encore actif se ré-annonce à son prochain heartbeat (≤180 s) — c'est voulu.
 // MJ : déclare / termine une session de jeu en cours (vtt/session.live).
 // Les joueurs qui ouvrent le VTT voient alors un message dans le sas d'entrée.
 function _renderSessionBtn() {
@@ -146,7 +147,7 @@ function _renderPresenceCol() {
   const list = document.getElementById('vtt-pres-list');
   if (!list) return;
   const now = Date.now();
-  const players = Object.values(VS.presence).filter(p => now - (p.lastSeen ?? 0) < 120_000);
+  const players = Object.values(VS.presence).filter(p => now - (p.lastSeen ?? 0) < PRESENCE_TTL_MS);
   if (!players.length) {
     list.innerHTML = '<div class="vtt-pres-empty">—</div>';
     return;

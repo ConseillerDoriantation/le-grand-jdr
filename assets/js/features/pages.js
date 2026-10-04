@@ -2,11 +2,13 @@
 // PAGES
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
+import { PRESENCE_TTL_MS } from '../shared/presence-ttl.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
-import { loadChars, loadCollection, loadCollectionAfter, getCachedCollection, getDocData, getDocDataSilent, replaceDoc, saveDoc, updateInCol, deleteFromCol, claimDocumentLease, clearDocumentLease } from '../data/firestore.js';
+import { loadChars, loadCollection, loadCollectionAfter, loadCollectionWhere, getCachedCollection, getDocData, getDocDataSilent, replaceDoc, saveDoc, updateInCol, deleteFromCol, claimDocumentLease, clearDocumentLease } from '../data/firestore.js';
 import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
-import { isFeatureEnabled } from '../shared/features.js';
+import { isFeatureEnabled, isFeatureAllowedByPlan } from '../shared/features.js';
+import { isUsableSummary, storyItemsFromSummary, summarizeAchievements, summarizeCollection } from '../shared/dashboard-summary.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { loadStats, peekStats, applyStatsLegacyRollup, resetStats, deleteCharStats, deleteCharDateStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
 import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, mergeVttRollDetails, normalizeSkillStats, topStatTies, vttLogTimeMs } from '../shared/stats-analysis.js';
@@ -2648,6 +2650,9 @@ const PAGES = {
     let achievementsRaw = getCachedCollection('achievements') || [];
     let quests          = getCachedCollection('quests')       || [];
     let collectionItems = getCachedCollection('collection')   || [];
+    // Joueur : résumé tenu par le MJ (settings/dashboardSummary). Tant qu'il est
+    // utilisable, Trame / Hauts-faits / Collection complètes ne sont pas lus.
+    let dashSummary     = null;
     let wallDocs        = [];
     let wallLegacy      = [];
     let wallRead        = null;
@@ -2712,8 +2717,11 @@ const PAGES = {
       const chars = uid ? getControlledCharacters(allChars, uid) : allChars;
       const controlledIds = new Set(chars.map(c => c.id));
       const allPartyChars = uid ? allChars.filter(c => !controlledIds.has(c.id)) : [];
-      // Les hauts-faits secrets restent invisibles aux joueurs partout
-      const achievements = STATE.isAdmin ? achievementsRaw : achievementsRaw.filter(a => !a.secret);
+      // Hauts-faits : compteur + 5 plus récents, secrets invisibles aux joueurs.
+      // Même helper pour le résumé MJ et les données complètes → rendu identique.
+      const achievementsView = dashSummary
+        ? (dashSummary.achievements || { count: 0, top: [] })
+        : summarizeAchievements(achievementsRaw, { isAdmin: STATE.isAdmin });
       // STATE.characters est le cache global de l'aventure. Les vues filtrent
       // localement ce qu'elles affichent, sinon les pages liées aux personnages
       // perdent les portraits/participants après un passage par le dashboard.
@@ -2990,8 +2998,9 @@ const PAGES = {
       ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
       ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
     ].filter(Boolean);
-    const collectionTotal  = collectionItems.length;
-    const collectionUnlocked = collectionItems.filter(c => c.unlocked).length;
+    const { total: collectionTotal, unlocked: collectionUnlocked } = dashSummary
+      ? (dashSummary.collection || { total: 0, unlocked: 0 })
+      : summarizeCollection(collectionItems);
     const collectionPct    = collectionTotal > 0 ? Math.round((collectionUnlocked / collectionTotal) * 100) : 0;
     // Groupes « En cours » de la Trame (quêtes liées à une mission). L'ancien
     // modèle de quêtes autonomes est abandonné — le hub reflète la Trame.
@@ -3277,10 +3286,10 @@ const PAGES = {
       return `
       <div class="dv2-panel-card">
         <div class="dv2-panel-header">
-          <div class="dv2-panel-title">🏆 Hauts-faits <span class="dv2-panel-count">${achievements.length}</span></div>
+          <div class="dv2-panel-title">🏆 Hauts-faits <span class="dv2-panel-count">${achievementsView.count}</span></div>
           <button class="dv2-section-action" data-navigate="achievements">Voir tout →</button>
         </div>
-        ${achievements.slice(0, 5).length > 0 ? [...achievements].sort((a,b) => { const p = d => { const [j,m,y] = (d||'').split('/'); return y&&m&&j?`${y}${m.padStart(2,'0')}${j.padStart(2,'0')}`:''; }; return p(b.date) > p(a.date) ? 1 : -1; }).slice(0, 5).map(a => `
+        ${achievementsView.top.length > 0 ? achievementsView.top.map(a => `
         <div class="dv2-ach-item">
           <div class="dv2-ach-icon">${a.icone||'🏆'}</div>
           <div class="dv2-flex1">
@@ -3512,7 +3521,7 @@ const PAGES = {
     }
 
     function _playerProgressPanel() {
-      const achievementCount = achievements.length;
+      const achievementCount = achievementsView.count;
       return `
       <section class="dv2-dash-panel dv2-dash-panel--pilot">
         <div class="dv2-section-label">
@@ -3636,7 +3645,7 @@ const PAGES = {
       </section>`;
 
       // ── Présence temps réel (MJ uniquement) ─────────────────────────
-      // Filtre : actif si lastSeen < 2 min (cohérent avec la présence VTT)
+      // Filtre : actif si lastSeen < PRESENCE_TTL_MS (cohérent avec la présence VTT)
       // Exclut le MJ lui-même. Cleanup auto via unwatchAll au prochain navigate.
       const _renderPresence = (list) => {
         const slot = document.getElementById('dash-presence');
@@ -3645,7 +3654,7 @@ const PAGES = {
         const active = (list || [])
           .filter(p => p.uid && p.uid !== _myUid)
           .map(p => ({ ...p, ts: p.lastSeen?.toMillis?.() ?? 0 }))
-          .filter(p => p.ts > 0 && (now - p.ts) < 120_000)
+          .filter(p => p.ts > 0 && (now - p.ts) < PRESENCE_TTL_MS)
           .sort((a, b) => (a.pseudo || '').localeCompare(b.pseudo || '', 'fr'));
         if (!active.length) {
           slot.innerHTML = `
@@ -3836,9 +3845,38 @@ const PAGES = {
     paint();
     watch('dash-characters',   'characters',   d => { allChars = sortCharactersForDisplay(d || []); _sessionCenterNeedsMount = true; schedulePaint(); });
     watch('dash-quests',       'quests',       d => { quests = d || []; _sessionCenterNeedsMount = true; schedulePaint(); });
-    watch('dash-story',        'story',        d => { storyItems = d || []; _sessionCenterNeedsMount = true; schedulePaint(); });
-    watch('dash-achievements', 'achievements', d => { achievementsRaw = d || []; schedulePaint(); });
-    watch('dash-collection',   'collection',   d => { collectionItems = d || []; schedulePaint(); });
+    const watchFullSources = () => {
+      watch('dash-story',        'story',        d => { storyItems = d || []; _sessionCenterNeedsMount = true; schedulePaint(); });
+      watch('dash-achievements', 'achievements', d => { achievementsRaw = d || []; schedulePaint(); });
+      watch('dash-collection',   'collection',   d => { collectionItems = d || []; schedulePaint(); });
+    };
+    if (STATE.isAdmin) {
+      watchFullSources();
+    } else {
+      // Quota : le résumé tenu par le MJ (1 document) remplace la lecture complète
+      // de Trame + Hauts-faits + Collection (base64 compris). Absent ou incomplet
+      // (MJ pas encore repassé après le déploiement) → repli sur la lecture complète.
+      let fullSourcesWatched = false;
+      watchDoc('dash-summary', 'settings', 'dashboardSummary', summary => {
+        if (fullSourcesWatched) return;
+        const usable = isUsableSummary(summary, {
+          achievements: isFeatureAllowedByPlan('achievements'),
+          collection: isFeatureAllowedByPlan('collection'),
+        });
+        if (!usable) {
+          fullSourcesWatched = true;
+          dashSummary = null;
+          storyItems = getCachedCollection('story') || [];
+          watchFullSources();
+          schedulePaint();
+          return;
+        }
+        dashSummary = summary;
+        storyItems = storyItemsFromSummary(summary);
+        _sessionCenterNeedsMount = true;
+        schedulePaint();
+      });
+    }
     // Un seul accès : le snapshot initial hydrate le mur puis reste abonné aux
     // deltas. Un loadRecent juste avant doublerait jusqu'à 80 lectures.
     watchRecent('dash-bastion-wall', 'bastionAnnonces', d => { wallDocs = d || []; schedulePaint(); }, { field: 'ts', max: 80 });
@@ -4068,7 +4106,10 @@ const PAGES = {
     const [users, quests, vttTokens] = await Promise.all([
       loadAllUsers(STATE.adventure),
       Promise.resolve(getCachedCollection('quests') || loadCollection('quests')).catch(() => []),
-      loadCollection('vttTokens').catch(() => []),
+      // Quota : le diagnostic ne concerne que les tokens liés à un perso/PNJ
+      // (invocations comprises, typées 'npc') — pas les ennemis de toutes les
+      // scènes. La réparation manuelle, elle, relit toute la collection.
+      loadCollectionWhere('vttTokens', 'type', 'in', ['player', 'npc']).catch(() => []),
     ]);
     const content = document.getElementById('main-content');
 
