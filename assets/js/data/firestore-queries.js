@@ -19,6 +19,8 @@ import { getCurrentAdventureId } from './firestore.js';
 // manque (failed-precondition, y compris pendant sa construction) ou si la
 // requête est refusée, `onUnavailable` est appelé UNE fois : l'appelant se rabat
 // sur sa requête historique. Firestore loggue alors le lien de création d'index.
+// `orderField: null` : pas de tri serveur (filtre seul → index mono-champ
+// automatique, rien à créer) ; l'appelant trie ses quelques documents.
 export function subscribeRecentWhere(col, { field, op = '==', value }, { orderField = 'ts', max = 30 } = {}, onData, { onUnavailable } = {}) {
   const adventureId = getCurrentAdventureId();
   if (!adventureId || !field) {
@@ -31,7 +33,7 @@ export function subscribeRecentWhere(col, { field, op = '==', value }, { orderFi
     query(
       collection(db, `adventures/${adventureId}/${col}`),
       where(field, op, value),
-      orderBy(orderField, 'desc'),
+      ...(orderField ? [orderBy(orderField, 'desc')] : []),
       limit(safeMax),
     ),
     snap => {
