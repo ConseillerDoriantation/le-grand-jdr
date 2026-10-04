@@ -48,5 +48,9 @@ test('vtt-ruler n\'écrit ni départ « longueur 0 » ni effacement à l\'expira
   const expire = ruler.slice(ruler.indexOf('function _expireRuler(')).split('\n}\n')[0];
   assert.match(expire, /_clearRuler\(\{ broadcast: false \}\)/);
   const vtt = readFileSync(new URL('../assets/js/features/vtt/vtt.js', import.meta.url), 'utf8');
-  assert.match(vtt, /_renderMjRulerRemote\(VS\.session\.mjRuler, \{ fromSession: true \}\)/);
+  assert.match(vtt, /_renderMjRulerRemote\(VS\.session\.mjRuler, \{ fromSession: true, confirmed: !snap\.metadata\.fromCache \}\)/);
+  // Amorçage sur confirmation serveur, réarmé à chaque (ré)abonnement du joueur.
+  const remote = ruler.slice(ruler.indexOf('export function _renderMjRulerRemote(')).split('\n}\n')[0];
+  assert.match(remote, /if \(fromSession && confirmed\) _mjRulerRemotePrimed = true;/);
+  assert.match(vtt, /if \(!STATE\.isAdmin\) _rearmMjRulerRemote\(\);\n\s*return onSnapshot\(_sesRef\(\), STATE\.isAdmin \? \{\} : \{ includeMetadataChanges: true \}/);
 });

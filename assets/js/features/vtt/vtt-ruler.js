@@ -214,15 +214,18 @@ function _clearMjRulerBroadcast() {
 }
 
 // Rendu de la règle MJ chez les joueurs — mise à jour en place, sans destroy/rebuild.
-// `fromSession` : appel du listener de session. La diffusion présente à son 1er
-// snapshot est ancienne (plus effacée en base depuis la passe quota) : elle
-// n'est jamais affichée ; seules les suivantes le sont.
+// Amorçage : tant que le listener de session n'a pas reçu de confirmation serveur
+// (`confirmed`) depuis son (ré)abonnement, toute diffusion vue est ancienne —
+// cache, ou mesure faite pendant que l'onglet était masqué — et n'est jamais
+// affichée ; seules les suivantes le sont. Plus effacée en base, une mesure finie
+// réapparaîtrait sinon 5 s au montage ou au retour sur l'onglet.
 let _mjRulerRemote = null;
 let _mjRulerRemoteKey = null;
 let _mjRulerRemoteAt = -Infinity;
 let _mjRulerRemoteTimer = null;
 let _mjRulerRemotePrimed = false;
-export function _renderMjRulerRemote(data, { fromSession = false } = {}) {
+export function _rearmMjRulerRemote() { _mjRulerRemotePrimed = false; }
+export function _renderMjRulerRemote(data, { fromSession = false, confirmed = false } = {}) {
   if (STATE.isAdmin) return; // le MJ voit déjà sa règle locale
   if (!VS.layers.ping) return;
   const key = data ? JSON.stringify(data) : '';
@@ -230,7 +233,7 @@ export function _renderMjRulerRemote(data, { fromSession = false } = {}) {
     _mjRulerRemoteKey = key;
     _mjRulerRemoteAt = _mjRulerRemotePrimed ? Date.now() : -Infinity;
   }
-  if (fromSession) _mjRulerRemotePrimed = true;
+  if (fromSession && confirmed) _mjRulerRemotePrimed = true;
   if (_mjRulerRemoteTimer) { clearTimeout(_mjRulerRemoteTimer); _mjRulerRemoteTimer = null; }
   const remaining = mjRulerRemainingMs(data, {
     receivedAt: _mjRulerRemoteAt, now: Date.now(), activePageId: VS.activePage?.id,

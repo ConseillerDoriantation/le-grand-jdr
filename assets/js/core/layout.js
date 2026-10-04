@@ -633,6 +633,25 @@ function _startSessionWatch() {
 // logout évite leurs refus Firestore tardifs et les réarme au prochain login.
 document.addEventListener('app:session-releasing', _stopSessionWatch);
 
+// Onglet masqué depuis 2 min : la pastille n'est pas visible, l'abonnement au
+// doc chaud vtt/session (tours, règle du MJ…) est coupé puis rebranché au
+// retour, comme les flux du VTT (sinon il garderait leur cible Firestore active).
+let _sessionHiddenTimer = null;
+document.addEventListener('visibilitychange', () => {
+  clearTimeout(_sessionHiddenTimer);
+  _sessionHiddenTimer = null;
+  if (document.hidden) {
+    _sessionHiddenTimer = setTimeout(() => {
+      _sessionHiddenTimer = null;
+      if (!document.hidden || !_sessionUnsub) return;
+      try { _sessionUnsub(); } catch {}
+      _sessionUnsub = null;
+    }, 120_000);
+  } else if (_sessionAdventureId && !_sessionUnsub) {
+    _startSessionWatch();
+  }
+});
+
 // ── Init (rendu idempotent ; écouteurs attachés une seule fois) ────────────
 function _initSidebar() {
   const sb = document.getElementById('sidebar');

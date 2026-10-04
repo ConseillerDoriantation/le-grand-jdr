@@ -204,3 +204,24 @@ test('la pastille du Mur du Bastion reste à l’écoute après une navigation',
   // Bastion désactivé : aucune lecture (refusée mais facturée).
   assert.match(signal, /if \(!isFeatureEnabled\('bastion'\)\) return;\s+_unsubActivity = subscribeDoc/);
 });
+
+test('un onglet VTT masqué coupe aussi ses flux visuels, sans rejouer l\'absence au retour', () => {
+  // Registre commun avec tokens/dessins : coupure après 2 min, reprise au retour.
+  assert.match(vtt, /_clearSceneSubscriptions\(\);\n\s*_pauseVttStreams\(\);/);
+  assert.match(vtt, /_rebindSceneSubscriptions\?\.\(\);\n\s*_resumeVttStreams\(\);/);
+  assert.match(vtt, /function _initListeners\(\) \{\n  _clearVttStreams\(\);\n  VS\.unsubs\.push\(_clearVttStreams\);/);
+  // Joueur : session, scènes et présence pausables ; le MJ les garde (logique de repos court, auto-synchro).
+  assert.match(vtt, /onSnapshot\(_sesRef\(\)[^\n]*\n\s*\}, \{ pausable: !STATE\.isAdmin \}\);/);
+  assert.match(vtt, /_watchVttStream\(\(\) => onSnapshot\(_pgsCol\(\)/);
+  assert.match(vtt, /_watchVttStream\(\(\) => \{ _startPresence\(\); return _resetPresence; \}, \{ pausable: !STATE\.isAdmin \}\)/);
+  // Visuels purs, pour tous : visée, pings, émotes.
+  assert.match(vtt, /_watchVttStream\(\(\) => onSnapshot\(_pingsCol\(\)/);
+  assert.match(vtt, /_watchVttStream\(\(\) => onSnapshot\(_reactionsCol\(\)/);
+  // Visée : amorcée jusqu'à la confirmation serveur (montage comme retour) → aucun sceau rejoué.
+  assert.match(vtt, /onSnapshot\(_castingCol\(\), \{ includeMetadataChanges: true \}, snap => \{\n\s*_renderRemoteCastings\(snap\.docs, !primed\);\n\s*if \(!snap\.metadata\.fromCache\) primed = true;/);
+  // Jamais en pause : musique (audio en arrière-plan) et journal (aucun gain).
+  assert.doesNotMatch(vtt, /_watchVttStream\(\(\) => onSnapshot\(_musicStateRef/);
+  // La sidebar écoute le même doc de session : elle doit suivre, sinon la cible reste active.
+  assert.match(layout, /if \(!document\.hidden \|\| !_sessionUnsub\) return;\n\s*try \{ _sessionUnsub\(\); \} catch \{\}/);
+  assert.match(layout, /else if \(_sessionAdventureId && !_sessionUnsub\) \{\n\s*_startSessionWatch\(\);/);
+});
