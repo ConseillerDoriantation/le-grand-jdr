@@ -848,7 +848,8 @@ match /adventures/{adventureId} {
     // sur la carte active). Les compteurs d'action et PM sont écrits lors d'une
     // attaque ou compétence ; sans eux, seul le déplacement délégué fonctionne.
     // `turnEpoch` date ces drapeaux de tour (vtt-turn-flags.js) : le passage de
-    // round n'a plus à les réécrire.
+    // round n'a plus à les réécrire. `technique*` : recharges et usages limités
+    // des techniques d'arme, écrits sur le token du lanceur à l'attaque.
     allow update: if inAdventure(adventureId)
       && (request.auth.uid == resource.data.ownerId
           || (resource.data.controlDelegates is list
@@ -860,7 +861,9 @@ match /adventures/{adventureId} {
              'col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt', 'moveOrigin',
              'pageId', 'visible',
              'attackedThisTurn', 'bonusActionThisTurn', 'reactionThisTurn', 'turnEpoch',
-             'pm', 'pmCombat', 'spellCooldowns'
+             'pm', 'pmCombat', 'spellCooldowns',
+             'techniqueCooldowns', 'techniqueCombatKey', 'techniqueCombatUses',
+             'techniqueSessionKey', 'techniqueSessionUses'
            ]);
     // Sorts de déplacement : un joueur peut pousser/attirer une cible (ou échanger sa place avec elle)
     // sans pouvoir modifier sa page, sa visibilité ou ses compteurs de tour.
