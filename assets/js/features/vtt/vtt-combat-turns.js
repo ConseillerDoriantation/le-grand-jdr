@@ -17,13 +17,14 @@ import { showNotif } from '../../shared/notifications.js';
 import { _sesRef, _tokRef } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
 import { normalizeTokenTurnOrder } from './vtt-token-visual.js';
+import { TURN_EPOCH_ENABLED, TURN_FLAG_RESET, nextTurnEpoch, roundTurnReset, stampTurnPatch } from './vtt-turn-flags.js';
 import { bumpHeal } from '../../shared/stats.js';
 import { _vttPublishOptimisticLog } from './vtt-chat.js';
 import { _renderCombatTrackerSoon } from './vtt-combat-tracker.js';
 import {
   CONDITION_BY_ID, _rollDiceDetailed, _setHp, _persistInvocationState,
   _vttTriggerConcentrationSave, _vttBreakConcentrationEffects, _vttExpireSpellZones,
-  _vttLogTargetFields,
+  _vttLogTargetFields, _turnEpoch, _applyTurnEpoch,
 } from './vtt.js';
 
 function _turnOrderForActivePage() {
@@ -38,19 +39,12 @@ function _turnOrderForActivePage() {
   );
 }
 
-// Remise à zéro des drapeaux de tour (début de combat, round suivant). Quota : on
-// ne réinitialise un drapeau QUE s'il était posé (sinon il vaut déjà false/0 côté
-// doc) ; un token qui n'a ni bougé ni agi ne génère donc AUCUNE écriture.
-function _turnResetPatch(tokData) {
-  const updates = {};
-  if (tokData.movedThisTurn)       updates.movedThisTurn = false;
-  if (tokData.movedCells)          updates.movedCells = 0;
-  if (tokData.bonusMvt)            updates.bonusMvt = 0;
-  if (tokData.moveOrigin != null)  updates.moveOrigin = deleteField();
-  if (tokData.attackedThisTurn)    updates.attackedThisTurn = false;
-  if (tokData.bonusActionThisTurn) updates.bonusActionThisTurn = false;
-  if (tokData.reactionThisTurn)    updates.reactionThisTurn = false;
-  return updates;
+// Remise à zéro des drapeaux de tour (début de combat, round suivant). Quota :
+// un token daté par l'époque de tour n'a RIEN à écrire (ses drapeaux sont périmés
+// d'eux-mêmes) ; un token hérité ne réinitialise que les drapeaux posés, et il est
+// daté au passage. `epoch` = nouvelle époque, null si le mécanisme est désactivé.
+function _turnResetPatch(tokData, epoch) {
+  return roundTurnReset(tokData, epoch, deleteField);
 }
 
 // Commit par lots de 400 opérations (limite Firestore : 500 par batch). Un seul
@@ -83,20 +77,12 @@ export async function _vttResetTurn(id) {
   if (!STATE.isAdmin) return;
   const token = VS.tokens[id]?.data;
   if (!token) return;
-  const previous = {
-    movedThisTurn: token.movedThisTurn,
-    movedCells: token.movedCells,
-    bonusMvt: token.bonusMvt,
-    moveOrigin: token.moveOrigin,
-    attackedThisTurn: token.attackedThisTurn,
-    bonusActionThisTurn: token.bonusActionThisTurn,
-    reactionThisTurn: token.reactionThisTurn,
-  };
-  Object.assign(token, { movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false });
-  delete token.moveOrigin;
+  const patch = stampTurnPatch(token, { ...TURN_FLAG_RESET }, _turnEpoch());
+  const previous = Object.fromEntries(Object.keys(patch).map(key => [key, token[key]]));
+  Object.assign(token, patch);
   _renderCombatTrackerSoon();
   try {
-    await updateDoc(_tokRef(id), { movedThisTurn: false, movedCells: 0, bonusMvt: 0, moveOrigin: deleteField(), attackedThisTurn: false, bonusActionThisTurn: false, reactionThisTurn: false });
+    await updateDoc(_tokRef(id), patch);
     showNotif('Tour réinitialisé', 'success');
   } catch {
     Object.assign(token, previous);
@@ -109,11 +95,12 @@ export async function _vttToggleTurnFlag(id, field) {
   if (!STATE.isAdmin || !["bonusActionThisTurn", "reactionThisTurn"].includes(field)) return;
   const token = VS.tokens[id]?.data;
   if (!token) return;
-  const previous = !!token[field];
-  token[field] = !previous;
+  const patch = stampTurnPatch(token, { [field]: !token[field] }, _turnEpoch());
+  const previous = Object.fromEntries(Object.keys(patch).map(key => [key, token[key]]));
+  Object.assign(token, patch);
   _renderCombatTrackerSoon();
-  await updateDoc(_tokRef(id), { [field]: token[field] }).catch(() => {
-    token[field] = previous;
+  await updateDoc(_tokRef(id), patch).catch(() => {
+    Object.assign(token, previous);
     _renderCombatTrackerSoon();
     showNotif("Erreur de suivi du tour", "error");
   });
@@ -173,12 +160,15 @@ export async function _vttToggleCombat() {
   VS.session ||= {};
   const active=!VS.session?.combat?.active;
   const previous = VS.session?.combat || {};
+  // Nouveau combat = nouvelle époque de tour : les drapeaux d'avant sont périmés.
+  const epoch = active && TURN_EPOCH_ENABLED ? nextTurnEpoch(previous) : null;
   const next = {
     ...previous,
     active,
     round: active ? 1 : 0,
     activeTokenId: null,
     ...(active ? { techniqueCombatKey: Date.now() } : {}),
+    ...(epoch != null ? { turnEpoch: epoch } : {}),
   };
   VS.session.combat = next;
   _renderCombatTrackerSoon();
@@ -190,6 +180,7 @@ export async function _vttToggleCombat() {
     showNotif('Impossible de modifier le combat.', 'error');
     return;
   }
+  if (epoch != null) _applyTurnEpoch(epoch);
   if (active) {
     const ops=[];
     // Au démarrage du combat (round 1), on convertit les conditions à durée
@@ -199,7 +190,7 @@ export async function _vttToggleCombat() {
     Object.keys(VS.tokens).forEach(id => {
       const tokData = VS.tokens[id]?.data;
       if (!tokData) return;
-      const updates = _turnResetPatch(tokData);
+      const updates = _turnResetPatch(tokData, epoch);
       if (Array.isArray(tokData.conditions) && tokData.conditions.length) {
         let changed = false;
         const newConds = tokData.conditions.map(c => {
@@ -228,7 +219,11 @@ export async function _vttNextRound() {
   const wasActive = !!VS.session?.combat?.active;
   const round=(VS.session?.combat?.round ?? 0)+1;
   const previousCombat = VS.session?.combat || {};
-  const nextCombat = { ...previousCombat, active:wasActive, round, activeTokenId:null };
+  const epoch = TURN_EPOCH_ENABLED ? nextTurnEpoch(previousCombat) : null;
+  const nextCombat = {
+    ...previousCombat, active:wasActive, round, activeTokenId:null,
+    ...(epoch != null ? { turnEpoch: epoch } : {}),
+  };
   VS.session.combat = nextCombat;
   _renderCombatTrackerSoon();
   try {
@@ -239,6 +234,7 @@ export async function _vttNextRound() {
     showNotif('Impossible de passer au round suivant.', 'error');
     return;
   }
+  if (epoch != null) _applyTurnEpoch(epoch);
 
   // ── Application des effets périodiques en début de round (avant cleanup) ──
   // DoT : dégâts/tour · Regen : soin/tour
@@ -336,7 +332,7 @@ export async function _vttNextRound() {
       ops.push({ id, del: true });
       return; // skip buff cleanup pour token supprimé
     }
-    const updates = _turnResetPatch(tokData);
+    const updates = _turnResetPatch(tokData, epoch);
     if (tokData.buffs?.length) {
       const remaining = tokData.buffs.filter(bf => {
         const isExpired =

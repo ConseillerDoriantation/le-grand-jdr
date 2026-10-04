@@ -847,6 +847,8 @@ match /adventures/{adventureId} {
     // `pageId`/`visible` permettent au joueur d'« Invoquer mon token » (le poser
     // sur la carte active). Les compteurs d'action et PM sont écrits lors d'une
     // attaque ou compétence ; sans eux, seul le déplacement délégué fonctionne.
+    // `turnEpoch` date ces drapeaux de tour (vtt-turn-flags.js) : le passage de
+    // round n'a plus à les réécrire.
     allow update: if inAdventure(adventureId)
       && (request.auth.uid == resource.data.ownerId
           || (resource.data.controlDelegates is list
@@ -857,7 +859,7 @@ match /adventures/{adventureId} {
            .affectedKeys().hasOnly([
              'col', 'row', 'movedThisTurn', 'movedCells', 'bonusMvt', 'moveOrigin',
              'pageId', 'visible',
-             'attackedThisTurn', 'bonusActionThisTurn', 'reactionThisTurn',
+             'attackedThisTurn', 'bonusActionThisTurn', 'reactionThisTurn', 'turnEpoch',
              'pm', 'pmCombat', 'spellCooldowns'
            ]);
     // Sorts de déplacement : un joueur peut pousser/attirer une cible (ou échanger sa place avec elle)
