@@ -17,10 +17,11 @@
 // `epoch` null = mécanisme désactivé : toutes les fonctions sont l'identité.
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Bascule de livraison : n'activer qu'une fois `turnEpoch` autorisé par les
-// règles Firestore (vttTokens, liste hasOnly propriétaire/délégué), sinon les
-// déplacements des joueurs seraient refusés.
-export const TURN_EPOCH_ENABLED = false;
+// Bascule de livraison : actif depuis le déploiement des règles qui autorisent
+// `turnEpoch` (vttTokens, liste hasOnly propriétaire/délégué). Sans elles, les
+// déplacements des joueurs seraient refusés : repasser à false en cas de retour
+// arrière des règles.
+export const TURN_EPOCH_ENABLED = true;
 
 export const TURN_FLAG_KEYS = Object.freeze([
   'movedThisTurn', 'movedCells', 'bonusMvt', 'moveOrigin',

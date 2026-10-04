@@ -9,8 +9,10 @@ import {
 
 const moved = { id: 't', col: 3, row: 2, movedThisTurn: true, movedCells: 3, moveOrigin: { col: 0, row: 2, round: 4 }, attackedThisTurn: true };
 
-test('livré désactivé tant que les règles n\'autorisent pas turnEpoch', () => {
-  assert.equal(TURN_EPOCH_ENABLED, false);
+test('activé seulement si les règles autorisent turnEpoch sur les tokens', () => {
+  if (!TURN_EPOCH_ENABLED) return;
+  const rules = readFileSync(new URL('../docs/firestore-rules.md', import.meta.url), 'utf8');
+  assert.match(rules, /'reactionThisTurn', 'turnEpoch'/);
 });
 
 test('époque de session : 0 par défaut, +1 au round suivant', () => {
