@@ -159,8 +159,19 @@ function _cacheInvalidateWhere(path) {
   }
 }
 
-function _cachePatchAdd(path, docData) {
+// Toute écriture réussie de cette couche passe par un _cachePatch* : on y
+// invalide les requêtes `where` et on signale la collection modifiée (le
+// résumé du dashboard tenu par le MJ s'y accroche).
+function _afterWrite(path) {
   _cacheInvalidateWhere(path);
+  if (typeof document === 'undefined') return;
+  document.dispatchEvent(new CustomEvent('app:data-written', {
+    detail: { path, col: String(path).split('/').pop() },
+  }));
+}
+
+function _cachePatchAdd(path, docData) {
+  _afterWrite(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) {
@@ -177,7 +188,7 @@ function _cachePatchAdd(path, docData) {
 }
 
 function _cachePatchUpdate(path, id, partial) {
-  _cacheInvalidateWhere(path);
+  _afterWrite(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) {
@@ -191,7 +202,7 @@ function _cachePatchUpdate(path, id, partial) {
 }
 
 function _cachePatchSave(path, id, partial) {
-  _cacheInvalidateWhere(path);
+  _afterWrite(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) {
@@ -209,7 +220,7 @@ function _cachePatchSave(path, id, partial) {
 }
 
 function _cachePatchReplace(path, id, data) {
-  _cacheInvalidateWhere(path);
+  _afterWrite(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   const docData = { id, ...data };
@@ -227,7 +238,7 @@ function _cachePatchReplace(path, id, data) {
 }
 
 function _cachePatchDelete(path, id) {
-  _cacheInvalidateWhere(path);
+  _afterWrite(path);
   const allKey = `${path}:all`;
   const all = _cache.get(allKey);
   if (all) _cache.set(allKey, { data: all.data.filter(d => d.id !== id), ts: all.ts });
@@ -426,6 +437,10 @@ const _LAZY_SESSION_DOCS = new Set([
   'world/dice_skills',      // histoire.js, shop.js, vtt.js
   'world/rarities',         // boutique/inventaire, stable par aventure
   'world/map',              // config fond de carte, stable mais image potentiellement lourde
+  // Résumé compact du dashboard (tenu par le client MJ) : remplace côté joueur la
+  // lecture complète de story/achievements/collection. Session-live → la porte
+  // « trustworthy » ne conclut jamais « absent » sur un simple snapshot cache.
+  'settings/dashboardSummary',
 ]);
 const _sessionDocKey = (col, id) => `${col}/${id}`;
 

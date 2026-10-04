@@ -413,6 +413,14 @@ export async function selectAdventure(adv) {
 
   // Pastille de non-lus du Mur du Bastion sur la navigation (toutes pages).
   initBastionWallSignal();
+
+  // MJ : tient à jour le résumé compact que lit le dashboard des joueurs, à partir
+  // des seules collections qu'il a déjà chargées (aucune lecture en plus).
+  if (STATE.isAdmin) {
+    import('../features/dashboard-summary-maintainer.js')
+      .then(m => m.startDashboardSummaryMaintainer())
+      .catch(e => console.warn('[adventure] résumé du dashboard indisponible', e?.message || e));
+  }
 }
 
 // ── Créer une aventure ──────────────────────────
