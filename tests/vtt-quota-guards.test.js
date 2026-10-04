@@ -32,7 +32,7 @@ test('la présence est limitée au VTT et ses lecteurs ne restent pas actifs glo
 test('les interactions continues limitent les écritures tout en forçant leur état final', () => {
   assert.match(vtt, /const KEYBOARD_REMOTE_SYNC_MS = 600/);
   assert.match(ruler, /const MJ_RULER_THROTTLE = 600/);
-  assert.match(ruler, /export function _endRuler\(\) \{[\s\S]*?_flushMjRulerBroadcast\(\)/);
+  assert.match(ruler, /export function _endRuler\(\) \{[\s\S]*?_flushMjRulerBroadcast\(\{ final: true \}\)/);
 });
 
 test('un quota épuisé produit un message explicite et non une avalanche de notifications', () => {

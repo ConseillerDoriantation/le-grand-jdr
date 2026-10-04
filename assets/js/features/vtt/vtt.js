@@ -12453,7 +12453,7 @@ function _initListeners() {
     _renderWeatherBtn();
     _applyWeather();
     _renderCombatTracker();
-    _renderMjRulerRemote(VS.session.mjRuler);
+    _renderMjRulerRemote(VS.session.mjRuler, { fromSession: true });
     _renderShortRest();
     _checkShortRestAutoApply();
   },()=>{}));
