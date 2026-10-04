@@ -32,7 +32,7 @@ test('la présence est limitée au VTT et ses lecteurs ne restent pas actifs glo
 test('les interactions continues limitent les écritures tout en forçant leur état final', () => {
   assert.match(vtt, /const KEYBOARD_REMOTE_SYNC_MS = 600/);
   assert.match(ruler, /const MJ_RULER_THROTTLE = 600/);
-  assert.match(ruler, /export function _endRuler\(\) \{[\s\S]*?_flushMjRulerBroadcast\(\)/);
+  assert.match(ruler, /export function _endRuler\(\) \{[\s\S]*?_flushMjRulerBroadcast\(\{ final: true \}\)/);
 });
 
 test('un quota épuisé produit un message explicite et non une avalanche de notifications', () => {
@@ -73,8 +73,9 @@ test('le journal MJ ne lit pas deux fois quatre-vingts messages pour en afficher
 test('le passage de round et le démarrage du combat ne réécrivent pas les tokens inchangés', () => {
   const turns = readFileSync(new URL('../assets/js/features/vtt/vtt-combat-turns.js', import.meta.url), 'utf8');
   // Un drapeau n'est réinitialisé que s'il était posé ; les deux boucles passent par le même helper.
-  assert.match(turns, /if \(tokData\.movedThisTurn\)\s+updates\.movedThisTurn = false;/);
-  assert.equal((turns.match(/const updates = _turnResetPatch\(tokData\);/g) || []).length, 2);
+  const flags = readFileSync(new URL('../assets/js/features/vtt/vtt-turn-flags.js', import.meta.url), 'utf8');
+  assert.match(flags, /if \(token\.movedThisTurn\)\s+updates\.movedThisTurn = false;/);
+  assert.equal((turns.match(/const updates = _turnResetPatch\(tokData, epoch\);/g) || []).length, 2);
   assert.match(turns, /if \(Object\.keys\(updates\)\.length\) ops\.push/);
   assert.match(turns, /offset \+= 400/);
   // Plus de b.update inconditionnel dans les boucles sur VS.tokens.
@@ -203,4 +204,25 @@ test('la pastille du Mur du Bastion reste à l’écoute après une navigation',
   assert.match(lazyDocs, /'bastionWall\/meta'/);
   // Bastion désactivé : aucune lecture (refusée mais facturée).
   assert.match(signal, /if \(!isFeatureEnabled\('bastion'\)\) return;\s+_unsubActivity = subscribeDoc/);
+});
+
+test('un onglet VTT masqué coupe aussi ses flux visuels, sans rejouer l\'absence au retour', () => {
+  // Registre commun avec tokens/dessins : coupure après 2 min, reprise au retour.
+  assert.match(vtt, /_clearSceneSubscriptions\(\);\n\s*_pauseVttStreams\(\);/);
+  assert.match(vtt, /_rebindSceneSubscriptions\?\.\(\);\n\s*_resumeVttStreams\(\);/);
+  assert.match(vtt, /function _initListeners\(\) \{\n  _clearVttStreams\(\);\n  VS\.unsubs\.push\(_clearVttStreams\);/);
+  // Joueur : session, scènes et présence pausables ; le MJ les garde (logique de repos court, auto-synchro).
+  assert.match(vtt, /onSnapshot\(_sesRef\(\)[^\n]*\n\s*\}, \{ pausable: !STATE\.isAdmin \}\);/);
+  assert.match(vtt, /_watchVttStream\(\(\) => onSnapshot\(_pgsCol\(\)/);
+  assert.match(vtt, /_watchVttStream\(\(\) => \{ _startPresence\(\); return _resetPresence; \}, \{ pausable: !STATE\.isAdmin \}\)/);
+  // Visuels purs, pour tous : visée, pings, émotes.
+  assert.match(vtt, /_watchVttStream\(\(\) => onSnapshot\(_pingsCol\(\)/);
+  assert.match(vtt, /_watchVttStream\(\(\) => onSnapshot\(_reactionsCol\(\)/);
+  // Visée : amorcée jusqu'à la confirmation serveur (montage comme retour) → aucun sceau rejoué.
+  assert.match(vtt, /onSnapshot\(_castingCol\(\), \{ includeMetadataChanges: true \}, snap => \{\n\s*_renderRemoteCastings\(snap\.docs, !primed\);\n\s*if \(!snap\.metadata\.fromCache\) primed = true;/);
+  // Jamais en pause : musique (audio en arrière-plan) et journal (aucun gain).
+  assert.doesNotMatch(vtt, /_watchVttStream\(\(\) => onSnapshot\(_musicStateRef/);
+  // La sidebar écoute le même doc de session : elle doit suivre, sinon la cible reste active.
+  assert.match(layout, /if \(!document\.hidden \|\| !_sessionUnsub\) return;\n\s*try \{ _sessionUnsub\(\); \} catch \{\}/);
+  assert.match(layout, /else if \(_sessionAdventureId && !_sessionUnsub\) \{\n\s*_startSessionWatch\(\);/);
 });

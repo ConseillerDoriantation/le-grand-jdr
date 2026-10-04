@@ -72,6 +72,7 @@ import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisu
 import { fogHasUnlimitedVision, fogVisionRadiusCells, vttCanvasPixelRatio, vttPinchCameraTransform } from './vtt-fog-performance.js';
 import { vttStructureLegendSvg } from './vtt-wall-utils.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenFootprintMeta, tokenHiddenHealthRatio, tokenMovementMeta, tokenRelationTone, tokenResourceArcs, tokenVisibleHealthMeta } from './vtt-token-visual.js';
+import { TURN_EPOCH_ENABLED, TURN_FLAG_RESET, sessionTurnEpoch, normalizeTurnFlags, stampTurnPatch, turnFlagsStale, hasTurnFlags } from './vtt-turn-flags.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { attackRollHitsTarget, gridDistanceForRange, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionConsumedByAttack, conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
@@ -83,7 +84,7 @@ import { _calcAfflictionDD, rollCriticalDiceDetailed, splitSpellDiceFormula } fr
 import { MAX_SIMULATED_DICE, normalizeSimulatedNatural } from './vtt-dice-simulation.js';
 import {
   _startRuler, _updateRuler, _endRuler, _clearRuler, _showRulerHover, _hideRulerHover,
-  _renderMjRulerRemote, _resetRuler, rulerActive, rulerBusy, rulerCells,
+  _renderMjRulerRemote, _rearmMjRulerRemote, _resetRuler, rulerActive, rulerBusy, rulerCells,
 } from './vtt-ruler.js';
 import {
   _initChatLogSubs, _vttToggleLogDetail, _vttSendChat, _vttChatReply, _vttChatReplyCancel, _chatMsgs,
@@ -1199,7 +1200,9 @@ function _vttArmListeners() {
   if (_vttArmTimer) { clearTimeout(_vttArmTimer); _vttArmTimer = null; }
   if (_vttArmDetach) { _vttArmDetach(); _vttArmDetach = null; }
   _initListeners();
-  _startPresence();
+  // Colonne de présence : purement visuelle chez le joueur (pausable) ; le MJ la
+  // garde pour le repos court automatique.
+  _watchVttStream(() => { _startPresence(); return _resetPresence; }, { pausable: !STATE.isAdmin });
 }
 function _vttScheduleListeners(host) {
   _vttListenersArmed = false;
@@ -1248,6 +1251,7 @@ function _cleanup() {
   _bestiaryCatalogLoaded = false;
   _bestiaryCatalogPromise = null;
   VS.session = {}; VS.activePage = null; VS.selected = null; _attackSrc = null;
+  _turnEpochApplied = null;
   _clearAim(); _hideActBar();
   _moveHL = []; _renderedPings.clear(); _renderedReactions.clear();
   for (const k of Object.keys(_emoteStacks)) delete _emoteStacks[k];
@@ -2153,7 +2157,7 @@ function _buildShape(t) {
               movePatch.movedThisTurn=true;
             }
           }
-          moves.push({id, tokenData, patch:movePatch});
+          moves.push({id, tokenData, patch:_stampTurn(tokenData, movePatch)});
         }
         if (!moves.length) {
           // Groupe relâché sur ses cases (clic « tremblé » > 3 px) : aucune écriture.
@@ -2214,7 +2218,7 @@ function _buildShape(t) {
         fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
         return;
       }
-      const patch={col:c,row:r};
+      let patch={col:c,row:r};
       if (VS.session?.combat?.active && moveCur && (c !== moveCur.col || r !== moveCur.row)) {
         patch.moveOrigin = _combatMoveOrigin(moveCur);
       }
@@ -2224,6 +2228,7 @@ function _buildShape(t) {
         patch.movedCells=(cur?.movedCells||0)+d;
         patch.movedThisTurn=true;
       }
+      patch=_stampTurn(moveCur, patch);
       const previous=moveCur
         ? Object.fromEntries(Object.keys(patch).map(key=>[key,moveCur[key]]))
         : null;
@@ -3442,7 +3447,7 @@ async function _moveTo(id, col, row) {
       return;
     }
   }
-  const patch = {col, row};
+  let patch = {col, row};
   const moved = !!cur && (col !== cur.col || row !== cur.row);
   if (moved && VS.session?.combat?.active) {
     patch.moveOrigin = _combatMoveOrigin(cur);
@@ -3452,6 +3457,7 @@ async function _moveTo(id, col, row) {
     patch.movedCells = (cur.movedCells || 0) + d;
     patch.movedThisTurn = true;
   }
+  patch = _stampTurn(cur, patch);
   const previous = Object.fromEntries(Object.keys(patch).map(key => [key, cur[key]]));
   Object.assign(cur, patch);
   const dims = _tokenDims(cur);
@@ -3509,24 +3515,26 @@ async function _vttUndoMove(id) {
     showNotif('Aucun déplacement à annuler pour ce tour.', 'info');
     return;
   }
-  const patch = {
+  const patch = _stampTurn(token, {
     col: Number(origin.col) || 0,
     row: Number(origin.row) || 0,
     movedCells: Number(origin.movedCells) || 0,
     movedThisTurn: !!origin.movedThisTurn,
-  };
-  patch.moveOrigin = deleteField();
+    moveOrigin: deleteField(),
+  });
   const previous = {
     col: token.col,
     row: token.row,
     movedCells: token.movedCells,
     movedThisTurn: token.movedThisTurn,
     moveOrigin: token.moveOrigin,
+    ...(Object.hasOwn(patch, 'turnEpoch') ? { turnEpoch: token.turnEpoch } : {}),
   };
   token.col = patch.col;
   token.row = patch.row;
   token.movedCells = patch.movedCells;
   token.movedThisTurn = patch.movedThisTurn;
+  if (Object.hasOwn(patch, 'turnEpoch')) token.turnEpoch = patch.turnEpoch;
   delete token.moveOrigin;
   const dims = _tokenDims(token);
   entry.shape?.to({
@@ -9758,10 +9766,11 @@ async function _vttRollAttack() {
     if (hasCombatUses) Object.assign(patch, { techniqueCombatKey: combatKey, techniqueCombatUses: combatUses });
     if (hasSessionUses) Object.assign(patch, { techniqueSessionKey: sessionKey, techniqueSessionUses: sessionUses });
     if (!Object.keys(patch).length) return;
-    const previous = Object.fromEntries(Object.keys(patch).map(key => [key, src[key]]));
-    Object.assign(src, patch);
+    const stamped = _stampTurn(src, patch);
+    const previous = Object.fromEntries(Object.keys(stamped).map(key => [key, src[key]]));
+    Object.assign(src, stamped);
     if (VS.selected === src.id) _renderInspectorSoon();
-    await updateDoc(_tokRef(src.id), patch).catch(error => {
+    await updateDoc(_tokRef(src.id), stamped).catch(error => {
       Object.assign(src, previous);
       if (VS.selected === src.id) _renderInspectorSoon();
       throw error;
@@ -12404,6 +12413,59 @@ function _stopPlayerNpcWatch() {
   _playerNpcApply = null;
 }
 
+// Époque de tour (cf. vtt-turn-flags.js) : n'est appliquée qu'une fois CONFIRMÉE
+// (snapshot de session sans écriture locale en attente, ou écriture du MJ
+// réussie) et ne fait que monter. Une écriture refusée ne fait donc rien perdre.
+let _turnEpochApplied = null;
+export function _turnEpoch() {
+  return TURN_EPOCH_ENABLED ? _turnEpochApplied : null;
+}
+// Patch daté de l'époque courante (identité si le mécanisme est désactivé).
+export function _stampTurn(token, patch) {
+  return stampTurnPatch(token, patch, _turnEpoch());
+}
+// Nouvelle époque : les drapeaux périmés sont remis à zéro EN MÉMOIRE (aucune
+// écriture), formes et tracker suivent.
+export function _applyTurnEpoch(epoch) {
+  if (!TURN_EPOCH_ENABLED || !Number.isFinite(epoch)) return;
+  if (_turnEpochApplied != null && epoch <= _turnEpochApplied) return;
+  _turnEpochApplied = epoch;
+  let changed = false;
+  for (const [id, entry] of Object.entries(VS.tokens || {})) {
+    const data = entry?.data;
+    if (!turnFlagsStale(data, epoch) || !hasTurnFlags(data)) continue;
+    Object.assign(data, TURN_FLAG_RESET);
+    _patchShape(id);
+    changed = true;
+  }
+  if (!changed) return;
+  _renderCombatTrackerSoon();
+  if (VS.selected) _renderInspectorSoon();
+}
+
+// Flux visuels coupés après 2 min d'onglet masqué puis rebranchés au retour
+// (comme tokens et dessins). Quota : un onglet masqué payait chaque écriture des
+// docs chauds (tour, règle MJ, visée, pings, émotes, brouillard) ; au retour, le
+// jeton de reprise (< 30 min) ne facture qu'une fois chaque doc modifié.
+let _pausableStreams = [];   // { start: () => unsubscribe, unsub }
+function _watchVttStream(start, { pausable = true } = {}) {
+  if (!pausable) { VS.unsubs.push(start()); return; }
+  _pausableStreams.push({ start, unsub: start() });
+}
+function _pauseVttStreams() {
+  for (const stream of _pausableStreams) {
+    try { stream.unsub?.(); } catch {}
+    stream.unsub = null;
+  }
+}
+function _resumeVttStreams() {
+  for (const stream of _pausableStreams) if (!stream.unsub) stream.unsub = stream.start();
+}
+function _clearVttStreams() {
+  _pauseVttStreams();
+  _pausableStreams = [];
+}
+
 let _sceneTokenUnsubs = [];   // tokens de la scène active (réabonné à chaque changement de scène)
 let _baseTokenUnsubs = [];    // réserve (+ joueurs/PNJ de toutes les scènes côté MJ) : indépendants de la scène
 let _sceneAnnotUnsub = null;
@@ -12425,14 +12487,23 @@ export function _vttPageChanged() {
 }
 
 function _initListeners() {
+  _clearVttStreams();
+  VS.unsubs.push(_clearVttStreams);
   if (!aid()) return;
 
-  // 1. Session
-  VS.unsubs.push(onSnapshot(_sesRef(), snap => {
+  // 1. Session — le MJ la garde en arrière-plan (repos court auto, auto-synchro).
+  // Joueur : `includeMetadataChanges` livre la confirmation serveur qui amorce la
+  // règle distante du MJ, même si rien n'a changé (aucune lecture facturée).
+  _watchVttStream(() => {
+    if (!STATE.isAdmin) _rearmMjRulerRemote();
+    return onSnapshot(_sesRef(), STATE.isAdmin ? {} : { includeMetadataChanges: true }, onSessionSnapshot, () => {});
+  }, { pausable: !STATE.isAdmin });
+  function onSessionSnapshot(snap) {
     const previousCombatActive = !!VS.session?.combat?.active;
     const previousRound = VS.session?.combat?.round ?? 0;
     const previousActiveTokenId = VS.session?.combat?.activeTokenId ?? null;
     VS.session=snap.exists()?snap.data():{};
+    if (!snap.metadata.hasPendingWrites) _applyTurnEpoch(sessionTurnEpoch(VS.session));
     setActiveStatsSession(VS.session.live && VS.session.statsSessionKey
       ? { key: VS.session.statsSessionKey, date: VS.session.statsSessionDate }
       : null);
@@ -12453,13 +12524,13 @@ function _initListeners() {
     _renderWeatherBtn();
     _applyWeather();
     _renderCombatTracker();
-    _renderMjRulerRemote(VS.session.mjRuler);
+    _renderMjRulerRemote(VS.session.mjRuler, { fromSession: true, confirmed: !snap.metadata.fromCache });
     _renderShortRest();
     _checkShortRestAutoApply();
-  },()=>{}));
+  }
 
   // 2. Pages
-  VS.unsubs.push(onSnapshot(_pgsCol(), snap => {
+  _watchVttStream(() => onSnapshot(_pgsCol(), snap => {
     snap.docChanges().forEach(ch => {
       if (ch.type==='removed') delete VS.pages[ch.doc.id];
       else {
@@ -12486,7 +12557,7 @@ function _initListeners() {
         ||Object.values(VS.pages).sort((a,b)=>(a.order??0)-(b.order??0))[0]?.id;
       if (target&&VS.pages[target]) { _switchPage(target); _vttAutoSelectOwnToken(); }
     }
-  },()=>{}));
+  },()=>{}), { pausable: !STATE.isAdmin });
 
   // 3. Personnages — source de vérité des HP joueurs
   VS.unsubs.push(subscribeCollection("characters", data => {
@@ -12599,7 +12670,7 @@ function _initListeners() {
     snap.docChanges().forEach(ch => {
      try {
       const id=ch.doc.id;
-      let data={id,...ch.doc.data()};
+      let data=normalizeTurnFlags({id,...ch.doc.data()}, _turnEpoch());
       // Hors périmètre (supprimé, ou sorti du flux : changement de scène…) :
       // on ne retire le token local que s'il relève encore de CE flux. S'il a
       // déjà été mis à jour par un autre flux, celui-ci fait foi.
@@ -12802,35 +12873,43 @@ function _initListeners() {
   // Une table laissée dans un onglet masqué ne doit pas consommer indéfiniment
   // les flux les plus volumineux. Après 2 minutes, tokens et dessins sont mis en
   // pause puis resynchronisés automatiquement au retour sur l'onglet.
+  // Les flux visuels pausables (_watchVttStream) suivent le même cycle.
   const onSceneVisibilityChange = () => {
     if (_sceneHiddenTimer) clearTimeout(_sceneHiddenTimer);
     _sceneHiddenTimer = null;
     if (document.hidden) {
       _sceneHiddenTimer = setTimeout(() => {
         _sceneHiddenTimer = null;
-        if (document.hidden) _clearSceneSubscriptions();
+        if (!document.hidden) return;
+        _clearSceneSubscriptions();
+        _pauseVttStreams();
       }, 120_000);
-    } else if (!_sceneTokenUnsubs.length && !_sceneAnnotUnsub) {
-      _rebindSceneSubscriptions?.();
+      return;
     }
+    if (!_sceneTokenUnsubs.length && !_sceneAnnotUnsub) _rebindSceneSubscriptions?.();
+    _resumeVttStreams();
   };
   document.addEventListener('visibilitychange', onSceneVisibilityChange);
   VS.unsubs.push(() => document.removeEventListener('visibilitychange', onSceneVisibilityChange));
   onSceneVisibilityChange();
 
   // 8. Ciblage multi-sorts temps réel (lignes pointillées broadcast)
-  // Le 1er snapshot livre les docs vttCasting persistés (anciens casts) → on
-  // « amorce » : on marque leurs sigils comme déjà vus SANS les rejouer, sinon
-  // toutes les runes des casts précédents se redessinent à l'arrivée sur le VTT.
-  let _castingPrimed = false;
-  VS.unsubs.push(onSnapshot(_castingCol(), snap => {
-    _renderRemoteCastings(snap.docs, !_castingPrimed);
-    _castingPrimed = true;
-  }, () => {}));
+  // Les snapshots livrés jusqu'à la 1ʳᵉ confirmation serveur (cache, puis casts
+  // lancés pendant l'absence — montage ou retour sur l'onglet) « amorcent » :
+  // leurs sigils sont marqués vus SANS être rejoués, sinon les runes des casts
+  // précédents se redessineraient. `includeMetadataChanges` garantit cette
+  // confirmation même si rien n'a changé (sans lecture facturée).
+  _watchVttStream(() => {
+    let primed = false;
+    return onSnapshot(_castingCol(), { includeMetadataChanges: true }, snap => {
+      _renderRemoteCastings(snap.docs, !primed);
+      if (!snap.metadata.fromCache) primed = true;
+    }, () => {});
+  });
 
   // 9. Pings visuels temps réel. La présence utilise désormais la collection
   // app-wide partagée via vtt-presence.js (un seul listener dans toute l'app).
-  VS.unsubs.push(onSnapshot(_pingsCol(), snap => {
+  _watchVttStream(() => onSnapshot(_pingsCol(), snap => {
     const now = Date.now();
 
     // Pings visuels (< 5 s)
@@ -12838,10 +12917,10 @@ function _initListeners() {
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(p => p.pageId === VS.activePage?.id && p.createdAt && (now - p.createdAt.toMillis()) < 5000);
     _renderPings(pings);
-  }, () => {})); // silencieux si pas de règle Firestore
+  }, () => {})); // silencieux si pas de règle Firestore ; pings > 5 s ignorés au retour
 
-  // 10. Réactions émotes temps réel
-  VS.unsubs.push(onSnapshot(_reactionsCol(), snap => {
+  // 10. Réactions émotes temps réel (> 12 s ignorées, donc rien de rejoué au retour)
+  _watchVttStream(() => onSnapshot(_reactionsCol(), snap => {
     const now = Date.now();
     snap.docs.forEach(d => {
       const r = { id: d.id, ...d.data() };
@@ -13112,11 +13191,13 @@ async function _vttCourir(id) {
   if (!tok || !VS.session?.combat?.active) return;
   if (tok.bonusMvt > 0) { showNotif('Course déjà utilisée ce tour', 'error'); return; }
   const bonus = _live(tok).displayMovement ?? 6;
-  _vttPatchTokenOptimistically(id, { bonusMvt: bonus });
+  const patch = _stampTurn(tok, { bonusMvt: bonus });
+  const previous = Object.fromEntries(Object.keys(patch).map(key => [key, tok[key]]));
+  _vttPatchTokenOptimistically(id, patch);
   try {
-    await updateDoc(_tokRef(id), { bonusMvt: bonus });
+    await updateDoc(_tokRef(id), patch);
   } catch (error) {
-    _vttPatchTokenOptimistically(id, { bonusMvt: 0 });
+    _vttPatchTokenOptimistically(id, previous);
     console.error('[vtt] course non appliquée', error);
     showNotif('Erreur', 'error');
     return;
@@ -13308,12 +13389,15 @@ function _moveSelectedBy(dc, dr, selectionIds = null) {
       patch.movedCells=(move.token.movedCells||0)+move.distance;
       patch.movedThisTurn=true;
     }
-    return { ...move, patch };
+    return { ...move, patch:_stampTurn(move.token, patch) };
   });
 
   prepared.forEach(({token,col,row,patch})=>{
     const previous=_keyboardOptimisticMoves.get(token.id);
     const confirmed=previous?.confirmed || {
+      // Champs ajoutés par la datation du tour (époque, remise à zéro) inclus :
+      // un refus rétablit le token exactement.
+      ...Object.fromEntries(Object.keys(patch).map(key=>[key, token[key]])),
       col:token.col,
       row:token.row,
       movedCells:token.movedCells||0,

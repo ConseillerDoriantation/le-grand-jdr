@@ -4,7 +4,8 @@
 import { STATE } from '../core/state.js';
 import { PRESENCE_TTL_MS } from '../shared/presence-ttl.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
-import { loadChars, loadCollection, loadCollectionAfter, loadCollectionWhere, getCachedCollection, getDocData, getDocDataSilent, replaceDoc, saveDoc, updateInCol, deleteFromCol, claimDocumentLease, clearDocumentLease } from '../data/firestore.js';
+import { loadChars, loadCollection, loadCollectionAfter, loadCollectionWhere, getCachedCollection, getDocData, getDocDataSilent, replaceDoc, saveDoc, updateInCol, deleteFromCol, claimDocumentLease, clearDocumentLease, subscribeRecentCollection } from '../data/firestore.js';
+import { subscribeRecentWhere } from '../data/firestore-queries.js';
 import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled, isFeatureAllowedByPlan } from '../shared/features.js';
@@ -16,14 +17,15 @@ import { MVP_AXIS_GUIDE, MVP_SCORING_GUIDE, scoreMvpView } from '../shared/stats
 import { showNotif } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
 import { confirmModal, openModal, promptModal, closeModalDirect } from '../shared/modal.js';
-import { watch, watchDoc, watchRecent } from '../shared/realtime.js';
+import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { getRouteSub } from '../shared/route.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 import { canControlCharacter, getControlledCharacters } from '../shared/character-state.js';
 import { dedupeQuestParticipants, questParticipantFromChar, toggleQuestParticipant } from '../shared/participants.js';
-import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey, bastionWallUnreadCount, sortBastionWallPosts } from '../shared/bastion-wall.js';
+import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey } from '../shared/bastion-wall.js';
+import { createDashboardWallFeed, dashboardWallView } from '../shared/dashboard-wall-feed.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
@@ -2627,6 +2629,9 @@ function _statsOpenManageModal() {
 }
 
 
+// Flux du mur du tableau de bord en cours (un seul à la fois, cf. dashboard()).
+let _dashWallFeed = null;
+
 const PAGES = {
 
   // ─── DASHBOARD ──────────────────────────────────────────────────────────────
@@ -2656,6 +2661,11 @@ const PAGES = {
     let wallDocs        = [];
     let wallLegacy      = [];
     let wallRead        = null;
+    const wallSeenAt = () => {
+      let seenAt = 0;
+      try { seenAt = Number(localStorage.getItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid)) || 0); } catch { /* stockage privé indisponible */ }
+      return Math.max(seenAt, Number(wallRead?.seenAt) || 0);
+    };
     let bastionDoc      = null;
     let nextSession     = null;
     let nextSessionReady = false;
@@ -3555,16 +3565,8 @@ const PAGES = {
 
     function _dashboardWallPanel() {
       if (!isFeatureEnabled('bastion')) return '';
-      const posts = sortBastionWallPosts([
-        ...wallDocs.filter(doc => doc.id !== 'main' && (doc.kind === 'post' || doc.text)),
-        ...wallLegacy.map((post, index) => ({ ...post, id: post.id || `legacy_${index}`, legacy: true })),
-      ]);
-      let seenAt = 0;
-      try { seenAt = Number(localStorage.getItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid)) || 0); } catch { /* stockage privé indisponible */ }
-      seenAt = Math.max(seenAt, Number(wallRead?.seenAt) || 0);
-      const unread = bastionWallUnreadCount(posts, seenAt, STATE.user?.uid);
-      const highlighted = posts.filter(post => post.ts > seenAt && post.uid !== STATE.user?.uid);
-      const shown = [...highlighted, ...posts.filter(post => !highlighted.includes(post))].slice(0, 4);
+      const seenAt = wallSeenAt();
+      const { unread, shown } = dashboardWallView({ docs: wallDocs, legacyItems: wallLegacy, seenAt, uid: STATE.user?.uid });
       const timeAgo = ts => {
         const minutes = Math.max(0, Math.floor((Date.now() - Number(ts || 0)) / 60000));
         if (minutes < 1) return "à l'instant";
@@ -3877,11 +3879,28 @@ const PAGES = {
         schedulePaint();
       });
     }
-    // Un seul accès : le snapshot initial hydrate le mur puis reste abonné aux
-    // deltas. Un loadRecent juste avant doublerait jusqu'à 80 lectures.
-    watchRecent('dash-bastion-wall', 'bastionAnnonces', d => { wallDocs = d || []; schedulePaint(); }, { field: 'ts', max: 80 });
-    watchDoc('dash-bastion-wall-legacy', 'bastionAnnonces', 'main', d => { wallLegacy = Array.isArray(d?.items) ? d.items : []; schedulePaint(); });
-    if (STATE.user?.uid) watchDoc('dash-bastion-wall-read', 'bastionWallReads', STATE.user.uid, d => { wallRead = d; schedulePaint(); }, { silent: true });
+    // Mur du Bastion (4 publications + non-lus) : flux bornés au lieu des 80
+    // dernières (shared/dashboard-wall-feed.js), arrêtés à la navigation comme
+    // les watch*. Bastion désactivé → panneau absent, aucun abonnement.
+    if (isFeatureEnabled('bastion')) {
+      _dashWallFeed?.stop();
+      const wallFeed = createDashboardWallFeed(
+        { subscribeRecent: subscribeRecentCollection, subscribeWhere: subscribeRecentWhere },
+        docs => { wallDocs = docs || []; schedulePaint(); },
+      );
+      _dashWallFeed = wallFeed;
+      wallFeed.start(wallSeenAt());
+      document.addEventListener('app:page-changed', () => {
+        wallFeed.stop();
+        if (_dashWallFeed === wallFeed) _dashWallFeed = null;
+      }, { once: true });
+      watchDoc('dash-bastion-wall-legacy', 'bastionAnnonces', 'main', d => { wallLegacy = Array.isArray(d?.items) ? d.items : []; schedulePaint(); });
+      if (STATE.user?.uid) watchDoc('dash-bastion-wall-read', 'bastionWallReads', STATE.user.uid, d => {
+        wallRead = d;
+        wallFeed.setSeenAt(wallSeenAt());
+        schedulePaint();
+      }, { silent: true });
+    }
     watchDoc('dash-bastion',   'bastion',        'main', d => { bastionDoc  = d; schedulePaint(); });
     watchDoc('dash-agenda',    'agenda_session', 'next', d => {
       nextSession = d;

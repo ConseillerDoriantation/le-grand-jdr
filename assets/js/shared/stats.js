@@ -4,8 +4,9 @@
 // Un seul doc par aventure : adventures/{aid}/stats/main. À chaque action
 // (jet de compétence, attaque, soin, émote…) on INCRÉMENTE des compteurs via
 // FieldValue.increment — pas de read-modify-write, sûr en concurrence.
-// Quota : les événements sont cumulés quelques secondes (stats-pending.js) puis
-// écrits en UNE fois → 1 écriture par rafale d'actions, 1 seule lecture pour la page.
+// Quota : les événements sont cumulés plusieurs minutes (stats-pending.js, copie
+// locale anti-crash dans stats-journal.js) puis écrits en UNE fois → quelques
+// écritures par séance et par joueur, 1 seule lecture pour la page.
 //
 // Modèle (tout en compteurs) :
 //   chars: {
@@ -26,6 +27,11 @@
 
 import { db, doc, getDoc, setDoc, updateDoc, increment, deleteField, runTransaction } from '../config/firebase.js';
 import { getCurrentAdventureId, deleteFromCol, getDocDataSilent, updateInCol } from '../data/firestore.js';
+import { STATE } from '../core/state.js';
+import { lsJson } from './local-storage.js';
+import {
+  statsJournalPrefix, statsJournalKey, serializeStatsJournal, parseStatsJournal, statsJournalReplayDelay,
+} from './stats-journal.js';
 import { patchStatsRollupScopes } from './stats-analysis.js';
 import { buildCombatCorrectionDeltas } from './stats-corrections.js';
 import {
@@ -86,6 +92,9 @@ export function makeStatsSessionKey(dateKey = statsDateKey(), startedAt = Date.n
 export function setActiveStatsSession(session = null) {
   const key = String(session?.key || '').trim();
   const date = String(session?.date || '').trim();
+  // Début ou fin d'un live : chaque client publie son tampon, la page
+  // Statistiques est donc complète dès la fin de la séance.
+  if (key !== (_activeSession?.key || '') && _pending) void flushStats();
   _activeSession = key ? { key, date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : statsDateKey() } : null;
 }
 
@@ -113,23 +122,33 @@ async function bumpStats(patch) {
 }
 
 // ── Tampon d'écriture (quota) ────────────────────────────────────────────────
-// Les compteurs d'actions sont cumulés puis écrits en un seul setDoc : 3 s après
-// la dernière action (10 s au plus après la première), ou tout de suite quand
-// l'onglet passe en arrière-plan, à la navigation, à la déconnexion et avant
-// toute lecture/mutation MJ du doc. Le setDoc est mis en file par le SDK
-// (persistée en IndexedDB) : un onglet fermé juste après garde l'écriture.
-const _FLUSH_DELAY_MS = 3000;
-const _FLUSH_MAX_WAIT_MS = 10_000;
+// Les compteurs d'actions sont cumulés puis écrits en un seul setDoc : 90 s après
+// la dernière action (5 min au plus après la première), ou tout de suite quand
+// l'onglet passe en arrière-plan, à la navigation, au début/à la fin d'un live,
+// à la déconnexion et avant toute lecture/mutation MJ du doc. Personne n'écoute
+// stats/main en direct : seul ce délai d'écriture change, jamais le jeu.
+// Une copie locale (stats-journal.js) couvre l'onglet tué sans `pagehide` ; le
+// setDoc, lui, est mis en file par le SDK (persistée en IndexedDB).
+const _FLUSH_DELAY_MS = 90_000;
+const _FLUSH_MAX_WAIT_MS = 5 * 60_000;
 let _pending = null;
 let _pendingRef = null;      // doc visé, capturé au 1er ajout (changement d'aventure sûr)
 let _pendingSince = 0;
 let _flushTimer = null;
+let _journalKey = null;      // copie locale de CE tampon, capturée au 1er ajout
+
+const _TAB_ID = (() => {
+  try { return crypto.randomUUID(); }
+  catch { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; }
+})();
 
 export function flushStats() {
   clearTimeout(_flushTimer);
   _flushTimer = null;
-  const pending = _pending, ref = _pendingRef;
-  _pending = null; _pendingRef = null; _pendingSince = 0;
+  const pending = _pending, ref = _pendingRef, journalKey = _journalKey;
+  _pending = null; _pendingRef = null; _pendingSince = 0; _journalKey = null;
+  // Effacée AVANT l'écriture : un rejeu ne peut pas compter deux fois.
+  if (journalKey) lsJson.remove(journalKey);
   const patch = buildStatsPatch(pending, increment);
   if (!ref || !patch) return Promise.resolve(true);
   return setDoc(ref, patch, { merge: true }).then(() => true, () => false);
@@ -138,6 +157,7 @@ export function flushStats() {
 function _queueStats(apply) {
   const ref = _statsRef();
   if (!ref) return Promise.resolve(false);
+  _replayOrphanJournals();
   if (_pendingRef && _pendingRef.path !== ref.path) void flushStats();
   _pending ??= createStatsPending();
   _pendingRef ??= ref;
@@ -145,10 +165,51 @@ function _queueStats(apply) {
   if (isStatsPendingEmpty(_pending)) return Promise.resolve(true);
   const now = Date.now();
   if (!_pendingSince) _pendingSince = now;
+  const uid = STATE.user?.uid;
+  if (uid) {
+    _journalKey ??= statsJournalKey(uid, _TAB_ID);
+    lsJson.set(_journalKey, serializeStatsJournal({ path: _pendingRef.path, pending: _pending, tabId: _TAB_ID, at: now }));
+  }
   clearTimeout(_flushTimer);
   const wait = Math.max(0, Math.min(_FLUSH_DELAY_MS, _pendingSince + _FLUSH_MAX_WAIT_MS - now));
   _flushTimer = setTimeout(() => { void flushStats(); }, wait);
   return Promise.resolve(true);
+}
+
+// Rejoue les tampons d'onglets disparus (plantage, coupure) de cet utilisateur.
+// Un journal encore récent peut appartenir à un onglet vivant : il est revu
+// à l'échéance où son propriétaire aurait forcément écrit.
+let _orphanScanUid = null;
+let _orphanTimer = null;
+function _replayOrphanJournals({ force = false } = {}) {
+  const uid = STATE.user?.uid;
+  if (!uid || (!force && _orphanScanUid === uid)) return;
+  _orphanScanUid = uid;
+  const prefix = statsJournalPrefix(uid);
+  const ownKey = statsJournalKey(uid, _TAB_ID);
+  let keys = [];
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && key !== ownKey && key.startsWith(prefix)) keys.push(key);
+    }
+  } catch { keys = []; }
+  let nextCheck = Infinity;
+  const now = Date.now();
+  for (const key of keys) {
+    const journal = parseStatsJournal(lsJson.get(key));
+    if (!journal) { lsJson.remove(key); continue; }
+    const delay = statsJournalReplayDelay(journal, { tabId: _TAB_ID, now, maxWaitMs: _FLUSH_MAX_WAIT_MS });
+    if (delay == null) continue;
+    if (delay > 0) { nextCheck = Math.min(nextCheck, delay); continue; }
+    lsJson.remove(key);
+    const patch = buildStatsPatch(journal.pending, increment);
+    if (patch) void setDoc(doc(db, journal.path), patch, { merge: true }).catch(() => {});
+  }
+  clearTimeout(_orphanTimer);
+  _orphanTimer = Number.isFinite(nextCheck)
+    ? setTimeout(() => _replayOrphanJournals({ force: true }), nextCheck + 1000)
+    : null;
 }
 
 if (typeof document !== 'undefined') {
@@ -172,6 +233,7 @@ export async function registerStatsSession({ key = '', date = '', startedAt = Da
 
 export async function loadStats() {
   void flushStats();   // la lecture locale inclut alors les compteurs encore en tampon
+  _replayOrphanJournals();
   const ref = _statsRef();
   if (!ref) return null;
   const snap = await getDoc(ref).catch(() => null);
