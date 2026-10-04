@@ -409,7 +409,9 @@ match /users/{uid} {
   allow list:   if isAdmin();
   allow create: if isUserSelfCreate(uid) || isAdmin();
   allow update: if isUserSelfUpdate(uid) || isAdmin();
-  allow delete: if isAdmin();
+  // Un utilisateur réauthentifié peut supprimer son propre document depuis
+  // la page Compte. Firebase Auth impose séparément la connexion récente.
+  allow delete: if (isLoggedIn() && request.auth.uid == uid) || isAdmin();
   // plan/premium/premiumUntil/subscription ne sont pas dans isUserSelfUpdate :
   // seul le super-admin ou un futur webhook serveur peut accorder/retirer Premium.
   // Les avantages consommés par les joueurs passent ensuite par l'aventure

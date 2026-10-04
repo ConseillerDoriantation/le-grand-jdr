@@ -73,19 +73,48 @@ test('le pupitre compact affiche ses ressources éditables et un vrai bouton Fic
   assert.match(inspector, /class="vtt-fiche vtt-fiche--compact"/);
   assert.match(inspector, /class="vtt-resource-summary vtt-resource-summary--/);
   assert.match(inspector, /<b>Fiche<\/b><kbd>C<\/kbd>/);
-  assert.match(inspector, /\$\{_tabBar \? `<details class="vtt-fiche-tools">/);
+  assert.match(inspector, /\$\{_tabBar \? `<span class="vtt-fiche-actions-separator"/);
   assert.match(inspector, /_resource\('Garde'/);
   assert.match(inspector, /setter: '_vttMsSetGarde'/);
   assert.doesNotMatch(inspector, /vtt-eco-row--compact/);
 });
 
-test('le menu du pupitre donne toujours accès à Stats États et Gérer', () => {
+test('le pupitre expose Stats États et Gérer dans un contrôle segmenté permanent', () => {
   assert.match(inspector, /\{ k:'stats',[\s\S]*?lb:'Stats'/);
   assert.match(inspector, /\{ k:'effets',[\s\S]*?lb:'États'/);
   assert.match(inspector, /\{ k:'gerer',[\s\S]*?lb:'Gérer'/);
-  assert.match(inspector, /\$\{_panelHtml\}[\s\S]*?\$\{_identitySheetBtn\}[\s\S]*?\$\{_tabBar \?/);
-  assert.match(inspector, /aria-label="Ouvrir Stats, États et Gérer">•••/);
-  assert.match(css, /@media \(max-width: 900px\)[\s\S]*?\.vtt-fiche-tools\s*\{\s*display:\s*block;/);
+  assert.match(inspector, /class="vtt-fiche-tabs" role="tablist"/);
+  assert.match(inspector, /aria-selected="\$\{s\.k === _insTab\}"/);
+  assert.match(inspector, /vtt-fiche-tab-count\$\{s\.negative \? ' negative' : ''\}/);
+  assert.doesNotMatch(inspector, /class="vtt-fiche-tools"/);
+  assert.match(css, /\.vtt-fiche-tabs\s*\{[\s\S]*?position:\s*static;[\s\S]*?flex-direction:\s*row;/);
+});
+
+test('le tiroir du pupitre suit l onglet actif et reste sous la topbar', () => {
+  assert.match(inspector, /function _syncInspectorDrawerGeometry\(\)/);
+  assert.match(inspector, /dockTop - usefulTop - 12/);
+  assert.match(inspector, /panel\.style\.setProperty\('--ax'/);
+  assert.match(inspector, /event\.key !== 'Escape' \|\| !_insTab/);
+  assert.match(css, /\.vtt-fiche-panel::after\s*\{[\s\S]*?left:\s*var\(--ax/);
+});
+
+test('les états sont résumés et affichés dans une liste unifiée', () => {
+  assert.match(inspector, /summarizeTokenEffects\(/);
+  assert.match(inspector, /name="vtt-token-effects"/);
+  assert.match(inspector, /class="vtt-condition-picker-grid"/);
+  assert.match(inspector, /data-vtt-fn="_vttInsFilterConditionPicker"/);
+  assert.match(inspector, /data-vtt-fn="_vttConditionApply"/);
+  assert.match(css, /\.vtt-effect-impact\s*\{/);
+  assert.match(css, /\.vtt-effect-item\s*\{/);
+});
+
+test('Gérer sépare présence source contrôle partagé et actions MJ', () => {
+  assert.match(inspector, /Visible des joueurs/);
+  assert.match(inspector, /data-page-select="vtt-ins-page-/);
+  assert.match(inspector, /Contrôle partagé/);
+  assert.match(inspector, /Modifier la source/);
+  assert.match(inspector, /Purger les effets/);
+  assert.match(inspector, /const _canManage = STATE\.isAdmin \|\| _isOwner/);
 });
 
 test('le pupitre reste une ligne compacte quelle que soit la ressource affichée', () => {
@@ -108,6 +137,15 @@ test('Combat suit la carte de la maquette sans réintroduire la Garde', () => {
   assert.match(combat, /Secondaire/);
   assert.match(combat, /_vttMsAttackSlot/);
   assert.doesNotMatch(combat, /calcGardeMax|_vttMsSetGarde|vtt-ms-defenses/);
+});
+
+test('l arme affichée ouvre directement les équipements compatibles', () => {
+  const combat = miniSheet.match(/function _msTabCombat\([\s\S]*?\n\}/)?.[0] || '';
+  assert.match(combat, /class="vtt-ms-atk-picker/);
+  assert.match(combat, /data-vtt-fn="_vttMsPop"/);
+  assert.match(combat, /data-vtt-args="slot\|\$\{_esc\(weaponPickerPid\)\}\|\$\{_esc\(_msAttackSlot\)\}"/);
+  assert.match(combat, /Mains nues/);
+  assert.match(css, /\.vtt-ms-atk-picker:hover,[\s\S]*?\.vtt-ms-atk-picker\.sel\s*\{/);
 });
 
 test('les quatre onglets de la mini-fiche restent sur une ligne', () => {

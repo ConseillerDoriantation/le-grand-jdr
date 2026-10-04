@@ -93,8 +93,14 @@ export function rollDice(expr, rng = Math.random) {
 
 /** Carte de rendu d'un jet (total + détail des dés). */
 export function rollCardHtml(roll) {
-  const detail = (roll?.parts || []).map(p => p.type === 'dice'
-    ? `${p.sign < 0 ? '−' : ''}${p.label} [${p.rolls.join(', ')}]`
-    : `${p.sign < 0 ? '−' : '+'}${p.value}`).join(' ');
-  return `<span class="chat-roll"><span class="chat-roll-total">🎲 ${_esc(String(roll?.total ?? ''))}</span><span class="chat-roll-detail">${_esc(roll?.expr ?? '')} · ${_esc(detail)}</span></span>`;
+  const parts = roll?.parts || [];
+  const dice = parts.filter(p => p.type === 'dice');
+  const d20 = dice.length === 1 && dice[0].label === '1d20' ? dice[0].rolls[0] : null;
+  const state = d20 === 20 ? ' chat-roll--crit' : d20 === 1 ? ' chat-roll--fumble' : '';
+  const chips = parts.flatMap(p => p.type === 'dice'
+    ? p.rolls.map(value => `<i class="chat-roll-die">${p.sign < 0 ? '−' : ''}${_esc(String(value))}</i>`)
+    : [`<i class="chat-roll-modifier">${p.sign < 0 ? '−' : '+'}${_esc(String(p.value))}</i>`]).join('');
+  const label = d20 === 20 ? '<span class="chat-roll-label">Réussite critique</span>'
+    : d20 === 1 ? '<span class="chat-roll-label">Échec critique</span>' : '';
+  return `<span class="chat-roll${state}"><span class="chat-roll-expr">${_esc(roll?.expr ?? '')}</span><span class="chat-roll-total">${_esc(String(roll?.total ?? ''))}</span><span class="chat-roll-dice">${chips}</span>${label}</span>`;
 }

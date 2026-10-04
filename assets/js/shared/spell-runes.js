@@ -57,11 +57,33 @@ export function getAfflictionEtatId(spell = {}) {
 // utilise bascule sur l'état de sort qui les absorbe. Rage n'est pas redirigée :
 // les objets/capacités (potion de rage…) passent par le même chemin.
 export const SPELL_CONDITION_REMAP = {
-  paralyzed: 'stunned', incapacitated: 'stunned', unconscious: 'stunned', petrified: 'stunned',
-  grappled: 'restrained', frightened: 'blinded',
+  incapacitated: 'stunned', unconscious: 'stunned', grappled: 'restrained',
 };
 export function spellConditionId(id = '') {
   return SPELL_CONDITION_REMAP[id] || id || '';
+}
+
+// États d'Affliction à 2 runes : un sort qui n'en a qu'une retombe sur la
+// version 1 rune (ancien sort Paralysé/Pétrifié forgé avant la règle).
+const SPELL_CONDITION_RUNE_FALLBACK = { paralyzed: 'stunned', petrified: 'stunned' };
+export function affordableSpellConditionId(id = '', runeCount = 0, requiredRunes = 1) {
+  if (!id || runeCount >= requiredRunes) return id || '';
+  return SPELL_CONDITION_RUNE_FALLBACK[id] || '';
+}
+
+/** États d'Enchantement retenus selon les runes : chaque état coûte ses runes
+ * (Invisible, Rage : 2), dans l'ordre choisi, sans dépasser le total. */
+export function enchantStatesWithinRunes(ids = [], runeCount = 0, costOf = () => 1) {
+  const out = [];
+  let left = Math.max(0, runeCount);
+  for (const id of ids) {
+    if (!id) continue;
+    const cost = Math.max(1, costOf(id) || 1);
+    if (cost > left) continue;
+    out.push(id);
+    left -= cost;
+  }
+  return out;
 }
 
 /**

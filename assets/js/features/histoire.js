@@ -170,19 +170,20 @@ async function renderHistoire() {
           groupClass: 'hist-toolbar-group',
           separatorClass: 'hist-toolbar-sep',
           groups: [
-            ['bold', 'italic', 'underline'],
-            ['h2', 'h3', 'blockquote'],
+            [{ type: 'block' }],
+            ['bold', 'italic', 'underline', 'strikeThrough'],
+            [{ type: 'color' }, { type: 'highlight' }, { type: 'size' }],
             [
               'insertUnorderedList',
               'insertOrderedList',
+              { type: 'align' },
+            ],
+            [
+              'createLink',
               'insertTable',
               'insertHorizontalRule',
             ],
             [
-              { type: 'color' },
-              { type: 'highlight' },
-              { type: 'font' },
-              { type: 'size' },
               { cmd: 'scene', title: 'Ajouter un marqueur de scène', html: '⛳ Scène', className: 'hist-tool--wide', stateful: false },
               { cmd: 'dice', title: 'Insérer un jet de dé (ou tapez [)', html: '🎲 Dé', className: 'hist-tool--wide', stateful: false },
             ],
@@ -225,7 +226,7 @@ async function renderHistoire() {
         <div class="hist-editor-wrap">
           ${richTextEditableHtml({
             id: 'hist-editor',
-            className: 'hist-editor',
+            className: 'hist-editor rtc',
             html: savedContent,
             placeholder: "Commencez à écrire l'histoire de cette mission…\n\nTapez @ pour mentionner un PNJ, un lieu… · [ ou 🎲 Dé pour un jet de dé",
             attrs: { spellcheck: 'true' },

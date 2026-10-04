@@ -8,13 +8,14 @@
 // ==============================================================================
 import { VS } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
-import { _esc, _searchIncludes, eyeIcon } from '../../shared/html.js';
+import { _esc, _searchIncludes } from '../../shared/html.js';
 import { computeEquipSkillBonus, statShort, calcCA, calcGardeMax } from '../../shared/char-stats.js';
 import { normalizeCharacterBuilds } from '../../shared/character-builds.js';
 import { hpColor, TYPE_COLOR, _STAT_COLOR, _STAT_KEY, _MS_BONUS_BUFF, _VTT_RUNE_META } from './vtt-constants.js';
 import { DAMAGE_INTERACTIONS } from '../../shared/damage-profile.js';
 import { getDamageTypeById } from '../../shared/damage-types.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
+import { summarizeTokenEffects } from '../../shared/token-effects-summary.js';
 import { _live } from './vtt-effective.js';
 import { _renderDicePanel } from './vtt-dice.js';
 import { _vttPanelError } from './vtt-utils.js';
@@ -30,9 +31,42 @@ let _inspectorDirty = false;    // coalescing des rafales de snapshots → 1 ren
 let _skillFilter = '';          // filtre live du panneau « Jets de compétences »
 let _openResourceKey = null;    // PV / PM / Garde : reste ouvert pendant une série de réglages
 let _resourceOutsideBound = false;
+let _inspectorDrawerBound = false;
 // Regroupement des compétences par caractéristique (scan plus rapide pour le joueur).
 const _SK_STAT_ORDER = ['FOR', 'DEX', 'CON', 'INT', 'SAG', 'CHA', ''];
 const _SK_STAT_LABEL = { FOR:'Force', DEX:'Dextérité', CON:'Constitution', INT:'Intelligence', SAG:'Sagesse', CHA:'Charisme', '':'Autres' };
+
+const _INS_ICONS = {
+  stats: '<path d="M5 20V11M12 20V5M19 20v-6"/>',
+  effects: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/>',
+  manage: '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
+  move: '<path d="M13 4a1.6 1.6 0 110 .01M9 20l2.5-6 3 2.5V21M8 11l3-3 3.5 2 2.5 3.5M11.5 8L9.5 13"/>',
+  shield: '<path d="M12 3l7 3v5.5c0 4.3-3 7.7-7 9.5-4-1.8-7-5.2-7-9.5V6z"/>',
+  range: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
+  sword: '<path d="M14.5 4H20v5.5L10 19.5 4.5 14z"/><path d="M7 16.5L3.5 20M5 12.5l6.5 6.5"/>',
+  pin: '<path d="M12 21s-6-5.6-6-11a6 6 0 0112 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/>',
+  reset: '<path d="M4 12a8 8 0 108-8H9"/><path d="M11 1L8 4l3 3"/>',
+  book: '<path d="M4 5.5A2.5 2.5 0 016.5 3H20v15H6.5A2.5 2.5 0 004 20.5z"/><path d="M4 20.5A2.5 2.5 0 016.5 18H20v3H6.5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/>',
+  wand: '<path d="M4 20L15 9M14 4v2M18 6l-1.4 1.4M20 10h-2M12 8l4 4"/>',
+  bag: '<path d="M5 8h14l-1 13H6z"/><path d="M9 8V6a3 3 0 016 0v2"/>',
+  paw: '<circle cx="7" cy="10" r="2"/><circle cx="17" cy="10" r="2"/><circle cx="10" cy="5.5" r="1.8"/><circle cx="14" cy="5.5" r="1.8"/><path d="M8 17c0-2.5 1.8-4.5 4-4.5s4 2 4 4.5-1.8 3-4 3-4-.5-4-3z"/>',
+  map: '<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>',
+  out: '<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  edit: '<path d="M4 20l1-4L16 5l3 3L8 19z"/>',
+  dice: '<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2" fill="currentColor"/><circle cx="15" cy="15" r="1.2" fill="currentColor"/><circle cx="15" cy="9" r="1.2" fill="currentColor"/><circle cx="9" cy="15" r="1.2" fill="currentColor"/>',
+  turn: '<path d="M20 12a8 8 0 11-3-6.2"/><path d="M20 4v5h-5"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  chevron: '<path d="M9 6l6 6-6 6"/>',
+};
+
+function _insIcon(name, className = '') {
+  return `<svg class="vtt-ins-icon${className ? ` ${className}` : ''}" viewBox="0 0 24 24" aria-hidden="true">${_INS_ICONS[name] || ''}</svg>`;
+}
 
 function _buildTokenBuildSwitcher(t) {
   if (!t?.characterId) return '';
@@ -41,25 +75,15 @@ function _buildTokenBuildSwitcher(t) {
   const { builds, activeBuildId } = normalizeCharacterBuilds(c);
   if (builds.length <= 1) return '';
   const canSwitch = _canControlToken(t);
-  const active = builds.find(b => b.id === activeBuildId) || builds[0];
   const buildButtons = builds.map(b =>
     `<button type="button" class="vtt-ins-build-option ${b.id === activeBuildId ? 'active' : ''}"
       data-vtt-fn="_vttSwitchCharacterBuild" data-vtt-args="${_esc(t.characterId)}|${_esc(b.id)}"
-      ${canSwitch ? '' : 'disabled'}>
-      <span>${_esc(b.name || 'Build')}</span>
-      ${b.id === activeBuildId ? '<b>Actif</b>' : ''}
-    </button>`
+      aria-pressed="${b.id === activeBuildId}" ${canSwitch ? '' : 'disabled'}>${_esc(b.name || 'Build')}</button>`
   ).join('');
-  return `<div class="vtt-ins-build-switch" title="${_esc(`${active?.name || 'Build'} : image, équipement, stats et bases PV/PM.`)}">
-    <span class="vtt-ins-build-label">Build</span>
-    <details class="vtt-ins-build-menu">
-      <summary class="vtt-ins-build-current">
-        <span>${_esc(active?.name || 'Build')}</span>
-      </summary>
-      <div class="vtt-ins-build-options">${buildButtons}</div>
-    </details>
-    <span class="vtt-ins-build-count">${builds.length}</span>
-  </div>`;
+  return `<section class="vtt-ins-drawer-section vtt-ins-build-section">
+    <div class="vtt-ins-section-heading"><span>Build actif</span></div>
+    <div class="vtt-ins-build-switch" role="group" aria-label="Build actif">${buildButtons}</div>
+  </section>`;
 }
 
 export function _renderInspectorSoon() {
@@ -124,6 +148,42 @@ function _wireResourceEditors(el) {
     _openResourceKey = null;
     openEditor.open = false;
   }, true);
+}
+
+function _syncInspectorDrawerGeometry() {
+  const panel = document.querySelector('#vtt-inspector .vtt-fiche-panel');
+  const dock = document.querySelector('#vtt-inspector .vtt-fiche');
+  if (!panel || !dock) return;
+  const topbar = document.querySelector('.vtt-toolbar, .vtt-topbar, .vtt-session-bar');
+  const usefulTop = Math.max(8, topbar?.getBoundingClientRect?.().bottom || 8);
+  const dockTop = dock.getBoundingClientRect().top;
+  panel.style.maxHeight = `${Math.max(190, dockTop - usefulTop - 12)}px`;
+
+  const active = document.querySelector('#vtt-inspector .vtt-fiche-tab.active');
+  if (!active) return;
+  const panelRect = panel.getBoundingClientRect();
+  const tabRect = active.getBoundingClientRect();
+  const arrow = tabRect.left + tabRect.width / 2 - panelRect.left;
+  panel.style.setProperty('--ax', `${Math.max(22, Math.min(panelRect.width - 22, arrow))}px`);
+}
+
+function _wireInspectorDrawer() {
+  requestAnimationFrame(_syncInspectorDrawerGeometry);
+  if (_inspectorDrawerBound) return;
+  _inspectorDrawerBound = true;
+  window.addEventListener('resize', _syncInspectorDrawerGeometry);
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !_insTab) return;
+    _insTab = null;
+    const t = VS.selected ? (VS.tokens[VS.selected]?.data ?? null) : _defaultInspectorToken(null);
+    _renderInspector(t);
+  });
+}
+
+export function _vttInsFilterConditionPicker(value = '') {
+  document.querySelectorAll('#vtt-inspector .vtt-condition-pick').forEach(button => {
+    button.hidden = !_searchIncludes(button.dataset.search || '', value);
+  });
 }
 export function _renderInspector(t) {
   const resolved = t ?? (!STATE.isAdmin && !VS.selected ? _defaultInspectorToken(null) : t);
@@ -213,15 +273,9 @@ export function _renderInspectorImpl(t) {
       actionHtml +
     '</div>';
   };
-  const _stat = (icon, lbl, val, full=false) =>
-    '<div class="vtt-ins-stat'+(full?' full':'')+'">'+
-      '<span class="vtt-ins-stat-label">'+icon+' '+lbl+'</span>'+
-      '<span class="vtt-ins-stat-val">'+val+'</span>'+
-    '</div>';
-
   // Précalcul du bloc stats (évite l'imbrication de backticks dans le template)
   // vitalsHtml = barres PV/PM (épinglées sous le header) · coreStatsHtml = onglet Stats
-  let vitalsHtml = '', coreStatsHtml = '';
+  let vitalsHtml = '', turnStatsHtml = '', coreStatsHtml = '';
   if (!STATE.isAdmin && t.type === 'enemy' && t.beastId) {
     const track    = VS.bstTracker[t.beastId] || {};
     const pvMax    = track.pvActuel !== undefined ? parseInt(track.pvActuel) : null;
@@ -230,7 +284,6 @@ export function _renderInspectorImpl(t) {
     const pvBarCol = pvPct > 50 ? '#22c38e' : pvPct > 25 ? '#f59e0b' : '#ef4444';
     const caLabel  = track.caEstimee  !== undefined && track.caEstimee  !== '' ? String(track.caEstimee)  : '?';
     const vitLabel = track.vitEstimee !== undefined && track.vitEstimee !== '' ? String(track.vitEstimee)+' cases' : '?';
-    const pos      = t.pageId ? 'Col '+t.col+' · Lig '+t.row : 'Non placé';
     vitalsHtml =
       '<div class="vtt-ins-bars">' +
         (pvMax !== null
@@ -238,12 +291,12 @@ export function _renderInspectorImpl(t) {
           : '<div class="vtt-ins-bar-row"><span class="vtt-ins-bar-lbl">PV</span><span style="color:var(--text-muted);font-size:.75rem;grid-column:2/-1">inconnus</span></div>') +
       '</div>';
     coreStatsHtml =
-      '<div class="vtt-ins-stats">' +
-        _stat('🛡', 'CA est.', caLabel) +
-        _stat('🏃', 'Vitesse', vitLabel) +
-        _stat('📍', 'Position', pos, true) +
-      '</div>' +
-      '<div style="font-size:.62rem;color:var(--text-dim);font-style:italic">Valeurs issues de ton bestiaire personnel</div>';
+      `<div class="vtt-ins-player-hint">${_insIcon('book')}<span>Ce que tu sais de cette créature. Tes estimations sont partagées avec ton Bestiaire.</span></div>` +
+      '<div class="vtt-stat-grid vtt-stat-grid--estimates">' +
+        `<div class="vtt-stat-card"><div class="vtt-stat-card-hd">${_insIcon('shield')}CA estimée</div><div class="vtt-stat-card-v">${_esc(caLabel)}</div></div>` +
+        `<div class="vtt-stat-card"><div class="vtt-stat-card-hd">${_insIcon('move')}Vitesse est.</div><div class="vtt-stat-card-v">${_esc(vitLabel)}</div></div>` +
+        `<div class="vtt-stat-card"><div class="vtt-stat-card-hd">${_insIcon('effects')}PV estimés</div><div class="vtt-stat-card-v">${pvMax !== null ? _esc(String(pvMax)) : '?'}</div></div>` +
+      '</div>';
   } else {
     const pos    = t.pageId ? 'Col '+t.col+' · Lig '+t.row : 'Non placé';
     const pm     = ld.displayPm    ?? null;
@@ -297,27 +350,33 @@ export function _renderInspectorImpl(t) {
       // Carte d'une stat ajustable : valeur + steppers −/+ (mouvement, CA, portée).
       const _card = (icon, lbl, valHtml, key, col) =>
         `<div class="vtt-stat-card">`+
-          `<div class="vtt-stat-card-hd"><span class="vtt-stat-card-ic">${icon}</span>${lbl}</div>`+
+          `<div class="vtt-stat-card-hd">${_insIcon(icon)}${lbl}</div>`+
           `<div class="vtt-stat-card-v"${col?` style="color:${col}"`:''}>${valHtml}${key?_badge(key):''}</div>`+
           `${_steps(key)}`+
         `</div>`;
       // Ligne d'info en lecture seule (attaque, position).
       const _info = (icon, lbl, val) =>
-        `<div class="vtt-stat-info-row"><span class="vtt-stat-info-k">${icon} ${lbl}</span><span class="vtt-stat-info-v">${val}</span></div>`;
-      return `<div class="vtt-stat-grid">`+
-          _card('🏃', 'Déplac.', mvVal, 'vitesse', mvCol)+
-          _card('🛡', 'Défense', `${caVal}`, caVal === '?' ? '' : 'ca')+
-          _card('🎯', 'Portée', `${ld.displayRange??1}<i class="vtt-stat-den"> c.</i>`, 'portee')+
-        `</div>`+
-        (canUndo ? `<button class="vtt-ins-undo-move" data-vtt-fn="_vttUndoMove" data-vtt-args="${_esc(t.id)}" title="Revenir à la position de début de tour et récupérer le mouvement">↶ Annuler le déplacement</button>` : '')+
-        `<div class="vtt-stat-info">`+
-          _info('⚔️', 'Attaque', atkLabel)+
-          _info('📍', 'Position', pos)+
-        `</div>`+
-        ((_canEditToken && _anyBonus)
-          ? `<button class="vtt-ins-bonus-reset" data-vtt-fn="_vttTokenResetBonus" data-vtt-args="${t.id}" title="Réinitialiser les bonus manuels">↺ Réinitialiser les bonus</button>` : '')+
-        (t.attackedThisTurn
-          ? `<div class="vtt-stat-note"><span class="vtt-ins-badge vtt-ins-badge-atk">✓ A attaqué ce tour</span></div>` : '');
+        `<div class="vtt-stat-info-row"><span class="vtt-stat-info-k">${_insIcon(icon)} ${lbl}</span><span class="vtt-stat-info-v">${val}</span></div>`;
+      const movementCells = _inCombat
+        ? Array.from({ length: Math.max(0, maxMvt) }, (_, index) => `<i class="${index < rem ? 'filled' : ''}"></i>`).join('')
+        : '';
+      const turnHtml = _inCombat ? `<section class="vtt-ins-drawer-section">
+        <div class="vtt-ins-section-heading"><span>Tour</span></div>
+        <div class="vtt-stat-turn">
+          <div class="vtt-stat-turn-value" style="color:${mvCol}">${rem}<small>/${maxMvt}</small></div>
+          <div class="vtt-stat-turn-progress"><span>Déplacement restant <small>${t.movedCells||0} utilisée${(t.movedCells||0)>1?'s':''}</small></span><div>${movementCells}</div></div>
+          ${canUndo ? `<button class="vtt-ins-ghost" data-vtt-fn="_vttUndoMove" data-vtt-args="${_esc(t.id)}">${_insIcon('undo')}Annuler</button>` : (t.attackedThisTurn ? '<span class="vtt-ins-chip positive">A attaqué</span>' : '')}
+        </div>
+      </section>` : '';
+      turnStatsHtml = turnHtml;
+      return `<section class="vtt-ins-drawer-section"><div class="vtt-ins-section-heading"><span>Ce tour</span>`+
+          ((_canEditToken && _anyBonus) ? `<button class="vtt-ins-heading-action" data-vtt-fn="_vttTokenResetBonus" data-vtt-args="${t.id}">${_insIcon('reset')}Réinitialiser</button>` : '')+
+        `</div><div class="vtt-stat-grid">`+
+          _card('move', 'Déplac.', `${ld.displayMovement ?? 6}<i class="vtt-stat-den"> c.</i>`, 'vitesse')+
+          _card('shield', 'Défense', `${caVal}`, caVal === '?' ? '' : 'ca')+
+          _card('range', 'Portée', `${ld.displayRange??1}<i class="vtt-stat-den"> c.</i>`, 'portee')+
+        `</div>${_canEditToken ? '<p class="vtt-ins-help">Les +/− ajoutent un bonus manuel valable jusqu’à réinitialisation.</p>' : ''}</section>`+
+        `<div class="vtt-stat-info">${_info('sword', 'Attaque', atkLabel)}${_info('pin', 'Position', pos)}</div>`;
     })();
   }
 
@@ -344,7 +403,7 @@ export function _renderInspectorImpl(t) {
             if (!v && v !== 0) return null;
             const m = Math.floor((v - 10) / 2);
             const ms = m >= 0 ? '+'+m : m;
-            return `<span class="vtt-creat-stat-pill"><b>${k.slice(0,3).toUpperCase()}</b> ${v} <span style="color:var(--text-dim)">(${ms})</span></span>`;
+            return `<span class="vtt-creat-stat-pill" style="--stat-c:${_STAT_COLOR[k.slice(0,3).toUpperCase()] || 'var(--text-muted)'}"><b>${k.slice(0,3).toUpperCase()}</b><strong>${ms}</strong><small>${v}</small></span>`;
           }).filter(Boolean).join('');
 
         const _affHtml = ((arr, label, color) => {
@@ -362,9 +421,10 @@ export function _renderInspectorImpl(t) {
         const rsLabel = { classique:'Classique', elite:'Élite', boss:'Boss' }[String(beast.rang||'').toLowerCase()] || 'Classique';
 
         _creatureHtml = `
-          <div class="vtt-ins-section vtt-creat-mj">
-            <div class="vtt-ins-section-title">📜 Fiche créature
+          <section class="vtt-ins-drawer-section vtt-creat-mj">
+            <div class="vtt-ins-section-heading"><span>Bestiaire</span>
               <span class="vtt-creat-rang vtt-creat-rang--${String(beast.rang||'classique').toLowerCase()}">${rsLabel}</span>
+              <button class="vtt-ins-heading-action" data-vtt-fn="_vttOpenSource" data-vtt-args="bestiary|${_esc(t.beastId)}">${_insIcon('out')}Ouvrir la fiche</button>
             </div>
             <div class="vtt-creat-vitals">
               <span class="vtt-creat-vital">🛡 CA <b>${beast.ca ?? '?'}</b>${realCaBuffed !== (beast.ca ?? 0) ? ` <span style="color:#a78bfa">(actuel ${realCaBuffed})</span>` : ''}</span>
@@ -382,7 +442,7 @@ export function _renderInspectorImpl(t) {
             ${_affHtml(beast.absorptions, 'Absorptions',  '#a78bfa')}
             ${beast.description ? `<div class="vtt-creat-desc">${_esc(beast.description)}</div>` : ''}
             ${_armesN.length ? `
-              <div class="vtt-creat-sub-title">🦷 Armes naturelles (${_armesN.length})</div>
+              <details class="vtt-ins-fold" open><summary>${_insIcon('chevron')}<span>Armes naturelles</span><small>${_armesN.length}</small></summary><div class="vtt-ins-fold-body">
               ${_armesN.map(w => {
                 const statShort = { force:'For', dexterite:'Dex', intelligence:'Int', sagesse:'Sag', constitution:'Con', charisme:'Cha', none:'—' };
                 const dStat = statShort[w.degatsStat]  || '';
@@ -397,9 +457,9 @@ export function _renderInspectorImpl(t) {
                     ${w.portee  ? `<span class="vtt-creat-atk-stat range">📏 ${_esc(w.portee)}</span>` : ''}
                   </div>
                 </div>`;
-              }).join('')}` : ''}
+              }).join('')}</div></details>` : ''}
             ${_actions.length ? `
-              <div class="vtt-creat-sub-title">⚔️ Actions (${_actions.length})</div>
+              <details class="vtt-ins-fold"><summary>${_insIcon('chevron')}<span>Actions</span><small>${_actions.length}</small></summary><div class="vtt-ins-fold-body">
               ${_actions.map(a => {
                 const runeBadgesHtml = runeBadges(a.runes || [], { className: 'vtt-creat-rune' });
                 const typeBadges = spellTypeBadges(a.types || [], { className: 'vtt-creat-act-type', stylePrefix: '--c:' });
@@ -411,7 +471,7 @@ export function _renderInspectorImpl(t) {
                   </div>
                   ${typeBadges || runeBadgesHtml ? `<div class="vtt-creat-act-badges">${typeBadges}${runeBadgesHtml}</div>` : ''}
                 </div>`;
-              }).join('')}` : ''}
+              }).join('')}</div></details>` : ''}
             ${(_atk.length && !_armesN.length && !_actions.length) ? `
               <div class="vtt-creat-sub-title">🗡 Attaques (${_atk.length})</div>
               ${_atk.map(a => `
@@ -425,15 +485,14 @@ export function _renderInspectorImpl(t) {
                   ${a.description ? `<div class="vtt-creat-atk-desc">${_esc(a.description)}</div>` : ''}
                 </div>`).join('')}` : ''}
             ${_trt.length ? `
-              <div class="vtt-creat-sub-title">✨ Traits (${_trt.length})</div>
+              <details class="vtt-ins-fold"><summary>${_insIcon('chevron')}<span>Traits</span><small>${_trt.length}</small></summary><div class="vtt-ins-fold-body">
               ${_trt.map(tr => `
                 <div class="vtt-creat-trait">
                   <div class="vtt-creat-trait-name">${_esc(tr.nom || '')}</div>
                   ${tr.description ? `<div class="vtt-creat-trait-desc">${_esc(tr.description)}</div>` : ''}
-                </div>`).join('')}` : ''}
+                </div>`).join('')}</div></details>` : ''}
             ${(_btn.length || beast.or) ? `
-              <div class="vtt-creat-sub-title">💰 Butins${_btn.length ? ` (${_btn.length})` : ''}</div>
-              <div class="vtt-creat-loots">
+              <details class="vtt-ins-fold" open><summary>${_insIcon('chevron')}<span>Butin</span><small>${_btn.length}${beast.or ? ' + or' : ''}</small></summary><div class="vtt-ins-fold-body vtt-creat-loots">
                 ${_btn.map((b,i) => {
                   const orphan = !b.itemId;
                   return `<div class="vtt-creat-loot" data-loot-idx="${i}">
@@ -444,18 +503,18 @@ export function _renderInspectorImpl(t) {
                     ${b.quantite ? `<span class="vtt-creat-loot-meta">${_esc(b.quantite)}</span>` : ''}
                     ${b.chance   ? `<span class="vtt-creat-loot-meta">${_esc(b.chance)}</span>`   : ''}
                     ${orphan
-                      ? `<span class="vtt-creat-loot-add" style="opacity:.4;cursor:not-allowed" title="Objet supprimé de la boutique">＋</span>`
-                      : `<button class="vtt-creat-loot-add" data-vtt-fn="_vttCreatSendLootToStash" data-vtt-args="${t.beastId}|${i}|$this" title="Envoyer à la réserve MJ">＋</button>`}
+                      ? `<button class="vtt-creat-loot-send" disabled title="Objet supprimé de la boutique">Indisponible</button>`
+                      : `<button class="vtt-creat-loot-send" data-vtt-fn="_vttCreatSendLootToStash" data-vtt-args="${t.beastId}|${i}|$this" title="Envoyer à la réserve MJ">${_insIcon('out')}Réserve</button>`}
                   </div>`;
                 }).join('')}
                 ${beast.or ? `<div class="vtt-creat-loot vtt-creat-loot--gold">
                   <span class="vtt-creat-loot-img vtt-creat-loot-img--gold">🪙</span>
                   <span class="vtt-creat-loot-name">Or</span>
                   <span class="vtt-creat-loot-meta">${_esc(beast.or)}</span>
-                  <button class="vtt-creat-loot-add" data-vtt-fn="_vttCreatSendGoldToStash" data-vtt-args="${t.beastId}|$this" title="Lancer l'or (${_esc(beast.or)}) et l'envoyer à la réserve MJ">＋</button>
+                  <button class="vtt-creat-loot-send" data-vtt-fn="_vttCreatSendGoldToStash" data-vtt-args="${t.beastId}|$this" title="Lancer l'or (${_esc(beast.or)}) et l'envoyer à la réserve MJ">${_insIcon('dice')}Lancer</button>
                 </div>` : ''}
-              </div>` : ''}
-          </div>`;
+              </div></details>` : ''}
+          </section>`;
       } else {
         // ── Vue joueur : seulement ses propres déductions ──────────────
         const track = VS.bstTracker[t.beastId] || {};
@@ -466,14 +525,13 @@ export function _renderInspectorImpl(t) {
         const _hasAnyDed = Object.values(ded).some(v => v && String(v).trim());
 
         _creatureHtml = `
-          <div class="vtt-ins-section vtt-creat-pl">
-            <div class="vtt-ins-section-title">📝 Mes observations</div>
+          <section class="vtt-ins-drawer-section vtt-creat-pl">
+            <div class="vtt-ins-section-heading"><span>Mes observations</span></div>
             <div class="vtt-creat-help">Renseigne ici ce que tu as découvert sur cette créature. Sauvegardé automatiquement (visible aussi dans le Bestiaire).</div>
             ${_actions.length ? `
-              <div class="vtt-creat-sub-title">⚔️ Actions observées (${_actions.length})</div>
               ${_actions.map((act, i) => {
                 const k = act.id || `idx_${i}`;
-                return `<div class="vtt-creat-atk-edit">
+                return `<details class="vtt-ins-fold"><summary>${_insIcon('chevron')}<span>${_esc(ded['act_nom_'+k] || `Attaque ${i+1}`)}</span><small>${ded['act_nom_'+k] ? 'observée' : 'non identifiée'}</small></summary><div class="vtt-ins-fold-body vtt-creat-atk-edit">
                   <input class="vtt-creat-input" placeholder="Nom de l'action…"
                     value="${_esc(ded['act_nom_'+k] || '')}"
                     data-vtt-fn="_vttBstDed" data-vtt-on="change" data-vtt-args="${_bid}|act_nom_${k}|$value">
@@ -488,135 +546,105 @@ export function _renderInspectorImpl(t) {
                       value="${_esc(ded['act_portee_'+k] || '')}"
                       data-vtt-fn="_vttBstDed" data-vtt-on="change" data-vtt-args="${_bid}|act_portee_${k}|$value">
                   </div>
-                </div>`;
+                </div></details>`;
               }).join('')}` : ''}
             ${_trt.length ? `
-              <div class="vtt-creat-sub-title">✨ Traits observés (${_trt.length})</div>
               ${_trt.map((_, i) => `
-                <div class="vtt-creat-trait-edit">
+                <details class="vtt-ins-fold"><summary>${_insIcon('chevron')}<span>${_esc(ded['tr_nom_'+i] || `Trait ${i+1}`)}</span><small>${ded['tr_nom_'+i] ? 'observé' : 'inconnu'}</small></summary><div class="vtt-ins-fold-body vtt-creat-trait-edit">
                   <input class="vtt-creat-input" placeholder="Nom du trait…"
                     value="${_esc(ded['tr_nom_'+i] || '')}"
                     data-vtt-fn="_vttBstDed" data-vtt-on="change" data-vtt-args="${_bid}|tr_nom_${i}|$value">
                   <input class="vtt-creat-input" placeholder="Description…"
                     value="${_esc(ded['tr_desc_'+i] || '')}"
                     data-vtt-fn="_vttBstDed" data-vtt-on="change" data-vtt-args="${_bid}|tr_desc_${i}|$value">
-                </div>`).join('')}` : ''}
-            <div class="vtt-creat-sub-title">📔 Notes</div>
+                </div></details>`).join('')}` : ''}
+            <div class="vtt-ins-section-heading"><span>Notes</span></div>
             <textarea class="vtt-creat-input vtt-creat-notes" rows="3" placeholder="Tes notes sur cette créature…"
               data-vtt-fn="_vttBstNotes" data-vtt-on="change" data-vtt-args="${_bid}|$value">${_esc(track.notes || '')}</textarea>
             ${!_actions.length && !_trt.length && !_hasNotes && !_hasAnyDed
               ? '<div class="vtt-creat-help" style="margin-top:.4rem">Aucune action/trait recensé par le MJ pour cette créature pour le moment.</div>'
               : ''}
-          </div>`;
+          </section>`;
       }
     }
   }
 
-  // ── Effets actifs (buffs, debuffs, DoT, enchantements, afflictions…) ──
+  // ── États + effets : résumé tactique et liste unifiée ───────────────────
   const _r = VS.session?.combat?.round ?? 0;
-  const _activeBuffs = (t.buffs || []).filter(bf =>
-    bf?.expiresAtRound == null || _r === 0 || _r <= bf.expiresAtRound);
-  const _buffsHtml = _activeBuffs.length ? (() => {
-    const _BUFF_LABEL = {
-      ca: 'Bonus CA', dot: 'Dégâts/tour', regen: 'Régénération',
-      dmg_bonus: 'Dégâts bonus',
-      move_bonus: 'Mouvement +', move_debuff: 'Mouvement −',
-      range_bonus: 'Portée +', shield_reactive: 'Bouclier réactif',
-      enchantment: 'Enchantement', affliction: 'Affliction',
-    };
-    const items = _activeBuffs.map((bf, i) => {
-      const ic = bf.icon || '✨';
-      const lbl = bf.sortLabel || _BUFF_LABEL[bf.type] || bf.type || 'Effet';
-      // Calcul durée restante
-      let durStr;
-      if (bf.canalisePersistant) durStr = '∞ canalisé';
-      else if (bf.expiresAtRound != null && _r > 0) durStr = `${bf.expiresAtRound - _r + 1}t`;
-      else if (bf.totalDuration != null) durStr = `${bf.totalDuration}t`;
-      else durStr = '∞';
-      // Détail (bonus, formule, slot, charges)
-      const detail = bf.type === 'dmg_bonus' ? `+${bf.formula}`
-                   : bf.type === 'move_bonus' || bf.type === 'move_debuff' ? `${bf.bonus > 0 ? '+' : ''}${bf.bonus} c`
-                   : bf.type === 'range_bonus' ? `+${bf.bonus} c`
-                   : bf.type === 'ca' ? `${bf.bonus >= 0 ? '+' : ''}${bf.bonus} CA`
-                   : bf.type === 'dmg_reduction' ? `−${bf.value} dégâts/coup`
-                   : bf.type === 'spell_light' ? (bf.bonus ? `💡 éclairage +${bf.bonus} c` : `💡 rayon ${bf.radius} c`)
-                   : bf.type === 'dmg_weakness' ? `×2 ${(VS.damageTypes || []).find(t => t.id === bf.element)?.label || 'élément'}`
-                   : bf.type === 'dot' || bf.type === 'regen' ? `${bf.formula} / tour`
-                   : bf.type === 'shield_reactive' ? `${bf.charges || 1} charge · ${bf.tier}`
-                   : bf.effect ? bf.effect.slice(0, 24) : '';
-      const rmBtn = STATE.isAdmin
-        ? `<button class="vtt-buff-rm" data-vtt-fn="_vttRemoveBuff" data-vtt-args="${t.id}|${i}" title="Retirer">✕</button>` : '';
-      // Sort suspendu : pas de bouton — la version GRATUITE du sort est dispo
-      // directement dans la liste d'actions (le buff 🔮 sert d'indicateur + minuteur).
-      const suspHint = bf.type === 'suspended_spell'
-        ? ' · 🎁 version gratuite dispo dans tes sorts' : '';
-      return `<div class="vtt-buff-item" title="${_esc(lbl)}${detail?' · '+_esc(detail):''}${suspHint}">
-        <span class="vtt-buff-ic">${ic}</span>
-        <span class="vtt-buff-lbl">${_esc(lbl)}</span>
-        ${detail ? `<span class="vtt-buff-detail">${_esc(detail)}</span>` : ''}
-        <span class="vtt-buff-dur">${durStr}</span>
-        ${rmBtn}
-      </div>`;
-    }).join('');
-    const addBtn = STATE.isAdmin
-      ? `<button class="vtt-btn-sm" data-vtt-fn="_vttAddBuffPrompt" data-vtt-args="${t.id}" title="Ajouter un effet manuel">＋</button>` : '';
-    return `<div class="vtt-ins-section">
-      <div class="vtt-ins-section-title">✨ Effets actifs ${addBtn}</div>
-      <div class="vtt-buff-list">${items}</div>
-    </div>`;
-  })() : (STATE.isAdmin
-    ? `<div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">✨ Effets actifs <button class="vtt-btn-sm" data-vtt-fn="_vttAddBuffPrompt" data-vtt-args="${t.id}">＋</button></div>
-        <div style="font-size:.72rem;color:var(--text-dim);font-style:italic">Aucun effet actif</div>
-      </div>` : '');
-
-  // ── Conditions / États du token (visibles par tous, gérables par le MJ) ──
+  const _activeBuffs = (t.buffs || []).map((buff, index) => ({ buff, index })).filter(({ buff }) =>
+    buff?.expiresAtRound == null || _r === 0 || _r <= buff.expiresAtRound);
   const _conds = Array.isArray(t.conditions) ? t.conditions : [];
   const _condIsActive = c => c.expiresAtRound == null || _r === 0 || _r <= c.expiresAtRound;
-  const _activeConds = _conds.filter(_condIsActive);
-  const _condsHtml = (() => {
-    const addBtn = STATE.isAdmin
-      ? `<span class="vtt-ins-section-actions">
-          <button class="vtt-btn-sm" data-vtt-fn="_vttConditionAdd" data-vtt-args="${t.id}" title="Appliquer un état">＋</button>
-          <button class="vtt-btn-sm" data-vtt-fn="_vttConditionConfig" title="Réglages : ce que chaque état fait, sa stat de JS et son DD par défaut">⚙</button>
-        </span>` : '';
-    const glossaryBtn = `<button class="vtt-cond-guide-open" data-vtt-fn="_vttConditionGlossary" title="Comprendre tous les états">📖 Glossaire</button>`;
-    const rows = _activeConds.map((cond, i) => {
+  const _activeConds = _conds.map((cond, index) => ({ cond, index })).filter(({ cond }) => _condIsActive(cond));
+  const _BUFF_LABEL = {
+    ca: 'Bonus CA', dot: 'Dégâts / tour', regen: 'Régénération', dmg_bonus: 'Dégâts bonus',
+    move_bonus: 'Mouvement +', move_debuff: 'Mouvement −', range_bonus: 'Portée +',
+    shield_reactive: 'Bouclier réactif', enchantment: 'Enchantement', affliction: 'Affliction',
+    suspended_spell: 'Sort suspendu',
+  };
+  const _buffDetail = bf => bf.type === 'dmg_bonus' ? `+${bf.formula}`
+    : bf.type === 'move_bonus' || bf.type === 'move_debuff' ? `${bf.bonus > 0 ? '+' : ''}${bf.bonus} cases`
+    : bf.type === 'range_bonus' ? `+${bf.bonus} cases`
+    : bf.type === 'ca' ? `${bf.bonus >= 0 ? '+' : ''}${bf.bonus} CA`
+    : bf.type === 'dmg_reduction' ? `−${bf.value} dégâts par coup`
+    : bf.type === 'spell_light' ? (bf.bonus ? `Éclairage +${bf.bonus} cases` : `Rayon ${bf.radius} cases`)
+    : bf.type === 'dmg_weakness' ? `×2 ${(VS.damageTypes || []).find(type => type.id === bf.element)?.label || 'élément'}`
+    : bf.type === 'dot' || bf.type === 'regen' ? `${bf.formula} / tour`
+    : bf.type === 'shield_reactive' ? `${bf.charges || 1} charge · ${bf.tier || ''}`.trim()
+    : bf.effect || '';
+  const _duration = (remaining, total, infinite = false) => {
+    if (infinite || remaining == null) return '<span class="vtt-effect-duration infinite">∞</span>';
+    const left = Math.max(1, Number(remaining) || 1);
+    const count = Math.min(12, Math.max(left, Number(total) || left));
+    return `<span class="vtt-effect-duration${left === 1 ? ' last' : ''}"><b>${left === 1 ? 'Dernier tour' : `${left} tours`}</b><span>${Array.from({ length: count }, (_, index) => `<i class="${index < left ? 'filled' : ''}"></i>`).join('')}</span></span>`;
+  };
+  const _effectSummary = summarizeTokenEffects(
+    _activeConds.map(({ cond }) => ({ ...cond, effects: { ...(CONDITION_BY_ID[cond.id]?.effects || {}), ...(cond.effects || {}) } })),
+    _activeBuffs.map(({ buff }) => buff),
+  );
+  const _effectsHtml = (() => {
+    const rows = _activeConds.map(({ cond, index }) => {
       const baseLib = CONDITION_BY_ID[cond.id] || { label: cond.id, icon: '❓', color: '#888', desc: '' };
-      // Faiblesse : l'élément visé fait partie du nom (« Faiblesse Feu »).
-      // Provoqué : le porteur de l'aggro aussi (« Provoqué → Brom »).
       const lib = cond.element
         ? { ...baseLib, label: `${baseLib.label} ${getDamageTypeById(VS.damageTypes, cond.element)?.label || ''}`.trim() }
         : cond.aggroName ? { ...baseLib, label: `${baseLib.label} → ${cond.aggroName}` }
         : baseLib;
-      const dur = cond.expiresAtRound != null && _r > 0
-        ? `${cond.expiresAtRound - _r + 1}t`
-        : (cond.expiresAtRound != null ? 'fin' : '∞');
-      const srcLine = cond.source ? `<div class="vtt-cond-src">📝 ${_esc(cond.source)}</div>` : '';
+      const remaining = cond.expiresAtRound != null && _r > 0 ? cond.expiresAtRound - _r + 1 : cond.pendingDuration;
       const saveLbl = cond.saveDC && cond.saveStat
         ? `${statShort(cond.saveStat) || cond.saveStat} DD ${cond.saveDC}` : null;
-      const realIdx = _conds.indexOf(cond);
       const ctrls = STATE.isAdmin ? `
-        <div class="vtt-cond-ctrls">
-          ${saveLbl ? `<button class="vtt-cond-save" data-vtt-fn="_vttConditionSave" data-vtt-args="${t.id}|${realIdx}" title="Lancer le jet de sauvegarde">🎲 JS ${saveLbl}</button>` : ''}
-          <button class="vtt-cond-edit" data-vtt-fn="_vttConditionEdit" data-vtt-args="${t.id}|${realIdx}" title="Modifier durée, DD, source">✏️</button>
-          <button class="vtt-cond-rm" data-vtt-fn="_vttConditionRemove" data-vtt-args="${t.id}|${realIdx}" title="Retirer l'état">✕</button>
+        <div class="vtt-effect-actions">
+          ${saveLbl ? `<button class="vtt-effect-save" data-vtt-fn="_vttConditionSave" data-vtt-args="${t.id}|${index}|$this" title="Lancer le jet de sauvegarde">${_insIcon('dice')}JS ${saveLbl}</button>` : ''}
+          <button class="vtt-ins-ghost" data-vtt-fn="_vttConditionEdit" data-vtt-args="${t.id}|${index}">${_insIcon('edit')}Modifier</button>
+          <button class="vtt-ins-ghost danger" data-vtt-fn="_vttConditionRemove" data-vtt-args="${t.id}|${index}">${_insIcon('close')}Retirer</button>
         </div>` : '';
-      return `<div class="vtt-cond-item" style="--cond-c:${lib.color}">
-        <div class="vtt-cond-hd">
-          <span class="vtt-cond-ic">${lib.icon}</span>
-          <button class="vtt-cond-nom" data-vtt-fn="_vttConditionGlossary" data-vtt-args="${_esc(cond.id)}" title="Voir la règle complète">${lib.label}</button>
-          <span class="vtt-cond-dur">${dur}</span>
-        </div>
-        <div class="vtt-cond-desc">${lib.desc}</div>
-        ${srcLine}
-        ${ctrls}
-      </div>`;
+      return `<details class="vtt-effect-item" name="vtt-token-effects" style="--effect-color:${lib.color}">
+        <summary><span class="vtt-effect-icon">${lib.icon}</span><span class="vtt-effect-name"><b>${_esc(lib.label)}</b><small><i>État</i>${_esc(lib.desc || '')}</small></span>${_duration(remaining, cond.pendingDuration || remaining, cond.expiresAtRound == null && cond.pendingDuration == null)}</summary>
+        <div class="vtt-effect-body"><p>${_esc(lib.desc || '')}</p>${cond.source ? `<span>Source : ${_esc(cond.source)}</span>` : ''}${ctrls}</div>
+      </details>`;
+    }).join('') + _activeBuffs.map(({ buff, index }) => {
+      const label = buff.sortLabel || buff.label || _BUFF_LABEL[buff.type] || buff.type || 'Effet';
+      const detail = _buffDetail(buff);
+      const negative = ['dot', 'move_debuff', 'affliction'].includes(buff.type);
+      const color = negative ? '#dc2626' : buff.type === 'suspended_spell' ? '#818cf8' : '#22c55e';
+      const remaining = buff.expiresAtRound != null && _r > 0 ? buff.expiresAtRound - _r + 1 : buff.totalDuration;
+      return `<details class="vtt-effect-item" name="vtt-token-effects" style="--effect-color:${color}">
+        <summary><span class="vtt-effect-icon">${buff.icon || '✨'}</span><span class="vtt-effect-name"><b>${_esc(label)}</b><small><i>Effet</i>${_esc(detail)}</small></span>${_duration(remaining, buff.totalDuration || remaining, buff.canalisePersistant || (buff.expiresAtRound == null && buff.totalDuration == null))}</summary>
+        <div class="vtt-effect-body"><p>${_esc(detail || label)}</p>${buff.source ? `<span>Source : ${_esc(buff.source)}</span>` : ''}${buff.type === 'suspended_spell' ? '<p>La version gratuite du sort est disponible dans tes actions.</p>' : ''}${STATE.isAdmin ? `<div class="vtt-effect-actions"><button class="vtt-ins-ghost danger" data-vtt-fn="_vttRemoveBuff" data-vtt-args="${t.id}|${index}">${_insIcon('close')}Retirer</button></div>` : ''}</div>
+      </details>`;
     }).join('');
-    return `<div class="vtt-ins-section">
-      <div class="vtt-ins-section-title">⚡ États <span class="vtt-ins-section-actions">${glossaryBtn}${addBtn}</span></div>
-      <div class="vtt-cond-list">${rows || '<div class="vtt-cond-empty">Aucun état actif sur ce token.</div>'}</div>
-    </div>`;
+    const applied = new Set(_activeConds.map(({ cond }) => cond.id));
+    const picker = STATE.isAdmin ? `<details class="vtt-condition-picker">
+      <summary class="vtt-ins-heading-action">${_insIcon('plus')}Ajouter</summary>
+      <div class="vtt-condition-picker-body">
+        <input class="vtt-ins-field" type="search" placeholder="Rechercher un état…" data-vtt-fn="_vttInsFilterConditionPicker" data-vtt-on="input" data-vtt-args="$value">
+        <div class="vtt-condition-picker-grid">${Object.values(CONDITION_BY_ID).map(condition => `<button class="vtt-condition-pick" style="--effect-color:${condition.color || '#888'}" data-search="${_esc(String(condition.label || '').toLocaleLowerCase('fr'))}" data-vtt-fn="_vttConditionApply" data-vtt-args="${t.id}|${_esc(condition.id)}" ${applied.has(condition.id) ? 'disabled' : ''}><span>${condition.icon || '❓'}</span><b>${_esc(condition.label || condition.id)}</b></button>`).join('')}</div>
+        <button class="vtt-ins-ghost" data-vtt-fn="_vttAddBuffPrompt" data-vtt-args="${t.id}">${_insIcon('wand')}Effet manuel…</button>
+      </div>
+    </details>` : '';
+    const empty = `<div class="vtt-effect-empty"><b>Aucun état ni effet</b><span>${STATE.isAdmin ? 'Ajoute un état depuis la liste ou applique un sort.' : 'Rien n’affecte ce token pour le moment.'}</span></div>`;
+    return `${_effectSummary.length ? `<section class="vtt-ins-drawer-section"><div class="vtt-ins-section-heading"><span>En résumé</span></div><div class="vtt-effect-impact">${_effectSummary.map(item => `<span class="${item.tone}">${_esc(item.label)}</span>`).join('')}</div></section>` : ''}
+      <section class="vtt-ins-drawer-section"><div class="vtt-ins-section-heading"><span>Actifs</span><button class="vtt-ins-heading-action" data-vtt-fn="_vttConditionGlossary">${_insIcon('book')}Glossaire</button>${STATE.isAdmin ? `<button class="vtt-ins-heading-action" data-vtt-fn="_vttConditionConfig">${_insIcon('manage')}Réglages</button>` : ''}</div>${picker}<div class="vtt-effect-list">${rows || empty}</div></section>`;
   })();
 
   // NB : le corps « Jets » (compétences + actions de combat + créature) est
@@ -626,85 +654,84 @@ export function _renderInspectorImpl(t) {
   const _delegateHtml = (() => {
     // Délégation de contrôle — visible pour propriétaire OU MJ
     const uid = STATE.user?.uid;
-    const isOwner = uid && t.ownerId === uid;
+    const tokenOwnerUid = t.ownerId || (t.characterId ? VS.characters[t.characterId]?.uid : null);
+    const isOwner = uid && tokenOwnerUid === uid;
     if (!isOwner && !STATE.isAdmin) return '';
     const dels = Array.isArray(t.controlDelegates) ? t.controlDelegates : [];
     const lookupName = _resolveUidName;
     const chips = dels.length
       ? dels.map(u => `<span class="vtt-delegate-chip">
+            <span class="vtt-delegate-avatar">${_esc(String(lookupName(u) || '?').trim().slice(0, 1).toUpperCase())}</span>
             <span>${_esc(lookupName(u))}</span>
             <button class="vtt-delegate-x" data-vtt-fn="_vttRemoveTokenDelegate"
-              data-vtt-args="${t.id}|${u}" title="Retirer">×</button>
+              data-vtt-args="${t.id}|${u}" title="Retirer">${_insIcon('close')}</button>
           </span>`).join('')
       : '<span class="vtt-delegate-empty">Personne — vous seul contrôlez ce token.</span>';
-    return `<div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">🤝 Contrôle délégué</div>
+    return `<section class="vtt-ins-drawer-section">
+        <div class="vtt-ins-section-heading"><span>Contrôle partagé</span></div>
         <div class="vtt-delegate-list">${chips}</div>
-        <button class="vtt-btn-sm vtt-delegate-add"
+        <button class="vtt-ins-ghost vtt-delegate-add"
           data-vtt-fn="_vttOpenTokenDelegatesModal" data-vtt-args="${t.id}"
-          title="Autoriser un autre joueur à contrôler ce token">＋ Ajouter un joueur</button>
-      </div>`;
+          title="Autoriser un autre joueur à contrôler ce token">${_insIcon('plus')}Ajouter un joueur</button>
+      </section>`;
   })();
 
-  const _sendPageHtml = (STATE.isAdmin && pageOpts) ? `
-      <div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">📡 Envoyer le joueur vers</div>
-        <select class="vtt-ins-select" data-vtt-fn="_vttMoveTokenAndReset" data-vtt-on="change" data-vtt-args="$this|${t.id}">
+  const _sendPageHtml = STATE.isAdmin ? `
+      <section class="vtt-ins-drawer-section">
+        <div class="vtt-ins-section-heading"><span>Présence</span></div>
+        <div class="vtt-ins-presence-row">${_insIcon('eye')}<span><b>Visible des joueurs</b><small>${t.visible !== false ? 'Tout le monde voit ce token' : 'Seul le MJ le voit'}</small></span><button class="vtt-ins-switch${t.visible !== false ? ' active' : ''}" data-vtt-fn="_vttToggleVisible" data-vtt-args="${t.id}" role="switch" aria-checked="${t.visible !== false}" aria-label="Visible des joueurs"><i></i></button></div>
+        ${pageOpts ? `<div class="vtt-ins-send-page"><select id="vtt-ins-page-${_esc(t.id)}" class="vtt-ins-field" aria-label="Envoyer vers une page">
           <option value="">— choisir une page —</option>${pageOpts}
-        </select>
-      </div>` : '';
-
-  const _quickActionHtml = _canControlToken(t) ? `
-    <div class="vtt-ins-action-row">
-      <button type="button" class="vtt-ins-action-main" data-vtt-fn="_showActBar" data-vtt-args="${t.id}" title="Ouvrir les attaques, sorts, objets et actions">
-        <span>⚡</span><b>Actions</b>
-      </button>
-    </div>` : '';
+        </select><button class="vtt-ins-ghost" data-vtt-fn="_vttMoveTokenAndReset" data-vtt-args="$this|${t.id}" data-page-select="vtt-ins-page-${_esc(t.id)}">${_insIcon('map')}Envoyer</button></div>` : ''}
+      </section>` : '';
 
   const _sourceLinksHtml = STATE.isAdmin ? (() => {
     const links = [];
     if (t.characterId) {
       const charId = _esc(t.characterId);
-      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="char|${charId}|combat" title="Ouvrir la fiche personnage"><span>👤</span><b>Fiche</b></button>`);
-      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="char|${charId}|sorts" title="Modifier les sorts du personnage"><span>✨</span><b>Sorts</b></button>`);
-      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="char|${charId}|inv" title="Modifier l'inventaire du personnage"><span>🎒</span><b>Inventaire</b></button>`);
+      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="char|${charId}|combat" title="Ouvrir la fiche personnage">${_insIcon('user')}<b>Fiche</b></button>`);
+      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="char|${charId}|sorts" title="Modifier les sorts du personnage">${_insIcon('wand')}<b>Sorts</b></button>`);
+      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="char|${charId}|inv" title="Modifier l'inventaire du personnage">${_insIcon('bag')}<b>Inventaire</b></button>`);
     } else if (t.npcId) {
-      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="npc|${_esc(t.npcId)}" title="Ouvrir la page des PNJ"><span>👥</span><b>PNJ</b></button>`);
+      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="npc|${_esc(t.npcId)}" title="Ouvrir la page des PNJ">${_insIcon('user')}<b>PNJ</b></button>`);
     } else if (t.beastId) {
-      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="bestiary|${_esc(t.beastId)}" title="Ouvrir le bestiaire"><span>🐉</span><b>Bestiaire</b></button>`);
+      links.push(`<button class="vtt-source-link" data-vtt-fn="_vttOpenSource" data-vtt-args="bestiary|${_esc(t.beastId)}" title="Ouvrir le bestiaire">${_insIcon('paw')}<b>Bestiaire</b></button>`);
     }
-    if (!links.length) return '';
-    return `<div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">↗ Modifier la source</div>
+    links.push(`<button class="vtt-source-link" data-vtt-fn="_vttEditToken" data-vtt-args="${t.id}" title="Modifier les statistiques de combat">${_insIcon('edit')}<b>Stats combat</b></button>`);
+    return `<section class="vtt-ins-drawer-section">
+        <div class="vtt-ins-section-heading"><span>Modifier la source</span></div>
         <div class="vtt-source-links">${links.join('')}</div>
-      </div>`;
+      </section>`;
   })() : '';
 
   const _footerHtml = STATE.isAdmin ? `
-      <div class="vtt-ins-section">
-        <div class="vtt-ins-section-title">🛠 Outils MJ</div>
+      <section class="vtt-ins-drawer-section">
+        <div class="vtt-ins-section-heading"><span>Actions MJ</span></div>
         <div class="vtt-ins-actions">
-          <button class="vtt-btn-sm" data-vtt-fn="_vttEditToken" data-vtt-args="${t.id}" title="Modifier les stats combat">⚙️ Stats</button>
-          <button class="vtt-btn-sm" data-vtt-fn="_vttToggleVisible" data-vtt-args="${t.id}" title="Visibilité joueurs">${t.visible ? `${eyeIcon(false)} Visible` : `${eyeIcon(true)} Caché`}</button>
-          ${VS.session?.combat?.active?`<button class="vtt-btn-sm" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">↺ Tour</button>`:''}
-          ${t.pageId?`<button class="vtt-btn-sm" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la carte">↩ Retirer</button>`:''}
-          ${(t.buffs||[]).length?`<button class="vtt-btn-sm vtt-btn-danger" data-vtt-fn="_vttClearBuffs" data-vtt-args="${t.id}" title="Supprimer tous les buffs actifs">🗑 Buffs</button>`:''}
+          ${VS.session?.combat?.active?`<button class="vtt-ins-ghost" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">${_insIcon('turn')}Réinitialiser le tour</button>`:''}
+          ${t.pageId?`<button class="vtt-ins-ghost" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la carte">${_insIcon('out')}Retirer de la carte</button>`:''}
+          ${(t.buffs||[]).length?`<button class="vtt-ins-ghost danger" data-vtt-fn="_vttClearBuffs" data-vtt-args="${t.id}" title="Supprimer tous les effets actifs">${_insIcon('trash')}Purger les effets (${(t.buffs||[]).length})</button>`:''}
         </div>
-      </div>` : '';
+      </section>` : '';
 
   // ── Onglets du tiroir droit (dépliables) : Stats · États · Gérer ──
   //   Stats = caractéristiques + CA/portée/déplacement + build (+ bestiaire MJ).
   //   États = conditions + buffs. Gérer = sources/délégation/envoi de page.
+  const _ctrl = _canControlToken(t);
+  const _ownerUid = t.ownerId || (t.characterId ? VS.characters[t.characterId]?.uid : null);
+  const _isOwner = !!(STATE.user?.uid && _ownerUid === STATE.user.uid);
+  const _canManage = STATE.isAdmin || _isOwner;
+  const _effectCount = _activeConds.length + _activeBuffs.length;
+  const _hasNegativeEffect = _activeConds.length > 0 || _activeBuffs.some(({ buff }) => ['dot', 'move_debuff', 'affliction'].includes(buff?.type));
   const _tabs = [
-    { k:'stats',  ic:'📊', lb:'Stats',  html: buildSwitcherHtml + coreStatsHtml + _creatureHtml },
-    { k:'effets', ic:'✨', lb:'États',  html: _condsHtml + _buffsHtml },
-    { k:'gerer',  ic:'⚙️', lb:'Gérer',  html: _sourceLinksHtml + _delegateHtml + _sendPageHtml + _footerHtml },
-  ].filter(s => s.html && s.html.trim());
+    { k:'stats', icon:'stats', lb:'Stats', html: turnStatsHtml + buildSwitcherHtml + coreStatsHtml + _creatureHtml, allowed: _ctrl },
+    { k:'effets', icon:'effects', lb:'États', html: _effectsHtml, allowed: _ctrl, count: _effectCount, negative: _hasNegativeEffect },
+    { k:'gerer', icon:'manage', lb:'Gérer', html: _sendPageHtml + _delegateHtml + _sourceLinksHtml + _footerHtml, allowed: _canManage },
+  ].filter(section => section.allowed && section.html && section.html.trim());
   // Contrôle du token : onglets détaillés (Stats/États/Gérer), mini-feuille et
   // édition ne sont accessibles qu'au propriétaire, aux délégués et au MJ. Un
   // joueur qui clique un token qu'il ne contrôle pas ne voit que la fiche compacte
   // en lecture seule (nom, jauges, CA, états) — pas les onglets ni la mini-feuille.
-  const _ctrl = _canControlToken(t);
   // Icônes sur le côté du carré d'identité ; chaque icône déploie/replie son
   // onglet en popover au-dessus de la fiche (rien de déployé par défaut).
   const _deployed = _ctrl ? (_tabs.find(s => s.k === _insTab) || null) : null;
@@ -719,12 +746,12 @@ export function _renderInspectorImpl(t) {
     ? `<button type="button" class="vtt-who-sheet${_sheetOpen ? ' active' : ''}" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${_esc(_sheetUid)}|${_esc(t.characterId)}" data-mini-uid="${_esc(_sheetUid)}" data-mini-char="${_esc(t.characterId)}" title="Ouvrir la mini-feuille de ${_esc(ld.displayName ?? t.name)}" aria-label="Ouvrir la mini-feuille du personnage" aria-pressed="${_sheetOpen}"><span>▤</span><b>Fiche</b><kbd>C</kbd></button>`
     : '';
   const _tabBar = (_tabs.length && _ctrl)
-    ? `<div class="vtt-fiche-tabs">${_tabs.map(s =>
-        `<button class="vtt-fiche-tab${s.k === _insTab ? ' active' : ''}" data-vtt-fn="_vttInsTab" data-vtt-args="${s.k}" title="${s.lb}" aria-expanded="${s.k === _insTab}"><span class="vtt-fiche-tab-ic">${s.ic}</span><span class="vtt-fiche-tab-lbl">${s.lb}</span></button>`).join('')}</div>`
+    ? `<div class="vtt-fiche-tabs" role="tablist" aria-label="Outils du token">${_tabs.map(s =>
+        `<button class="vtt-fiche-tab${s.k === _insTab ? ' active' : ''}" data-vtt-fn="_vttInsTab" data-vtt-args="${s.k}" title="${s.lb}" role="tab" aria-selected="${s.k === _insTab}" aria-expanded="${s.k === _insTab}">${_insIcon(s.icon)}<span class="vtt-fiche-tab-lbl">${s.lb}</span>${s.count ? `<span class="vtt-fiche-tab-count${s.negative ? ' negative' : ''}">${s.count}</span>` : ''}</button>`).join('')}</div>`
     : '';
   const _panelHtml = _deployed
     ? `<div class="vtt-fiche-panel" role="region" aria-label="${_deployed.lb}">
-         <div class="vtt-fiche-panel-hd"><span>${_deployed.ic} ${_deployed.lb}</span><button class="vtt-fiche-panel-x" data-vtt-fn="_vttInsTab" data-vtt-args="${_deployed.k}" title="Replier" aria-label="Replier">✕</button></div>
+         <div class="vtt-fiche-panel-hd"><span><b>${_deployed.lb}</b><small>${_esc(ld.displayName ?? t.name)} · ${_esc(lbl)}</small></span><button class="vtt-fiche-panel-x" data-vtt-fn="_vttInsTab" data-vtt-args="${_deployed.k}" title="Replier" aria-label="Replier">${_insIcon('close')}</button></div>
          <div class="vtt-fiche-panel-body">${_deployed.html}</div>
        </div>`
     : '';
@@ -783,10 +810,11 @@ export function _renderInspectorImpl(t) {
       ${_summary}
       <div class="vtt-fiche-actions">
         ${_identitySheetBtn}
-        ${_tabBar ? `<details class="vtt-fiche-tools"><summary title="Stats, États et gestion" aria-label="Ouvrir Stats, États et Gérer">•••</summary>${_tabBar}</details>` : ''}
+        ${_tabBar ? `<span class="vtt-fiche-actions-separator" aria-hidden="true"></span>${_tabBar}` : ''}
       </div>
     </div>`;
   _wireResourceEditors(el);
+  _wireInspectorDrawer();
 
   // Le lanceur de dés du dock affiche les compétences du token courant : si son
   // panneau est ouvert, on le rafraîchit à chaque changement de sélection.

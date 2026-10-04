@@ -9,8 +9,10 @@ import {
   getEquipmentSlot,
   getEquipmentSlotsByKind,
   getPrimaryWeaponSlotId,
+  getSecondaryWeaponSlotId,
   resolveEquipmentSlotForItem,
 } from './equipment-slots.js';
+import { weaponHands } from './weapon-family.js';
 import {
   formatArmorSetEffect,
   getArmorSetDefinition,
@@ -270,6 +272,7 @@ export function buildEquippedItemFromInventory(slot, item, invIndex) {
       portee: item.portee || '',
       particularite: item.particularite || getItemEffectText(item) || item.description || '',
       format: item.format || '',
+      nature: item.nature || '',   // physique / magique — découplé de la famille
       toucher: item.toucher || '',
       stats: item.stats || '',
     };
@@ -298,8 +301,13 @@ export function buildInventoryEquipPatch(character, invIndex, requestedSlot = ''
   const slotDef = getEquipmentSlot(slot);
   if (!slotDef || !equipmentSlotAcceptsItem(slotDef, item)) return null;
 
+  const primarySlot = getPrimaryWeaponSlotId();
+  const secondarySlot = getSecondaryWeaponSlotId();
+  if (slot === secondarySlot && weaponHands(character?.equipement?.[primarySlot]) === 2) return null;
+
   const equipement = { ...(character?.equipement || {}) };
   const replacedItem = equipement[slot]?.nom ? equipement[slot] : null;
+  const displacedItems = [];
 
   // Une même unité d'inventaire ne peut occuper qu'un slot dans le build actif.
   Object.keys(equipement).forEach(otherSlot => {
@@ -311,12 +319,17 @@ export function buildInventoryEquipPatch(character, invIndex, requestedSlot = ''
   const equippedItem = buildEquippedItemFromInventory(slot, item, index);
   if (!equippedItem) return null;
   equipement[slot] = equippedItem;
+  if (slot === primarySlot && weaponHands(equippedItem) === 2 && equipement[secondarySlot]?.nom) {
+    displacedItems.push(equipement[secondarySlot]);
+    delete equipement[secondarySlot];
+  }
 
   return {
     item,
     slot,
     slotDef,
     replacedItem,
+    displacedItems,
     equipement,
     statsBonus: computeEquipStatsBonus(equipement),
   };
@@ -337,6 +350,7 @@ export function serializeShopWeaponForCombat(item = {}) {
     portee: item.portee || '',
     traits: getItemTraits(item),
     format: item.format || '',
+    nature: item.nature || '',   // physique / magique — découplé de la famille
     toucher: item.toucher || '',
     particularite: item.particularite || getItemEffectText(item) || '',
     stats: item.stats || '',

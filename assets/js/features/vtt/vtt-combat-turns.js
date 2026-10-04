@@ -16,7 +16,7 @@ import { db, updateDoc, setDoc, serverTimestamp, writeBatch, deleteField } from 
 import { showNotif } from '../../shared/notifications.js';
 import { _sesRef, _tokRef } from './vtt-refs.js';
 import { _live } from './vtt-effective.js';
-import { normalizeTokenTurnOrder, tokenTurnFlagsDirty } from './vtt-token-visual.js';
+import { normalizeTokenTurnOrder } from './vtt-token-visual.js';
 import { bumpHeal } from '../../shared/stats.js';
 import { _vttPublishOptimisticLog } from './vtt-chat.js';
 import { _renderCombatTrackerSoon } from './vtt-combat-tracker.js';
@@ -38,11 +38,20 @@ function _turnOrderForActivePage() {
   );
 }
 
-// Remise à zéro des drapeaux de tour, uniquement si le token en porte (quota :
-// un token qui n'a ni bougé ni agi n'est pas réécrit à chaque round).
-const _turnResetPatch = tokData => tokenTurnFlagsDirty(tokData)
-  ? { movedThisTurn:false, movedCells:0, bonusMvt:0, moveOrigin:deleteField(), attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false }
-  : {};
+// Remise à zéro des drapeaux de tour (début de combat, round suivant). Quota : on
+// ne réinitialise un drapeau QUE s'il était posé (sinon il vaut déjà false/0 côté
+// doc) ; un token qui n'a ni bougé ni agi ne génère donc AUCUNE écriture.
+function _turnResetPatch(tokData) {
+  const updates = {};
+  if (tokData.movedThisTurn)       updates.movedThisTurn = false;
+  if (tokData.movedCells)          updates.movedCells = 0;
+  if (tokData.bonusMvt)            updates.bonusMvt = 0;
+  if (tokData.moveOrigin != null)  updates.moveOrigin = deleteField();
+  if (tokData.attackedThisTurn)    updates.attackedThisTurn = false;
+  if (tokData.bonusActionThisTurn) updates.bonusActionThisTurn = false;
+  if (tokData.reactionThisTurn)    updates.reactionThisTurn = false;
+  return updates;
+}
 
 // Commit par lots de 400 opérations (limite Firestore : 500 par batch). Un seul
 // batch géant échouait en bloc — silencieusement — au-delà de 500 tokens.

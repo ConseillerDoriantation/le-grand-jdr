@@ -72,7 +72,9 @@ test('le journal MJ ne lit pas deux fois quatre-vingts messages pour en afficher
 
 test('le passage de round et le démarrage du combat ne réécrivent pas les tokens inchangés', () => {
   const turns = readFileSync(new URL('../assets/js/features/vtt/vtt-combat-turns.js', import.meta.url), 'utf8');
-  assert.match(turns, /tokenTurnFlagsDirty\(tokData\)/);
+  // Un drapeau n'est réinitialisé que s'il était posé ; les deux boucles passent par le même helper.
+  assert.match(turns, /if \(tokData\.movedThisTurn\)\s+updates\.movedThisTurn = false;/);
+  assert.equal((turns.match(/const updates = _turnResetPatch\(tokData\);/g) || []).length, 2);
   assert.match(turns, /if \(Object\.keys\(updates\)\.length\) ops\.push/);
   assert.match(turns, /offset \+= 400/);
   // Plus de b.update inconditionnel dans les boucles sur VS.tokens.

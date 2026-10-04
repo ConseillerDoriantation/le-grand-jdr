@@ -216,16 +216,6 @@ export function normalizeTokenTurnOrder(storedOrder = [], tokens = [], getName =
   return [...order, ...missing.map(token => token.id)];
 }
 
-// Un token a-t-il des drapeaux de tour à réinitialiser ? Quota : le passage de
-// round ne réécrit que ces tokens-là (les autres auraient reçu des valeurs
-// identiques — une écriture facturée pour rien, diffusée à chaque client).
-// Les lecteurs traitent déjà un champ absent comme « remis à zéro ».
-export function tokenTurnFlagsDirty(token = {}) {
-  return !!(token.movedThisTurn || token.movedCells || token.bonusMvt
-    || token.moveOrigin !== undefined
-    || token.attackedThisTurn || token.bonusActionThisTurn || token.reactionThisTurn);
-}
-
 function turnsLeft(effect, round) {
   if (effect?.expiresAtRound == null || round <= 0) return null;
   return Math.max(0, Number(effect.expiresAtRound) - round + 1);

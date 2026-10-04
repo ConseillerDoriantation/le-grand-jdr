@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, getAfflictionMode, getAfflictionEtatId, spellConditionId, withElementWeaknesses, isLightSpell, lightSpellRadius, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
+import { runeCount, calcSpellTargets, calcSpellDuration, getProtectionRestoreMode, getProtectionModes, protectionRunesFor, getAfflictionMode, getAfflictionEtatId, spellConditionId, affordableSpellConditionId, enchantStatesWithinRunes, withElementWeaknesses, isLightSpell, lightSpellRadius, protectionSplitAllowed, isProtectionMultiMode, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../assets/js/shared/spell-runes.js';
 
 const sort = (runes = [], extra = {}) => ({ runes, ...extra });
 
@@ -131,13 +131,25 @@ test('Affliction Faiblesse : ancien mode lu comme l’état « faiblesse »', ()
   assert.equal(getAfflictionMode(sort(['Affliction'])), 'dot');
 });
 
-test('États retirés des sorts : redirigés vers l’état qui les absorbe (Rage exclue)', () => {
-  assert.equal(getAfflictionEtatId(sort(['Affliction'], { afflictionMode: 'etat', afflictionEtatId: 'paralyzed' })), 'stunned');
+test('États retirés des sorts : redirigés vers l’état qui les absorbe', () => {
+  assert.equal(getAfflictionEtatId(sort(['Affliction'], { afflictionMode: 'etat', afflictionEtatId: 'incapacitated' })), 'stunned');
   assert.equal(spellConditionId('grappled'), 'restrained');
-  assert.equal(spellConditionId('frightened'), 'blinded');
+  assert.equal(spellConditionId('frightened'), 'frightened');
+  assert.equal(spellConditionId('paralyzed'), 'paralyzed');
   assert.equal(spellConditionId('rage'), 'rage');
-  assert.equal(spellConditionId('marked'), 'marked');
   assert.equal(spellConditionId(''), '');
+});
+
+test('états à 2 runes : Affliction retombe sur la version 1 rune, Enchantement respecte le total', () => {
+  assert.equal(affordableSpellConditionId('paralyzed', 1, 2), 'stunned');
+  assert.equal(affordableSpellConditionId('paralyzed', 2, 2), 'paralyzed');
+  assert.equal(affordableSpellConditionId('marked', 1, 1), 'marked');
+  assert.equal(affordableSpellConditionId('mystere', 1, 2), '');
+  const cost = id => (id === 'invisible' || id === 'rage' ? 2 : 1);
+  assert.deepEqual(enchantStatesWithinRunes(['invisible', 'guided'], 2, cost), ['invisible']);
+  assert.deepEqual(enchantStatesWithinRunes(['invisible', 'guided'], 3, cost), ['invisible', 'guided']);
+  assert.deepEqual(enchantStatesWithinRunes(['rage'], 1, cost), []);
+  assert.deepEqual(enchantStatesWithinRunes(['guided', 'swift', 'chanceux'], 2, cost), ['guided', 'swift']);
 });
 
 test('Faiblesse d\'élément : ×2, annule une résistance, ne perce pas une immunité', () => {

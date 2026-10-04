@@ -6114,10 +6114,10 @@ body.ach-dragging * { cursor:grabbing !important; }
 }
 .world-sec-body.is-slides { padding-top: 24px; }
 
-/* Texte enrichi : colonne de lecture ~68 caractères, centrée dans la carte →
-   un bloc centré par le MJ tombe au milieu, comme dans l'éditeur. */
+/* Texte enrichi : même largeur confortable en lecture et en édition. */
 .world-section-content {
-  max-width: 68ch;
+  width: min(100%, 1080px);
+  max-width: none;
   margin-inline: auto;
   color: var(--text-soft);
   font-size: 1rem;
@@ -6585,6 +6585,64 @@ body.ach-dragging * { cursor:grabbing !important; }
 [data-theme="light"] .world-empty-copy span { color: var(--gold-dark); }
 [data-theme="light"] .world-pager-link svg,
 [data-theme="light"] .world-nav-mobile-icon { color: var(--gold); }
+
+/* Guide — l'éditeur partagé reprend exactement la colonne et les proportions
+   du prototype Claude Design. La page grandit avec le texte : le scroll reste
+   celui du Guide, pas un second scroll enfermé dans la zone de rédaction. */
+.world-editor--rich {
+  width: min(100%, 1080px);
+  margin-inline: auto;
+}
+.shared-image-lightbox-hint {
+  max-width: calc(100vw - 120px);
+  text-align: center;
+}
+html:has(.world-editor--rich),
+body:has(.world-editor--rich) {
+  /* `overflow-x:hidden` sur la racine crée un conteneur de scroll qui neutralise
+     position:sticky dans Chromium. `clip` garde la protection horizontale sans
+     détacher la barre d'outils du scroll de la page. */
+  overflow-x: clip;
+}
+.world-editor--rich .rtq-wrap { min-width: 0; }
+.world-editor--rich .rtq-toolbar.ql-toolbar.ql-snow {
+  top: calc(var(--header-height, 64px) + 24px);
+  z-index: 20;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 22%);
+}
+@media (min-width: 769px) {
+  .world-editor--rich .rtq-toolbar.ql-toolbar.ql-snow { top: 16px; }
+}
+.world-editor--rich .ql-editor {
+  min-height: max(520px, calc(100vh - 330px));
+  max-height: none;
+  padding: 26px clamp(26px, 5vw, 58px) 48px;
+  overflow: visible;
+}
+.world-editor--rich .ql-editor.ql-blank::before {
+  right: clamp(26px, 5vw, 58px);
+  left: clamp(26px, 5vw, 58px);
+}
+/* L'ancienne citation dorée du Guide ne doit pas écraser la typographie du
+   nouvel éditeur, en lecture comme en édition. */
+.rte-content.rtc.world-section-content blockquote,
+.world-editor--rich .ql-editor blockquote {
+  margin: .7em 0 0;
+  padding: .15em 0 .15em 1.1em;
+  border: 0;
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-style: italic;
+}
+@media (max-width: 720px) {
+  .world-editor--rich .ql-editor {
+    min-height: max(440px, calc(100vh - 290px));
+    padding: 22px 18px 40px;
+  }
+  .world-editor--rich .ql-editor.ql-blank::before { right: 18px; left: 18px; }
+}
 
 /* Map */
 .map-container {

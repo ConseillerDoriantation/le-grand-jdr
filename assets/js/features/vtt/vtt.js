@@ -26,13 +26,12 @@ import { getArmorSetData, getMainWeapon, getItemTraits, getEquippedSourceItem, r
 import { getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { buildProjectionPatch, switchBuild } from '../../shared/character-builds.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
-import { resolveWeaponFamily } from '../../shared/weapon-family.js';
 import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
 import { _zoneCellRects } from './vtt-render.js';
 import { resolveWeaponDamageContext } from '../../shared/weapon-damage-context.js';
 import {
   combinedTechniqueTargetCA, techniqueAllowedForAction, techniqueAreaIntersects, techniqueOutcomeMultiplier, techniqueTriggerApplies,
-  techniqueActiveForMode, techniqueCritRangeBonus, techniqueDamageMalus,
+  techniqueActiveForMode, techniqueCritRangeBonus, techniqueDamageMalus, techniqueEligibilityMode,
   weaponTechniqueDamageTerms,
 } from '../../shared/weapon-techniques.js';
 import { loadDamageTypes, getDamageTypeRules, getDamageTypeById, damageTypeEmitsLight } from '../../shared/damage-types.js';
@@ -41,10 +40,10 @@ import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nea
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, spellConditionId, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, spellConditionId, affordableSpellConditionId, enchantStatesWithinRunes, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm, getProtectionCAOverride, getProtectionReductionStep } from '../../shared/spell-matrices.js';
-import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary } from '../../shared/conditions.js';
+import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary, conditionSpellRunes } from '../../shared/conditions.js';
 import { showNotif } from '../../shared/notifications.js';
 import { toggleTheme } from '../../shared/theme.js';
 import { accAttackDelta, accCastDelta, applyStatsDelta, bumpBiggestHit, bumpBiggestTaken, bumpDamageTaken, setActiveStatsSession } from '../../shared/stats.js';
@@ -75,7 +74,7 @@ import { vttStructureLegendSvg } from './vtt-wall-utils.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenFootprintMeta, tokenHiddenHealthRatio, tokenMovementMeta, tokenRelationTone, tokenResourceArcs, tokenVisibleHealthMeta } from './vtt-token-visual.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { attackRollHitsTarget, gridDistanceForRange, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
-import { conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
+import { conditionConsumedByAttack, conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
 import { planGroupGridStep } from './vtt-group-movement.js';
 import { invocableCharacterTokens, resolveCharacterControlToken } from './vtt-token-control.js';
 import { naturalWeaponCombatContext } from '../../shared/bestiary-combat.js';
@@ -102,7 +101,7 @@ import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
   _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf,
 } from './vtt-effective.js';
-import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttBuildJetsBody, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
+import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttInsFilterConditionPicker, _vttBuildJetsBody, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
@@ -201,7 +200,7 @@ import {
   _vttMsDeleteNote, _vttMsEquip, _vttMsUnequip, _vttMsUnequipAll, _vttMsEquipPicker,
   _vttMsSlotChange, _vttMsDeleteItem, _vttMsSendPicker, _vttMsConfirmSend,
   _vttMsInvSearch, _vttMsInvCat, _vttMsInvClear, _vttMsSortSearch, _vttMsSortCat,
-  _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft, _vttMsCraftAsk, _vttMsCraftCancel,
+  _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft, _vttMsCraftAsk, _vttMsCraftCancel, _vttForgeOpen,
   _vttMsCraftSearch, _vttMsCraftClear,
   _vttMsSendGoldPicker, _vttMsConfirmSendGold,
   _vttMsSac, _vttMsGoPurse, _vttMsPop, _vttMsToggleSpell, _vttMsKeyToggle,
@@ -326,9 +325,12 @@ function _vttClearAoptSearch(btn) {
   if (inp) { inp.value = ''; _vttAoptSearch('', inp); inp.focus(); }
 }
 function _vttMoveTokenAndReset(sel, tid) {
-  if (!sel.value) return;
-  _vttMoveTokenToPage(tid, sel.value);
-  sel.value = '';
+  const input = sel?.matches?.('select')
+    ? sel
+    : document.getElementById(sel?.dataset?.pageSelect || '');
+  if (!input?.value) return;
+  _vttMoveTokenToPage(tid, input.value);
+  input.value = '';
 }
 function _vttSetEmoteAlbum(v) {
   const t = (v || '').trim();
@@ -358,6 +360,11 @@ function _vttIsTypingTarget(target) {
     (editable && editable.getAttribute('contenteditable') !== 'false') ||
     el.isContentEditable
   );
+}
+
+function _vttHasCopyableTextSelection() {
+  const selection = window.getSelection?.();
+  return !!selection && !selection.isCollapsed && selection.toString().length > 0;
 }
 
 function _vttSetActionPending(el) {
@@ -3986,12 +3993,14 @@ function _vttSpellMods(s) {
         } : null,
     // Enchantement mode État : applique l'état choisi directement à l'allié
     enchantEtatId: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
-      ? (spellConditionId(s.enchantEtatId) || null) : null,
+      ? (enchantStatesWithinRunes([spellConditionId(s.enchantEtatId)], nbEnch, id => conditionSpellRunes(CONDITION_BY_ID[id]))[0] || null) : null,
     // Multi-états : 1 par rune Enchantement (le 1er garde ses réglages fins, les
     // suivants sont auto-modulés par Puissance/Amplification). Limité à nbEnch.
     enchantEtatIds: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
-      ? ((Array.isArray(s.enchantEtatIds) && s.enchantEtatIds.length
-          ? s.enchantEtatIds : [s.enchantEtatId]).map(spellConditionId).filter(Boolean).slice(0, nbEnch))
+      // Chaque état coûte ses runes (Invisible, Rage : 2) : le total ne dépasse pas nbEnch.
+      ? enchantStatesWithinRunes((Array.isArray(s.enchantEtatIds) && s.enchantEtatIds.length
+          ? s.enchantEtatIds : [s.enchantEtatId]).map(spellConditionId).filter(Boolean),
+          nbEnch, id => conditionSpellRunes(CONDITION_BY_ID[id]))
       : [],
     enchantStatePower: (nbEnch > 0 && nbInv === 0 && s.enchantMode === 'etat')
       ? nbP : 0,
@@ -4037,7 +4046,9 @@ function _vttSpellMods(s) {
           const mode = getAfflictionMode(s);
           let saveStat = 'constitution';
           let conditionLib = null;
-          const etatId = mode === 'etat' ? getAfflictionEtatId(s) : '';
+          // État à 2 runes (Paralysé, Pétrifié) avec une seule rune : version 1 rune.
+          const rawEtatId = mode === 'etat' ? getAfflictionEtatId(s) : '';
+          const etatId = affordableSpellConditionId(rawEtatId, nbAff, conditionSpellRunes(CONDITION_BY_ID[rawEtatId]));
           if (etatId) {
             conditionLib = CONDITION_BY_ID[etatId] || null;
             if (conditionLib?.defaultSaveStat) saveStat = conditionLib.defaultSaveStat;
@@ -5944,14 +5955,18 @@ function _buildAttackOptions(t) {
   const wMaitrise    = c && !wReplace && weapon ? getMaitriseBonus(c, weapon) : 0;
   // Règles de type de dégâts (missEffect, armorPen, dmgBonus)
   const wReplaceTypeId = wReplace?.element || 'physique';
-  // Type d'arme (ex-format) : porte isMagic, type de dégâts et techniques.
-  const fmt        = wReplace ? null : resolveWeaponFamily(VS.weaponFormats, weapon);
-  const isMagicW   = wReplace ? true : fmt?.isMagic === true;
-  const typeRules  = wReplace
-    ? getDamageTypeRules(VS.damageTypes, wReplaceTypeId)
-    : (isMagicW
-        ? getDamageTypeRules(VS.damageTypes, 'physique')
-        : getDamageTypeRules(VS.damageTypes, fmt?.damageType || 'physique'));
+  // La nature portée par l'objet prime sur celle de sa famille : une dague peut
+  // donc être magique, et une famille historiquement magique être forcée en
+  // physique. Le même résolveur est utilisé par la fiche et les PNJ.
+  const playerWeaponDamage = !wReplace && !isUnarmed
+    ? resolveWeaponDamageContext(VS.weaponFormats, VS.damageTypes, weapon, c?.elements || [])
+    : null;
+  const fmt       = playerWeaponDamage?.format || null;
+  const isMagicW  = wReplace ? true : playerWeaponDamage?.isMagic === true;
+  const resolvedWeaponTypeId = wReplace
+    ? wReplaceTypeId
+    : (isUnarmed ? 'physique' : (playerWeaponDamage?.damageTypeId || 'physique'));
+  const typeRules = getDamageTypeRules(VS.damageTypes, resolvedWeaponTypeId);
 
   // Formule dés finale : arme invoquée → buff.weaponDice + mod stat ; sinon comportement actuel
   const wDmgDiceRaw = wReplace ? wReplace.weaponDice
@@ -5964,10 +5979,9 @@ function _buildAttackOptions(t) {
   const wPortee = wReplace ? Math.max(1, wReplace.weaponRange || 1) : (ld.displayRange ?? 1);
 
   // ── Détecte un buff d'enchantement actif (purement visuel/marquage ici).
-  // L'enchantement N'override PAS l'élément de l'arme : l'arme reste PHYSIQUE
-  // (donc miss = 0 dégâts, pas de demi-dégâts). Le bonus s'ajoute uniquement
-  // sur un coup réussi (géré dans _vttRollAttack). On garde juste le label
-  // « · enchantée » et l'élément du bonus en métadonnée pour affichage.
+  // L'enchantement N'override PAS la nature ni l'élément de l'arme. Le bonus
+  // s'ajoute uniquement sur un coup réussi (géré dans _vttRollAttack). On garde
+  // juste le label « · enchantée » et l'élément du bonus en métadonnée.
   const _round_eff = VS.session?.combat?.round ?? 0;
   const _enchantBuff = (t.buffs || []).find(b =>
     b.type === 'dmg_bonus' && b.slot === 'arme'
@@ -5982,7 +5996,7 @@ function _buildAttackOptions(t) {
   // NB : le bonus toucher d'enchantement (toucher_bonus) n'est PAS baked ici —
   // il est ajouté frais au jet (_vttRollAttack) et au HUD pour rester à jour si
   // le buff est posé après la construction du panneau.
-  const _wDefaultTypeId = wReplace ? wReplaceTypeId : (isMagicW ? null : (fmt?.damageType || 'physique'));
+  const _wDefaultTypeId = resolvedWeaponTypeId;
   const _wFinalTypeObj  = _wDefaultTypeId ? getDamageTypeById(VS.damageTypes, _wDefaultTypeId) : null;
 
   options.push({
@@ -6001,12 +6015,12 @@ function _buildAttackOptions(t) {
     dmgStatMod:       wDmgMod,
     dmgStatLabel:     wDmgStatLabel,
     maitriseBonus:    wMaitrise,
-    typeRules:        typeRules,           // règles d'arme PHYSIQUE inchangées
+    typeRules,
     damageTypeId:     _wDefaultTypeId,
     damageTypeIcon:   _wFinalTypeObj?.icon || (wReplace ? '✨' : ''),
     damageTypeColor: _wFinalTypeObj?.color || '',
     isMagicWeapon:    !!wReplace || (isMagicW && !isUnarmed),
-    charElements:     wReplace ? [wReplaceTypeId] : ((isMagicW && !isUnarmed) ? (c?.elements || []) : []),
+    charElements:     wReplace ? [wReplaceTypeId] : (playerWeaponDamage?.elementIds || []),
     isInvokedWeapon:  !!wReplace,
     enchantedElement: _enchantBuff?.element || null,
     traits:           !wReplace && !isUnarmed ? getItemTraits(weaponSource) : [],
@@ -6029,10 +6043,16 @@ function _buildAttackOptions(t) {
     const secondaryDmgMod = secondaryDmgStats.reduce((sum, stat) => sum + getMod(c, stat), 0);
     const secondaryTouchMod = getMod(c, secondaryTouchStat);
     const secondaryMastery = getMaitriseBonus(c, secondaryWeapon);
-    const secondaryFormat = resolveWeaponFamily(VS.weaponFormats, secondaryWeapon);
-    const secondaryMagic = secondaryFormat?.isMagic === true;
-    const secondaryTypeId = secondaryMagic ? null : (secondaryFormat?.damageType || 'physique');
-    const secondaryType = secondaryTypeId ? getDamageTypeById(VS.damageTypes, secondaryTypeId) : null;
+    const secondaryDamage = resolveWeaponDamageContext(
+      VS.weaponFormats,
+      VS.damageTypes,
+      secondaryWeapon,
+      c?.elements || [],
+    );
+    const secondaryFormat = secondaryDamage.format;
+    const secondaryMagic = secondaryDamage.isMagic;
+    const secondaryTypeId = secondaryDamage.damageTypeId || 'physique';
+    const secondaryType = getDamageTypeById(VS.damageTypes, secondaryTypeId);
     const secondaryBaseRange = Math.max(1, parseInt(secondaryWeapon.portee) || 1);
     const secondaryRangeBonus = Math.max(0, (ld.displayRange || secondaryBaseRange) - _vttBestWeaponRange(c));
 
@@ -6053,14 +6073,12 @@ function _buildAttackOptions(t) {
       dmgStatMod: secondaryDmgMod,
       dmgStatLabel: secondaryDmgStats.map(stat => statShort(stat) || stat).join('+'),
       maitriseBonus: secondaryMastery,
-      typeRules: secondaryMagic
-        ? getDamageTypeRules(VS.damageTypes, 'physique')
-        : getDamageTypeRules(VS.damageTypes, secondaryTypeId),
+      typeRules: getDamageTypeRules(VS.damageTypes, secondaryTypeId),
       damageTypeId: secondaryTypeId,
       damageTypeIcon: secondaryType?.icon || '',
       damageTypeColor: secondaryType?.color || '',
       isMagicWeapon: secondaryMagic,
-      charElements: secondaryMagic ? (c.elements || []) : [],
+      charElements: secondaryDamage.elementIds,
       traits: getItemTraits(getEquippedSourceItem(c, getSecondaryWeaponSlotId(), secondaryWeapon)),
       weaponSlot: 'secondary',
       weaponTechniques: Array.isArray(secondaryFormat?.techniques) ? secondaryFormat.techniques : [],
@@ -7523,7 +7541,21 @@ function _vttTechniqueKey(technique) {
     .replace(/[^a-z0-9:_-]/gi, '_');
 }
 
-function _vttTechniqueAvailability(technique, src) {
+function _vttTechniqueEligibilityMode(src, tgt, opt, requestedMode = 'normal') {
+  if (!src) return 'normal';
+  const cond = _conditionsAttackMods(src, tgt, opt);
+  const style = _combatStyleContext(src, tgt, opt).modifiers;
+  // Le bouton « Avantage » ne suffit pas à rendre Coup sournois disponible :
+  // l'ouverture doit venir du lanceur, de la cible ou d'un style automatique.
+  // Un désavantage réel ou explicitement choisi annule cette ouverture.
+  return techniqueEligibilityMode({
+    hasAdvantage: cond.hasAdv || style.hasAdv,
+    hasDisadvantage: cond.hasDis || style.hasDis,
+    requestedMode,
+  });
+}
+
+function _vttTechniqueAvailability(technique, src, tgt = null, opt = {}, requestedMode = null) {
   if (!technique || !src) return { available: true, remaining: null, cooldown: 0 };
   const key = _vttTechniqueKey(technique);
   const round = Math.max(0, parseInt(VS.session?.combat?.round, 10) || 0);
@@ -7540,7 +7572,17 @@ function _vttTechniqueAvailability(technique, src) {
     const used = sameSession ? (parseInt(src.techniqueSessionUses?.[key], 10) || 0) : 0;
     remaining = Math.max(0, technique.maxUses - used);
   }
-  return { available: cooldown <= 0 && (remaining == null || remaining > 0), remaining, cooldown };
+  const resolvedRequestedMode = requestedMode || document.getElementById('atk-mode')?.value || 'normal';
+  const advantageMissing = !techniqueActiveForMode(
+    technique,
+    _vttTechniqueEligibilityMode(src, tgt, opt, resolvedRequestedMode),
+  );
+  return {
+    available: !advantageMissing && cooldown <= 0 && (remaining == null || remaining > 0),
+    remaining,
+    cooldown,
+    advantageMissing,
+  };
 }
 
 function _vttAttackTechniques(opt) {
@@ -7573,9 +7615,15 @@ function _vttWeaponTechniquesHtml(opt) {
         const detail = [t.description, ..._weaponTechniqueEffectParts(t)].filter(Boolean).join(' · ');
         const source = t._source === 'damage-type' ? `${t._sourceLabel} · ` : '';
         const active = selected?._choiceId === t._choiceId;
-        const availability = _vttTechniqueAvailability(t, VS.tokens[_atkCtx?.srcId]?.data);
+        const availability = _vttTechniqueAvailability(
+          t,
+          VS.tokens[_atkCtx?.srcId]?.data,
+          VS.tokens[_atkCtx?.tgtId]?.data,
+          opt,
+        );
         const availabilityLabel = availability.cooldown > 0 ? ` · recharge ${availability.cooldown}t`
-          : availability.remaining != null ? ` · ${availability.remaining}/${t.maxUses}` : '';
+          : availability.remaining != null ? ` · ${availability.remaining}/${t.maxUses}`
+            : availability.advantageMissing ? ' · avantage requis' : '';
         return `<button type="button" class="vtt-atk-pick vtt-atk-technique-choice ${active ? 'is-active' : ''}" style="--ec:${t._source === 'damage-type' ? (opt.damageTypeColor || '#f97316') : 'var(--amber)'}" data-technique-id="${_esc(t._choiceId)}"
           data-vtt-fn="_vttSetWeaponTechnique" data-vtt-args="${sourceKey}|${_esc(t._choiceId)}" aria-pressed="${active ? 'true' : 'false'}"
           ${availability.available ? '' : 'disabled aria-disabled="true"'} title="${_esc(`${source}${detail || t.label}${availabilityLabel}`)}">${_esc(t.icon || '🎯')} ${_esc(t.label)}${availabilityLabel}</button>`;
@@ -7594,8 +7642,16 @@ function _vttSetWeaponTechnique(sourceKey, techniqueId) {
   const id = String(techniqueId || '');
   const clicked = _vttAttackTechniques(ctx.opt)
     .find(technique => technique._source === source && technique._choiceId === id) || null;
-  if (clicked && !_vttTechniqueAvailability(clicked, VS.tokens[ctx.srcId]?.data).available) {
-    showNotif('Cette technique n’est pas encore disponible.', 'warning');
+  const availability = clicked ? _vttTechniqueAvailability(
+    clicked,
+    VS.tokens[ctx.srcId]?.data,
+    VS.tokens[ctx.tgtId]?.data,
+    ctx.opt,
+  ) : null;
+  if (clicked && !availability.available) {
+    showNotif(availability.advantageMissing
+      ? 'Coup sournois nécessite un avantage réel du lanceur ou contre la cible.'
+      : 'Cette technique n’est pas encore disponible.', 'warning');
     return;
   }
   ctx[stateKey] = clicked && ctx[stateKey]?._choiceId !== clicked._choiceId ? clicked : null;
@@ -8065,6 +8121,16 @@ function _vttSetMode(mode) {
   });
   const inp = document.getElementById('atk-mode');
   if (inp) inp.value = mode;
+  if (_atkCtx?.opt) {
+    const src = VS.tokens[_atkCtx.srcId]?.data;
+    const tgt = VS.tokens[_atkCtx.tgtId]?.data;
+    const eligibilityMode = _vttTechniqueEligibilityMode(src, tgt, _atkCtx.opt, mode);
+    for (const key of ['weaponTechnique', 'damageTechnique']) {
+      if (_atkCtx[key] && !techniqueActiveForMode(_atkCtx[key], eligibilityMode)) _atkCtx[key] = null;
+    }
+    const slot = document.getElementById('atk-techniques-slot');
+    if (slot) slot.innerHTML = _vttWeaponTechniquesHtml(_atkCtx.opt);
+  }
   _vttRenderActionSimulationFields();
 }
 
@@ -9714,7 +9780,9 @@ async function _vttRollAttack() {
   try {
 
     for (const technique of selectedTechniques) {
-      if (!_vttTechniqueAvailability(technique, src).available) {
+      // La modale est déjà fermée ici : transmettre explicitement la cible,
+      // l'action et le mode évite de perdre l'avantage fourni par son debuff.
+      if (!_vttTechniqueAvailability(technique, src, tgt, opt, mode).available) {
         showNotif(`⚠ ${technique.label} n’est plus disponible.`, 'error');
         return;
       }
@@ -10452,9 +10520,17 @@ async function _vttRollAttack() {
     else if (hasAdv) effectiveMode = 'adv';
     else if (hasDis) effectiveMode = 'dis';
     const automaticReasons = [...condMods.reasons, ...styleMods.reasons];
-    // Technique réservée à l'avantage (Coup sournois) : sans avantage final,
-    // elle ne s'active pas et l'attaque reste normale.
-    const _inactiveTechniques = selectedTechniques.filter(technique => !techniqueActiveForMode(technique, effectiveMode));
+    // Coup sournois exige une ouverture réellement fournie par le lanceur, la
+    // cible ou le style. Choisir manuellement « Avantage » ne suffit pas ; choisir
+    // « Désavantage » annule en revanche une ouverture existante.
+    const techniqueMode = techniqueEligibilityMode({
+      hasAdvantage: condMods.hasAdv || styleMods.hasAdv,
+      hasDisadvantage: condMods.hasDis || styleMods.hasDis,
+      requestedMode: mode,
+    });
+    const _inactiveTechniques = selectedTechniques.filter(
+      technique => !techniqueActiveForMode(technique, techniqueMode),
+    );
     if (_inactiveTechniques.length) {
       selectedTechniques = selectedTechniques.filter(technique => !_inactiveTechniques.includes(technique));
       techniqueDefenseBonus = _techniqueDefense(selectedTechniques);
@@ -11051,7 +11127,7 @@ async function _vttRollAttack() {
         const hitTypes = new Set(rawDamagePieces.filter(p => p.amount > 0).map(p => p.damageTypeId));
         const isConsumedNow = c => {
           const eff = CONDITION_BY_ID[c.id]?.effects;
-          return (hit && !!eff?.consumedByAttackAgainst)
+          return conditionConsumedByAttack(eff, { hit })
             || (!!eff?.consumedByElementHit && !!c.element && hitTypes.has(c.element));
         };
         const curConds = curTgtData.conditions || [];
@@ -11065,6 +11141,9 @@ async function _vttRollAttack() {
           }
         }
         if (remaining.length !== curConds.length) {
+          // Le retrait (notamment Invisible après un coup reçu) doit être visible
+          // immédiatement ; le snapshot Firestore ne fait ensuite que confirmer.
+          _vttPatchTokenOptimistically(curTgtData.id, { conditions: remaining });
           targetWrite = targetWrite.then(async () => {
             // _syncDownedCondition peut avoir ajouté Inconscient entre-temps :
             // repartir de l'état le plus récent et ne retirer que les effets consommés.
@@ -11218,39 +11297,60 @@ async function _vttRollAttack() {
     const modNotes = []; // notes textuelles pour la notif/log
     const concentrationLogs = [];
 
-    // ── Contrecoup de technique sur un raté (Élan total, Coup sournois) ──
-    // L'attaquant est découvert jusqu'à la fin du round (≈ son prochain tour).
-    // En combat uniquement : hors combat un buff sans échéance serait permanent.
+    // ── États post-attaque : invisibilité consommée + contrecoup de technique ──
+    // Une attaque portée dissipe les états qui le demandent (Invisible). Sur un
+    // raté de Coup sournois, À découvert est posé même au round 0 : sa durée est
+    // alors différée au démarrage du combat comme les autres états temporaires.
     let techniqueBacklashNote = null;
     const _roundBk = VS.session?.combat?.round ?? 0;
+    const _baseRoundBk = Math.max(1, _roundBk);
     const _missedAll = !opt.autoHit && [...primaryOutcomes.values()].every(outcome => !outcome.hit);
-    if (_missedAll && _roundBk > 0) {
+    const sourcePatch = {};
+    let sourceConditions = [...(src.conditions || [])];
+    let sourceConditionsChanged = false;
+    const attackConsumedConditions = sourceConditions.filter(
+      condition => conditionConsumedByAttack(CONDITION_BY_ID[condition.id]?.effects, { attacker: true }),
+    );
+    if (attackConsumedConditions.length) {
+      const consumedIds = new Set(attackConsumedConditions.map(condition => condition.id));
+      sourceConditions = sourceConditions.filter(condition => !consumedIds.has(condition.id));
+      sourceConditionsChanged = true;
+      modNotes.push(...attackConsumedConditions.map(condition => {
+        const lib = CONDITION_BY_ID[condition.id];
+        return `${lib?.icon || '✨'} ${lib?.label || condition.id} dissipé`;
+      }));
+    }
+    if (_missedAll) {
       const caMalus = selectedTechniques.reduce((max, t) => Math.max(max, parseInt(t.missSelfCaMalus, 10) || 0), 0);
       const condIds = [...new Set(selectedTechniques.map(t => t.missSelfConditionId).filter(id => id && CONDITION_BY_ID[id]))];
       const label = selectedTechniques.find(t => t.missSelfCaMalus || t.missSelfConditionId)?.label || 'Technique';
       const notes = [];
-      const patch = {};
       if (caMalus > 0) {
         const sortLabel = `Contrecoup · ${label}`;
-        patch.buffs = [...(src.buffs || []).filter(b => !(b.type === 'ca' && b.sortLabel === sortLabel)), {
-          type: 'ca', bonus: -caMalus, startRound: _roundBk, totalDuration: 1, expiresAtRound: _roundBk,
+        sourcePatch.buffs = [...(src.buffs || []).filter(b => !(b.type === 'ca' && b.sortLabel === sortLabel)), {
+          type: 'ca', bonus: -caMalus, startRound: _baseRoundBk, totalDuration: 1, expiresAtRound: _baseRoundBk,
           sortLabel, icon: '💢',
         }];
         notes.push(`CA −${caMalus}`);
       }
       if (condIds.length) {
-        const kept = (src.conditions || []).filter(c => !condIds.includes(c.id));
-        patch.conditions = [...kept, ...condIds.map(id => ({
-          id, appliedAt: Date.now(), appliedBy: srcId, source: label, saveDC: null, saveStat: null, expiresAtRound: _roundBk,
+        sourceConditions = [...sourceConditions.filter(c => !condIds.includes(c.id)), ...condIds.map(id => ({
+          id, appliedAt: Date.now(), appliedBy: srcId, source: label, saveDC: null, saveStat: null,
+          expiresAtRound: _roundBk > 0 ? _roundBk : null,
+          ...(_roundBk === 0 ? { pendingDuration: 1 } : {}),
         }))];
+        sourceConditionsChanged = true;
         notes.push(...condIds.map(id => `${CONDITION_BY_ID[id].icon} ${CONDITION_BY_ID[id].label}`));
       }
       if (notes.length) {
         techniqueBacklashNote = `${label} raté : ${notes.join(' · ')} jusqu'à la fin du round`;
         modNotes.push(`💢 ${techniqueBacklashNote}`);
-        _vttPatchTokenOptimistically(srcId, patch);
-        updateDoc(_tokRef(srcId), patch).catch(error => console.error('[vtt] contrecoup de technique', error));
       }
+    }
+    if (sourceConditionsChanged) sourcePatch.conditions = sourceConditions;
+    if (Object.keys(sourcePatch).length) {
+      _vttPatchTokenOptimistically(srcId, sourcePatch);
+      updateDoc(_tokRef(srcId), sourcePatch).catch(error => console.error('[vtt] états post-attaque', error));
     }
 
     // Remonte dans modNotes les effets liés aux états (dégâts bonus + consommations)
@@ -13988,6 +14088,12 @@ async function _vttClearBuffs(id) {
   if (!STATE.isAdmin) return;
   const t=VS.tokens[id]?.data; if (!t) return;
   const previous = t.buffs || [];
+  if (!previous.length) return;
+  const accepted = await confirmModal(
+    `Supprimer les ${previous.length} effet${previous.length > 1 ? 's' : ''} actif${previous.length > 1 ? 's' : ''} de ce token ?`,
+    { title: 'Purger les effets', confirmLabel: 'Purger', danger: true, icon: '🗑️' },
+  );
+  if (!accepted) return;
   _vttPatchTokenOptimistically(id, { buffs: [] });
   try {
     await updateDoc(_tokRef(id),{buffs:[]});
@@ -15481,6 +15587,9 @@ function _keyHandler(e) {
   if (e.key === 'Enter' && _polyActive) { e.preventDefault(); _polyFinish(); return; }
   // Ctrl+C / Ctrl+V : copier / coller la sélection (tokens + dessins)
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+    // Une sélection de texte (notamment dans le chat) reste prioritaire sur
+    // le presse-papier interne des tokens et dessins.
+    if (_vttHasCopyableTextSelection()) return;
     if (_vttCopySelection()) e.preventDefault();
     return;
   }
@@ -15947,7 +16056,6 @@ function _vttRailButton(id, label, shortcut, description, { tool = '', panel = '
       ${tool ? `data-tool="${tool}" data-vtt-fn="_vttTool" data-vtt-args="${tool}" aria-pressed="${active}"` : ''}
       ${panel ? `data-tool-panel="${panel}"` : ''}
       ${!tool && id === 'center' ? 'data-vtt-fn="_vttCenterOnMyToken"' : ''}
-      ${!tool && id === 'perf' ? `data-vtt-fn="_vttToggleLowFx" aria-pressed="${vttLowFx()}"` : ''}
       ${!tool && id === 'keys' ? 'data-vtt-fn="_vttOpenKeyboardHelp"' : ''}
       aria-label="${label}">
     ${_vttToolIcon(id)}${shortcut ? `<span class="vtt-tool-key">${shortcut}</span>` : ''}
@@ -15980,7 +16088,6 @@ function _vttToolbarMarkup() {
       </div>
       <div class="vtt-tool-group">${_vttRailButton('center','Recentrer','X','Ramène la vue sur ton personnage.')}</div>
       <div class="vtt-tool-group">
-        ${_vttRailButton('perf','Mode performance','','Coupe les effets coûteux pour fluidifier la table.',{active:vttLowFx(),extra:'vtt-tool-performance'})}
         ${_vttRailButton('keys','Raccourcis','?','Affiche toutes les commandes clavier.',{panel:'keys'})}
       </div>
     </div>
@@ -16370,6 +16477,7 @@ export const VTT_ACTIONS = {
   _vttFogRedo,
   _vttImportGithubRelease,
   _vttInsTab,
+  _vttInsFilterConditionPicker,
   _vttOpenSource,
   _vttRcolView,
   _vttSkillFilter,
@@ -16419,6 +16527,7 @@ export const VTT_ACTIONS = {
   _vttMsCraft,
   _vttMsCraftAsk,
   _vttMsCraftCancel,
+  _vttForgeOpen,
   _vttMsCraftSearch,
   _vttMsCraftClear,
   _vttMsDeleteItem,

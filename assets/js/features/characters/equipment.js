@@ -11,7 +11,10 @@ import {
   buildInventoryEquipPatch,
   inferAttackStatFromItem,
 } from '../../shared/equipment-utils.js';
-import { equipmentSlotAcceptsItem, getEquipmentSlot } from '../../shared/equipment-slots.js';
+import {
+  equipmentSlotAcceptsItem, getEquipmentSlot, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId,
+} from '../../shared/equipment-slots.js';
+import { weaponHands } from '../../shared/weapon-family.js';
 
 let _equipCompatibles = [];
 let _equipSelectedMeta = {};
@@ -38,6 +41,12 @@ export async function equipInventoryItem(invIndex, requestedSlot = '', {
   const c = STATE.activeChar;
   if (!c) return false;
 
+  if (requestedSlot === getSecondaryWeaponSlotId()
+    && weaponHands(c.equipement?.[getPrimaryWeaponSlotId()]) === 2) {
+    showNotif('La main secondaire est prise par l’arme à deux mains.', 'error');
+    return false;
+  }
+
   const change = buildInventoryEquipPatch(c, invIndex, requestedSlot);
   if (!change) {
     showNotif("Cet objet ne correspond à aucun emplacement d'équipement actif.", 'error');
@@ -60,7 +69,10 @@ export async function equipInventoryItem(invIndex, requestedSlot = '', {
     const replaced = change.replacedItem && change.replacedItem.sourceInvIndex !== invIndex
       ? ` · ${change.replacedItem.nom} déséquipé`
       : '';
-    showNotif(`${change.item.nom || 'Objet'} équipé · ${change.slotDef.label}${replaced}`, 'success');
+    const displaced = (change.displacedItems || []).length
+      ? ` · ${(change.displacedItems || []).map(item => item.nom).filter(Boolean).join(', ')} rangé${change.displacedItems.length > 1 ? 's' : ''}`
+      : '';
+    showNotif(`${change.item.nom || 'Objet'} équipé · ${change.slotDef.label}${replaced}${displaced}`, 'success');
   } catch (e) {
     c.equipement = previousEquipement;
     c.statsBonus = previousStatsBonus;
@@ -175,6 +187,7 @@ export function editEquipSlot(slot) {
     traits: Array.isArray(equipped.traits) ? [...equipped.traits] : [],
     sousType: equipped.sousType || '',
     mains: equipped.mains || '',
+    nature: equipped.nature || '',
   };
 }
 
@@ -212,6 +225,7 @@ export function previewEquipFromInv(val, slot) {
       _equipSelectedMeta.traits        = Array.isArray(item.traits) ? [...item.traits] : (item.trait ? [item.trait] : []);
       _equipSelectedMeta.sousType      = item.sousType      || '';
       _equipSelectedMeta.mains         = item.mains         || '';
+      _equipSelectedMeta.nature        = item.nature        || '';
       _equipSelectedMeta.sourceInvIndex = Number.isInteger(compat?.invIndex) ? compat.invIndex : -1;
     }
   }
@@ -259,6 +273,7 @@ export async function saveEquipSlot(slot) {
       particularite: meta.particularite || '',
       traits:        Array.isArray(meta.traits) ? [...meta.traits] : [],
       format:        meta.format        || '',
+      nature:        meta.nature        || '',
       toucher:       meta.toucher       || '',
       stats:         meta.stats         || '',
       sousType:      meta.sousType      || '',
@@ -290,7 +305,7 @@ export async function saveEquipSlot(slot) {
 // ══════════════════════════════════════════════
 // VIDER UN SLOT
 // ══════════════════════════════════════════════
-export async function clearEquipSlot(slot) {
+export async function clearEquipSlot(slot, { renderTab = 'combat' } = {}) {
   const c = STATE.activeChar; if(!c) return;
   const equip = c.equipement||{};
   delete equip[slot];
@@ -304,7 +319,7 @@ export async function clearEquipSlot(slot) {
   } catch (e) {
     showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
   }
-  _renderEquipmentChar(c);
+  _renderEquipmentChar(c, renderTab);
 }
 
 registerActions({
@@ -323,6 +338,6 @@ registerActions({
     }
   },
   saveEquipSlot:  (btn) => saveEquipSlot(btn.dataset.slot),
-  clearEquipSlot: (btn) => clearEquipSlot(btn.dataset.slot),
+  clearEquipSlot: (btn) => clearEquipSlot(btn.dataset.slot, { renderTab: btn.dataset.renderTab || 'combat' }),
   _eqClose:       ()    => closeModal(),
 });

@@ -145,6 +145,8 @@ function _getActiveArtisanChar() {
 // ══════════════════════════════════════════════
 
 export async function openArtisanModal() {
+  // Accès réservé au MJ le temps de la refonte du système de craft/artisanat.
+  if (!STATE.isAdmin) { showNotif('L\'Artisan est en cours de refonte — indisponible pour le moment.', 'info'); return; }
   await loadUpgradeSettings();
   STORE.inlineRootId = null;
   STORE.activeCharId = null; // reset à chaque ouverture
@@ -156,6 +158,13 @@ export async function openArtisanModal() {
 }
 
 export async function mountArtisanPage(rootId = 'sh-artisan-page', { reset = false } = {}) {
+  // Accès réservé au MJ le temps de la refonte du système de craft/artisanat.
+  if (!STATE.isAdmin) {
+    const root = document.getElementById(rootId);
+    if (root) root.innerHTML = '<div style="padding:2.5rem 1rem;text-align:center;color:var(--text-dim)">🔨 L\'Artisan est en cours de refonte.<br>Il sera bientôt de retour.</div>';
+    STORE.inlineRootId = null;
+    return;
+  }
   await loadUpgradeSettings();
   STORE.inlineRootId = rootId;
   if (reset) {
