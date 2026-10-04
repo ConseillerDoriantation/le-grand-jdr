@@ -192,3 +192,15 @@ test('3e passe : les modules feuilles n’importent que des exports existants (d
     }
   }
 });
+
+test('la pastille du Mur du Bastion reste à l’écoute après une navigation', () => {
+  const signal = readFileSync(new URL('../assets/js/shared/bastion-signal.js', import.meta.url), 'utf8');
+  const lazyDocs = firestore.match(/_LAZY_SESSION_DOCS = new Set\(\[([\s\S]*?)\]\);/)?.[1] || '';
+  // watchDoc (realtime.js) est coupé par unwatchAll() à chaque navigate().
+  assert.doesNotMatch(signal, /watchDoc\(|from '\.\/realtime\.js'/);
+  assert.match(signal, /_unsubActivity = subscribeDoc\('bastionWall', 'meta',/);
+  // Doc session-live : un seul listener partagé, libéré au changement d'aventure.
+  assert.match(lazyDocs, /'bastionWall\/meta'/);
+  // Bastion désactivé : aucune lecture (refusée mais facturée).
+  assert.match(signal, /if \(!isFeatureEnabled\('bastion'\)\) return;\s+_unsubActivity = subscribeDoc/);
+});

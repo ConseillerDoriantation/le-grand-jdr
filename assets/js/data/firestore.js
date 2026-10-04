@@ -441,6 +441,9 @@ const _LAZY_SESSION_DOCS = new Set([
   // lecture complète de story/achievements/collection. Session-live → la porte
   // « trustworthy » ne conclut jamais « absent » sur un simple snapshot cache.
   'settings/dashboardSummary',
+  // Pastille « Mur du Bastion » de la navigation (shared/bastion-signal.js) :
+  // écoutée sur toutes les pages, elle doit survivre aux navigations.
+  'bastionWall/meta',
 ]);
 const _sessionDocKey = (col, id) => `${col}/${id}`;
 
