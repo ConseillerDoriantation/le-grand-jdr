@@ -411,6 +411,11 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   // Bestiaire principal : lu par la page Bestiaire, la palette Ctrl+K et le VTT.
   // Lazy-session → 0 lecture en repeat-visit (au prix de la RAM, cf. note ci-dessus).
   'bestiary',
+  // Sources complètes MJ SEULEMENT (règles : lecture admin). Sans cache, chaque
+  // visite des pages Hauts-faits / Collection relisait tout (base64 compris).
+  // Un joueur ne les demande jamais ; un refus éventuel → failed → [].
+  'achievements_secret',
+  'collection_secret',
 ]);
 const _SESSION_DOCS = [];
 const _LAZY_SESSION_DOCS = new Set([

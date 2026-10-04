@@ -148,3 +148,12 @@ test('3e passe : un token relâché sur sa case et un nombre inchangé ne rééc
   const inline = readFileSync(new URL('../assets/js/features/characters/inline-edit.js', import.meta.url), 'utf8');
   assert.match(inline, /if \(!c \|\| String\(val\) === cur\) \{ input\.replaceWith\(el\); return; \}/);
 });
+
+test('3e passe : les catalogues secrets du MJ ne sont relus qu’une fois par session', () => {
+  const lazyCollections = firestore.match(/_LAZY_SESSION_COLLECTIONS = new Set\(\[([\s\S]*?)\]\);/)?.[1] || '';
+  const eagerCollections = firestore.match(/_SESSION_COLLECTIONS = \[([\s\S]*?)\];/)?.[1] || '';
+  for (const col of ['achievements_secret', 'collection_secret']) {
+    assert.match(lazyCollections, new RegExp(`['"]${col}['"]`), `${col} doit être session-live (lazy)`);
+    assert.doesNotMatch(eagerCollections, new RegExp(`['"]${col}['"]`), `${col} ne doit pas être amorcé à l'entrée`);
+  }
+});
