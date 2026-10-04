@@ -657,6 +657,10 @@ match /adventures/{adventureId} {
   }
   // Événements ciblés utilisés par la cloche. Ils ne contiennent qu'un extrait
   // d'un post déjà visible par tous les membres de l'aventure.
+  // INDEX COMPOSITE CONSEILLÉ (quota : chacun ne lit que SES événements) :
+  //   Collection `bastionWallNotifications` (scope Collection) — targetUid ASC, ts DESC.
+  //   Sans lui, l'app retombe sur les 100 derniers événements de tous (lien
+  //   « create index » loggué en console au 1er chargement).
   match /bastionWallNotifications/{id} {
     allow read: if inAdventure(adventureId);
     allow create: if inAdventure(adventureId)

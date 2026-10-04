@@ -157,3 +157,38 @@ test('3e passe : les catalogues secrets du MJ ne sont relus qu’une fois par se
     assert.doesNotMatch(eagerCollections, new RegExp(`['"]${col}['"]`), `${col} ne doit pas être amorcé à l'entrée`);
   }
 });
+
+test('3e passe : la cloche ne lit que les événements du joueur, avec repli sans index', () => {
+  const qol = readFileSync(new URL('../assets/js/shared/global-qol.js', import.meta.url), 'utf8');
+  const queries = readFileSync(new URL('../assets/js/data/firestore-queries.js', import.meta.url), 'utf8');
+  const block = qol.slice(qol.indexOf('function _mountBastionWallNotifications'), qol.indexOf('function _isVisible'));
+  assert.match(block, /subscribeRecentWhere\('bastionWallNotifications',\s*\{ field: 'targetUid', value: uid \},\s*\{ orderField: 'ts', max: 30 \}/);
+  // Repli historique UNIQUEMENT dans onUnavailable (index absent / refus).
+  assert.match(block, /onUnavailable: \(\) => \{\s*_wallNotificationUnsubs\.push\(subscribeRecentCollection\('bastionWallNotifications', onEvents,\s*\{ field: 'ts', max: 100, silent: true \}\)\);/);
+  assert.equal((block.match(/subscribeRecentCollection\(/g) || []).length, 1);
+  // Un désabonnement avant l'erreur ne doit jamais armer le repli.
+  assert.match(queries, /if \(!active\) return;\s+active = false;/);
+  assert.match(queries, /err\?\.code === 'failed-precondition'/);
+});
+
+test('3e passe : les modules feuilles n’importent que des exports existants (déploiement sûr)', () => {
+  const exportsOf = (src) => {
+    const names = new Set();
+    for (const m of src.matchAll(/export\s+(?:async\s+)?(?:function\*?|const|let|class)\s+([A-Za-z_$][\w$]*)/g)) names.add(m[1]);
+    for (const m of src.matchAll(/export\s*\{([\s\S]*?)\}/g)) {
+      m[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop().trim()).filter(Boolean).forEach(n => names.add(n));
+    }
+    return names;
+  };
+  const read = rel => readFileSync(new URL(`../assets/js/${rel}`, import.meta.url), 'utf8');
+  const leaves = { 'data/firestore-queries.js': read('data/firestore-queries.js') };
+  for (const [file, src] of Object.entries(leaves)) {
+    for (const m of src.matchAll(/import\s*\{([\s\S]*?)\}\s*from\s*'([^']+)'/g)) {
+      const target = new URL(m[2], new URL(`../assets/js/${file}`, import.meta.url));
+      const available = exportsOf(readFileSync(target, 'utf8'));
+      m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean).forEach(name => {
+        assert.ok(available.has(name), `${file} importe « ${name} » absent de ${m[2]}`);
+      });
+    }
+  }
+});
