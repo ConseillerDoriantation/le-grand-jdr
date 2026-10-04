@@ -194,6 +194,17 @@ function _compareMissionsChronoDesc(a, b) {
 // ══════════════════════════════════════════════════════════════════════════════
 const _getStat = (c, k) => Math.min(22, (c?.stats?.[k] || 8) + (c?.statsBonus?.[k] || 0));
 
+function _canManageCharacter(char) {
+  const uid = STATE.user?.uid || '';
+  if (STATE.isAdmin) return true;
+  if (!uid || !char) return false;
+  return char.uid === uid || (Array.isArray(char.controlDelegates) && char.controlDelegates.includes(uid));
+}
+
+function _canManageItem(item) {
+  return STATE.isAdmin || _canManageCharacter(item?.char);
+}
+
 function _buildRecord(char = null, pres = null) {
   const nom    = char?.nom || 'Personnage';
   const classe = char?.classe?.trim() || pres?.classe?.trim() || '';
@@ -293,7 +304,7 @@ function _buildDataset(presentations = [], characters = []) {
 
   const lsOrdre = _getLocalOrdre();
   return items
-    .filter(item => STATE.isAdmin || item.visible !== false)
+    .filter(item => _canManageItem(item) || item.visible !== false)
     .sort((a, b) => {
       const ao = (a.ordre ?? 999) !== 999 ? a.ordre : (lsOrdre ? (lsOrdre.indexOf(a.id) + 1 || 999) : 999);
       const bo = (b.ordre ?? 999) !== 999 ? b.ordre : (lsOrdre ? (lsOrdre.indexOf(b.id) + 1 || 999) : 999);
@@ -446,6 +457,7 @@ function _renderCard(item, idx) {
   const locked = !item.content && !item.bio && !item.portraitUrl && !item.imageUrl;
   const hidden = item.visible === false;
   const isAdmin = STATE.isAdmin;
+  const canManage = _canManageItem(item);
 
   // Image affichée dans la card : utilise imageUrl avec un crop CSS optionnel.
   // Le cadrage admin (pan-zoom) génère { offX, offY, imgW } qu'on applique en CSS.
@@ -479,12 +491,12 @@ function _renderCard(item, idx) {
   <article class="pp-card${hidden?' is-hidden':''}${locked?' is-locked':''}" data-pp-id="${_esc(item.id)}"
     style="--card-accent:${col}">
     ${isAdmin ? `<div class="pp-card-drag" title="Réordonner">${_ppIcon('grip')}</div>` : ''}
-    ${isAdmin ? `
+    ${canManage ? `
       <div class="pp-card-admin">
         <button class="pp-card-admin-btn" title="${hidden?'Afficher':'Masquer'} aux joueurs"
           data-pp-action="toggleVisible" data-id="${_esc(item.id)}">${_ppIcon(hidden ? 'eyeOff' : 'eye')}</button>
-        ${item.presentationId ? `<button class="pp-card-admin-btn" title="Modifier"
-          data-pp-action="editPres" data-id="${_esc(item.presentationId)}">${_ppIcon('edit')}</button>` : ''}
+        <button class="pp-card-admin-btn" title="Modifier"
+          data-pp-action="editItem" data-id="${_esc(item.id)}">${_ppIcon('edit')}</button>
       </div>` : ''}
 
     <button class="pp-card-clickarea" data-pp-action="openFiche" data-id="${_esc(item.id)}">
@@ -946,8 +958,8 @@ function _renderFiche(item, items) {
         <span class="pp-toolbar-back-text">Roster</span>
       </button>
       ${stripHtml}
-      ${STATE.isAdmin && item.presentationId
-        ? `<button class="pp-toolbar-edit" data-pp-action="editPres" data-id="${_esc(item.presentationId)}">${_ppIcon('edit')} Modifier</button>`
+      ${_canManageItem(item)
+        ? `<button class="pp-toolbar-edit" data-pp-action="editItem" data-id="${_esc(item.id)}">${_ppIcon('edit')} Modifier</button>`
         : ''}
     </nav>
 
@@ -1552,13 +1564,26 @@ Object.assign(ppHandlers, {
   toggleVisible: (el) => _toggleVisible(el.dataset.id),
   lightbox:      (el) => _openLightbox(el.dataset.presId, parseInt(el.dataset.idx, 10) || 0),
   editPres:      (el) => _editPlayerPresent(el.dataset.id),
+  editItem:      (el) => _editPlayerItem(el.dataset.id),
   newPlayer:     ()   => openPlayerPresentModal(),
 });
 
 async function _toggleVisible(id) {
   const item = STORE.items.find(i => i.id === id);
-  if (!item?.presentationId) return;
+  if (!item || !_canManageItem(item)) return;
   const newVal = !(item.visible !== false);
+  if (!item.presentationId) {
+    if (!item.charId) return;
+    const created = await tryUpsert('players', null, {
+      charId: item.charId,
+      visible: newVal,
+      ordre: item.ordre ?? 999,
+      content: '',
+      imageUrl: '',
+    });
+    if (created) await PAGES.players();
+    return;
+  }
   try {
     await updateInCol('players', item.presentationId, { visible: newVal });
     item.visible = newVal;
@@ -1628,6 +1653,7 @@ async function openPlayerPresentModal(player = null) {
 
   // ── Helpers pour le hero ──
   const linkedChar = curCharId ? characters.find(c => c.id === curCharId) : null;
+  const selectableCharacters = STATE.isAdmin ? characters : characters.filter(_canManageCharacter);
   const heroNom    = player?.nom || linkedChar?.nom || (player ? 'Présentation' : 'Nouvelle présentation');
   const heroClasse = linkedChar?.classe || '';
   const heroRace   = linkedChar?.race   || '';
@@ -1710,9 +1736,9 @@ async function openPlayerPresentModal(player = null) {
         <div class="pp-mn-grid-2">
           <div class="pp-mn-field">
             <label class="pp-mn-label">Fiche liée <span class="pp-form-hint">(auto-remplit classe, race, joueur)</span></label>
-            <select class="pp-mn-input" id="pp-char-id">
+            <select class="pp-mn-input" id="pp-char-id" ${STATE.isAdmin ? '' : 'disabled'}>
               <option value="">— Aucun lien —</option>
-              ${characters.map(c => `<option value="${_esc(c.id)}" ${c.id===curCharId?'selected':''}>${_esc(c.nom||'?')}${c.classe?' — '+_esc(c.classe):''}${c.ownerPseudo?' ('+_esc(c.ownerPseudo)+')':''}</option>`).join('')}
+              ${selectableCharacters.map(c => `<option value="${_esc(c.id)}" ${c.id===curCharId?'selected':''}>${_esc(c.nom||'?')}${c.classe?' — '+_esc(c.classe):''}${c.ownerPseudo?' ('+_esc(c.ownerPseudo)+')':''}</option>`).join('')}
             </select>
           </div>
           <div class="pp-mn-field">
@@ -2017,6 +2043,12 @@ Object.assign(ppHandlers, {
 });
 
 async function _savePlayerPresent(id = '') {
+  const charId = document.getElementById('pp-char-id')?.value || '';
+  const linkedChar = STORE.characters.find(char => char.id === charId);
+  if (!STATE.isAdmin && !_canManageCharacter(linkedChar)) {
+    showNotif('Tu ne peux modifier que la présentation de ton personnage.', 'error');
+    return;
+  }
   const cropResult = _ppCropper?.getResult();
     let imageUrl = '';
     if (typeof cropResult === 'string')      imageUrl = cropResult;
@@ -2048,7 +2080,7 @@ async function _savePlayerPresent(id = '') {
     _ppEditingPlayer = null;
 
     const data = {
-      charId:         document.getElementById('pp-char-id')?.value         || '',
+      charId,
       content:        getQuillHtml('pp-content'),
       imageUrl,
       cardCrop,
@@ -2089,7 +2121,19 @@ async function _deletePlayerPresent(id) {
 async function _editPlayerPresent(id) {
   const items = await loadCollection('players');
   const p = items.find(e => e.id === id);
-  if (p) openPlayerPresentModal(p);
+  if (!p) return;
+  const char = STORE.characters.find(c => c.id === p.charId);
+  if (_canManageCharacter(char)) openPlayerPresentModal(p);
+}
+
+async function _editPlayerItem(id) {
+  const item = STORE.items.find(entry => entry.id === id);
+  if (!item || !_canManageItem(item)) return;
+  if (item.presentationId) {
+    await _editPlayerPresent(item.presentationId);
+    return;
+  }
+  if (item.charId) openPlayerPresentModal({ charId: item.charId, visible: item.visible });
 }
 
 // ── Lightbox galerie (overlay plein écran, pas une modale scrollable) ──────
