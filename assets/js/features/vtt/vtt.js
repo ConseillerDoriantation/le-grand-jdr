@@ -2143,6 +2143,8 @@ function _buildShape(t) {
             showNotif('🧱 Un token du groupe est bloqué par un obstacle.', 'error');
             _multiDragOrigin=null; return;
           }
+          // Quota : un token relâché sur sa propre case n'a rien à écrire.
+          if (!distance) continue;
           const movePatch={col:nc,row:nr};
           if (VS.session?.combat?.active && distance) {
             movePatch.moveOrigin = _combatMoveOrigin(tokenData);
@@ -2152,6 +2154,13 @@ function _buildShape(t) {
             }
           }
           moves.push({id, tokenData, patch:movePatch});
+        }
+        if (!moves.length) {
+          // Groupe relâché sur ses cases (clic « tremblé » > 3 px) : aucune écriture.
+          VS.layers.token.batchDraw();
+          if (VS.selected && VS.selectedMulti.has(VS.selected)) _refreshRanges(VS.selected, VS.tokens[VS.selected]?.data);
+          fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+          _multiDragOrigin=null; return;
         }
         const batch=writeBatch(db);
         moves.forEach(move=>{
@@ -2197,8 +2206,15 @@ function _buildShape(t) {
         }
       }
       g.position({x:c*CELL+sw*CELL/2,y:r*CELL+sh*CELL/2}); VS.layers.token.batchDraw();
-      const patch={col:c,row:r};
       const moveCur=VS.tokens[t.id]?.data;
+      // Quota : un clic « tremblé » (> 3 px) déclenche un drag Konva. Relâché sur
+      // sa case, le token est recalé localement sans réécrire la même position.
+      if (moveCur && Number(moveCur.col) === c && Number(moveCur.row) === r) {
+        _refreshRanges(t.id, moveCur);
+        fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+        return;
+      }
+      const patch={col:c,row:r};
       if (VS.session?.combat?.active && moveCur && (c !== moveCur.col || r !== moveCur.row)) {
         patch.moveOrigin = _combatMoveOrigin(moveCur);
       }

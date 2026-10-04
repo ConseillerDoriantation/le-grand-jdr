@@ -134,3 +134,17 @@ test('2e passe : présence, notes, accusés de lecture et KO ennemi sans écritu
   assert.match(vtt, /\{ hp:newHp, \.\.\.\(downedConds \? \{ conditions: downedConds \} : \{\}\) \}/);
   assert.match(vtt, /\.\.\.\(downed \? \{ conditions: downed \} : \{\}\) \}\);/);
 });
+
+test('3e passe : un token relâché sur sa case et un nombre inchangé ne réécrivent rien', () => {
+  const dragEnd = vtt.slice(vtt.indexOf("g.on('dragend', async () => {"), vtt.indexOf('const _isAttackTargetInRange'));
+  // Token seul : sortie avant tout updateDoc quand la case n'a pas changé.
+  const sameCell = dragEnd.indexOf('Number(moveCur.col) === c && Number(moveCur.row) === r');
+  assert.ok(sameCell > 0, 'garde « même case » absente du dragend');
+  assert.ok(sameCell < dragEnd.indexOf('await updateDoc(_tokRef(t.id),patch)'));
+  // Groupe : les tokens immobiles sont ignorés et un groupe immobile ne commit pas.
+  assert.match(dragEnd, /if \(!distance\) continue;\s+const movePatch=\{col:nc,row:nr\};/);
+  assert.match(dragEnd, /if \(!moves\.length\) \{[\s\S]{0,400}_multiDragOrigin=null; return;\s+\}\s+const batch=writeBatch\(db\);/);
+  // Fiche : édition inline d'un nombre sans changement de valeur.
+  const inline = readFileSync(new URL('../assets/js/features/characters/inline-edit.js', import.meta.url), 'utf8');
+  assert.match(inline, /if \(!c \|\| String\(val\) === cur\) \{ input\.replaceWith\(el\); return; \}/);
+});

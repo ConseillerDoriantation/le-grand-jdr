@@ -98,7 +98,8 @@ export function inlineEditNum(charId, field, el, min=0, max=99999) {
   const save = async () => {
     const val = Math.max(min, Math.min(max, parseInt(input.value)||0));
     const c = getCharacterById(charId);
-    if (!c) { input.replaceWith(el); return; }
+    // Valeur inchangée (simple clic dans le champ) : aucune écriture.
+    if (!c || String(val) === cur) { input.replaceWith(el); return; }
     c[field] = val;
     // pvBase / pmBase appartiennent au BUILD actif : les écrire en direct sur le
     // perso laissait le build avec l'ancienne valeur, qui la réécrasait au rendu
