@@ -1061,6 +1061,45 @@ export async function deleteFromCol(col, id) {
   }
 }
 
+// Mutations explicites dans une aventure qui n'est pas forcément la table
+// courante. Réservées aux parcours rares (gestion/suppression du compte) afin
+// de ne jamais changer STATE.adventure juste pour viser une sous-collection.
+export async function updateInAdventureCol(adventureId, col, id, data) {
+  if (!adventureId || !col || !id) throw new Error('Cible aventure invalide');
+  const path = `adventures/${adventureId}/${col}`;
+  try {
+    await updateDoc(doc(db, path, id), data);
+    _cachePatchUpdate(path, id, data);
+  } catch (e) {
+    _handleFirestoreError(e, `updateInAdventureCol(${path}/${id})`);
+    throw e;
+  }
+}
+
+export async function loadAdventureCollection(adventureId, col) {
+  if (!adventureId || !col) return [];
+  const path = `adventures/${adventureId}/${col}`;
+  try {
+    const snap = await getDocs(collection(db, path));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    _handleFirestoreError(e, `loadAdventureCollection(${path})`);
+    throw e;
+  }
+}
+
+export async function deleteFromAdventureCol(adventureId, col, id) {
+  if (!adventureId || !col || !id) throw new Error('Cible aventure invalide');
+  const path = `adventures/${adventureId}/${col}`;
+  try {
+    await deleteDoc(doc(db, path, id));
+    _cachePatchDelete(path, id);
+  } catch (e) {
+    _handleFirestoreError(e, `deleteFromAdventureCol(${path}/${id})`);
+    throw e;
+  }
+}
+
 // ── Spécifique personnages ─────────────────────
 const _inventoryNormAttempted = new Set();
 const _lacerationMigrAttempted = new Set();
@@ -1089,7 +1128,7 @@ export async function loadMyCharactersAcrossAdventures(uid) {
 // (scope collection) + la règle characters existante (inAdventure) → aucun index
 // ni règle spéciale à créer. Sert à agréger les persos cross-aventures (écran
 // Compte). Échec (droits) → [].
-export async function loadCharsForAdventure(adventureId, uid = null) {
+export async function loadCharsForAdventure(adventureId, uid = null, { throwOnError = false } = {}) {
   if (!adventureId) return [];
   try {
     const col = collection(db, 'adventures', adventureId, 'characters');
@@ -1097,6 +1136,7 @@ export async function loadCharsForAdventure(adventureId, uid = null) {
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) {
     console.warn('[firestore] loadCharsForAdventure', adventureId, e?.code || e);
+    if (throwOnError) throw e;
     return [];
   }
 }

@@ -7,13 +7,16 @@
 import { auth } from '../config/firebase.js';
 
 import {
-  updateEmail, updatePassword, deleteUser,
-  EmailAuthProvider, reauthenticateWithCredential,
+  updatePassword, deleteUser, verifyBeforeUpdateEmail,
+  EmailAuthProvider, GoogleAuthProvider,
+  reauthenticateWithCredential, reauthenticateWithPopup,
+  linkWithCredential, linkWithPopup,
 } from 'firebase/auth';   // résolu par l'import map de index.html
 
 import {
-  loadChars, loadCollection, deleteFromCol, updateInCol,
+  loadCollection, deleteFromCol, updateInCol,
   getDocDataSilent, saveDoc, loadCharsForAdventure,
+  loadAdventureCollection, updateInAdventureCol, deleteFromAdventureCol,
 } from '../data/firestore.js';
 
 import { openModal, closeModal, promptModal } from '../shared/modal.js';
@@ -27,7 +30,8 @@ import { registerActions }        from '../core/actions.js';
 import { _esc, _norm }           from '../shared/html.js';
 import { emptyStateHtml }        from '../shared/list-renderer.js';
 import { calcOr }                from '../shared/char-stats.js';
-import { adminAdventureCount, hasPremiumAccess, planLabel, planLimits } from '../shared/premium.js';
+import { hasPremiumAccess, planLabel, PREMIUM_LIMITS } from '../shared/premium.js';
+import { deleteAdventure, removeSelfFromAdventure } from '../core/adventure.js';
 
 import { getCharacterById } from '../shared/character-state.js';
 // ══════════════════════════════════════════════════════════════════════════════
@@ -79,30 +83,57 @@ async function _liquidateInventory(inventaire = []) {
   } catch (e) { notifySaveError(e); }
 }
 
-/**
- * Supprime tous les personnages d'un utilisateur et vend leurs items boutique.
- * Retourne le résumé { nbPersos, totalOr }
- */
-async function _purgeUserCharacters(uid) {
-  try {
-    const chars = await loadChars(uid);
-    let totalOr = 0;
+async function _liquidateAdventureInventory(adventureId, inventaire = [], shopDocs = null) {
+  const shopItems = inventaire.filter(i => i.source === 'boutique' && i.itemId);
+  if (!shopItems.length) return 0;
+  const docs = shopDocs || await loadAdventureCollection(adventureId, 'shop');
+  const shopMap = Object.fromEntries(docs.map(item => [item.id, item]));
+  const restockByItem = new Map();
+  let totalOr = 0;
+  shopItems.forEach(item => {
+    totalOr += parseFloat(item.prixVente) || Math.round((parseFloat(item.prixAchat) || 0) * .6);
+    const current = shopMap[item.itemId]?.dispo;
+    if (current !== undefined && current !== '' && Number(current) >= 0) {
+      restockByItem.set(item.itemId, (restockByItem.get(item.itemId) || 0) + 1);
+    }
+  });
+  await Promise.all([...restockByItem].map(([itemId, count]) =>
+    updateInAdventureCol(adventureId, 'shop', itemId, {
+      dispo: Number(shopMap[itemId].dispo) + count,
+    })
+  ));
+  return totalOr;
+}
 
-    await Promise.all(chars.map(async (c) => {
-      totalOr += await _liquidateInventory(c.inventaire || []);
-      await deleteFromCol('characters', c.id);
-    }));
+async function _loadAllOwnCharacters(uid, { strict = false } = {}) {
+  const adventures = (STATE.adventures || []).filter(a => a?.id);
+  const groups = await Promise.all(adventures.map(async adventure => ({
+    adventure,
+    characters: await loadCharsForAdventure(adventure.id, uid, { throwOnError: strict }),
+  })));
+  return groups;
+}
 
-    // Mettre à jour STATE.characters
-    STATE.characters = (STATE.characters || []).filter(c => c.uid !== uid);
-
-    return { nbPersos: chars.length, totalOr };
-  } catch (e) { notifySaveError(e); }
+async function _purgeCharactersFromAdventure(adventureId, chars = []) {
+  if (!chars.length) return { nbPersos: 0, totalOr: 0 };
+  const combinedInventory = chars.flatMap(c => c.inventaire || []);
+  const needsShop = combinedInventory.some(i => i.source === 'boutique' && i.itemId);
+  const shopDocs = needsShop ? await loadAdventureCollection(adventureId, 'shop') : [];
+  const totalOr = await _liquidateAdventureInventory(adventureId, combinedInventory, shopDocs);
+  for (const character of chars) {
+    await deleteFromAdventureCol(adventureId, 'characters', character.id);
+  }
+  if (STATE.adventure?.id === adventureId) {
+    const ids = new Set(chars.map(c => c.id));
+    STATE.characters = (STATE.characters || []).filter(c => !ids.has(c.id));
+  }
+  return { nbPersos: chars.length, totalOr };
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 function _accountProviderLabel(user) {
   const providers = (user?.providerData || []).map(p => p.providerId).filter(Boolean);
+  if (providers.includes('google.com') && providers.includes('password')) return 'Google + email';
   if (providers.includes('google.com')) return 'Google';
   if (providers.includes('password')) return 'Email + mot de passe';
   return providers[0] || 'Compte Firebase';
@@ -135,210 +166,142 @@ async function _syncCurrentMemberProfiles(patch = {}) {
     }
   }));
 }
-// RENDU PRINCIPAL
-// ══════════════════════════════════════════════════════════════════════════════
+const _accountUi = {
+  open: null,
+  section: 'profile',
+  danger: false,
+  googleReauthed: false,
+  deleting: false,
+  characterGroups: null,
+  avatarTab: 'characters',
+  avatarChoice: null,
+};
+let _accountObserver = null;
+
+const _ACCOUNT_ICONS = {
+  edit: '<svg viewBox="0 0 16 16"><path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/></svg>',
+  user: '<svg viewBox="0 0 16 16"><circle cx="8" cy="5.5" r="2.8"/><path d="M2.5 14c.8-2.8 3-4.2 5.5-4.2s4.7 1.4 5.5 4.2"/></svg>',
+  key: '<svg viewBox="0 0 16 16"><circle cx="5.5" cy="10.5" r="3"/><path d="M7.7 8.3L13.5 2.5M11.5 4.5l1.5 1.5"/></svg>',
+  star: '<svg viewBox="0 0 16 16"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg>',
+  warn: '<svg viewBox="0 0 16 16"><path d="M8 2l6.5 11.5h-13zM8 6.5v3M8 11.8v.1"/></svg>',
+  lock: '<svg viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/></svg>',
+  eye: '<svg viewBox="0 0 16 16"><path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>',
+  check: '<svg viewBox="0 0 16 16"><path d="M3 8.5l3.2 3L13 4.5"/></svg>',
+  copy: '<svg viewBox="0 0 16 16"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5"/><path d="M10.5 5V3.5A1 1 0 009.5 2.5h-6a1 1 0 00-1 1v6a1 1 0 001 1H5"/></svg>',
+  google: '<svg class="ac-google" viewBox="0 0 16 16"><path d="M15.3 8.2c0-.5 0-1-.1-1.4H8v2.7h4.1a3.5 3.5 0 01-1.5 2.3v1.9H13c1.4-1.3 2.3-3.2 2.3-5.5z"/><path d="M8 15.5c2 0 3.7-.7 5-1.8l-2.4-1.9c-.7.5-1.6.8-2.6.8-2 0-3.7-1.4-4.3-3.2H1.2v2A7.5 7.5 0 008 15.5z" opacity=".7"/><path d="M3.7 9.4a4.5 4.5 0 010-2.8v-2H1.2a7.5 7.5 0 000 6.8z" opacity=".5"/><path d="M8 3.5c1.1 0 2.1.4 2.9 1.1L13 2.5A7.5 7.5 0 001.2 4.6l2.5 2C4.3 4.9 6 3.5 8 3.5z" opacity=".85"/></svg>',
+};
+const _ai = name => `<span class="ac-ico">${_ACCOUNT_ICONS[name] || ''}</span>`;
+const _providerSet = user => new Set((user?.providerData || []).map(p => p.providerId));
+const _hasProvider = (user, id) => _providerSet(user).has(id);
+const _passwordField = (id, placeholder, autocomplete, { reveal = true } = {}) => {
+  const input = `<input class="ac-inp" id="${id}" type="password" placeholder="${placeholder}" autocomplete="${autocomplete}" maxlength="128" data-input="validateAccountForm">`;
+  if (!reveal) return input;
+  return `<div class="ac-pw">${input}<button type="button" data-action="toggleAccountPassword" data-target="${id}" aria-label="Afficher le mot de passe">${_ai('eye')}</button></div>`;
+};
+const _formatStorage = mb => mb >= 1024 ? `${mb / 1024} Go` : `${mb} Mo`;
+const _pendingEmailKey = uid => `grimorium.pendingEmail.${uid}`;
+
+function _avatarMeta(profile, pseudo) {
+  const selected = profile.avatarIcon || '';
+  if (!selected) return { label: 'Avatar par défaut', source: 'Initiales de ton pseudo' };
+  const character = (_accountUi.characterGroups || []).flatMap(g => g.characters).find(c => _charPortrait(c) === selected);
+  if (character) return { label: character.nom || 'Portrait de personnage', source: 'Portrait de personnage' };
+  const appAvatar = (_iconCatalog || []).find(icon => icon.url === selected);
+  return { label: appAvatar?.label || pseudo, source: appAvatar ? "Avatar de l'app" : 'Portrait du compte' };
+}
+
+function _profileSection(profile, user) {
+  const pseudo = profile.pseudo || 'Aventurier';
+  const currentChars = (STATE.characters || []).filter(c => c.uid === user.uid).length;
+  const open = _accountUi.open === 'pseudo';
+  const avatar = _avatarMeta(profile, pseudo);
+  return `<section class="ac-sec" id="account-profile"><div class="ac-sec-h"><h2>Profil</h2><p>Ce que voient les autres joueurs.</p></div><div class="ac-card">
+    <div class="ac-row ${open ? 'open' : ''}"><span class="ac-lb">Pseudo</span>${open ? `
+      <div class="ac-form"><label class="ac-f"><span>Nouveau pseudo <i id="acc-pseudo-count">${pseudo.length}/30</i></span><input class="ac-inp" id="acc-pseudo" value="${_esc(pseudo)}" maxlength="40" autocomplete="nickname" data-input="validateAccountForm"></label>
+      <div class="ac-preview"><img src="${_esc(avatarSrcOf(profile))}" alt=""><span><b id="acc-pseudo-preview">${_esc(pseudo)}</b><small>Prêt pour la séance de ce soir.</small></span><em>Aperçu chat</em></div>
+      <p class="ac-note">Mis à jour sur tes ${currentChars} personnage${currentChars === 1 ? '' : 's'} chargé${currentChars === 1 ? '' : 's'} et dans tes ${(STATE.adventures || []).length} aventure${(STATE.adventures || []).length === 1 ? '' : 's'}.</p>
+      <p class="ac-err" id="acc-pseudo-error" hidden></p><div class="ac-form-actions"><button class="ac-btn ghost" data-action="closeAccountEditor">Annuler</button><button class="ac-btn primary" id="acc-pseudo-save" data-action="saveAccountPseudo" disabled>Enregistrer</button></div></div>` : `
+      <div class="ac-value"><b>${_esc(pseudo)}</b><small>Ton nom à la table : chat, initiative, listes de joueurs.</small></div><button class="ac-btn" data-action="openAccountEditor" data-editor="pseudo">${_ai('edit')}Modifier</button>`}</div>
+    <div class="ac-row"><span class="ac-lb">Avatar</span><div class="ac-value"><span class="ac-avatar-value"><img src="${_esc(avatarSrcOf(profile))}" alt=""><span><b>${_esc(avatar.label)}</b><small>${_esc(avatar.source)}</small></span></span></div><button class="ac-btn" data-action="openAvatarPicker">Changer</button></div>
+  </div></section>`;
+}
+
+function _connectionSection(user) {
+  const email = user.email || STATE.profile?.email || '';
+  const hasPassword = _hasProvider(user, 'password');
+  const hasGoogle = _hasProvider(user, 'google.com');
+  const emailOpen = _accountUi.open === 'email';
+  const passwordOpen = _accountUi.open === 'password' || _accountUi.open === 'link-password';
+  const pending = localStorage.getItem(_pendingEmailKey(user.uid)) || '';
+  const methodBadges = `${hasPassword ? `<span>${_ai('key')}Email + mot de passe</span>` : ''}${hasGoogle ? `<span>${_ai('google')}Google</span>` : ''}`;
+  const methodActions = `${!hasGoogle ? `<button class="ac-btn" data-action="linkAccountGoogle">${_ai('google')}Lier Google</button>` : ''}${!hasPassword ? `<button class="ac-btn" data-action="openAccountEditor" data-editor="link-password">${_ai('key')}Ajouter un mot de passe</button>` : ''}`;
+  const emailRow = emailOpen
+    ? `<div class="ac-row open"><span class="ac-lb">Adresse email</span><div class="ac-form"><p class="ac-note">Actuelle : <b>${_esc(email)}</b></p><label class="ac-f"><span>Nouvelle adresse</span><input class="ac-inp" id="acc-new-email" type="email" inputmode="email" autocomplete="email" maxlength="254" data-input="validateAccountForm"></label><label class="ac-f"><span>Mot de passe actuel</span>${_passwordField('acc-email-password', '••••••••', 'current-password', { reveal: false })}</label><p class="ac-note">Un lien de confirmation sera envoyé à la nouvelle adresse.</p><p class="ac-err" id="acc-email-error" hidden></p><div class="ac-form-actions"><button class="ac-btn ghost" data-action="closeAccountEditor">Annuler</button><button class="ac-btn primary" id="acc-email-save" data-action="saveAccountEmail" disabled>Envoyer le lien</button></div></div></div>`
+    : `<div class="ac-row"><span class="ac-lb">Adresse email</span><div class="ac-value"><b>${_esc(email || 'Non renseignée')}</b><small>${pending ? `Confirmation envoyée à ${_esc(pending)}.` : 'Sert à te connecter, recevoir les invitations et récupérer ton compte.'}</small></div>${hasPassword ? `<button class="ac-btn" data-action="openAccountEditor" data-editor="email">${_ai('edit')}Modifier</button>` : `<span class="ac-lock">${_ai('lock')}Géré par Google</span>`}</div>`;
+  let passwordLead = '';
+  if (hasPassword) passwordLead = `<label class="ac-f"><span>Mot de passe actuel</span>${_passwordField('acc-old-password', '••••••••', 'current-password', { reveal: false })}</label>`;
+  else if (!email) passwordLead = '<label class="ac-f"><span>Adresse email</span><input class="ac-inp" id="acc-link-email" type="email" autocomplete="email" data-input="validateAccountForm"></label>';
+  else passwordLead = `<p class="ac-note">Le mot de passe sera lié à <b>${_esc(email)}</b>.</p>`;
+  const passwordRow = passwordOpen
+    ? `<div class="ac-row open"><span class="ac-lb">Mot de passe</span><div class="ac-form">${passwordLead}<label class="ac-f"><span>Nouveau mot de passe</span>${_passwordField('acc-new-password', '', 'new-password')}</label><label class="ac-f"><span>Confirmer</span>${_passwordField('acc-confirm-password', '', 'new-password')}</label><ul class="ac-checks"><li id="acc-check-length"><i>${_ai('check')}</i>6 caractères minimum</li><li id="acc-check-match"><i>${_ai('check')}</i>Les deux saisies correspondent</li>${hasPassword ? `<li id="acc-check-different"><i>${_ai('check')}</i>Différent de l'actuel</li>` : ''}</ul><p class="ac-err" id="acc-password-error" hidden></p><div class="ac-form-actions"><button class="ac-btn ghost" data-action="closeAccountEditor">Annuler</button><button class="ac-btn primary" id="acc-password-save" data-action="saveAccountPassword" disabled>${hasPassword ? 'Mettre à jour' : 'Ajouter cette méthode'}</button></div></div></div>`
+    : `<div class="ac-row"><span class="ac-lb">Mot de passe</span><div class="ac-value"><b class="${hasPassword ? '' : 'dim'}">${hasPassword ? '••••••••' : 'Aucun'}</b><small>${hasPassword ? 'Change-le si tu soupçonnes un accès non voulu.' : 'Ton compte utilise actuellement Google.'}</small></div><button class="ac-btn" data-action="openAccountEditor" data-editor="${hasPassword ? 'password' : 'link-password'}">${_ai('edit')}${hasPassword ? 'Modifier' : 'Ajouter'}</button></div>`;
+  return `<section class="ac-sec" id="account-connection"><div class="ac-sec-h"><h2>Connexion &amp; sécurité</h2><p>Gère tes méthodes de connexion sans créer de compte en double.</p></div><div class="ac-card"><div class="ac-row"><span class="ac-lb">Méthodes</span><div class="ac-value"><span class="ac-provider-list">${methodBadges}</span><small>Lier les deux méthodes permet d'utiliser le même compte dans les deux cas.</small></div><div class="ac-row-actions">${methodActions}</div></div>${emailRow}${passwordRow}<div class="ac-row"><span class="ac-lb">Identifiant</span><div class="ac-value"><code>${_esc(user.uid)}</code><small>À communiquer au support ou au MJ en cas de souci de rattachement.</small></div><button class="ac-btn ghost" data-action="copyAccountUid">${_ai('copy')}Copier</button></div></div></section>`;
+}
+
+function _planSection(profile) {
+  const premium = hasPremiumAccess(profile);
+  const pages = ['Boutique','Collection','Hauts-Faits','Carte','Guide','Joueurs','Bastion','Recettes','Statistiques'];
+  const column = (key, name) => {
+    const limits = PREMIUM_LIMITS[key];
+    const active = (key === 'premium') === premium;
+    return `<div class="ac-plan-column ${active ? 'active' : ''} ${key === 'premium' ? 'premium' : ''}"><div class="ac-plan-title"><b>${name}</b>${active ? '<em>Ton plan</em>' : ''}</div><ul><li>Aventures en tant que MJ <b>Illimitées</b></li><li>Stockage images <b>${_formatStorage(limits.imageStorageMb)}</b></li><li>Stockage musiques <b>${_formatStorage(limits.musicStorageMb)}</b></li><li>Pages bonus <b class="${key === 'free' ? 'off' : ''}">${key === 'free' ? '—' : 'Toutes'}</b></li><li>VTT avancé <b class="${key === 'free' ? 'off' : ''}">${key === 'free' ? '—' : 'Inclus'}</b></li></ul></div>`;
+  };
+  return `<section class="ac-sec" id="account-plan"><div class="ac-sec-h"><h2>Abonnement</h2><p>Ton plan et ce qu'il inclut.</p></div><div class="ac-card"><div class="ac-plan">${column('free','Gratuit')}${column('premium','Premium')}</div><div class="ac-plan-pages"><span class="ac-kicker">Pages bonus ${premium ? 'débloquées' : '— Premium'}</span><div class="ac-chips ${premium ? '' : 'locked'}">${pages.map(page => `<span>${premium ? '' : _ai('lock')}${page}</span>`).join('')}</div></div><div class="ac-plan-footer"><p>${STATE.isSuperAdmin ? 'Super-admin : Premium attribué automatiquement.' : premium ? 'Premium actif. Accordé par un super-admin.' : "Le passage en Premium se fait pour l'instant auprès d'un super-admin — le paiement en ligne arrive plus tard."}</p></div></div></section>`;
+}
+
+function _dangerSection(user) {
+  const groups = _accountUi.characterGroups;
+  const charCount = groups ? groups.reduce((sum, g) => sum + g.characters.length, 0) : null;
+  const owned = (STATE.adventures || []).filter(a => a.createdBy === user.uid);
+  const transferable = owned.filter(a => _adventureSuccessor(a, user.uid));
+  const deleted = owned.length - transferable.length;
+  const hasPassword = _hasProvider(user, 'password');
+  const hasGoogle = _hasProvider(user, 'google.com');
+  return `<section class="ac-sec" id="account-danger"><div class="ac-sec-h"><h2>Zone sensible</h2></div><div class="ac-card danger"><div class="ac-danger-summary"><div><b>Supprimer mon compte</b><small>Efface définitivement ton compte et tes personnages. Impossible à annuler.</small></div>${_accountUi.danger ? '' : '<button class="ac-btn danger-text" data-action="openAccountDanger">Supprimer le compte…</button>'}</div>${_accountUi.danger ? `<div class="ac-danger-form">${groups ? `<ul class="ac-consequences"><li><b>${charCount}</b> personnage${charCount === 1 ? '' : 's'} supprimé${charCount === 1 ? '' : 's'}, avec fiches et inventaires</li><li><b>${transferable.length}</b> aventure${transferable.length === 1 ? '' : 's'} transférée${transferable.length === 1 ? '' : 's'} au prochain membre</li><li><b>${deleted}</b> aventure${deleted === 1 ? '' : 's'} sans autre membre supprimée${deleted === 1 ? '' : 's'}</li><li><b>✓</b> Objets achetés remis en stock avant le départ</li></ul>` : '<p class="ac-note">Calcul des données concernées…</p>'}${hasGoogle ? `<div class="ac-f"><span>Confirme ton identité</span><button class="ac-google-button ${_accountUi.googleReauthed ? 'confirmed' : ''}" data-action="reauthAccountGoogle">${_accountUi.googleReauthed ? `${_ai('check')}Identité confirmée` : `${_ai('google')}Confirmer avec Google`}</button></div>` : ''}${hasPassword ? `<label class="ac-f"><span>${hasGoogle ? 'Ou confirme avec ton mot de passe' : 'Mot de passe actuel'}</span>${_passwordField('acc-delete-password', '••••••••', 'current-password', { reveal: false })}</label>` : ''}<label class="ac-f"><span>Tape SUPPRIMER pour confirmer</span><input class="ac-inp" id="acc-delete-confirm" placeholder="SUPPRIMER" autocomplete="off" spellcheck="false" data-input="validateAccountForm"></label><p class="ac-err" id="acc-delete-error" hidden></p><div class="ac-form-actions left"><button class="ac-btn danger" id="acc-delete-button" data-action="confirmDeleteAccount" disabled>${_accountUi.deleting ? 'Suppression en cours…' : 'Supprimer définitivement'}</button><button class="ac-btn ghost" data-action="closeAccountDanger">Annuler</button></div></div>` : ''}</div></section>`;
+}
+
 async function renderAccount() {
   const content = document.getElementById('main-content');
-  const user    = auth.currentUser;
+  const user = auth.currentUser;
   const profile = STATE.profile || {};
-
-  if (!user) {
-    content.innerHTML = emptyStateHtml('🔒', 'Non connecté.');
-    return;
-  }
-
-  const chars = await loadChars(user.uid);
-  const nbChars = chars.length;
+  if (!user) { content.innerHTML = emptyStateHtml('', 'Non connecté.'); return; }
+  const pending = localStorage.getItem(_pendingEmailKey(user.uid));
+  if (pending && user.email?.toLowerCase() === pending.toLowerCase()) localStorage.removeItem(_pendingEmailKey(user.uid));
   const pseudo = profile.pseudo || 'Aventurier';
-  const email = user.email || '';
-  const adventuresCount = Array.isArray(STATE.adventures) ? STATE.adventures.length : 0;
-  const roleLabel = STATE.isAdmin ? 'Maître de Jeu' : 'Joueur';
-  const providerLabel = _accountProviderLabel(user);
   const premium = hasPremiumAccess(profile);
-  const currentPlan = planLabel(profile);
-  const limits = planLimits(profile);
-  const adventureLimit = Number.isFinite(limits.maxAdminAdventures) ? limits.maxAdminAdventures : 'illimitées';
-  const myAdminAdventures = adminAdventureCount();
-  const planSource = STATE.isSuperAdmin ? 'Super-admin : Premium automatique' : (premium ? 'Compte premium actif' : 'Compte gratuit');
+  const ownsAdventure = (STATE.adventures || []).some(a => a.createdBy === user.uid || (a.admins || []).includes(user.uid));
+  content.innerHTML = `<div class="ac-page"><header class="ac-header"><button class="ac-header-avatar" data-action="openAvatarPicker" aria-label="Changer d'avatar"><img src="${_esc(avatarSrcOf(profile))}" alt=""><span>${_ai('edit')}</span></button><div class="ac-header-text"><span class="ac-kicker">Mon compte</span><h1>${_esc(pseudo)}</h1><p>${_esc(user.email || profile.email || '')}</p><div class="ac-tags"><span class="${premium ? 'premium' : ''}">${_esc(planLabel(profile))}</span>${ownsAdventure ? '<span class="gm">Maître de jeu</span>' : ''}<span>${_esc(_accountProviderLabel(user))}</span></div></div></header><div class="ac-layout"><nav class="ac-nav" aria-label="Sections du compte"><button class="${_accountUi.section === 'profile' ? 'active' : ''}" data-action="goAccountSection" data-section="profile">${_ai('user')}Profil</button><button class="${_accountUi.section === 'connection' ? 'active' : ''}" data-action="goAccountSection" data-section="connection">${_ai('key')}Connexion</button><button class="${_accountUi.section === 'plan' ? 'active' : ''}" data-action="goAccountSection" data-section="plan">${_ai('star')}Abonnement</button><button class="danger-nav ${_accountUi.section === 'danger' ? 'active' : ''}" data-action="goAccountSection" data-section="danger">${_ai('warn')}Zone sensible</button></nav><main class="ac-main">${_profileSection(profile, user)}${_connectionSection(user)}${_planSection(profile)}${_dangerSection(user)}</main></div></div>`;
+  _setupAccountObserver();
+  validateAccountForm();
+}
 
-  content.innerHTML = `
-  <div class="account-page">
-    <section class="account-hero">
-      <button class="acc-avatar acc-avatar-btn has-img account-avatar-xl" data-action="openAvatarPicker" title="Changer d'avatar">
-        <img src="${_esc(avatarSrcOf(profile))}" alt="" class="acc-avatar-img">
-        <span class="acc-avatar-edit" title="Changer d'avatar">📷</span>
-      </button>
-      <div class="account-hero-main">
-        <span class="account-kicker">Compte connecté</span>
-        <h1>${_esc(pseudo)}</h1>
-        <p>${_esc(email || 'Email non renseigné')}</p>
-        <div class="account-badges">
-          <span>${STATE.isAdmin ? '🛡️' : '⚔️'} ${_esc(roleLabel)}</span>
-          <span class="${premium ? 'account-badge-premium' : ''}">${premium ? '✨' : '◇'} ${_esc(currentPlan)}</span>
-          <span>${_esc(providerLabel)}</span>
-        </div>
-      </div>
-      <div class="account-hero-actions">
-        <button class="btn btn-gold btn-sm" data-action="openAvatarPicker">Changer l'avatar</button>
-        <button class="btn btn-outline btn-sm" data-action="openEditPseudo">Renommer</button>
-      </div>
-    </section>
+function _setupAccountObserver() {
+  _accountObserver?.disconnect();
+  if (!('IntersectionObserver' in window)) return;
+  _accountObserver = new IntersectionObserver(entries => {
+    const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (!visible) return;
+    const section = visible.target.id.replace('account-', '');
+    _accountUi.section = section;
+    document.querySelectorAll('.ac-nav button').forEach(button => button.classList.toggle('active', button.dataset.section === section));
+  }, { rootMargin: '-25% 0px -60% 0px', threshold: [0, .2, .6] });
+  document.querySelectorAll('.ac-sec').forEach(section => _accountObserver.observe(section));
+}
 
-    <section class="account-summary">
-      <div class="account-summary-card">
-        <span>Personnages</span>
-        <strong>${nbChars}</strong>
-        <small>${nbChars === 1 ? 'fiche liée' : 'fiches liées'}</small>
-      </div>
-      <div class="account-summary-card">
-        <span>Aventures</span>
-        <strong>${adventuresCount}</strong>
-        <small>${adventuresCount === 1 ? 'campagne' : 'campagnes'}</small>
-      </div>
-      <div class="account-summary-card">
-        <span>Rôle</span>
-        <strong>${_esc(roleLabel)}</strong>
-        <small>${STATE.isAdmin ? 'gestion active' : 'accès joueur'}</small>
-      </div>
-      <div class="account-summary-card">
-        <span>Plan</span>
-        <strong>${_esc(currentPlan)}</strong>
-        <small>${premium ? 'pages bonus ouvertes' : 'socle gratuit'}</small>
-      </div>
-    </section>
-
-    <div class="account-layout">
-      <main class="account-main-stack">
-        <section class="acc-section account-panel">
-          <div class="acc-section-header">
-            <span>👤</span>
-            <div>
-              <div class="acc-section-title">Profil public</div>
-              <p>Ces informations servent à t'identifier auprès de la table.</p>
-            </div>
-          </div>
-          <div class="acc-section-body">
-            <div class="account-setting-row">
-              <div>
-                <span class="acc-label">Pseudo</span>
-                <strong>${_esc(pseudo || 'Aventurier')}</strong>
-                <small>Visible dans l'interface, le chat et les fiches liées.</small>
-              </div>
-              <button class="acc-edit-btn" data-action="openEditPseudo">Modifier</button>
-            </div>
-            <div class="account-setting-row">
-              <div>
-                <span class="acc-label">Avatar</span>
-                <strong>Portrait du compte</strong>
-                <small>Utilisé dans la navigation et certains sélecteurs.</small>
-              </div>
-              <button class="acc-edit-btn" data-action="openAvatarPicker">Choisir</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="acc-section account-panel account-premium-panel ${premium ? 'is-premium' : 'is-free'}">
-          <div class="acc-section-header">
-            <span>${premium ? '✨' : '◇'}</span>
-            <div>
-              <div class="acc-section-title">Plan ${_esc(currentPlan)}</div>
-              <p>${_esc(planSource)}</p>
-            </div>
-          </div>
-          <div class="acc-section-body">
-            <div class="account-plan-grid">
-              <div class="account-plan-card ${premium ? 'is-on' : 'is-off'}">
-                <strong>Pages bonus</strong>
-                <small>${premium ? 'Boutique, Collection, Hauts-Faits, Carte, Guide, Joueurs, Bastion, Recettes, Statistiques.' : 'Réservées aux comptes Premium.'}</small>
-              </div>
-              <div class="account-plan-card">
-                <strong>Aventures MJ</strong>
-                <small>${myAdminAdventures}/${adventureLimit}</small>
-              </div>
-              <div class="account-plan-card">
-                <strong>Images</strong>
-                <small>${limits.imageStorageMb} Mo prévus</small>
-              </div>
-              <div class="account-plan-card">
-                <strong>Musiques</strong>
-                <small>${limits.musicStorageMb} Mo prévus</small>
-              </div>
-            </div>
-            <div class="account-plan-actions">
-              <button class="acc-edit-btn" data-action="openPremiumInfo">${premium ? 'Voir le statut' : 'Comprendre Premium'}</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="acc-section account-panel">
-          <div class="acc-section-header">
-            <span>🔐</span>
-            <div>
-              <div class="acc-section-title">Connexion & sécurité</div>
-              <p>Les modifications sensibles demandent une confirmation.</p>
-            </div>
-          </div>
-          <div class="acc-section-body">
-            <div class="account-setting-row">
-              <div>
-                <span class="acc-label">Adresse email</span>
-                <strong>${_esc(email || 'Non renseignée')}</strong>
-                <small>Adresse utilisée pour te connecter et récupérer ton compte.</small>
-              </div>
-              <button class="acc-edit-btn" data-action="openEditEmail">Modifier</button>
-            </div>
-            <div class="account-setting-row">
-              <div>
-                <span class="acc-label">Mot de passe</span>
-                <strong>••••••••</strong>
-                <small>À changer si tu suspectes un accès non voulu.</small>
-              </div>
-              <button class="acc-edit-btn" data-action="openEditPassword">Modifier</button>
-            </div>
-          </div>
-        </section>
-      </main>
-
-      <aside class="account-side-stack">
-        <section class="acc-section account-panel account-identity-card">
-          <div class="acc-section-header">
-            <span>🧭</span>
-            <div>
-              <div class="acc-section-title">Repères</div>
-              <p>Résumé rapide du compte.</p>
-            </div>
-          </div>
-          <div class="acc-section-body">
-            <div class="account-meta-line"><span>UID</span><code>${_esc(user.uid)}</code></div>
-            <div class="account-meta-line"><span>Profil</span><strong>${_esc(roleLabel)}</strong></div>
-            <div class="account-meta-line"><span>Plan</span><strong>${_esc(currentPlan)}</strong></div>
-            <div class="account-meta-line"><span>Connexion</span><strong>${_esc(providerLabel)}</strong></div>
-          </div>
-        </section>
-
-        <section class="acc-section account-panel account-danger-panel">
-          <div class="acc-section-header">
-            <span>⚠️</span>
-            <div>
-              <div class="acc-section-title">Zone de danger</div>
-              <p>Action définitive.</p>
-            </div>
-          </div>
-          <div class="acc-section-body">
-            <p>
-              La suppression du compte est irréversible. Les personnages seront supprimés et leurs objets boutique remis en stock.
-            </p>
-            ${nbChars > 0 ? `
-            <div class="account-danger-note">
-              ${nbChars} personnage${nbChars!==1?'s':''} concerné${nbChars!==1?'s':''}.
-            </div>` : ''}
-            <button class="acc-danger-btn" data-action="openDeleteAccount">Supprimer mon compte</button>
-          </div>
-        </section>
-      </aside>
-    </div>
-  </div>
-  `;
+function _adventureSuccessor(adventure, uid) {
+  const admins = (adventure.admins || []).filter(id => id && id !== uid);
+  if (admins.length) return admins[0];
+  return [...(adventure.players || []), ...(adventure.accessList || [])].find(id => id && id !== uid) || null;
 }
 // AVATAR — catalogue d'avatars GLOBAL à l'app + portraits des persos du joueur
 // ══════════════════════════════════════════════════════════════════════════════
@@ -347,32 +310,6 @@ async function renderAccount() {
 // users/{uid}.avatarIcon (doc global). ⚠️ nécessite (cf. docs/firestore-rules.md) :
 //  - la clé `avatarIcon` autorisée dans la règle isUserSelfUpdate ;
 //  - une règle lecture/écriture sur la collection globale `app_config`.
-function openPremiumInfo() {
-  const profile = STATE.profile || {};
-  const premium = hasPremiumAccess(profile);
-  const limits = planLimits(profile);
-  const adventureLimit = Number.isFinite(limits.maxAdminAdventures) ? limits.maxAdminAdventures : 'illimitées';
-  openModal(`${premium ? '✨' : '◇'} Compte ${planLabel(profile)}`, `
-    <div class="account-premium-modal">
-      <div class="account-premium-status ${premium ? 'is-premium' : 'is-free'}">
-        <strong>${premium ? 'Premium actif' : 'Compte gratuit'}</strong>
-        <span>${STATE.isSuperAdmin ? 'Le super-admin est Premium automatiquement.' : (premium ? 'Les pages bonus sont accessibles.' : 'Les pages bonus restent verrouillées.')}</span>
-      </div>
-      <div class="account-premium-list">
-        <div><b>Aventures MJ</b><span>${adventureLimit} aventure${adventureLimit === 1 ? '' : 's'} administrée${adventureLimit === 1 ? '' : 's'}.</span></div>
-        <div><b>Pages bonus</b><span>Boutique, Collection, Hauts-Faits, Carte, Guide, Joueurs, Bastion, Recettes et Statistiques.</span></div>
-        <div><b>VTT avancé</b><span>Brouillard de guerre, murs et éclairage dynamique.</span></div>
-        <div><b>Stockage images</b><span>${limits.imageStorageMb} Mo prévus pour ce plan.</span></div>
-        <div><b>Stockage musiques</b><span>${limits.musicStorageMb} Mo prévus pour ce plan.</span></div>
-      </div>
-      <p class="account-premium-note">
-        Le paiement réel n'est pas encore branché. Le plan peut être activé en base par un super-admin via les champs
-        <code>plan: "premium"</code>, <code>premium: true</code>, <code>premiumUntil</code> Timestamp futur ou <code>subscription.status: "active"</code>.
-      </p>
-    </div>
-  `, { subtitle: 'Statut du compte et futures limites de stockage', accent: premium ? '#e8b84b' : '#7fb2ff' });
-}
-
 const PROFILE_ICONS_DOC = 'profileIcons';
 let _iconCatalog = null; // cache session
 
@@ -387,48 +324,53 @@ async function _loadIconCatalog(force = false) {
 const _charPortrait = (c) => c?.photoURL || c?.photo || c?.avatar || c?.imageUrl || '';
 
 async function openAvatarPicker() {
-  const catalog = await _loadIconCatalog(true);
-  const cur = STATE.profile?.avatarIcon || '';
-  const uid = STATE.user?.uid || auth.currentUser?.uid || '';
-  const _lbl = (txt) => `<div style="font-size:.74rem;font-weight:700;color:var(--text-dim);letter-spacing:.02em;margin:.3rem 0 .45rem">${txt}</div>`;
-  const _optBtn = (url, label) => `
-    <button class="avatar-opt${cur === url ? ' is-sel' : ''}" data-action="chooseAvatar"
-      data-url="${_esc(url)}" title="${_esc(label || '')}">
-      <img src="${_esc(resolveAvatarUrl(url))}" alt="${_esc(label || '')}" loading="lazy">
-    </button>`;
-
-  // Portraits des personnages DU JOUEUR sur TOUTES ses aventures : on lit ses
-  // persos (filtrés sur son uid) dans CHACUNE de ses aventures (STATE.adventures),
-  // via les index/règles standard — pas de collectionGroup ni d'index spécial. On
-  // fusionne avec l'aventure courante (déjà en mémoire), dédoublonne par id, et
-  // filtre à ses propres persos ayant un portrait.
-  const _advs = Array.isArray(STATE.adventures) ? STATE.adventures : [];
-  const _cross = (await Promise.all(_advs.map(a => loadCharsForAdventure(a?.id, uid).catch(() => [])))).flat();
-  const _byId = new Map();
-  [...(_cross || []), ...(STATE.characters || [])]
-    .filter(c => c?.uid === uid && _charPortrait(c))
-    .forEach(c => { if (c.id && !_byId.has(c.id)) _byId.set(c.id, c); });
-  const myChars = [..._byId.values()];
-  const charsSection = myChars.length
-    ? _lbl('🧙 Mes personnages') + `<div class="avatar-grid">${myChars.map(c => _optBtn(_charPortrait(c), c.nom || 'Personnage')).join('')}</div>`
-    : '';
-
-  const catalogSection = catalog.length
-    ? _lbl('🎭 Avatars de l\'app') + `<div class="avatar-grid">${catalog.map(ic => _optBtn(ic.url, ic.label)).join('')}</div>`
-    : `<div class="acc-avatar-empty">Aucun avatar disponible pour l'instant.${STATE.isSuperAdmin ? ' Ajoutes-en via « Gérer les avatars ».' : ''}</div>`;
-
-  openModal('🎭 Choisir un avatar', `
-    ${charsSection}
-    ${catalogSection}
-    <div style="display:flex;gap:.5rem;margin-top:.9rem;flex-wrap:wrap;align-items:center">
-      ${cur ? `<button class="btn btn-outline btn-sm" data-action="chooseAvatar" data-url="">↩︎ Avatar par défaut</button>` : ''}
-      ${STATE.isSuperAdmin ? `<button class="btn btn-outline btn-sm" data-action="openAvatarManager">⚙️ Gérer les avatars</button>` : ''}
-      <button class="btn btn-outline btn-sm" style="margin-left:auto" data-action="_accClose">Fermer</button>
-    </div>
-  `, { subtitle: "Tes personnages ou les avatars de l'app", accent: '#4f8cff' });
+  const uid = STATE.user?.uid || auth.currentUser?.uid;
+  if (!uid) return;
+  const [catalog, groups] = await Promise.all([
+    _loadIconCatalog(),
+    _accountUi.characterGroups ? Promise.resolve(_accountUi.characterGroups) : _loadAllOwnCharacters(uid),
+  ]);
+  _accountUi.characterGroups = groups;
+  _accountUi.avatarChoice = STATE.profile?.avatarIcon || '';
+  const chars = groups.flatMap(group => group.characters).filter(_charPortrait);
+  _accountUi.avatarTab = catalog.some(icon => icon.url === _accountUi.avatarChoice) ? 'app' : 'characters';
+  _renderAvatarPicker(chars, catalog);
 }
 
-async function chooseAvatar(url) {
+function _renderAvatarPicker(chars = [], catalog = []) {
+  document.querySelector('.ac-avatar-overlay')?.remove();
+  const selected = _accountUi.avatarChoice || '';
+  const choices = _accountUi.avatarTab === 'characters'
+    ? [{ url: '', label: 'Par défaut', fallback: true }, ...chars.map(c => ({ url: _charPortrait(c), label: c.nom || 'Personnage' }))]
+    : catalog.map(icon => ({ url: icon.url, label: icon.label || 'Avatar' }));
+  const selectedChoice = [...choices, ...catalog.map(icon => ({ url: icon.url, label: icon.label }))].find(choice => choice.url === selected);
+  const fallback = (STATE.profile?.pseudo || 'A').trim().slice(0, 1).toUpperCase();
+  const preview = selected ? `<img src="${_esc(resolveAvatarUrl(selected))}" alt="">` : `<span>${_esc(fallback)}</span>`;
+  const overlay = document.createElement('div');
+  overlay.className = 'ac-avatar-overlay';
+  overlay.dataset.action = 'closeAvatarPicker';
+  overlay.innerHTML = `<div class="ac-avatar-modal" role="dialog" aria-modal="true" aria-labelledby="account-avatar-title"><header><div class="ac-avatar-preview">${preview}</div><div><span class="ac-kicker">Avatar du compte</span><h3 id="account-avatar-title">Choisir un avatar</h3></div><button class="ac-modal-close" data-action="closeAvatarPicker" aria-label="Fermer">×</button></header><div class="ac-avatar-body"><div class="ac-avatar-tabs"><button class="${_accountUi.avatarTab === 'characters' ? 'active' : ''}" data-action="setAvatarTab" data-tab="characters">Mes personnages <i>${chars.length}</i></button><button class="${_accountUi.avatarTab === 'app' ? 'active' : ''}" data-action="setAvatarTab" data-tab="app">Avatars de l'app <i>${catalog.length}</i></button></div><div class="ac-avatar-grid">${choices.length ? choices.map(choice => `<button class="ac-avatar-option ${choice.url === selected ? 'active' : ''}" data-action="selectAccountAvatar" data-url="${_esc(choice.url)}"><span>${choice.fallback ? _esc(fallback) : `<img src="${_esc(resolveAvatarUrl(choice.url))}" alt="" loading="lazy">`}</span><small>${_esc(choice.label)}</small></button>`).join('') : '<p class="ac-avatar-empty">Aucun avatar dans cette sélection.</p>'}</div>${_accountUi.avatarTab === 'characters' ? '<p class="ac-note">Portraits de tes personnages, toutes aventures confondues.</p>' : ''}</div><footer>${STATE.isSuperAdmin ? '<button class="ac-btn ghost" data-action="openAvatarManagerFromPicker">Gérer le catalogue</button>' : ''}<span></span><button class="ac-btn ghost" data-action="closeAvatarPicker">Annuler</button><button class="ac-btn primary" data-action="applyAccountAvatar" ${selected === (STATE.profile?.avatarIcon || '') ? 'disabled' : ''}>Utiliser cet avatar</button></footer><span class="ac-avatar-selected" hidden>${_esc(selectedChoice?.label || 'Par défaut')}</span></div>`;
+  document.body.appendChild(overlay);
+}
+
+function setAvatarTab(tab) {
+  _accountUi.avatarTab = tab === 'app' ? 'app' : 'characters';
+  const chars = (_accountUi.characterGroups || []).flatMap(group => group.characters).filter(_charPortrait);
+  _renderAvatarPicker(chars, _iconCatalog || []);
+}
+
+function selectAccountAvatar(url) {
+  _accountUi.avatarChoice = url || '';
+  const chars = (_accountUi.characterGroups || []).flatMap(group => group.characters).filter(_charPortrait);
+  _renderAvatarPicker(chars, _iconCatalog || []);
+}
+
+function closeAvatarPicker(button, event) {
+  if (button?.classList?.contains('ac-avatar-overlay') && event?.target !== button) return;
+  document.querySelector('.ac-avatar-overlay')?.remove();
+}
+
+async function chooseAvatar(url = _accountUi.avatarChoice || '') {
   const user = auth.currentUser;
   if (!user) return;
   try {
@@ -444,9 +386,9 @@ async function chooseAvatar(url) {
         .then(() => { if (a.memberProfiles?.[user.uid]) a.memberProfiles[user.uid].avatarIcon = url || ''; })
         .catch(() => {});
     }
-    closeModal();
+    closeAvatarPicker();
     showNotif(url ? 'Avatar mis à jour !' : 'Avatar réinitialisé.', 'success');
-    renderAccount();
+    await renderAccount();
     refreshSidebarProfile();
   } catch (err) {
     console.error('[account] chooseAvatar:', err);
@@ -597,224 +539,278 @@ async function removeAvatarIcon(idx) {
   } catch (e) { notifySaveError(e); }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MODIFIER PSEUDO
-// ══════════════════════════════════════════════════════════════════════════════
-function openEditPseudo() {
-  const profile = STATE.profile || {};
-  openModal('✏️ Modifier le pseudo', `
-    <div class="form-group">
-      <label>Nouveau pseudo</label>
-      <input class="input-field" id="acc-pseudo" value="${_esc(profile.pseudo || '')}"
-        placeholder="Ton pseudo d'aventurier...">
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" data-action="savePseudo">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
-    </div>
-  `, { subtitle: 'Ton nom d\'aventurier, visible par la table' });
-  setTimeout(() => {
-    const el = document.getElementById('acc-pseudo');
-    el?.focus(); el?.select();
-  }, 60);
+function _setAccountError(id, message = '') {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.textContent = message;
+  element.hidden = !message;
 }
 
-async function savePseudo() {
-  const newPseudo = document.getElementById('acc-pseudo')?.value?.trim();
-  if (!newPseudo) { showNotif('Le pseudo ne peut pas être vide.', 'error'); return; }
-  if (newPseudo.length > 30) { showNotif('Pseudo trop long (30 caractères max).', 'error'); return; }
+function _authErrorMessage(error) {
+  if (['auth/wrong-password', 'auth/invalid-credential'].includes(error?.code)) return 'Mot de passe incorrect.';
+  if (error?.code === 'auth/email-already-in-use') return 'Cette adresse est déjà utilisée par un autre compte.';
+  if (error?.code === 'auth/credential-already-in-use') return 'Cette méthode est déjà liée à un autre compte. Contacte le support pour fusionner les données.';
+  if (error?.code === 'auth/popup-closed-by-user') return 'La fenêtre Google a été fermée avant la confirmation.';
+  if (error?.code === 'auth/requires-recent-login') return 'Ta session est trop ancienne. Reconnecte-toi puis réessaie.';
+  if (error?.code === 'auth/weak-password') return 'Le mot de passe est trop faible.';
+  return error?.message || 'Une erreur inattendue est survenue.';
+}
 
+function openAccountEditor(editor) {
+  _accountUi.open = editor;
+  renderAccount().then(() => {
+    const targets = { pseudo: 'acc-pseudo', email: 'acc-new-email', password: 'acc-old-password', 'link-password': 'acc-new-password' };
+    const input = document.getElementById(targets[editor]);
+    input?.focus();
+    input?.select?.();
+  });
+}
+
+function closeAccountEditor() {
+  _accountUi.open = null;
+  renderAccount();
+}
+
+function toggleAccountPassword(target) {
+  const input = document.getElementById(target);
+  if (input) input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+function validateAccountForm() {
+  if (_accountUi.open === 'pseudo') {
+    const input = document.getElementById('acc-pseudo');
+    if (input) {
+      const value = input.value.trim();
+      const count = document.getElementById('acc-pseudo-count');
+      const preview = document.getElementById('acc-pseudo-preview');
+      if (count) { count.textContent = `${value.length}/30`; count.classList.toggle('over', value.length > 30); }
+      if (preview) preview.textContent = value || '…';
+      input.classList.toggle('bad', value.length > 30);
+      const button = document.getElementById('acc-pseudo-save');
+      if (button) button.disabled = !value || value.length > 30 || value === (STATE.profile?.pseudo || 'Aventurier');
+    }
+  }
+  if (_accountUi.open === 'email') {
+    const email = document.getElementById('acc-new-email')?.value.trim() || '';
+    const password = document.getElementById('acc-email-password')?.value || '';
+    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+    document.getElementById('acc-new-email')?.classList.toggle('bad', !!email && !valid);
+    const button = document.getElementById('acc-email-save');
+    if (button) button.disabled = !valid || !password || email.toLowerCase() === (auth.currentUser?.email || '').toLowerCase();
+  }
+  if (_accountUi.open === 'password' || _accountUi.open === 'link-password') {
+    const oldValue = document.getElementById('acc-old-password')?.value || '';
+    const newValue = document.getElementById('acc-new-password')?.value || '';
+    const confirmValue = document.getElementById('acc-confirm-password')?.value || '';
+    const lengthOk = newValue.length >= 6;
+    const matchOk = !!newValue && newValue === confirmValue;
+    const differentOk = _accountUi.open === 'link-password' || (!!newValue && newValue !== oldValue);
+    document.getElementById('acc-check-length')?.classList.toggle('ok', lengthOk);
+    document.getElementById('acc-check-match')?.classList.toggle('ok', matchOk);
+    document.getElementById('acc-check-different')?.classList.toggle('ok', differentOk);
+    const linkEmail = document.getElementById('acc-link-email')?.value.trim() || auth.currentUser?.email || '';
+    const button = document.getElementById('acc-password-save');
+    if (button) button.disabled = !lengthOk || !matchOk || !differentOk || (_accountUi.open === 'password' && !oldValue) || (_accountUi.open === 'link-password' && !linkEmail);
+  }
+  if (_accountUi.danger) {
+    const confirmed = document.getElementById('acc-delete-confirm')?.value.trim() === 'SUPPRIMER';
+    const password = document.getElementById('acc-delete-password')?.value || '';
+    const identityOk = _accountUi.googleReauthed || !!password;
+    const button = document.getElementById('acc-delete-button');
+    if (button) button.disabled = !confirmed || !identityOk || !_accountUi.characterGroups || _accountUi.deleting;
+  }
+}
+
+async function saveAccountPseudo() {
+  const user = auth.currentUser;
+  const newPseudo = document.getElementById('acc-pseudo')?.value.trim();
+  if (!user || !newPseudo || newPseudo.length > 30) return;
+  try {
+    // Lecture explicite seulement au clic Enregistrer : garantit que toutes les
+    // fiches seront mises à jour, sans ajouter de coût au rendu de la page.
+    const groups = await _loadAllOwnCharacters(user.uid, { strict: true });
+    await updateInCol('users', user.uid, { pseudo: newPseudo });
+    setProfile({ ...(STATE.profile || {}), pseudo: newPseudo });
+    await _syncCurrentMemberProfiles({ pseudo: newPseudo });
+    _accountUi.characterGroups = groups;
+    await Promise.all(groups.flatMap(group => group.characters.map(character =>
+      updateInAdventureCol(group.adventure.id, 'characters', character.id, { ownerPseudo: newPseudo })
+    )));
+    (STATE.characters || []).filter(c => c.uid === user.uid).forEach(c => { c.ownerPseudo = newPseudo; });
+    _accountUi.open = null;
+    showNotif('Pseudo mis à jour.', 'success');
+    refreshSidebarProfile();
+    await renderAccount();
+  } catch (error) {
+    console.error('[account] pseudo:', error);
+    _setAccountError('acc-pseudo-error', 'Impossible de mettre le pseudo à jour.');
+  }
+}
+
+async function saveAccountEmail() {
+  const user = auth.currentUser;
+  const newEmail = document.getElementById('acc-new-email')?.value.trim();
+  const password = document.getElementById('acc-email-password')?.value || '';
+  if (!user || !newEmail || !password) return;
+  if (newEmail.toLowerCase() === (user.email || '').toLowerCase()) {
+    _setAccountError('acc-email-error', "C'est déjà ton adresse actuelle.");
+    return;
+  }
+  try {
+    _setAccountError('acc-email-error');
+    await _reauth(password);
+    await verifyBeforeUpdateEmail(user, newEmail);
+    localStorage.setItem(_pendingEmailKey(user.uid), newEmail);
+    _accountUi.open = null;
+    showNotif(`Lien de confirmation envoyé à ${newEmail}.`, 'success');
+    await renderAccount();
+  } catch (error) {
+    console.error('[account] verify email:', error);
+    _setAccountError('acc-email-error', _authErrorMessage(error));
+  }
+}
+
+async function saveAccountPassword() {
   const user = auth.currentUser;
   if (!user) return;
-
+  const oldPassword = document.getElementById('acc-old-password')?.value || '';
+  const newPassword = document.getElementById('acc-new-password')?.value || '';
+  const confirmation = document.getElementById('acc-confirm-password')?.value || '';
+  const linking = _accountUi.open === 'link-password';
+  if (newPassword.length < 6 || newPassword !== confirmation) return;
   try {
-    await updateInCol('users', user.uid, { pseudo: newPseudo });
-    const newProfile = { ...(STATE.profile||{}), pseudo: newPseudo };
-    setProfile(newProfile);
-    await _syncCurrentMemberProfiles({ pseudo: newPseudo });
-
-    // Mettre à jour ownerPseudo sur tous les personnages du joueur
-    const chars = (STATE.characters||[]).filter(c => c.uid === user.uid);
-    await Promise.all(chars.map(c => updateInCol('characters', c.id, { ownerPseudo: newPseudo })));
-    chars.forEach(c => { c.ownerPseudo = newPseudo; });
-
-    closeModal();
-    showNotif(`Pseudo mis à jour : ${newPseudo}`, 'success');
-    renderAccount();
-  } catch (err) {
-    console.error('[account] savePseudo:', err);
-    showNotif('Erreur lors de la mise à jour.', 'error');
+    _setAccountError('acc-password-error');
+    if (linking) {
+      const email = document.getElementById('acc-link-email')?.value.trim() || user.email;
+      if (!email) throw new Error('Une adresse email est nécessaire.');
+      await linkWithCredential(user, EmailAuthProvider.credential(email, newPassword));
+    } else {
+      await _reauth(oldPassword);
+      await updatePassword(user, newPassword);
+    }
+    await user.reload();
+    _accountUi.open = null;
+    showNotif(linking ? 'Connexion par email ajoutée.' : 'Mot de passe mis à jour.', 'success');
+    await renderAccount();
+  } catch (error) {
+    console.error('[account] password:', error);
+    _setAccountError('acc-password-error', _authErrorMessage(error));
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MODIFIER EMAIL
-// ══════════════════════════════════════════════════════════════════════════════
-function openEditEmail() {
-  openModal('📧 Modifier l\'email', `
-    <p style="font-size:.8rem;color:var(--text-dim);margin-bottom:.75rem">
-      Une confirmation sera requise. Ton mot de passe actuel est nécessaire.
-    </p>
-    <div class="form-group">
-      <label for="acc-new-email">Nouvel email</label>
-      <input class="input-field" id="acc-new-email" type="email" placeholder="nouveau@email.com" inputmode="email" autocomplete="email" maxlength="254" required>
-    </div>
-    <div class="form-group">
-      <label for="acc-reauth-pw-email">Mot de passe actuel</label>
-      <input class="input-field" id="acc-reauth-pw-email" type="password" placeholder="••••••••" autocomplete="current-password" maxlength="128" required>
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" data-action="saveEmail">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
-    </div>
-  `, { subtitle: 'Mot de passe actuel requis pour confirmer', accent: '#4f8cff' });
-}
-
-async function saveEmail() {
-  const emailInput = document.getElementById('acc-new-email');
-  if (emailInput && !emailInput.checkValidity()) { emailInput.reportValidity(); return; }
-  const newEmail = emailInput?.value?.trim();
-  const password = document.getElementById('acc-reauth-pw-email')?.value;
-  if (!newEmail || !password) { showNotif('Remplis tous les champs.', 'error'); return; }
-
+async function linkAccountGoogle() {
+  const user = auth.currentUser;
+  if (!user) return;
   try {
-    await _reauth(password);
-    await updateEmail(auth.currentUser, newEmail);
-    await updateInCol('users', auth.currentUser.uid, { email: newEmail });
-    const newProfile = { ...(STATE.profile||{}), email: newEmail };
-    setProfile(newProfile);
-    await _syncCurrentMemberProfiles({ email: newEmail });
-    closeModal();
-    showNotif('Email mis à jour !', 'success');
-    renderAccount();
-  } catch (err) {
-    console.error('[account] saveEmail:', err);
-    if (err.code === 'auth/email-already-in-use') showNotif('Cet email est déjà utilisé.', 'error');
-    else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') showNotif('Mot de passe incorrect.', 'error');
-    else showNotif('Erreur : ' + (err.message||'inconnue'), 'error');
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await linkWithPopup(user, provider);
+    await user.reload();
+    showNotif('Connexion Google liée au compte.', 'success');
+    await renderAccount();
+  } catch (error) {
+    console.error('[account] link google:', error);
+    showNotif(_authErrorMessage(error), 'error');
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// MODIFIER MOT DE PASSE
-// ══════════════════════════════════════════════════════════════════════════════
-function openEditPassword() {
-  openModal('🔐 Modifier le mot de passe', `
-    <div class="form-group">
-      <label>Mot de passe actuel</label>
-      <input class="input-field" id="acc-old-pw" type="password" placeholder="••••••••">
-    </div>
-    <div class="form-group">
-      <label>Nouveau mot de passe</label>
-      <input class="input-field" id="acc-new-pw" type="password" placeholder="6 caractères minimum">
-    </div>
-    <div class="form-group">
-      <label>Confirmer le nouveau mot de passe</label>
-      <input class="input-field" id="acc-new-pw2" type="password" placeholder="••••••••">
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1" data-action="savePassword">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
-    </div>
-  `, { subtitle: 'Mot de passe actuel requis pour confirmer', accent: '#4f8cff' });
+async function copyAccountUid() {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  try { await navigator.clipboard.writeText(uid); showNotif('Identifiant copié.', 'success'); }
+  catch { showNotif("Impossible de copier automatiquement l'identifiant.", 'error'); }
 }
 
-async function savePassword() {
-  const oldPw  = document.getElementById('acc-old-pw')?.value;
-  const newPw  = document.getElementById('acc-new-pw')?.value;
-  const newPw2 = document.getElementById('acc-new-pw2')?.value;
+function goAccountSection(section) {
+  _accountUi.section = section;
+  document.getElementById(`account-${section}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
-  if (!oldPw || !newPw || !newPw2) { showNotif('Remplis tous les champs.', 'error'); return; }
-  if (newPw.length < 6)            { showNotif('Minimum 6 caractères.', 'error'); return; }
-  if (newPw !== newPw2)            { showNotif('Les mots de passe ne correspondent pas.', 'error'); return; }
+async function openAccountDanger() {
+  const user = auth.currentUser;
+  if (!user) return;
+  _accountUi.danger = true;
+  _accountUi.googleReauthed = false;
+  _accountUi.characterGroups = null;
+  await renderAccount();
+  _accountUi.characterGroups = await _loadAllOwnCharacters(user.uid, { strict: true });
+  await renderAccount();
+  document.getElementById(_hasProvider(user, 'password') ? 'acc-delete-password' : 'acc-delete-confirm')?.focus();
+}
 
+function closeAccountDanger() {
+  _accountUi.danger = false;
+  _accountUi.googleReauthed = false;
+  renderAccount();
+}
+
+async function reauthAccountGoogle() {
+  const user = auth.currentUser;
+  if (!user) return;
   try {
-    await _reauth(oldPw);
-    await updatePassword(auth.currentUser, newPw);
-    closeModal();
-    showNotif('Mot de passe mis à jour !', 'success');
-  } catch (err) {
-    console.error('[account] savePassword:', err);
-    if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential')
-      showNotif('Mot de passe actuel incorrect.', 'error');
-    else
-      showNotif('Erreur : ' + (err.message||'inconnue'), 'error');
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await reauthenticateWithPopup(user, provider);
+    _accountUi.googleReauthed = true;
+    await renderAccount();
+  } catch (error) {
+    _setAccountError('acc-delete-error', _authErrorMessage(error));
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// SUPPRIMER LE COMPTE
-// ══════════════════════════════════════════════════════════════════════════════
-function openDeleteAccount() {
-  openModal('🗑️ Supprimer le compte', `
-    <div style="background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.25);
-      border-radius:10px;padding:.85rem 1rem;margin-bottom:1rem;font-size:.82rem;line-height:1.7">
-      <strong style="color:#ff6b6b;display:block;margin-bottom:.4rem">⚠️ Cette action est irréversible.</strong>
-      <ul style="margin:0;padding-left:1.2rem;color:var(--text-muted)">
-        <li>Tous tes personnages seront supprimés</li>
-        <li>Leurs objets boutique seront automatiquement remis en stock</li>
-        <li>Ton compte et tes données seront définitivement effacés</li>
-      </ul>
-    </div>
-    <div class="form-group">
-      <label>Confirme avec ton mot de passe</label>
-      <input class="input-field" id="acc-del-pw" type="password" placeholder="••••••••">
-    </div>
-    <div class="form-group">
-      <label>Tape <strong style="color:#ff6b6b">SUPPRIMER</strong> pour confirmer</label>
-      <input class="input-field" id="acc-del-confirm" placeholder="SUPPRIMER">
-    </div>
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="acc-delete-confirm" data-action="confirmDeleteAccount">
-        🗑️ Supprimer définitivement
-      </button>
-      <button class="btn btn-outline btn-sm" data-action="_accClose">Annuler</button>
-    </div>
-  `, { subtitle: 'Action irréversible', accent: '#ff6b6b' });
+function _withoutOwnEmail(emails, ownEmail) {
+  const normalized = String(ownEmail || '').trim().toLowerCase();
+  return (emails || []).filter(email => String(email || '').trim().toLowerCase() !== normalized);
+}
+
+async function _transferOwnedAdventure(adventure, successor, uid) {
+  const unique = values => [...new Set(values.filter(Boolean))];
+  const memberProfiles = { ...(adventure.memberProfiles || {}) };
+  delete memberProfiles[uid];
+  await updateInCol('adventures', adventure.id, {
+    createdBy: successor,
+    admins: unique([successor, ...(adventure.admins || []).filter(id => id !== uid && id !== successor)]),
+    players: unique((adventure.players || []).filter(id => id !== uid && id !== successor)),
+    accessList: unique([successor, ...(adventure.accessList || []).filter(id => id !== uid)]),
+    accessEmails: _withoutOwnEmail(adventure.accessEmails, auth.currentUser?.email),
+    memberProfiles,
+  });
 }
 
 async function confirmDeleteAccount() {
-  const password = document.getElementById('acc-del-pw')?.value;
-  const confirm  = document.getElementById('acc-del-confirm')?.value?.trim();
-
-  if (!password)               { showNotif('Mot de passe requis.', 'error'); return; }
-  if (confirm !== 'SUPPRIMER') { showNotif('Tape exactement "SUPPRIMER" pour confirmer.', 'error'); return; }
-
   const user = auth.currentUser;
-  if (!user) return;
-
-  // Désactiver le bouton pendant l'opération
-  const btn = document.querySelector('[data-action="confirmDeleteAccount"]');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Suppression en cours...'; }
-
+  const confirmation = document.getElementById('acc-delete-confirm')?.value.trim();
+  const password = document.getElementById('acc-delete-password')?.value || '';
+  if (!user || confirmation !== 'SUPPRIMER' || (!_accountUi.googleReauthed && !password)) return;
+  _accountUi.deleting = true;
+  validateAccountForm();
   try {
-    // 1. Réauthentifier
-    await _reauth(password);
-
-    // 2. Vendre les items et supprimer les personnages
-    const { nbPersos, totalOr } = await _purgeUserCharacters(user.uid);
-    console.debug(`[account] ${nbPersos} persos supprimés, ${totalOr} or restitué à la boutique`);
-
-    // 3. Supprimer le document profil dans Firestore
-    try {
-      await deleteFromCol('users', user.uid);
-    } catch { /* peut ne pas exister */ }
-
-    // 4. Supprimer le compte Firebase Auth
+    if (!_accountUi.googleReauthed) await _reauth(password);
+    const groups = _accountUi.characterGroups || await _loadAllOwnCharacters(user.uid, { strict: true });
+    const byAdventure = new Map(groups.map(group => [group.adventure.id, group.characters]));
+    for (const adventure of [...(STATE.adventures || [])]) {
+      const characters = byAdventure.get(adventure.id) || [];
+      if (adventure.createdBy === user.uid) {
+        const successor = _adventureSuccessor(adventure, user.uid);
+        if (!successor) {
+          await deleteAdventure(adventure.id);
+          continue;
+        }
+        await _purgeCharactersFromAdventure(adventure.id, characters);
+        await _transferOwnedAdventure(adventure, successor, user.uid);
+        continue;
+      }
+      await _purgeCharactersFromAdventure(adventure.id, characters);
+      await removeSelfFromAdventure(adventure.id);
+    }
+    await deleteFromCol('users', user.uid);
     await deleteUser(user);
-
-    // 5. La déconnexion est automatique après deleteUser — onAuthStateChanged s'en charge
-    showNotif('Compte supprimé. Au revoir !', 'success');
-
-  } catch (err) {
-    console.error('[account] confirmDeleteAccount:', err);
-    if (btn) { btn.disabled = false; btn.textContent = '🗑️ Supprimer définitivement'; }
-    if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential')
-      showNotif('Mot de passe incorrect.', 'error');
-    else if (err.code === 'auth/requires-recent-login')
-      showNotif('Session expirée — reconnecte-toi d\'abord.', 'error');
-    else
-      showNotif('Erreur : ' + (err.message||'inconnue'), 'error');
+    showNotif('Compte supprimé. Au revoir.', 'success');
+  } catch (error) {
+    console.error('[account] delete:', error);
+    _accountUi.deleting = false;
+    _setAccountError('acc-delete-error', _authErrorMessage(error));
+    validateAccountForm();
   }
 }
 
@@ -858,21 +854,43 @@ PAGES.account = renderAccount;
 
 registerActions({
   openAvatarPicker:    () => openAvatarPicker(),
-  chooseAvatar:        (btn) => chooseAvatar(btn.dataset.url || ''),
+  setAvatarTab:        (btn) => setAvatarTab(btn.dataset.tab),
+  selectAccountAvatar:(btn) => selectAccountAvatar(btn.dataset.url || ''),
+  applyAccountAvatar:  () => chooseAvatar(),
+  closeAvatarPicker:   (btn, event) => closeAvatarPicker(btn, event),
+  openAvatarManagerFromPicker: () => { closeAvatarPicker(); openAvatarManager(); },
   openAvatarManager:   () => openAvatarManager(),
   addAvatarIcon:       () => addAvatarIcon(),
   importAvatarsGithub: () => importAvatarsGithub(),
   dedupeAvatarsCatalog: () => dedupeAvatarsCatalog(),
   updateAvatarIcon:    (btn) => updateAvatarIcon(Number(btn.dataset.idx)),
   removeAvatarIcon:    (btn) => removeAvatarIcon(Number(btn.dataset.idx)),
-  openEditPseudo:      () => openEditPseudo(),
-  openPremiumInfo:     () => openPremiumInfo(),
-  openEditEmail:       () => openEditEmail(),
-  openEditPassword:    () => openEditPassword(),
-  openDeleteAccount:   () => openDeleteAccount(),
-  savePseudo:          () => savePseudo(),
-  saveEmail:           () => saveEmail(),
-  savePassword:        () => savePassword(),
+  openAccountEditor:   (btn) => openAccountEditor(btn.dataset.editor),
+  closeAccountEditor:  () => closeAccountEditor(),
+  toggleAccountPassword: (btn) => toggleAccountPassword(btn.dataset.target),
+  validateAccountForm: () => validateAccountForm(),
+  saveAccountPseudo:   () => saveAccountPseudo(),
+  saveAccountEmail:    () => saveAccountEmail(),
+  saveAccountPassword: () => saveAccountPassword(),
+  linkAccountGoogle:   () => linkAccountGoogle(),
+  copyAccountUid:      () => copyAccountUid(),
+  goAccountSection:    (btn) => goAccountSection(btn.dataset.section),
+  openAccountDanger:   () => openAccountDanger(),
+  closeAccountDanger:  () => closeAccountDanger(),
+  reauthAccountGoogle: () => reauthAccountGoogle(),
   confirmDeleteAccount:() => confirmDeleteAccount(),
   _accClose:           () => closeModal(),
+});
+
+document.addEventListener('keydown', event => {
+  if (!document.querySelector('.ac-page') && !document.querySelector('.ac-avatar-overlay')) return;
+  if (event.key === 'Escape') {
+    if (document.querySelector('.ac-avatar-overlay')) closeAvatarPicker();
+    else if (_accountUi.open) closeAccountEditor();
+    else if (_accountUi.danger) closeAccountDanger();
+  }
+  if (event.key === 'Enter' && event.target?.closest('.ac-form')) {
+    const button = event.target.closest('.ac-form').querySelector('.ac-btn.primary:not(:disabled)');
+    if (button) { event.preventDefault(); button.click(); }
+  }
 });
