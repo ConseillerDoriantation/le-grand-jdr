@@ -16,6 +16,7 @@ import {
   tokenHiddenHealthRatio,
   tokenResourceArcs,
   normalizeTokenTurnOrder,
+  tokenTurnFlagsDirty,
 } from '../assets/js/features/vtt/vtt-token-visual.js';
 
 const vttSource = readFileSync(new URL('../assets/js/features/vtt/vtt.js', import.meta.url), 'utf8');
@@ -175,4 +176,15 @@ test('l’ordre de passage reste stable, élimine les doublons et ajoute les nou
   ];
   assert.deepEqual(normalizeTokenTurnOrder(['bob','missing','bob'],tokens), ['bob','alice','enemy']);
   assert.deepEqual(normalizeTokenTurnOrder([],tokens), ['alice','bob','enemy']);
+});
+
+test('seuls les tokens ayant bougé ou agi sont réécrits au passage de round', () => {
+  assert.equal(tokenTurnFlagsDirty({}), false);
+  assert.equal(tokenTurnFlagsDirty({ movedThisTurn: false, movedCells: 0, bonusMvt: 0, attackedThisTurn: false }), false);
+  assert.equal(tokenTurnFlagsDirty({ movedCells: 2 }), true);
+  assert.equal(tokenTurnFlagsDirty({ bonusMvt: 1 }), true);
+  assert.equal(tokenTurnFlagsDirty({ moveOrigin: { col: 1, row: 2 } }), true);
+  assert.equal(tokenTurnFlagsDirty({ attackedThisTurn: true }), true);
+  assert.equal(tokenTurnFlagsDirty({ bonusActionThisTurn: true }), true);
+  assert.equal(tokenTurnFlagsDirty({ reactionThisTurn: true }), true);
 });

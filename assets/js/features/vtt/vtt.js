@@ -7,6 +7,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { STATE } from '../../core/state.js';
+import { PRESENCE_TTL_MS } from '../../shared/presence-ttl.js';
 import { registerActions } from '../../core/actions.js';
 import Sortable from '../../vendor/sortable.esm.js';
 import { getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection, subscribeDoc } from '../../data/firestore.js';
@@ -195,7 +196,7 @@ import {
   _vttKickPresence,
 } from './vtt-presence.js';
 import {
-  _renderMiniSheet, _vttToggleMiniSheet, _vttSelectMiniChar, _msCanEdit, _msCanEditVitals,
+  _renderMiniSheet, _vttToggleMiniSheet, _vttSelectMiniChar, _msCanEdit, _msCanEditVitals, _msFlushNoteDrafts,
   _vttMsTab, _vttMsToggleCollapsed, _vttMsAttackSlot, _vttMsAddNote, _vttMsToggleNote,
   _vttMsDeleteNote, _vttMsEquip, _vttMsUnequip, _vttMsUnequipAll, _vttMsEquipPicker,
   _vttMsSlotChange, _vttMsDeleteItem, _vttMsSendPicker, _vttMsConfirmSend,
@@ -852,21 +853,28 @@ export async function _setHp(t, newHp, tokenPatch = null) {
     for (const key of Object.keys(tokenPatch)) previousTokenPatch[key] = t[key];
     Object.assign(t, tokenPatch);
   }
+  // Token simple (ennemi) : PV et « Inconscient » auto partent dans la MÊME
+  // écriture (quota). PNJ / perso : PV sur leur fiche, état synchronisé après.
+  const downed = !t.characterId && !t.npcId ? _downedConditionsFor(t, v) : null;
+  const conditionsBefore = t.conditions;
+  if (downed) t.conditions = downed;
   _showAppliedHpDelta(t, live.displayHp ?? previous, v);
   _patchHpOptimistically(t, v);
   try {
     if (t.characterId) await updateDoc(_chrRef(t.characterId), { hp: v });
     else if (t.npcId)  await updateDoc(_npcRef(t.npcId),       { hp: v });
-    else               await updateDoc(_tokRef(t.id),          { hp: v, ...(tokenPatch || {}) });
+    else               await updateDoc(_tokRef(t.id),          { hp: v, ...(tokenPatch || {}), ...(downed ? { conditions: downed } : {}) });
   } catch (error) {
     for (const [key, value] of Object.entries(previousTokenPatch)) {
       if (value === undefined) delete t[key];
       else t[key] = value;
     }
+    if (downed) t.conditions = conditionsBefore;
     if (previous != null) _patchHpOptimistically(t, previous);
     throw error;
   }
-  await _syncDownedCondition(t, v);
+  if (downed) _notifyDowned(t, v);
+  else await _syncDownedCondition(t, v);
 }
 
 /**
@@ -984,24 +992,37 @@ async function _restoreTokenPm(td, amount, { deferWrite = false } = {}) {
   return { applied: Math.max(0, nv - cur), cur: nv, max };
 }
 
-async function _syncDownedCondition(t, hp) {
-  if (!t || t.type === 'player') return;
+// États après un changement de PV d'une créature (pas un perso joueur) :
+// « Inconscient » auto à 0 PV, retiré au-dessus. null = rien à changer.
+// Calcul séparé de l'écriture : un token simple écrit PV + état en une fois.
+function _downedConditionsFor(t, hp) {
+  if (!t || t.type === 'player') return null;
   const conds = t.conditions || [];
   if (hp <= 0) {
-    if (conds.some(c => c.id === 'unconscious')) return; // déjà inconscient (manuel ou auto)
-    const newConds = [...conds, {
+    if (conds.some(c => c.id === 'unconscious')) return null; // déjà inconscient (manuel ou auto)
+    return [...conds, {
       id: 'unconscious', appliedAt: Date.now(), appliedBy: 'auto', auto0hp: true,
       source: 'PV à 0', saveDC: null, saveStat: null, expiresAtRound: null,
     }];
-    t.conditions = newConds;
-    await updateDoc(_tokRef(t.id), { conditions: newConds }).catch(() => {});
-    const name = _live(t).displayName ?? t.name;
-    showNotif(`😵 ${name} tombe inconscient (0 PV)`, 'info');
-  } else if (conds.some(c => c.id === 'unconscious' && c.auto0hp)) {
-    const newConds = conds.filter(c => !(c.id === 'unconscious' && c.auto0hp));
-    t.conditions = newConds;
-    await updateDoc(_tokRef(t.id), { conditions: newConds }).catch(() => {});
   }
+  if (conds.some(c => c.id === 'unconscious' && c.auto0hp)) {
+    return conds.filter(c => !(c.id === 'unconscious' && c.auto0hp));
+  }
+  return null;
+}
+
+function _notifyDowned(t, hp) {
+  if (hp > 0) return;
+  const name = _live(t).displayName ?? t.name;
+  showNotif(`😵 ${name} tombe inconscient (0 PV)`, 'info');
+}
+
+async function _syncDownedCondition(t, hp) {
+  const newConds = _downedConditionsFor(t, hp);
+  if (!newConds) return;
+  t.conditions = newConds;
+  await updateDoc(_tokRef(t.id), { conditions: newConds }).catch(() => {});
+  _notifyDowned(t, hp);
 }
 
 /**
@@ -1193,6 +1214,8 @@ function _cleanup() {
   _vttPageActive = false;
   _vttCancelListenerSchedule();
   _resetKeyboardMovement({ persist:true });
+  void _flushVitalBursts();   // rafale ±PV/PM en attente : l'écrire avant de quitter
+  void _msFlushNoteDrafts();  // note de la mini-fiche en cours de saisie, idem
   VS.unsubs.forEach(u => u?.());
   VS.unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
   _tokenTooltip?.remove(); _tokenTooltip=null;
@@ -10943,10 +10966,15 @@ async function _vttRollAttack() {
           const previousEstimate=_patchEnemyHpEstimateOptimistically(curTgtData,newEst,estimateMax);
           _showAppliedHpDelta(curTgtData, realCur, newHp, STATE.isAdmin ? newHp : newEst);
           _patchHpOptimistically(curTgtData, newHp);
-          targetWrite = updateDoc(_tokRef(curTgtData.id), { hp:newHp })
-            .then(() => _syncDownedCondition(curTgtData, newHp))
+          // PV + « Inconscient » auto dans la même écriture du token (quota).
+          const downedConds = _downedConditionsFor(curTgtData, newHp);
+          const condsBeforeDowned = curTgtData.conditions;
+          if (downedConds) curTgtData.conditions = downedConds;
+          targetWrite = updateDoc(_tokRef(curTgtData.id), { hp:newHp, ...(downedConds ? { conditions: downedConds } : {}) })
+            .then(() => { if (downedConds) _notifyDowned(curTgtData, newHp); })
             .catch(error=>{
               curTgtData.hp=realCur;
+              if (downedConds) curTgtData.conditions = condsBeforeDowned;
               _restoreEnemyHpEstimate(curTgtData,previousEstimate);
               _patchHpOptimistically(curTgtData,realCur);
               throw error;
@@ -14334,6 +14362,7 @@ async function _vttConfirmAddBuff(tokenId) {
 
 async function _vttSetHp(tokenId,hp) {
   const t=VS.tokens[tokenId]?.data; if (!t) return;
+  _takeVitalBurst(tokenId, 'PV');   // valeur saisie / Max : remplace une rafale ±1 en attente
   // Détecte une perte de PV pour déclencher un JS de concentration auto
   const lT = _live(t);
   const prevHp = lT.displayHp ?? t.hp ?? null;
@@ -14352,27 +14381,95 @@ async function _vttSetHp(tokenId,hp) {
     notes.forEach(msg => showNotif(msg, msg.startsWith('💢') ? 'error' : 'info'));
   }
 }
+// ±1 PV/PM en rafale. Quota : chaque clic écrivait la fiche (gros doc diffusé à
+// tous les clients) + 2 stats, et relançait un jet de concentration par pas.
+// Désormais chaque clic ne met à jour que l'affichage ; une seule écriture part
+// 700 ms après le dernier clic, via les setters habituels, avec le delta TOTAL
+// (stats, concentration et rollback calculés depuis la valeur d'avant rafale).
+const _VITAL_BURST_MS = 700;
+const _vitalBursts = new Map();   // `${tokenId}|${kind}` → { tokenId, kind, base, value, timer }
+
+function _patchPmOptimistically(t, v) {
+  if (t.characterId && VS.characters[t.characterId]) {
+    Object.assign(VS.characters[t.characterId], _charPmPatch(v));
+    _patchEntityTokenShapes('characterId', t.characterId);
+    return true;
+  }
+  if (t.npcId && VS.npcs[t.npcId]) {
+    VS.npcs[t.npcId].pmCurrent = v;
+    _patchEntityTokenShapes('npcId', t.npcId);
+    return true;
+  }
+  return false;
+}
+
+const _liveVital = (t, kind) => Number(kind === 'PV' ? _live(t).displayHp : _live(t).displayPm);
+
+// Retire la rafale en attente. Si la valeur affichée est toujours celle posée par
+// la rafale, on rétablit la valeur d'avant rafale (le setter appelé ensuite en
+// déduit le delta total). Sinon, une autre écriture (attaque, coût de sort,
+// snapshot d'un autre client) a déjà fixé la valeur : la rafale est abandonnée
+// pour ne jamais l'écraser. Renvoie la rafale si elle reste à écrire.
+function _takeVitalBurst(tokenId, kind) {
+  const key = `${tokenId}|${kind}`;
+  const entry = _vitalBursts.get(key);
+  if (!entry) return null;
+  _vitalBursts.delete(key);
+  clearTimeout(entry.timer);
+  const t = VS.tokens[tokenId]?.data;
+  if (!t || _liveVital(t, kind) !== entry.value) return null;
+  if (kind === 'PV') _patchHpOptimistically(t, entry.base);
+  else _patchPmOptimistically(t, entry.base);
+  return entry;
+}
+
+function _flushVitalBurst(key) {
+  const [tokenId, kind] = key.split('|');
+  const entry = _takeVitalBurst(tokenId, kind);
+  if (!entry || entry.value === entry.base) return Promise.resolve();
+  return (kind === 'PV' ? _vttSetHp(tokenId, entry.value) : _vttSetPm(tokenId, entry.value))
+    .catch(error => _vttReportActionFailure('_vttAdjustVital', error));
+}
+
+function _flushVitalBursts() {
+  return Promise.all([..._vitalBursts.keys()].map(_flushVitalBurst));
+}
+if (typeof window !== 'undefined') window.addEventListener('pagehide', () => { void _flushVitalBursts(); });
+
 function _vttAdjustVital(tokenId, kind, delta) {
   const t = VS.tokens[tokenId]?.data;
   if (!t || !_canControlToken(t)) return;
   const live = _live(t);
   const isHp = kind === 'PV';
   if (!isHp && kind !== 'PM') return;
-  const current = Number(isHp ? live.displayHp : live.displayPm);
+  const key = `${tokenId}|${kind}`;
+  let burst = _vitalBursts.get(key);
+  // Valeur changée par ailleurs pendant la rafale : on repart de la valeur réelle.
+  if (burst && _liveVital(t, kind) !== burst.value) { _takeVitalBurst(tokenId, kind); burst = null; }
+  const current = burst ? burst.value : Number(isHp ? live.displayHp : live.displayPm);
   const max = Number(isHp ? live.displayHpMax : live.displayPmMax);
   if (!Number.isFinite(current) || !Number.isFinite(max) || max < 0) return;
   const step = Math.sign(Number(delta));
   if (!Number.isFinite(step) || !step) return;
   const next = Math.max(0, Math.min(max, current + step));
   if (next === current) return;
-  // Le cache est mis à jour immédiatement par les setters ; ne pas bloquer les
-  // clics suivants en attendant l'acquittement Firestore de chaque pas.
-  void (isHp ? _vttSetHp(tokenId, next) : _vttSetPm(tokenId, next))
-    .catch(error => _vttReportActionFailure('_vttAdjustVital', error));
+  // PM sans stockage local simple (invocation…) : écriture directe, comme avant.
+  if (!isHp && !burst && (t.summonKind === 'invocation' || !(t.characterId || t.npcId))) {
+    void _vttSetPm(tokenId, next).catch(error => _vttReportActionFailure('_vttAdjustVital', error));
+    return;
+  }
+  const entry = burst || { tokenId, kind, base: current, value: current, timer: null };
+  entry.value = next;
+  if (isHp) _patchHpOptimistically(t, next);
+  else _patchPmOptimistically(t, next);
+  clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => { void _flushVitalBurst(key); }, _VITAL_BURST_MS);
+  _vitalBursts.set(key, entry);
 }
 async function _vttSetPm(tokenId,pm) {
   const t=VS.tokens[tokenId]?.data; if (!t) return;
   if (!_canControlToken(t)) return;
+  _takeVitalBurst(tokenId, 'PM');   // valeur saisie / Max : remplace une rafale ±1 en attente
   if (t.summonKind === 'invocation') {
     try {
       const next = await _setInvocationPm(t, pm);
@@ -15561,7 +15658,7 @@ function _vttSlideClose() {
 }
 function _vttOnlinePlayerCount() {
   const now = Date.now();
-  return Object.values(VS.presence || {}).filter(p => p && now - (p.lastSeen || 0) < 120_000).length;
+  return Object.values(VS.presence || {}).filter(p => p && now - (p.lastSeen || 0) < PRESENCE_TTL_MS).length;
 }
 function _vttReserveCount() {
   const seen = new Set();

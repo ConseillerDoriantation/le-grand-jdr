@@ -8,6 +8,7 @@
 
 import { setDoc, updateDoc } from '../../config/firebase.js';
 import { STATE } from '../../core/state.js';
+import { PRESENCE_TTL_MS } from '../../shared/presence-ttl.js';
 import { VS } from './vtt-state.js';
 import { _esc } from '../../shared/html.js';
 import { calcPVMax, calcPMMax } from '../../shared/char-stats.js';
@@ -24,7 +25,7 @@ import {
 // Vote complet (tous les owners de player tokens placés ont voté) → MJ applique.
 // MJ peut forcer / annuler / régler max / reset compteur.
 // ══════════════════════════════════════════════════════════════════════════
-// Présent = joueur RÉELLEMENT connecté au VTT (VS.presence / pings, fenêtre 120 s,
+// Présent = joueur RÉELLEMENT connecté au VTT (VS.presence / pings, fenêtre PRESENCE_TTL_MS,
 // même critère que la liste de présence et vtt-tray) ET dont un token est posé sur
 // la map active. Sans ça, des joueurs déconnectés — ou des tokens oubliés sur
 // d'autres pages — restaient comptés dans le quorum et bloquaient le vote à
@@ -32,7 +33,7 @@ import {
 // Page active GLOBALE (VS.session.activePageId) plutôt que VS.activePage (locale,
 // car un joueur peut être épinglé ailleurs via playerPages) → quorum identique sur
 // tous les clients. Tout est déjà en mémoire : zéro lecture/écriture Firestore.
-const _SR_TTL = 120_000;
+const _SR_TTL = PRESENCE_TTL_MS;
 let _shortRestFlash = null;
 let _shortRestFlashTimer = null;
 function _srOnline(uid) {
@@ -130,7 +131,18 @@ async function _vttShortRestResetCount() {
   await setDoc(_sesRef(), { shortRest: { ...sr, count: 0, vote: null } }, { merge: true });
 }
 
-async function _applyShortRest({ forced = false } = {}) {
+// Verrou : _checkShortRestAutoApply est appelé par plusieurs listeners (session,
+// tokens, présence). Sans lui, deux appels proches pendant les écritures pouvaient
+// appliquer le repos deux fois (PV/PM ×2 et écritures en double).
+let _shortRestApplying = false;
+async function _applyShortRest(options = {}) {
+  if (_shortRestApplying) return;
+  _shortRestApplying = true;
+  try { await _applyShortRestOnce(options); }
+  finally { _shortRestApplying = false; }
+}
+
+async function _applyShortRestOnce({ forced = false } = {}) {
   const sr = VS.session?.shortRest || { max: 0, count: 0, vote: null };
   if ((sr.count || 0) >= (sr.max ?? 0)) {
     showNotif('Plus de court repos disponible', 'error'); return;

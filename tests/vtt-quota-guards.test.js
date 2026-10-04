@@ -69,3 +69,66 @@ test('le journal MJ ne lit pas deux fois quatre-vingts messages pour en afficher
   assert.match(vttChat, /_GM_LOG_LIMIT = 20/);
   assert.doesNotMatch(vttChat, /_logGmCol\(\)[\s\S]{0,80}limit\(80\)/);
 });
+
+test('le passage de round et le démarrage du combat ne réécrivent pas les tokens inchangés', () => {
+  const turns = readFileSync(new URL('../assets/js/features/vtt/vtt-combat-turns.js', import.meta.url), 'utf8');
+  assert.match(turns, /tokenTurnFlagsDirty\(tokData\)/);
+  assert.match(turns, /if \(Object\.keys\(updates\)\.length\) ops\.push/);
+  assert.match(turns, /offset \+= 400/);
+  // Plus de b.update inconditionnel dans les boucles sur VS.tokens.
+  assert.doesNotMatch(turns, /\n\s+b\.update\(_tokRef\(id\), updates\);/);
+});
+
+test('les boutons ±1 PV/PM n’écrivent qu’une fois par rafale de clics', () => {
+  const body = vtt.slice(vtt.indexOf('function _vttAdjustVital('), vtt.indexOf('async function _vttSetPm('));
+  assert.match(vtt, /const _VITAL_BURST_MS = 700/);
+  assert.match(body, /setTimeout\(\(\) => \{ void _flushVitalBurst\(key\); \}, _VITAL_BURST_MS\)/);
+  // Chaque clic ne fait plus d'appel direct au setter PV (écriture + stats + concentration).
+  assert.doesNotMatch(body, /_vttSetHp\(tokenId, next\)/);
+  assert.match(vtt, /function _cleanup\(\) \{[\s\S]{0,200}_flushVitalBursts\(\)/);
+  // Une autre écriture pendant la rafale (attaque, coût, Max, autre client) n'est jamais écrasée.
+  assert.match(vtt, /if \(!t \|\| _liveVital\(t, kind\) !== entry\.value\) return null;/);
+  assert.match(vtt, /async function _vttSetHp\(tokenId,hp\) \{\n[^\n]*\n  _takeVitalBurst\(tokenId, 'PV'\);/);
+});
+
+test('la présence bat toutes les 180 s et tous les lecteurs partagent la même expiration', () => {
+  assert.match(sharedPresence, /const HEARTBEAT_MS = 180_000;/);
+  const ttl = readFileSync(new URL('../assets/js/shared/presence-ttl.js', import.meta.url), 'utf8');
+  assert.match(ttl, /export const PRESENCE_TTL_MS = 300_000;/);
+  const readers = {
+    chat, presence, tray, pages,
+    rest: readFileSync(new URL('../assets/js/features/vtt/vtt-rest.js', import.meta.url), 'utf8'),
+  };
+  for (const [name, src] of Object.entries(readers)) {
+    assert.match(src, /PRESENCE_TTL_MS/, `${name} doit utiliser PRESENCE_TTL_MS`);
+    assert.doesNotMatch(src, /lastSeen[^\n]*< ?120_?000|ms < 120000|p\.ts\) < 120_000/, `${name} : expiration codée en dur`);
+  }
+});
+
+test('Ctrl+K et la page Admin ne relisent plus des catalogues entiers sans besoin', () => {
+  const palette = readFileSync(new URL('../assets/js/features/command-palette.js', import.meta.url), 'utf8');
+  assert.match(palette, /const shallow = await _loadEntries\(\{ deep: false \}\)/);
+  assert.match(palette, /_ensureDeepEntriesForQuery\(requestedQuery\)/);
+  assert.match(palette, /getCachedCollection\(col\)/);
+  assert.match(pages, /loadCollectionWhere\('vttTokens', 'type', 'in', \['player', 'npc'\]\)/);
+  // Les règles évaluent isAdmin() (lecture de users/{uid}) en dernier.
+  assert.match(rules, /hasEmailAccess\(adv\) \|\|\s*isAdmin\(\)/);
+});
+
+test('2e passe : présence, notes, accusés de lecture et KO ennemi sans écriture superflue', () => {
+  // Présence : retour au VTT après suppression → ré-annonce immédiate ; retour
+  // sur l'onglet avec une présence fraîche → pas d'écriture.
+  assert.match(sharedPresence, /_announced = false;[\s\S]{0,260}_lastWriteAt = 0;/);
+  assert.match(sharedPresence, /if \(_announced && since < HEARTBEAT_MS\) _timer = setTimeout\(beat, HEARTBEAT_MS - since\);/);
+  // Notes mini-fiche : brouillon capturé à la frappe, écrit au blur / à 1,5 s.
+  const mini = readFileSync(new URL('../assets/js/features/vtt/vtt-mini-fiche.js', import.meta.url), 'utf8');
+  assert.match(mini, /const _MS_NOTE_SAVE_MS = 1500;/);
+  assert.match(mini, /t\.onblur = onBlur/);
+  assert.match(mini, /notes\[idx\] = \{ \.\.\.notes\[idx\], titre: draft\.titre\.trim\(\) \|\| 'Sans titre', contenu: draft\.contenu \}/);
+  assert.match(vtt, /void _msFlushNoteDrafts\(\);/);
+  // Chat : accusé de lecture seulement s'il y a un message plus récent.
+  assert.match(chat, /if \(_latestAt\(convoId\) <= \(Number\(_readsSaved\[convoId\]\) \|\| 0\)\) return;/);
+  // Ennemi à 0 PV : PV + « Inconscient » dans le même updateDoc.
+  assert.match(vtt, /\{ hp:newHp, \.\.\.\(downedConds \? \{ conditions: downedConds \} : \{\}\) \}/);
+  assert.match(vtt, /\.\.\.\(downed \? \{ conditions: downed \} : \{\}\) \}\);/);
+});

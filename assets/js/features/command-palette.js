@@ -5,7 +5,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { STATE } from '../core/state.js';
-import { loadCollection, loadChars } from '../data/firestore.js';
+import { loadCollection, loadChars, getCachedCollection } from '../data/firestore.js';
 import { _esc, _norm, _searchIncludes, _trunc, loadingHtml } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { navigate } from '../core/navigation.js';
@@ -19,9 +19,9 @@ import { getControlledCharacters } from '../shared/character-state.js';
 const MAX_RESULTS = 30;
 
 // Pas de cache local : les 8 collections principales sont session-live
-// (cf. firestore.js), donc loadCollection retourne instantanément du cache
-// mémoire. Reconstruire l'index à chaque ouverture est suffisamment rapide
-// (~5-10 ms pour ~500 entrées) et garantit des résultats toujours frais.
+// (cf. firestore.js) une fois amorcées. Reconstruire l'index à chaque ouverture
+// est suffisamment rapide (~5-10 ms pour ~500 entrées) et garantit des résultats
+// frais. L'amorçage des catalogues absents attend une vraie recherche (≥ 2 car.).
 let _open        = false;
 let _activeIndex = 0;
 let _entries     = [];
@@ -30,6 +30,8 @@ let _query       = '';
 let _initialized = false;
 let _bestiaryEntries = null;
 let _bestiaryEntriesPromise = null;
+let _deepEntriesLoaded = false;
+let _deepEntriesPromise = null;
 let _previousFocus = null;
 
 // ── PAGES (raccourcis directs) ────────────────────────────────────────────────
@@ -104,19 +106,37 @@ function _firstStr(obj, keys) {
   return '';
 }
 
-async function _loadEntries() {
-  const [npcs, chars, quests, shop, shopCats, achievements, collection, story, recipes] =
+// Collections nécessaires pour réafficher un élément « Récemment ouvert ».
+const _RECENT_TYPE_COLLECTIONS = {
+  npc: ['npcs'], group: ['quests', 'story'], shop: ['shop'], achievement: ['achievements'],
+  collection: ['collection'], story: ['story'], recipe: ['recipes'],
+};
+
+// Quota : ouvrir la palette (souvent juste pour changer de page) amorçait les
+// 8 catalogues (lecture complète de chacun, puis listeners pour la session).
+// À l'ouverture (`deep: false`), on n'utilise que ce qui est déjà en mémoire, plus
+// les collections des éléments récents. Le reste est chargé dès 2 caractères tapés.
+async function _loadEntries({ deep = true } = {}) {
+  const needed = new Set();
+  if (!deep) {
+    for (const item of getRecentNavigation()) (_RECENT_TYPE_COLLECTIONS[item.type] || []).forEach(col => needed.add(col));
+  }
+  const get = (col, force = false) => (deep || force || needed.has(col))
+    ? loadCollection(col).catch(() => [])
+    : Promise.resolve(getCachedCollection(col) || []);
+  const [npcs, chars, quests, shop, achievements, collection, story, recipes] =
     await Promise.all([
-      loadCollection('npcs').catch(() => []),
+      get('npcs'),
       loadChars().then(chars => getControlledCharacters(chars)).catch(() => []),
-      loadCollection('quests').catch(() => []),
-      loadCollection('shop').catch(() => []),
-      loadCollection('shopCategories').catch(() => []),
-      loadCollection('achievements').catch(() => []),
-      loadCollection('collection').catch(() => []),
-      loadCollection('story').catch(() => []),
-      loadCollection('recipes').catch(() => []),
+      get('quests'),
+      get('shop'),
+      get('achievements'),
+      get('collection'),
+      get('story'),
+      get('recipes'),
     ]);
+  // Les catégories masquées filtrent la boutique : toujours chargées si elle l'est.
+  const shopCats = shop.length ? await get('shopCategories', true) : [];
 
   // Cohérence avec le reste de l'app : on cache les hauts-faits secrets aux non-MJ.
   const achFiltered = STATE.isAdmin ? achievements : achievements.filter(a => !a.secret);
@@ -288,6 +308,18 @@ function _buildBestiaryEntries(bestiary) {
     });
   }
   return entries;
+}
+
+// Index complet (tous les catalogues), chargé à la 1re vraie recherche.
+async function _ensureDeepEntriesForQuery(query) {
+  if (_norm(query).length < 2 || _deepEntriesLoaded) return false;
+  _deepEntriesPromise ||= _loadEntries({ deep: true });
+  const entries = await _deepEntriesPromise;
+  if (!_open || _deepEntriesLoaded) return false;
+  _deepEntriesLoaded = true;
+  // Conserve les créatures déjà ajoutées par la recherche bestiaire.
+  _entries = [...entries, ..._entries.filter(e => e.type === 'beast')];
+  return true;
 }
 
 async function _ensureBestiaryEntriesForQuery(query) {
@@ -603,11 +635,13 @@ function _mountModal() {
     _renderList();
 
     const requestedQuery = _query;
-    _ensureBestiaryEntriesForQuery(requestedQuery).then(changed => {
+    const refresh = changed => {
       if (!_open || !changed) return;
       _results = _filterAndSort(_entries, _query);
       _renderList();
-    });
+    };
+    _ensureDeepEntriesForQuery(requestedQuery).then(refresh);
+    _ensureBestiaryEntriesForQuery(requestedQuery).then(refresh);
   });
 
   input.addEventListener('keydown', (e) => {
@@ -657,6 +691,8 @@ async function openPalette() {
   _results = [];
   _bestiaryEntries = null;
   _bestiaryEntriesPromise = null;
+  _deepEntriesLoaded = false;
+  _deepEntriesPromise = null;
   _previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
   const input = _mountModal();
@@ -666,7 +702,8 @@ async function openPalette() {
   setTimeout(() => input?.focus(), 30);
 
   try {
-    _entries = await _loadEntries();
+    const shallow = await _loadEntries({ deep: false });
+    if (!_deepEntriesLoaded) _entries = shallow;   // une recherche rapide a pu compléter l'index
     if (_bestiaryEntries && _norm(_query).length >= 2 && !_entries.some(e => e.type === 'beast')) {
       _entries = [..._entries, ..._bestiaryEntries];
     }

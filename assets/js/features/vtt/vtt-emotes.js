@@ -554,13 +554,11 @@ export async function _vttSendEmote(name, opts = {}) {
 
   // Propagation temps réel. Une réaction n'embarque aucune identité textuelle :
   // le token d'origine suffit et aucune adresse de compte ne doit être exposée.
-  setDoc(_reactionRef(uid), {
+  _broadcastReaction(uid, {
     tokenId, emoteName: name, emoteUrl: em.url,
     pageId: VS.activePage?.id ?? null,
     createdAt: ts,
     big, targetTokenId: targetTokenId || null, count,
-  }).catch(err => {
-    console.error('[vtt] émote temps réel — écriture refusée. Vérifier vttEmoteReactions dans Firestore.', err);
   });
 
   // Statistiques : compte l'émote (attribuée au personnage du token émetteur), chaque envoi.
@@ -568,6 +566,29 @@ export async function _vttSendEmote(name, opts = {}) {
 
   _emoteLast = name;
   if (_emoteTab === 'rec') _renderEmotePickerIfOpen();
+}
+
+// Quota : un combo (clics rapides) écrivait le doc de réaction à chaque clic,
+// relu par chaque client. Le 1er clic part tout de suite, les suivants au plus
+// toutes les 500 ms avec le compteur courant (les autres voient ×1 puis ×N).
+const _REACTION_THROTTLE_MS = 500;
+let _reactionLastWrite = 0, _reactionTimer = null, _reactionPending = null;
+function _writeReaction(uid, payload) {
+  _reactionLastWrite = Date.now();
+  setDoc(_reactionRef(uid), payload).catch(err => {
+    console.error('[vtt] émote temps réel — écriture refusée. Vérifier vttEmoteReactions dans Firestore.', err);
+  });
+}
+function _broadcastReaction(uid, payload) {
+  const wait = _REACTION_THROTTLE_MS - (Date.now() - _reactionLastWrite);
+  if (wait <= 0 && !_reactionTimer) { _writeReaction(uid, payload); return; }
+  _reactionPending = { uid, payload };
+  if (_reactionTimer) return;
+  _reactionTimer = setTimeout(() => {
+    _reactionTimer = null;
+    const pending = _reactionPending; _reactionPending = null;
+    if (pending) _writeReaction(pending.uid, pending.payload);
+  }, Math.max(0, wait));
 }
 
 // Compat : ancien handler de clic sur une tuile → envoi normal.

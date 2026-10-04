@@ -2,8 +2,9 @@
 // PAGES
 // ══════════════════════════════════════════════
 import { STATE } from '../core/state.js';
+import { PRESENCE_TTL_MS } from '../shared/presence-ttl.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
-import { loadChars, loadCollection, loadCollectionAfter, getCachedCollection, getDocData, getDocDataSilent, replaceDoc, saveDoc, updateInCol, deleteFromCol, claimDocumentLease, clearDocumentLease } from '../data/firestore.js';
+import { loadChars, loadCollection, loadCollectionAfter, loadCollectionWhere, getCachedCollection, getDocData, getDocDataSilent, replaceDoc, saveDoc, updateInCol, deleteFromCol, claimDocumentLease, clearDocumentLease } from '../data/firestore.js';
 import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { isFeatureEnabled } from '../shared/features.js';
@@ -3636,7 +3637,7 @@ const PAGES = {
       </section>`;
 
       // ── Présence temps réel (MJ uniquement) ─────────────────────────
-      // Filtre : actif si lastSeen < 2 min (cohérent avec la présence VTT)
+      // Filtre : actif si lastSeen < PRESENCE_TTL_MS (cohérent avec la présence VTT)
       // Exclut le MJ lui-même. Cleanup auto via unwatchAll au prochain navigate.
       const _renderPresence = (list) => {
         const slot = document.getElementById('dash-presence');
@@ -3645,7 +3646,7 @@ const PAGES = {
         const active = (list || [])
           .filter(p => p.uid && p.uid !== _myUid)
           .map(p => ({ ...p, ts: p.lastSeen?.toMillis?.() ?? 0 }))
-          .filter(p => p.ts > 0 && (now - p.ts) < 120_000)
+          .filter(p => p.ts > 0 && (now - p.ts) < PRESENCE_TTL_MS)
           .sort((a, b) => (a.pseudo || '').localeCompare(b.pseudo || '', 'fr'));
         if (!active.length) {
           slot.innerHTML = `
@@ -4068,7 +4069,10 @@ const PAGES = {
     const [users, quests, vttTokens] = await Promise.all([
       loadAllUsers(STATE.adventure),
       Promise.resolve(getCachedCollection('quests') || loadCollection('quests')).catch(() => []),
-      loadCollection('vttTokens').catch(() => []),
+      // Quota : le diagnostic ne concerne que les tokens liés à un perso/PNJ
+      // (invocations comprises, typées 'npc') — pas les ennemis de toutes les
+      // scènes. La réparation manuelle, elle, relit toute la collection.
+      loadCollectionWhere('vttTokens', 'type', 'in', ['player', 'npc']).catch(() => []),
     ]);
     const content = document.getElementById('main-content');
 

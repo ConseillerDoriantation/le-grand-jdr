@@ -25,6 +25,7 @@ import {
   serverTimestamp, doc, getDoc, getDocFromCache, setDoc, deleteDoc, deleteField,
 } from '../config/firebase.js';
 import { getCurrentAdventureId, getDocData, subscribeCollection } from '../data/firestore.js';
+import { PRESENCE_TTL_MS } from '../shared/presence-ttl.js';
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif } from '../shared/notifications.js';
@@ -54,6 +55,7 @@ let _advMsgs = [];                                 // messages Aventure (live se
 let _groups  = [];                                 // convos de groupe où je suis membre
 let _convoMsgs = [];                               // messages du GROUPE ouvert
 let _reads = {};                                   // convoId → millis lus
+let _readsSaved = {};                              // idem, tel qu'ENREGISTRÉ dans chatReads (quota)
 let _ghosts = new Set();                            // uids confirmés fantômes (compte supprimé) → masqués
 let _unsubAdv = null, _unsubGroups = null, _unsubConvo = null;
 let _unsubTyping = null, _unsubReads = null;       // « écrit… » (conv ouverte) + « vu » (DM ouvert)
@@ -96,7 +98,8 @@ export async function initChat(uid) {
   _prevUnread = 0;
   _mount();
 
-  try { const s = await getDoc(_readRef()); const d = s.data() || {}; _reads = { ...d, [ADV]: Number(d[ADV] ?? d.at) || 0 }; }
+  _readsSaved = {};
+  try { const s = await getDoc(_readRef()); const d = s.data() || {}; _reads = { ...d, [ADV]: Number(d[ADV] ?? d.at) || 0 }; _readsSaved = { ..._reads }; }
   catch { _reads = {}; }
 
   _advLimit = HISTORY;
@@ -183,7 +186,7 @@ function _subscribePresence() {
     const now = Date.now(); const on = new Set();
     rows.forEach(p => {
       const ms = p.lastSeen?.toMillis?.() ?? (typeof p.lastSeen === 'number' ? p.lastSeen : 0);
-      if (p.id !== _uid && now - ms < 120000) on.add(p.id);   // expiration 120 s, hors moi
+      if (p.id !== _uid && now - ms < PRESENCE_TTL_MS) on.add(p.id);   // présence expirée exclue, hors moi
     });
     _online = on;
     _updateOnlineDots();
@@ -673,7 +676,9 @@ function _signalTyping() {
     if (ref) setDoc(ref, { convoId: _openId, at: serverTimestamp() }).catch(() => {});
   }
   clearTimeout(_typingClearTimer);
-  _typingClearTimer = setTimeout(_clearTyping, 5000);   // arrêt de frappe → efface
+  // Arrêt de frappe : aucune écriture « effacer » (les lecteurs expirent déjà
+  // l'indicateur 6 s après le dernier signal) ; la frappe suivante ré-émet tout de suite.
+  _typingClearTimer = setTimeout(() => { _typingWroteAt = 0; }, 5000);
 }
 function _clearTyping() {
   clearTimeout(_typingClearTimer);
@@ -838,11 +843,25 @@ function _markReadLocal(convoId) {
   const latest = msgs.length ? _atMillis(msgs[msgs.length - 1]) : 0;
   _reads[convoId] = Math.max(_reads[convoId] || 0, latest, Date.now());
 }
+// Dernier message connu d'une conversation, sans lecture supplémentaire : fil
+// Aventure (toujours écouté) ou aperçu `lastAt` du groupe / MP (toujours écouté).
+function _latestAt(convoId) {
+  if (convoId === ADV) return _advMsgs.length ? _atMillis(_advMsgs[_advMsgs.length - 1]) : 0;
+  const open = _openId === convoId && _convoMsgs.length ? _atMillis(_convoMsgs[_convoMsgs.length - 1]) : 0;
+  return Math.max(open, _lastMillis(_convoById(convoId)));
+}
 async function _markRead(convoId) {
   _markReadLocal(convoId);
   _notify();                       // titre d'onglet à jour après lecture
+  // Quota : aucun message depuis le dernier accusé ENREGISTRÉ → rien à écrire
+  // (ouvrir/fermer la bulle ne coûte plus d'écriture ; non-lus et « Vu » inchangés).
+  if (_latestAt(convoId) <= (Number(_readsSaved[convoId]) || 0)) return;
   const ref = _readRef(); if (!ref) return;
-  try { await setDoc(ref, { [convoId]: _reads[convoId] }, { merge: true }); } catch { /* non bloquant */ }
+  const value = _reads[convoId];
+  try {
+    await setDoc(ref, { [convoId]: value }, { merge: true });
+    _readsSaved[convoId] = Math.max(Number(_readsSaved[convoId]) || 0, value);
+  } catch { /* non bloquant */ }
 }
 
 // ── Messages privés (DM) ────────────────────────────────────────────────────

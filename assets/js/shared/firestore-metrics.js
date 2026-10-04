@@ -59,15 +59,38 @@ export function recordFirestoreWrite(path, count = 1) {
   _remember('write', path, safeCount);
 }
 
+// Nom de la collection d'un chemin Firestore (segments alternés collection/doc) :
+// 'adventures/a/vttTokens/t1' → 'vttTokens', 'adventures/a/vttTokens' → 'vttTokens'.
+export function metricCollectionName(path = '') {
+  const segments = String(path || '').split('/').filter(Boolean);
+  if (!segments.length) return 'inconnu';
+  return segments[segments.length % 2 === 0 ? segments.length - 2 : segments.length - 1];
+}
+
 export function firestoreMetricsSnapshot() {
   const byPath = [..._paths.entries()]
     .map(([path, values]) => ({ path, ...values, total: values.reads + values.writes }))
     .sort((a, b) => b.total - a.total || a.path.localeCompare(b.path));
+  // Vue agrégée : les écritures sont ventilées par document (1 ligne/token…),
+  // ce regroupement montre directement quelle collection consomme le quota.
+  const collections = new Map();
+  for (const row of byPath) {
+    const name = metricCollectionName(row.path);
+    const acc = collections.get(name) || { collection: name, reads: 0, writes: 0, cacheReads: 0, docs: 0 };
+    acc.reads += row.reads;
+    acc.writes += row.writes;
+    acc.cacheReads += row.cacheReads;
+    acc.docs += 1;
+    collections.set(name, acc);
+  }
+  const byCollection = [...collections.values()]
+    .sort((a, b) => (b.writes - a.writes) || (b.reads - a.reads) || a.collection.localeCompare(b.collection));
   return {
     startedAt: new Date(_startedAt).toISOString(),
     elapsedMinutes: Math.max(0, Math.round((Date.now() - _startedAt) / 6000) / 10),
     ..._totals,
     lastMinute: _recent.reduce((sum, entry) => sum + entry.count, 0),
+    byCollection,
     byPath,
     note: 'Estimation client : la console Firebase reste la source de facturation officielle.',
   };
@@ -84,9 +107,11 @@ export function resetFirestoreMetrics() {
 }
 
 if (typeof window !== 'undefined') {
-  // Usage console : firebaseUsage() ou firebaseUsage.reset().
+  // Usage console : firebaseUsage(), firebaseUsage.print() (par collection),
+  // firebaseUsage.printDocs() (par document) ou firebaseUsage.reset().
   const api = () => firestoreMetricsSnapshot();
   api.reset = resetFirestoreMetrics;
-  api.print = () => console.table(firestoreMetricsSnapshot().byPath);
+  api.print = () => console.table(firestoreMetricsSnapshot().byCollection);
+  api.printDocs = () => console.table(firestoreMetricsSnapshot().byPath);
   window.firebaseUsage = api;
 }

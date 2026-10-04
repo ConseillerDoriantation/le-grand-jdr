@@ -266,21 +266,26 @@ function isCharacterUidSameEmailRelink(adventureId, before, after) {
          after.diff(before).affectedKeys().hasOnly(["uid"]) &&
          after.uid == request.auth.uid;
 }
+// Quota : chaque get() d'une règle est une lecture facturée (mise en cache pour
+// la seule requête en cours). Le doc aventure est lu de toute façon ; isAdmin()
+// lit en plus users/{uid}. Il est donc évalué EN DERNIER : un membre court-circuite
+// avant, sans cette lecture. Résultat booléen identique (le OU est commutatif, et
+// `error || true` vaut true pour un super-admin hors aventure).
 function inAdventure(adventureId) {
   let adv = get(/databases/$(database)/documents/adventures/$(adventureId)).data;
   return isLoggedIn() &&
     (
-      isAdmin() ||
       adv.admins.hasAny([request.auth.uid]) ||
       adv.accessList.hasAny([request.auth.uid]) ||
-      hasEmailAccess(adv)
+      hasEmailAccess(adv) ||
+      isAdmin()
     );
 }
 function isAdvAdmin(adventureId) {
-  return isAdmin() ||
-    (isLoggedIn() &&
+  return (isLoggedIn() &&
       get(/databases/$(database)/documents/adventures/$(adventureId))
-        .data.admins.hasAny([request.auth.uid]));
+        .data.admins.hasAny([request.auth.uid])) ||
+    isAdmin();
 }
 function ownsAdventureCharacter(adventureId, charId) {
   return isLoggedIn() &&
