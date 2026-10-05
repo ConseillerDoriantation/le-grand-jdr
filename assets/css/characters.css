@@ -22400,6 +22400,8 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-v3 button.ids-portrait-in.is-clickable:hover { box-shadow: 0 0 0 2px var(--surface-1),0 0 0 4px color-mix(in srgb,var(--aura) 86%,transparent),0 0 20px color-mix(in srgb,var(--aura) 28%,transparent); }
 .cs-v3 button.ids-portrait-in.is-clickable:focus-visible { outline: 2px solid var(--aura); outline-offset: 4px; }
 .cs-v3 .ids-portrait-in img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.cs-v3 .ids-portrait.is-dead .ids-portrait-in img { filter: grayscale(1) contrast(.9) brightness(.72); }
+.cs-v3 .ids-portrait-in img { transition: filter .22s ease; }
 .cs-v3 .ids-portrait-edit { position: absolute; right: 6px; bottom: 16px; z-index: 4; width: 31px; height: 31px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border-md); border-radius: 50%; background: var(--surface-1); color: var(--text-muted); cursor: pointer; }
 .cs-v3 .ids-portrait-edit:hover { border-color: var(--border-strong); color: var(--text); }
 .cs-v3 .ids-level { position: absolute; left: 50%; bottom: -12px; z-index: 4; transform: translateX(-50%); height: 25px; display: flex; align-items: center; gap: 5px; padding: 0 12px; border: 1px solid var(--border-md); border-radius: 999px; background: var(--surface-1); color: var(--text); font: 600 .92rem var(--font-display, Cinzel, serif); cursor: pointer; }
@@ -22409,6 +22411,27 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-v3 .ids-copy { width: 100%; margin-top: 22px; }
 .cs-v3 .ids-copy h2 { margin: 0; color: var(--text); font: 700 1.28rem/1.2 var(--font-display, Cinzel, serif); letter-spacing: .015em; text-transform: uppercase; text-wrap: balance; }
 .cs-v3 .ids-copy > p { margin: 5px 0 0; color: var(--text-muted); font-size: .79rem; font-weight: 500; }
+.cs-v3 .ids-life { --life-color: var(--emerald); position: relative; display: inline-flex; align-items: center; gap: 6px; width: max-content; min-height: 23px; margin-top: 7px; padding: 3px 8px; border: 1px solid color-mix(in srgb,var(--life-color) 25%,var(--border)); border-radius: 999px; background: color-mix(in srgb,var(--life-color) 6%,transparent); color: var(--text-muted); font: 600 .64rem/1 var(--font-body, Inter, sans-serif); }
+.cs-v3 button.ids-life { cursor: pointer; }
+.cs-v3 button.ids-life:hover { border-color: color-mix(in srgb,var(--life-color) 52%,var(--border)); background: color-mix(in srgb,var(--life-color) 11%,transparent); color: var(--text-soft); }
+.cs-v3 .ids-life.is-dead { --life-color: var(--text-dim); }
+.cs-v3 .ids-life.is-other { --life-color: var(--amber); }
+.cs-v3 .ids-life > i { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--life-color); box-shadow: 0 0 0 2px color-mix(in srgb,var(--life-color) 13%,transparent); }
+.cs-v3 .ids-life > span { padding-top: 1px; }
+.cs-v3 .ids-life > svg { width: 11px; height: 11px; margin-left: 1px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.cs-v3 .ids-pop-status { width: 260px; padding: 10px; }
+.cs-v3 .ids-status-options { display: grid; gap: 3px; margin-top: 7px; }
+.cs-v3 .ids-status-option { --life-color: var(--emerald); display: grid; grid-template-columns: 8px minmax(0,1fr) 18px; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 7px 8px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--text-muted); text-align: left; cursor: pointer; }
+.cs-v3 .ids-status-option.is-dead { --life-color: var(--text-dim); }
+.cs-v3 .ids-status-option.is-other { --life-color: var(--amber); }
+.cs-v3 .ids-status-option:hover { background: var(--surface-2); color: var(--text-soft); }
+.cs-v3 .ids-status-option.active { border-color: color-mix(in srgb,var(--life-color) 34%,var(--border)); background: color-mix(in srgb,var(--life-color) 8%,transparent); }
+.cs-v3 .ids-status-option > i { width: 7px; height: 7px; border-radius: 50%; background: var(--life-color); }
+.cs-v3 .ids-status-option > span { display: grid; gap: 2px; min-width: 0; }
+.cs-v3 .ids-status-option b { color: var(--text-soft); font-size: .72rem; font-weight: 650; }
+.cs-v3 .ids-status-option small { overflow: hidden; color: var(--text-dim); font-size: .6rem; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.cs-v3 .ids-status-option em { visibility: hidden; color: var(--life-color); font-size: .75rem; font-style: normal; font-weight: 800; text-align: center; }
+.cs-v3 .ids-status-option.active em { visibility: visible; }
 .cs-v3 .ids-titles { margin-top: 7px; color: var(--text-soft); font-family: Georgia, 'Times New Roman', serif; font-size: .75rem; font-style: italic !important; font-weight: 400; line-height: 1.35; text-wrap: balance; }
 .cs-v3 .ids-titles span { color: var(--text-dim); font-style: italic !important; }
 .cs-v3 .ids-xp-line { width: auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; margin-top: 9px; padding: 4px 9px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text-dim); font-size: .68rem; cursor: pointer; }
