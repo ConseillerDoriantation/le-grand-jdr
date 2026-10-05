@@ -1190,7 +1190,7 @@
 .tm { --lw: 212px; position: relative; display: flex; flex-direction: column; gap: 10px; }
 .tm-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tm-zoom { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: var(--r-full); background: var(--surface-2); border: 1px solid var(--border); }
-.tm-zoom button { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: var(--text-soft); font-size: 15px; font-weight: 600; cursor: pointer; }
+.tm-zoom button { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: var(--text-soft); font-size: 15px; font-weight: 600; cursor: pointer; background: transparent; border: 0; -webkit-appearance: none; appearance: none; }
 .tm-zoom button:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
 .tm-zoom button:disabled { opacity: .35; cursor: default; }
 .tm-zoom span { min-width: 44px; text-align: center; font-size: 12px; font-weight: 500; color: var(--text-soft); font-variant-numeric: tabular-nums; }
@@ -1389,7 +1389,7 @@
 .ls-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .ls-tools > span { font-size: 12px; color: var(--text-muted); }
 .ls-seg { display: inline-flex; padding: 2px; border-radius: var(--r-full); background: var(--surface-sunken); border: 1px solid var(--border); }
-.ls-seg button { padding: 5px 13px; border-radius: var(--r-full); font-size: 12px; font-weight: 500; color: var(--text-muted); cursor: pointer; }
+.ls-seg button { padding: 5px 13px; border-radius: var(--r-full); font-size: 12px; font-weight: 500; color: var(--text-muted); cursor: pointer; background: transparent; border: 0; -webkit-appearance: none; appearance: none; }
 .ls-seg button:hover { color: var(--text-soft); }
 .ls-seg button.on { background: var(--surface-3); color: var(--text); }
 .ls-t { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-1); overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
@@ -1399,7 +1399,7 @@
 .ls-r[data-lsopen]:hover { background: var(--surface-2); }
 .ls-r[data-lsopen]:focus-visible { outline: none; background: var(--surface-2); box-shadow: inset 2px 0 0 var(--gold); }
 .ls-hd { min-height: 40px; border-top: 0; background: var(--surface-2); }
-.ls-r.ls-hd > button { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 4px; min-width: 0; height: 40px; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); text-align: left; cursor: pointer; }
+.ls-r.ls-hd > button { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 4px; min-width: 0; height: 40px; font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); text-align: left; cursor: pointer; background: transparent; border: 0; -webkit-appearance: none; appearance: none; }
 .ls-hd button:hover { color: var(--text-soft); }
 .ls-hd button.on { color: var(--text); }
 .ls-hd button i { font-style: normal; color: var(--gold-2); font-size: 11px; letter-spacing: 0; }

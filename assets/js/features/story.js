@@ -1047,11 +1047,15 @@ let TM_POS = {}, TM_LINKS = [], TM_KEEP = null;
 // Statut → clé courte de rendu.
 const _tmKey = m => ({ 'Terminée':'done', 'En cours':'live', 'Échouée':'fail' })[m.statut] || 'todo';
 
-// Ids de personnages du joueur connecté (pastille « Toi »).
+// Ids des personnages POSSÉDÉS par le joueur connecté (pastille « Toi »).
+// On n'utilise pas getMyCharacters : il inclut les `controlDelegates` (le MJ qui
+// peut piloter les jetons des joueurs), ce qui marquerait à tort « Toi » sur les
+// missions des autres. La propriété « Toi » = possession réelle (c.uid === uid).
 function _tmMyCharIds() {
   const uid = STATE.user?.uid || '';
-  const chars = getMyCharacters(getCachedCollection('characters') || STATE.characters || [], uid);
-  return new Set(chars.map(c => c.id).filter(Boolean));
+  if (!uid) return new Set();
+  const chars = getCachedCollection('characters') || STATE.characters || [];
+  return new Set(chars.filter(c => c?.uid === uid).map(c => c.id).filter(Boolean));
 }
 // Participants d'une mission → [{ id, nom, me }] (chaînes = charId, ou objets).
 function _tmParticipants(m, myIds, charById) {
