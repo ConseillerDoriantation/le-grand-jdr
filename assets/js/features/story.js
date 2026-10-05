@@ -73,12 +73,10 @@ const STORE = {
 };
 
 let _stCropper   = null;
-let _stMapZoom = () => {};
-let _stMapReset = () => {};
 
 // ── Préférences persistées (handoff STORY.md §11) ─────────────────────────────
 const STORY_PREFS_KEY = 'story-prefs-v2';
-const STORY_PREFS_DEFAULT = { view: 'carte', search: '', statut: '', playerScope: 'all', zoom: 1, panX: 0, panY: 0 };
+const STORY_PREFS_DEFAULT = { view: 'carte', search: '', statut: '', playerScope: 'all', mapDensity: 1, mapX: null };
 function getStoryPrefs() {
   try { return { ...STORY_PREFS_DEFAULT, ...(JSON.parse(localStorage.getItem(STORY_PREFS_KEY)) || {}) }; }
   catch { return { ...STORY_PREFS_DEFAULT }; }
@@ -1033,357 +1031,329 @@ function _renderHero(hero, activeActe, counts, progPct, ringFill, ringC, nextMis
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// VUE CARTE — Lignes narratives (style métro) — handoff STORY.md §6 ⭐
-// • 1 axe = 1 couloir horizontal avec carte d'en-tête à gauche
-// • Stations = missions ordonnées par `ordre`, positions déterministes
-// • Liens INTRA-axe représentés par la ligne de métro elle-même
-// • Liens INTER-axes = S-curves verticales pointillées dorées
-// • Grille verticale dashée subtile = repère temporel commun
-// • Zoom molette + pan, pas de drag des nœuds
+// VUE CARTE v2 — Plan de métro lisible (handoff TrameCarte)
+// • Rendu 1:1 : le conteneur défile nativement ; le zoom change l'espacement des
+//   colonnes (densité), jamais la taille du texte.
+// • HTML + SVG : le SVG ne trace que les lignes d'axe et les correspondances ;
+//   stations, étiquettes, règle des chapitres et noms d'axes sont en HTML.
+// • En-têtes collants (chapitres en haut + axes à gauche), colonne « En jeu ».
 // ══════════════════════════════════════════════════════════════════════════════
-const MAP_HEADER_W = 240;
-const MAP_COL_W    = 220;
-const MAP_LANE_H   = 200;
-const MAP_TOP_PAD  = 70;
-const MAP_BOT_PAD  = 40;
-const MAP_NODE_R   = 38;
+const TM = { TOP: 44, BOT: 74, ROW: 100, R: 14, BASE_COL: 184 };
+const TM_DENS = [0.7, 0.85, 1, 1.2, 1.45];
+let TM_POS = {}, TM_LINKS = [], TM_KEEP = null;
+
+// Statut → clé courte de rendu.
+const _tmKey = m => ({ 'Terminée':'done', 'En cours':'live', 'Échouée':'fail' })[m.statut] || 'todo';
+
+// Ids de personnages du joueur connecté (pastille « Toi »).
+function _tmMyCharIds() {
+  const uid = STATE.user?.uid || '';
+  const chars = getMyCharacters(getCachedCollection('characters') || STATE.characters || [], uid);
+  return new Set(chars.map(c => c.id).filter(Boolean));
+}
+// Participants d'une mission → [{ id, nom, me }] (chaînes = charId, ou objets).
+function _tmParticipants(m, myIds, charById) {
+  const uid = STATE.user?.uid || '';
+  return (Array.isArray(m.participants) ? m.participants : []).map(p => {
+    const id = typeof p === 'string' ? p : (p?.charId || p?.id || '');
+    const pUid = typeof p === 'object' ? p?.uid : '';
+    const nom = (typeof p === 'object' && (p?.nom || p?.name)) || charById.get(id)?.nom || id;
+    return { id, nom, me: (id && myIds.has(id)) || (uid && pUid === uid) };
+  }).filter(p => p.id || p.nom);
+}
+// La mission concerne-t-elle un personnage du joueur connecté ?
+const _tmMine = (m, myIds) => {
+  const uid = STATE.user?.uid || '';
+  return (Array.isArray(m.participants) ? m.participants : []).some(p => {
+    const id = typeof p === 'string' ? p : (p?.charId || p?.id || '');
+    const pUid = typeof p === 'object' ? p?.uid : '';
+    return (id && myIds.has(id)) || (uid && pUid === uid);
+  });
+};
 
 function _renderMapView(missions) {
   STORE.mapItemsCache = missions;
+  const prefs = getStoryPrefs();
+  const d = prefs.mapDensity || 1, COL = Math.round(TM.BASE_COL * d);
+  const myIds = _tmMyCharIds();
 
-  // ── 1. Grouper par axe ─────────────────────────────────────────────────
+  // 1) Grouper par axe, trier par ordre puis date.
   const byAxe = new Map();
-  missions.forEach(m => {
-    const k = m.axe || '__none__';
-    if (!byAxe.has(k)) byAxe.set(k, []);
-    byAxe.get(k).push(m);
-  });
-  byAxe.forEach(list => list.sort((a,b) =>
-    (a.ordre||0) - (b.ordre||0) || (a.date||'').localeCompare(b.date||'')));
+  missions.forEach(m => { const k = m.axe || '__none__'; if (!byAxe.has(k)) byAxe.set(k, []); byAxe.get(k).push(m); });
+  byAxe.forEach(l => l.sort((a, b) => (a.ordre||0) - (b.ordre||0) || (a.date||'').localeCompare(b.date||'')));
 
-  // ── 2. ALIGNEMENT TEMPOREL GLOBAL ──────────────────────────────────────
-  // Toutes les missions partagent une grille d'ordres communs. Deux missions
-  // de même `ordre` (peu importe leur axe) tombent dans la MÊME colonne X.
-  // → permet de voir "ce qui se passe en même temps" entre axes parallèles.
-  const allOrdres = [...new Set(missions.map(m => m.ordre || 0))].sort((a,b) => a - b);
-  if (!allOrdres.length) allOrdres.push(0);
-  const ordreToCol = new Map(allOrdres.map((o, i) => [o, i]));
+  // 2) Colonnes = valeurs distinctes d'ordre, tous axes confondus.
+  const ordres = [...new Set(missions.map(m => m.ordre||0))].sort((a,b) => a-b);
+  if (!ordres.length) ordres.push(0);
+  const o2c = new Map(ordres.map((o,i) => [o,i]));
 
-  // ── 3. Sub-rows : si 2+ missions du même axe ont le même ordre, on les
-  //    empile verticalement dans la lane (split de ligne).
-  const lanes = [...byAxe.entries()]
-    .sort((A, B) => _axeRank(A[0]) - _axeRank(B[0]))
-    .map(([axe, list], laneIdx) => {
-    // Grouper par colonne (= par valeur d'ordre)
+  // 3) Une rangée par axe ; empilement si plusieurs missions au même chapitre.
+  let y = 0;
+  const lanes = [...byAxe.entries()].sort((A,B) => _axeRank(A[0]) - _axeRank(B[0])).map(([axe, list], i) => {
     const byCol = new Map();
-    list.forEach(m => {
-      const col = ordreToCol.get(m.ordre || 0) ?? 0;
-      if (!byCol.has(col)) byCol.set(col, []);
-      byCol.get(col).push(m);
-    });
+    list.forEach(m => { const c = o2c.get(m.ordre||0) ?? 0; if (!byCol.has(c)) byCol.set(c, []); byCol.get(c).push(m); });
     const maxSubs = Math.max(1, ...[...byCol.values()].map(a => a.length));
-    return {
-      axe, list, byCol, maxSubs,
-      color: axe === '__none__' ? '#7a8fa8' : (STORE.axeMap[axe] || '#7a8fa8'),
+    const h = TM.TOP + (maxSubs-1)*TM.ROW + TM.BOT;
+    const l = { i, axe, list, byCol, cols:[...byCol.keys()].sort((a,b)=>a-b), top:y, y0:y+TM.TOP, h,
+      color: axe === '__none__' ? 'var(--text-muted)' : axeColor(axe),
       label: axe === '__none__' ? 'Hors axe' : axe,
-      term: list.filter(m => m.statut === 'Terminée').length,
-    };
+      done: list.filter(m => m.statut === 'Terminée').length };
+    y += h;
+    return l;
   });
+  const H = y, W = ordres.length*COL + 24;
 
-  // ── 4. Hauteur dynamique par lane (selon sub-rows max) ─────────────────
-  const SUB_GAP = 22;
-  const SUB_BLOCK_H = MAP_NODE_R * 2 + 60;  // place pour titre + date sous le nœud
-  const laneY = []; let curY = MAP_TOP_PAD;
-  lanes.forEach(l => {
-    const h = Math.max(MAP_LANE_H, l.maxSubs * SUB_BLOCK_H + (l.maxSubs - 1) * SUB_GAP + 60);
-    l.height = h;
-    l.y = curY + h / 2;
-    laneY.push(l.y);
-    curY += h;
-  });
-  const maxCols = allOrdres.length;
-  const MAP_W = MAP_HEADER_W + maxCols * MAP_COL_W + 40;
-  const MAP_H = curY + MAP_BOT_PAD;
+  // 4) Position de chaque station.
+  TM_POS = {};
+  lanes.forEach(l => l.byCol.forEach((subs, c) => subs.forEach((m, s) => {
+    TM_POS[m.id] = { x: c*COL + COL/2, y: l.y0 + s*TM.ROW, lane: l.i, col: c, sub: s };
+  })));
 
-  // ── 5. Positions de chaque station ─────────────────────────────────────
-  const positions = {};
-  lanes.forEach(l => {
-    l.byCol.forEach((subs, col) => {
-      const N = subs.length;
-      subs.forEach((m, subRow) => {
-        const x = MAP_HEADER_W + col * MAP_COL_W + MAP_COL_W/2;
-        // Centré sur la lane si N=1 ; sinon empilé symétriquement autour du centre
-        const yOff = N === 1
-          ? 0
-          : (subRow - (N - 1) / 2) * (SUB_BLOCK_H + SUB_GAP) * 0.7;
-        positions[m.id] = { x, y: l.y + yOff };
+  // Colonne « En jeu » = la plus à droite contenant une mission En cours.
+  let nowCol = -1;
+  missions.forEach(m => { if (m.statut === 'En cours' && TM_POS[m.id]) nowCol = Math.max(nowCol, TM_POS[m.id].col); });
+
+  // 5) Lignes d'axe : plein jusqu'aux stations jouées, pointillé vers les à-venir.
+  const seg = (dPath, m, lane) => `<path class="tm-ln ${_tmKey(m)==='todo'?'fut':'run'}" data-lane="${lane}" style="--axe:${lanes[lane].color}" d="${dPath}"/>`;
+  const linesSvg = lanes.map(l => {
+    const out = [];
+    l.cols.forEach((c, idx) => {
+      const subs = l.byCol.get(c), x = c*COL + COL/2;
+      if (idx > 0) {
+        const xp = l.cols[idx-1]*COL + COL/2;
+        out.push(seg(`M${xp} ${l.y0}L${x} ${l.y0}`, subs[0], l.i));
+      }
+      subs.slice(1).forEach((m, k) => {
+        const yk = l.y0 + (k+1)*TM.ROW;
+        const prev = idx > 0 ? l.cols[idx-1]*COL + COL/2 : null;
+        const next = idx < l.cols.length-1 ? l.cols[idx+1]*COL + COL/2 : null;
+        if (prev === null) out.push(seg(`M${x} ${l.y0}L${x} ${yk}`, m, l.i));
+        else out.push(seg(`M${prev} ${l.y0}C${prev+(x-prev)*.55} ${l.y0} ${x-(x-prev)*.55} ${yk} ${x} ${yk}`, m, l.i));
+        if (next !== null) out.push(seg(`M${x} ${yk}C${x+(next-x)*.45} ${yk} ${next-(next-x)*.55} ${l.y0} ${next} ${l.y0}`, l.byCol.get(l.cols[idx+1])[0], l.i));
       });
     });
-  });
-
-  // ── DEFS : clipPaths + dégradés de lane + marker ──
-  const clipDefs = missions.filter(m => positions[m.id]).map(m => `
-    <clipPath id="st-clip-${_esc(m.id)}">
-      <circle cx="${positions[m.id].x}" cy="${positions[m.id].y}" r="${MAP_NODE_R}"/>
-    </clipPath>`).join('');
-  const laneGrads = lanes.map((l, i) => `
-    <linearGradient id="lane-grad-${i}" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="${l.color}" stop-opacity="0.18"/>
-      <stop offset="100%" stop-color="${l.color}" stop-opacity="0.02"/>
-    </linearGradient>`).join('');
-  const defs = `<defs>
-    <marker id="trame-arrow" viewBox="0 0 10 10" refX="9" refY="5"
-      markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M0 0 L10 5 L0 10 z" fill="var(--amber)" fill-opacity="0.75"/>
-    </marker>
-    ${clipDefs}${laneGrads}
-  </defs>`;
-
-  // ── GRILLE CHRONOLOGIQUE (lignes verticales très subtiles) ──
-  const gridLines = Array.from({ length: maxCols }, (_, i) => {
-    const x = MAP_HEADER_W + i * MAP_COL_W + MAP_COL_W/2;
-    return `<line class="map-grid" x1="${x}" y1="${MAP_TOP_PAD - 10}" x2="${x}" y2="${MAP_H - 20}"/>`;
+    return out.join('');
   }).join('');
 
-  // ── COULOIRS (bande + en-tête + ligne de métro + CH.NN) ──
-  const lanesSvg = lanes.map((l, idx) => {
-    const headerLabel = l.label.length > 22 ? l.label.slice(0, 21) + '…' : l.label;
-    const pct = l.list.length ? Math.round(l.term / l.list.length * 100) : 0;
-    const fillW = 130 * (l.list.length ? l.term / l.list.length : 0);
-    // Endpoints de la ligne de métro = première et dernière colonne occupée par cet axe
-    const occupiedCols = [...l.byCol.keys()];
-    const firstCol = occupiedCols.length ? Math.min(...occupiedCols) : 0;
-    const lastCol  = occupiedCols.length ? Math.max(...occupiedCols) : 0;
-    const firstX = MAP_HEADER_W + firstCol * MAP_COL_W + MAP_COL_W/2;
-    const lastX  = MAP_HEADER_W + lastCol  * MAP_COL_W + MAP_COL_W/2;
-    const laneTop = l.y - l.height/2;
-    const headerY = laneTop + 24;
-    const headerH = l.height - 48;
-    const headerLabelY = l.y - 18;
-    return `<g>
-      <!-- Bande de fond colorée -->
-      <rect x="${MAP_HEADER_W - 8}" y="${laneTop + 18}"
-        width="${MAP_W - MAP_HEADER_W}" height="${l.height - 36}"
-        fill="url(#lane-grad-${idx})" rx="20"/>
-      <!-- Carte d'en-tête à gauche -->
-      <rect class="map-lane-card" x="16" y="${headerY}"
-        width="${MAP_HEADER_W - 38}" height="${headerH}"
-        stroke="${l.color}" rx="14"/>
-      <rect x="16" y="${headerY}" width="4" height="${headerH}" fill="${l.color}" rx="2"/>
-      <text class="map-lane-title" x="32" y="${headerLabelY}" fill="${l.color}">${_esc(headerLabel)}</text>
-      <text class="map-lane-sub" x="32" y="${l.y + 2}">${l.list.length} CHAPITRE${l.list.length > 1 ? 'S' : ''}</text>
-      <rect class="map-lane-track" x="32" y="${l.y + 16}" width="130" height="5" rx="2.5"/>
-      <rect x="32" y="${l.y + 16}" width="${fillW.toFixed(1)}" height="5" fill="${l.color}" rx="2.5"/>
-      <text class="map-lane-pct" x="170" y="${l.y + 21}" fill="${l.color}">${pct}%</text>
-      <!-- Ligne de métro (glow + solide) — uniquement entre première et dernière colonne -->
-      ${l.list.length > 0 && firstCol !== lastCol ? `
-        <line x1="${firstX}" y1="${l.y}" x2="${lastX}" y2="${l.y}"
-          stroke="${l.color}" stroke-width="14" opacity="0.10" stroke-linecap="round"/>
-        <line x1="${firstX}" y1="${l.y}" x2="${lastX}" y2="${l.y}"
-          stroke="${l.color}" stroke-width="5" opacity="0.55" stroke-linecap="round"/>
-      ` : ''}
-      <!-- Pour les sub-rows : connecteur vertical entre la ligne de métro et chaque sous-station -->
-      ${[...l.byCol.entries()].map(([col, subs]) => {
-        if (subs.length <= 1) return '';
-        const x = MAP_HEADER_W + col * MAP_COL_W + MAP_COL_W/2;
-        const ys = subs.map(m => positions[m.id]?.y).filter(Number.isFinite);
-        if (!ys.length) return '';
-        const minY = Math.min(...ys), maxY = Math.max(...ys);
-        return `<line x1="${x}" y1="${minY}" x2="${x}" y2="${maxY}"
-          stroke="${l.color}" stroke-width="3" opacity="0.32" stroke-linecap="round"/>`;
-      }).join('')}
-      <!-- Numéros de chapitre au-dessus de chaque station, basés sur l'ordre GLOBAL -->
-      ${l.list.map(m => {
-        const p = positions[m.id]; if (!p) return '';
-        const colIdx = ordreToCol.get(m.ordre || 0) ?? 0;
-        return `<text class="map-ch" x="${p.x}" y="${p.y - MAP_NODE_R - 22}"
-          text-anchor="middle">CH.${String(colIdx + 1).padStart(2,'0')}</text>`;
-      }).join('')}
-    </g>`;
+  // 6) Correspondances (liens) — hors enchaînement direct sur la même ligne.
+  TM_LINKS = [];
+  const R = TM.R;
+  const linksSvg = missions.flatMap(m => (m.liens||[]).map(tid => {
+    const a = TM_POS[m.id], b = TM_POS[tid];
+    if (!a || !b) return '';
+    const lane = lanes[a.lane];
+    if (a.lane === b.lane && a.sub === 0 && b.sub === 0 && Math.abs(lane.cols.indexOf(a.col) - lane.cols.indexOf(b.col)) === 1) return '';
+    TM_LINKS.push([m.id, tid]);
+    let dPath;
+    if (Math.abs(a.x-b.x) < 4) {
+      const s = Math.sign(b.y-a.y) || 1, fy = a.y + s*(R+4), ty = b.y - s*(R+9), bow = COL*.3;
+      dPath = `M${a.x+R*.7} ${fy}C${a.x+bow} ${fy+s*20} ${b.x+bow} ${ty-s*20} ${b.x+R*.7} ${ty}`;
+    } else {
+      const s = Math.sign(b.x-a.x), fx = a.x + s*(R+4), tx = b.x - s*(R+9), mid = (fx+tx)/2;
+      dPath = `M${fx} ${a.y}C${mid} ${a.y} ${mid} ${b.y} ${tx} ${b.y}`;
+    }
+    return `<path class="tm-lk" data-a="${_esc(m.id)}" data-b="${_esc(tid)}" d="${dPath}" marker-end="url(#tmArrow)"/>`;
+  })).join('');
+
+  // 7) Règle des chapitres (sticky top).
+  const ruler = ordres.map((o, c) => {
+    const date = missions.find(m => TM_POS[m.id]?.col === c && m.date)?.date || '';
+    return `<div class="tm-rc${c===nowCol?' now':''}" style="left:${c*COL}px;width:${COL}px">
+      <b>Ch. ${String(c+1).padStart(2,'0')}</b>${c===nowCol ? '<em>En jeu</em>' : date ? `<span>${_esc(date)}</span>` : ''}</div>`;
   }).join('');
 
-  // ── LIENS INTER-AXES uniquement (S-curves verticales pointillées) ──
-  const itemMap = new Map(missions.map(m => [m.id, m]));
-  const crossLiens = [];
-  missions.forEach(m => (m.liens || []).forEach(tid => {
-    const fp = positions[m.id], tp = positions[tid];
-    if (!fp || !tp || !itemMap.has(tid)) return;
-    if (Math.abs(fp.y - tp.y) > 5) crossLiens.push({ fp, tp });
-  }));
-  const liensSvg = crossLiens.map(({ fp, tp }) => {
-    const midY = (fp.y + tp.y) / 2;
-    const d = `M${fp.x} ${fp.y} C${fp.x} ${midY} ${tp.x} ${midY} ${tp.x} ${tp.y}`;
-    return `<g>
-      <path class="map-edge-glow" d="${d}"/>
-      <path class="map-edge" d="${d}" marker-end="url(#trame-arrow)"/>
-    </g>`;
+  // 8) Colonne des axes (sticky left).
+  const laneLabels = lanes.map(l => `<div class="tm-lane" data-lane="${l.i}" style="height:${l.h}px;--axe:${l.color}">
+      <div class="tm-lane-h"><i></i><b title="${_esc(l.label)}">${_esc(l.label)}</b></div>
+      <div class="tm-pips">${l.list.map(m => `<span class="p-${_tmKey(m)}" title="${_esc(m.titre||'')}"></span>`).join('')}</div>
+      <small>${l.done} / ${l.list.length} terminée${l.done>1?'s':''}</small>
+    </div>`).join('');
+
+  const bands = lanes.map(l => `<div class="tm-band" style="top:${l.top}px;height:${l.h}px"></div>`).join('');
+
+  // 9) Stations (bouton HTML centré sur la position).
+  const stations = missions.map(m => {
+    const p = TM_POS[m.id]; if (!p) return '';
+    const k = _tmKey(m), l = lanes[p.lane];
+    const mine = _tmMine(m, myIds);
+    const arc = k === 'live' ? `<svg class="tm-arc" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21"/><circle cx="24" cy="24" r="21" pathLength="100" stroke-dasharray="${itemProgress(m)} 100"/></svg>` : '';
+    return `<button class="tm-st k-${k}${m.type==='event'?' ev':''}${mine?' me':''}" data-id="${_esc(m.id)}" data-lane="${p.lane}" style="left:${p.x}px;top:${p.y}px;--axe:${l.color}" aria-label="${_esc(m.titre||'Sans titre')} — ${_esc(m.statut||'En attente')}">
+      <span class="tm-dot">${arc}<i>${k==='done'?'✓':k==='fail'?'✕':''}</i></span>
+      <span class="tm-lab" style="width:${COL-22}px"><b>${_esc(m.titre||'Sans titre')}</b>${m.date?`<small>${_esc(m.date)}</small>`:''}</span>
+    </button>`;
   }).join('');
 
-  // ── STATIONS (nœuds illustrés) ──
-  const nodesSvg = missions.map(m => {
-    const p = positions[m.id]; if (!p) return '';
-    const st = stCfg(m);
-    const axeCol = m.axe ? (STORE.axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
-    const prog = itemProgress(m);
-    const init = (m.titre || '?')[0]?.toUpperCase() || '?';
-    const progR = MAP_NODE_R + 6;
-    const progAng = (Math.max(0, Math.min(100, prog)) / 100) * 360;
-    const endX = p.x + progR * Math.sin(progAng * Math.PI / 180);
-    const endY = p.y - progR * Math.cos(progAng * Math.PI / 180);
-    const largeArc = progAng > 180 ? 1 : 0;
-    const progPath = progAng > 0
-      ? `M${p.x} ${p.y - progR} A${progR} ${progR} 0 ${largeArc} 1 ${endX.toFixed(1)} ${endY.toFixed(1)}`
-      : '';
-    return `<g class="map-node" data-id="${_esc(m.id)}"
-        style="--node-color:${st.color};--axe-color:${axeCol}"
-        tabindex="0" role="button" aria-label="${_esc(m.titre||'')}">
-      <circle cx="${p.x}" cy="${p.y}" r="${MAP_NODE_R + 18}" fill="${axeCol}" opacity="0.10"/>
-      <circle class="map-node-plate" cx="${p.x}" cy="${p.y}" r="${MAP_NODE_R + 3}"/>
-      <circle class="map-node-ring" cx="${p.x}" cy="${p.y}" r="${MAP_NODE_R + 2}"
-        stroke="${st.color}"/>
-      ${progPath ? `<path d="${progPath}" stroke="${st.color}" stroke-width="3.5"
-        fill="none" stroke-linecap="round" opacity="0.9"/>` : ''}
-      ${m.imageUrl
-        ? `<image href="${_esc(m.imageUrl)}" x="${p.x - MAP_NODE_R}" y="${p.y - MAP_NODE_R}"
-            width="${MAP_NODE_R*2}" height="${MAP_NODE_R*2}"
-            clip-path="url(#st-clip-${_esc(m.id)})" preserveAspectRatio="xMidYMid slice"/>`
-        : `<text class="map-node-glyph" x="${p.x}" y="${p.y}" text-anchor="middle" dy=".35em"
-            fill="${st.color}">${_esc(init)}</text>`}
-      <circle class="map-node-badge" cx="${p.x + MAP_NODE_R - 4}" cy="${p.y - MAP_NODE_R + 4}"
-        r="9" fill="${st.color}"/>
-      <text class="map-node-badge-t" x="${p.x + MAP_NODE_R - 4}" y="${p.y - MAP_NODE_R + 4}"
-        text-anchor="middle" dy=".34em">${st.icon}</text>
-      <text class="map-node-label" x="${p.x}" y="${p.y + MAP_NODE_R + 22}"
-        text-anchor="middle">
-        ${_esc((m.titre || '').slice(0, 22))}${(m.titre||'').length > 22 ? '…' : ''}
-      </text>
-      ${m.date ? `<text class="map-node-date" x="${p.x}" y="${p.y + MAP_NODE_R + 38}" text-anchor="middle">${_esc(m.date)}</text>` : ''}
-    </g>`;
-  }).join('');
-
-  const prefs = getStoryPrefs();
-  return `
-    <div class="map-shell">
-      <div class="map-toolbar">
-        <button class="map-tool" data-action="_stMapZoom" data-factor="0.85" title="Dézoomer">−</button>
-        <span class="map-zoom-val">${Math.round(prefs.zoom * 100)}%</span>
-        <button class="map-tool" data-action="_stMapZoom" data-factor="1.18" title="Zoomer">+</button>
-        <button class="map-tool" data-action="_stMapReset" title="Recentrer">⊙</button>
-        <span class="map-hint">Chaque ligne = un axe narratif · Stations dans l'ordre des chapitres · Pointillés dorés = liens inter-axes</span>
+  const zi = TM_DENS.indexOf(d);
+  return `<div class="tm" style="--col:${COL}px">
+    <div class="tm-bar">
+      <div class="tm-zoom">
+        <button data-tmz="-1" title="Resserrer" ${zi===0?'disabled':''}>−</button>
+        <span>${Math.round(d*100)}%</span>
+        <button data-tmz="1" title="Espacer" ${zi===TM_DENS.length-1?'disabled':''}>+</button>
       </div>
-      <div class="map-viewport" id="st-map-viewport">
-        <svg id="st-map-svg" viewBox="0 0 ${MAP_W} ${MAP_H}" class="map-svg"
-          preserveAspectRatio="xMidYMid meet">
-          ${defs}
-          ${gridLines}
-          ${lanesSvg}
-          ${liensSvg}
-          ${nodesSvg}
-        </svg>
-        <div class="map-tooltip" id="st-map-tooltip" style="display:none"></div>
+      <button class="tm-btn" data-tmfit>Ajuster</button>
+      ${nowCol >= 0 ? `<button class="tm-btn" data-tmnow>Aller à l'en-jeu</button>` : ''}
+      <span class="tm-sp"></span>
+      <div class="tm-legend">
+        <span><i class="lg k-done"></i>Terminée</span>
+        <span><i class="lg k-live"></i>En cours</span>
+        <span><i class="lg k-fail"></i>Échouée</span>
+        <span><i class="lg k-todo"></i>À venir</span>
+        <span><i class="lg ev"></i>Événement</span>
+        <span><i class="lg me"></i>Toi</span>
+        <span><i class="lg lk"></i>Correspondance</span>
       </div>
-    </div>`;
+    </div>
+    <div class="tm-vp" tabindex="-1">
+      <div class="tm-grid" style="grid-template-columns:var(--lw) minmax(${W}px,1fr)">
+        <div class="tm-corner">Axes <span>→ Chapitres</span></div>
+        <div class="tm-ruler">${ruler}</div>
+        <div class="tm-lanes">${laneLabels}</div>
+        <div class="tm-track" style="height:${H}px">
+          ${bands}
+          ${nowCol >= 0 ? `<div class="tm-now" style="left:${nowCol*COL}px;width:${COL}px"></div>` : ''}
+          <svg class="tm-svg" width="${W}" height="${H}" aria-hidden="true">
+            <defs><marker id="tmArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="context-stroke" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+            ${linesSvg}${linksSvg}
+          </svg>
+          ${stations}
+        </div>
+      </div>
+    </div>
+    <div class="tm-card" hidden></div>
+  </div>`;
 }
 
-// Interactions carte : zoom molette + boutons, pan, hover tooltip, clic = détail
+// Interactions carte : densité (boutons / Ctrl+molette), glisser-déplacer,
+// survol/focus (met en évidence la ligne + ses liens, affiche la fiche), clavier
+// (flèches entre stations), clic → openStoryDetail. Densité et position de
+// défilement persistées dans les prefs (mapDensity / mapX).
 function _initMapInteractions() {
-  const viewport = document.getElementById('st-map-viewport');
-  const svg = document.getElementById('st-map-svg');
-  const tooltip = document.getElementById('st-map-tooltip');
-  if (!viewport || !svg) return;
+  const root = document.querySelector('.tm'); if (!root) return;
+  const vp = root.querySelector('.tm-vp'), card = root.querySelector('.tm-card');
+  const missions = STORE.mapItemsCache || [];
+  const myIds = _tmMyCharIds();
+  const charById = new Map((getCachedCollection('characters') || STATE.characters || []).map(c => [c.id, c]));
+  const lw = () => root.querySelector('.tm-lanes').offsetWidth;
+  const COL = Math.round(TM.BASE_COL * (getStoryPrefs().mapDensity || 1));
+  const nowEl = root.querySelector('.tm-now');
+  const centerNow = smooth => { if (nowEl) vp.scrollTo({ left: nowEl.offsetLeft + COL/2 - (vp.clientWidth - lw())/2, behavior: smooth ? 'smooth' : 'auto' }); };
 
-  const prefs = getStoryPrefs();
-  let zoom = prefs.zoom || 1, panX = prefs.panX || 0, panY = prefs.panY || 0;
-  const apply = () => {
-    svg.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
-    svg.style.transformOrigin = '0 0';
-    const zVal = viewport.parentElement?.querySelector('.map-zoom-val');
-    if (zVal) zVal.textContent = `${Math.round(zoom*100)}%`;
+  // Position initiale : conservée après un changement de densité, sinon mapX,
+  // sinon centrée sur la colonne « En jeu ».
+  if (TM_KEEP) { vp.scrollLeft = TM_KEEP.ratio * (vp.scrollWidth - vp.clientWidth); vp.scrollTop = TM_KEEP.top; TM_KEEP = null; }
+  else if (getStoryPrefs().mapX != null) vp.scrollLeft = getStoryPrefs().mapX;
+  else centerNow(false);
+  let st; vp.addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(() => setStoryPrefs({ mapX: vp.scrollLeft }), 200); hideCard(); });
+
+  const rerender = dens => {
+    const max = vp.scrollWidth - vp.clientWidth;
+    TM_KEEP = { ratio: max > 0 ? vp.scrollLeft/max : 0, top: vp.scrollTop };
+    setStoryPrefs({ mapDensity: dens });
+    root.outerHTML = _renderMapView(missions);
+    _initMapInteractions();
   };
-  apply();
+  const step = dir => {
+    const cur = getStoryPrefs().mapDensity || 1;
+    const i = TM_DENS.indexOf(cur);
+    const n = Math.max(0, Math.min(TM_DENS.length-1, (i < 0 ? 2 : i) + dir));
+    if (TM_DENS[n] !== cur) rerender(TM_DENS[n]);
+  };
+  root.querySelectorAll('[data-tmz]').forEach(b => b.onclick = () => step(+b.dataset.tmz));
+  const fit = root.querySelector('[data-tmfit]');
+  if (fit) fit.onclick = () => {
+    const cols = root.querySelectorAll('.tm-rc').length || 1;
+    const ideal = (vp.clientWidth - lw() - 24) / (cols*TM.BASE_COL);
+    const best = TM_DENS.reduce((a,b) => (b <= ideal && b > a) ? b : a, TM_DENS[0]);
+    rerender(best);
+  };
+  const nowBtn = root.querySelector('[data-tmnow]');
+  if (nowBtn) nowBtn.onclick = () => centerNow(true);
 
-  let saveTimer = null;
-  const persist = (patch) => {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => setStoryPrefs(patch), 400);
+  vp.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); step(e.deltaY < 0 ? 1 : -1); }, { passive:false });
+
+  // Glisser pour se déplacer (souris) ; le tactile garde le défilement natif.
+  let drag = null;
+  vp.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse' || e.button !== 0 || e.target.closest('.tm-st,.tm-lane,.tm-ruler,.tm-corner')) return;
+    drag = { x:e.clientX, y:e.clientY, l:vp.scrollLeft, t:vp.scrollTop };
+    vp.classList.add('grab'); vp.setPointerCapture(e.pointerId);
+  });
+  vp.addEventListener('pointermove', e => { if (!drag) return; vp.scrollLeft = drag.l-(e.clientX-drag.x); vp.scrollTop = drag.t-(e.clientY-drag.y); });
+  const end = () => { drag = null; vp.classList.remove('grab'); };
+  vp.addEventListener('pointerup', end); vp.addEventListener('pointercancel', end);
+
+  // Mise en évidence : la ligne survolée + ses correspondances.
+  const clear = () => { root.classList.remove('hl'); root.querySelectorAll('.on').forEach(el => el.classList.remove('on')); };
+  const hlLane = lane => {
+    root.classList.add('hl');
+    root.querySelectorAll('[data-lane]').forEach(el => el.classList.toggle('on', +el.dataset.lane === lane));
+    root.querySelectorAll('.tm-lk').forEach(el => el.classList.toggle('on', TM_POS[el.dataset.a]?.lane === lane || TM_POS[el.dataset.b]?.lane === lane));
+  };
+  const hlStation = id => {
+    const p = TM_POS[id]; if (!p) return;
+    const linked = new Set([id]);
+    TM_LINKS.forEach(([a,b]) => { if (a === id) linked.add(b); if (b === id) linked.add(a); });
+    root.classList.add('hl');
+    root.querySelectorAll('[data-lane]').forEach(el => el.classList.toggle('on', +el.dataset.lane === p.lane || linked.has(el.dataset.id)));
+    root.querySelectorAll('.tm-lk').forEach(el => el.classList.toggle('on', el.dataset.a === id || el.dataset.b === id));
   };
 
-  viewport.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    const nz = Math.max(0.4, Math.min(3, zoom * delta));
-    if (nz === zoom) return;
-    const rect = viewport.getBoundingClientRect();
-    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-    panX = cx - (cx - panX) * (nz / zoom);
-    panY = cy - (cy - panY) * (nz / zoom);
-    zoom = nz;
-    apply();
-    persist({ zoom, panX, panY });
-  }, { passive: false });
+  function hideCard(){ card.hidden = true; }
+  function showCard(el){
+    const m = missions.find(x => x.id === el.dataset.id); if (!m) return;
+    const s = stCfg(m), prog = itemProgress(m), gs = m.groupes || [];
+    const parts = _tmParticipants(m, myIds, charById);
+    const axeCol = m.axe ? axeColor(m.axe) : 'var(--text-muted)';
+    card.innerHTML = `
+      <div class="tc-axe" style="--axe:${axeCol}"><i></i>${_esc(m.axe||'Hors axe')}${m.type==='event'?' · Événement':''}</div>
+      <div class="tc-t">${_esc(m.titre||'Sans titre')}</div>
+      <div class="tc-m"><span style="color:${s.color}">${s.icon} ${_esc(m.statut||'En attente')}${m.statut==='En cours'?` · ${prog}%`:''}</span>${m.date?`<span>${_esc(m.date)}</span>`:''}${m.lieu?`<span>${_esc(m.lieu)}</span>`:''}</div>
+      ${gs.length ? `<div class="tc-g">${gs.map(g => { const v = parseInt(g.reussite); return `<div><span>${_esc(g.nom||'Groupe')}</span><em><i style="width:${isNaN(v)?0:Math.max(0,Math.min(100,v))}%"></i></em><b>${isNaN(v)?'—':v+'%'}</b></div>`; }).join('')}</div>` : ''}
+      ${parts.length ? `<div class="tc-p">${parts.map(p => `<span class="${p.me?'me':''}">${_esc(p.nom)}</span>`).join('')}</div>` : ''}
+      <div class="tc-h">Clique pour ouvrir la mission</div>`;
+    card.hidden = false;
+    const rr = root.getBoundingClientRect(), dr = el.querySelector('.tm-dot').getBoundingClientRect();
+    const cw = card.offsetWidth, ch = card.offsetHeight;
+    let left = dr.right - rr.left + 14;
+    if (left + cw > rr.width - 8) left = dr.left - rr.left - cw - 14;
+    let top = dr.top - rr.top - 12;
+    top = Math.max(8, Math.min(top, rr.height - ch - 8));
+    card.style.left = Math.max(8, left) + 'px'; card.style.top = top + 'px';
+  }
 
-  _stMapZoom = (factor) => {
-    const rect = viewport.getBoundingClientRect();
-    const cx = rect.width / 2, cy = rect.height / 2;
-    const nz = Math.max(0.4, Math.min(3, zoom * factor));
-    panX = cx - (cx - panX) * (nz / zoom);
-    panY = cy - (cy - panY) * (nz / zoom);
-    zoom = nz;
-    apply();
-    setStoryPrefs({ zoom, panX, panY });
+  const stations = [...root.querySelectorAll('.tm-st')];
+  const ensureVisible = el => {
+    const p = TM_POS[el.dataset.id]; if (!p) return;
+    const left = vp.scrollLeft, w = vp.clientWidth - lw();
+    if (p.x - COL/2 < left) vp.scrollLeft = p.x - COL/2;
+    else if (p.x + COL/2 > left + w) vp.scrollLeft = p.x + COL/2 - w;
   };
-  _stMapReset = () => { zoom = 1; panX = 0; panY = 0; apply(); setStoryPrefs({ zoom, panX, panY }); };
-
-  // Pan + click
-  let panStart = null;
-  viewport.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.map-node')) return;  // clic sur nœud géré au pointerup
-    panStart = { x: e.clientX, y: e.clientY, panX0: panX, panY0: panY, moved: false };
-    viewport.classList.add('is-panning');
-    viewport.setPointerCapture?.(e.pointerId);
+  stations.forEach(el => {
+    el.onclick = () => { hideCard(); openStoryDetail(el.dataset.id); };
+    el.addEventListener('pointerenter', () => { hlStation(el.dataset.id); showCard(el); });
+    el.addEventListener('pointerleave', () => { clear(); hideCard(); });
+    el.addEventListener('focus', () => { ensureVisible(el); hlStation(el.dataset.id); requestAnimationFrame(() => showCard(el)); });
+    el.addEventListener('blur', () => { clear(); hideCard(); });
+    el.addEventListener('keydown', e => {
+      const dir = { ArrowRight:[1,0], ArrowLeft:[-1,0], ArrowDown:[0,1], ArrowUp:[0,-1] }[e.key];
+      if (!dir) return;
+      e.preventDefault();
+      const c = TM_POS[el.dataset.id];
+      const cand = stations.map(s => ({ s, p:TM_POS[s.dataset.id] })).filter(({p}) =>
+        dir[0] ? (p.lane === c.lane && Math.sign(p.x-c.x) === dir[0]) : Math.sign(p.y-c.y) === dir[1]);
+      const best = cand.sort((A,B) => {
+        const da = dir[0] ? Math.abs(A.p.x-c.x)*2 + Math.abs(A.p.y-c.y) : Math.abs(A.p.y-c.y) + Math.abs(A.p.x-c.x)*1.5;
+        const db = dir[0] ? Math.abs(B.p.x-c.x)*2 + Math.abs(B.p.y-c.y) : Math.abs(B.p.y-c.y) + Math.abs(B.p.x-c.x)*1.5;
+        return da - db;
+      })[0];
+      if (best) best.s.focus();
+    });
   });
-  viewport.addEventListener('pointermove', (e) => {
-    if (panStart) {
-      const dx = e.clientX - panStart.x, dy = e.clientY - panStart.y;
-      if (Math.hypot(dx, dy) > 2) panStart.moved = true;
-      panX = panStart.panX0 + dx; panY = panStart.panY0 + dy;
-      apply();
-      return;
-    }
-    const node = e.target.closest?.('.map-node');
-    if (node && tooltip) {
-      const item = STORE.mapItemsCache.find(i => i.id === node.dataset.id);
-      if (item) {
-        const st = stCfg(item);
-        const axeCol = item.axe ? (STORE.axeMap[item.axe] || '#7a8fa8') : '#7a8fa8';
-        tooltip.innerHTML = `
-          <div class="tip-titre" style="color:${st.color}">${st.icon} ${_esc(item.titre || 'Sans titre')}</div>
-          ${item.axe ? `<div class="tip-axe" style="color:${axeCol}">● ${_esc(item.axe)}</div>` : ''}
-          ${item.date ? `<div class="tip-meta">📅 ${_esc(item.date)}</div>` : ''}
-          ${item.lieu ? `<div class="tip-meta">📍 ${_esc(item.lieu)}</div>` : ''}
-          ${(item.participants||[]).length ? `<div class="tip-meta">👥 ${item.participants.length} participant${item.participants.length>1?'s':''}</div>` : ''}
-        `;
-        const rect = viewport.getBoundingClientRect();
-        tooltip.style.display = 'block';
-        tooltip.style.left = (e.clientX - rect.left + 14) + 'px';
-        tooltip.style.top  = (e.clientY - rect.top + 14) + 'px';
-      }
-    } else if (tooltip) {
-      tooltip.style.display = 'none';
-    }
+  root.querySelectorAll('.tm-lane').forEach(el => {
+    el.addEventListener('pointerenter', () => hlLane(+el.dataset.lane));
+    el.addEventListener('pointerleave', clear);
   });
-  viewport.addEventListener('pointerup', (e) => {
-    if (panStart) {
-      const moved = panStart.moved;
-      panStart = null;
-      viewport.classList.remove('is-panning');
-      persist({ panX, panY });
-      if (moved) return;
-    }
-    const node = e.target.closest?.('.map-node');
-    if (node) openStoryDetail(node.dataset.id);
-  });
-  viewport.addEventListener('pointerleave', () => { if (tooltip) tooltip.style.display = 'none'; });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -2618,8 +2588,6 @@ registerActions({
   _stSetPlayerScope:       (btn) => _stSetPlayerScope(btn.dataset.scope),
   _stResetFilters:         ()    => _stResetFilters(),
   _stSwitchActe:           (btn) => _stSwitchActe(btn.dataset.acte),
-  _stMapZoom:              (btn) => _stMapZoom(Number(btn.dataset.factor)),
-  _stMapReset:             ()    => _stMapReset(),
   _toggleLien:             (btn) => _toggleLien(btn.dataset.id),
   _stPickAxeColor:         (btn) => _previewAxeColor(btn.closest('.axe-order-row'), btn.dataset.color),
   openAxeOrder:            () => openAxeOrder(),
