@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
+const readSource = url => readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
+
 import {
   createStatsPending,
   isStatsPendingEmpty,
@@ -49,7 +51,7 @@ test('les records gardent le maximum et cohabitent avec les compteurs', () => {
 });
 
 test('stats.js met en tampon les bumps et vide le tampon avant lecture ou mutation MJ', () => {
-  const src = readFileSync(new URL('../assets/js/shared/stats.js', import.meta.url), 'utf8');
+  const src = readSource(new URL('../assets/js/shared/stats.js', import.meta.url));
   for (const fn of ['applyStatsDelta', 'bumpHeal', 'bumpDamageTaken', 'bumpEmote', 'bumpSkill']) {
     const body = src.slice(src.indexOf(`export function ${fn}(`)).split('\n}\n')[0];
     assert.match(body, /_queueStats\(/, `${fn} doit passer par le tampon`);

@@ -437,9 +437,10 @@ const _LAZY_SESSION_DOCS = new Set([
   'world/dice_skills',      // histoire.js, shop.js, vtt.js
   'world/rarities',         // boutique/inventaire, stable par aventure
   'world/map',              // config fond de carte, stable mais image potentiellement lourde
-  // Résumé compact du dashboard (tenu par le client MJ) : remplace côté joueur la
-  // lecture complète de story/achievements/collection. Session-live → la porte
-  // « trustworthy » ne conclut jamais « absent » sur un simple snapshot cache.
+  // Résumé compact du dashboard (tenu par le client MJ) : séances + groupes
+  // actifs, sans obliger les joueurs à lire story, quests ou agenda_session.
+  // Session-live → la porte « trustworthy » ne conclut jamais « absent » sur
+  // un simple snapshot cache.
   'settings/dashboardSummary',
   // Pastille « Mur du Bastion » de la navigation (shared/bastion-signal.js) :
   // écoutée sur toutes les pages, elle doit survivre aux navigations.
