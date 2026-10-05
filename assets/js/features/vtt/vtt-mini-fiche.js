@@ -23,7 +23,7 @@ import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, cal
 import { useGold } from '../../shared/economy.js';
 import { loadCollection, getDocData } from '../../data/firestore.js'; // lecture recettes/boutique (couche quota)
 // ── Craft génératif (« Forger ») ─────────────────────────────────────────────
-import { craftCategoryFor, craftDiscipline, craftDD, resolveCraftAttempt, countInventoryItem } from '../../shared/craft-engine.js';
+import { craftCategoryFor, craftCategoryForItem, itemCraftSignals, craftDiscipline, craftDD, craftRecycleQty, resolveCraftAttempt, countInventoryItem } from '../../shared/craft-engine.js';
 import { loadCraftSettings, getCraftSettings, craftRecipeMaterials } from '../../shared/craft-settings.js';
 import { loadRarities, _rareteLabel } from '../../shared/rarity.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
@@ -231,6 +231,7 @@ const _MS_ICONS = {
   unlock: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
   send:   '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M16 6 12 2 8 6"/><path d="M12 2v13"/>',
   trash:  '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  recycle:'<path d="M7 19H4.8a2 2 0 0 1-1.7-3l1.5-2.6"/><path d="m13.5 4.3 1.2-2a2 2 0 0 1 3.5 0l1.3 2.3"/><path d="M17 19h2.2a2 2 0 0 0 1.7-3l-1.3-2.2"/><path d="m8.5 4.3-3 5.2"/><path d="m14 22-3.2-5.5 6.2.1"/><path d="m3.3 10.5 5.2-1.4"/>',
   ring:   '<circle cx="12" cy="15" r="5.5"/><path d="M8.5 10 12 4l3.5 6"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
   x:      '<path d="M18 6 6 18M6 6l12 12"/>',
@@ -768,6 +769,97 @@ async function _vttMsDeleteItem(charId, uid, invIndex) {
     _renderMiniSheet(uid);
     updateDoc(_chrRef(charId), { inventaire: prevInv, equipement: prevEquip, statsBonus: prevBonus, ...(prevHist !== undefined ? { inventoryHistory: prevHist } : {}) })
       .catch(err => { console.error('[vtt] undo delete', err); showNotif('Restauration impossible', 'error'); });
+  } } });
+}
+
+// Démonter (recyclage) : détruit un objet craftable pour récupérer une partie
+// de ses matériaux (fraction réglable côté MJ) ET débloquer ses traits sous
+// forme de fragments réutilisables au Forgeron (palier 2★/3★). C'est la boucle
+// de longévité : loot → démontage → fragments → re-craft.
+async function _vttMsRecycle(charId, uid, invIndex) {
+  if (!_msCanEdit(uid)) return;
+  invIndex = parseInt(invIndex);
+  const c = VS.characters[charId]; if (!c) return;
+  const prevInv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
+  const item = prevInv[invIndex]; if (!item) return;
+
+  const cat = craftCategoryForItem(item);
+  if (!cat) { showNotif('Cet objet ne peut pas être démonté.', 'info'); return; }
+
+  await _msEnsureShop();
+  try { await loadCraftSettings(); } catch {}
+  const cfg = getCraftSettings();
+  const tier = Math.max(1, Math.min(3, parseInt(item.rarete) || 1));
+
+  // 1) Matériaux rendus = fraction de la recette du palier (rareté de l'objet).
+  const catalogMap = new Map((_msCraftShop || []).map(it => [it.id, it]));
+  const returned = [];        // entrées d'inventaire à rendre
+  const returnedLog = [];     // { shopItem, qty } pour l'historique / toast
+  for (const r of craftRecipeMaterials(cat, tier, cfg)) {
+    const qty = craftRecycleQty(r.quantite, cfg);
+    const shopItem = catalogMap.get(r.itemId);
+    if (qty <= 0 || !shopItem) continue;
+    for (let k = 0; k < qty; k++) returned.push(shopItemToInvEntry(shopItem, { source: 'recyclage' }));
+    returnedLog.push({ shopItem, qty });
+  }
+
+  // 2) Fragments de trait débloqués (slot selon le type d'objet).
+  const sig = itemCraftSignals(item);
+  const slot = sig.kind === 'armure' ? (item.slotArmure || '')
+             : sig.kind === 'bijou'  ? (item.slotBijou  || '')
+             : 'arme';
+  const traits = Array.isArray(item.traits) ? item.traits.filter(Boolean).map(String) : [];
+  const gainFrags = !!(slot && traits.length);
+
+  if (!returnedLog.length && !gainFrags) {
+    showNotif('Rien à récupérer sur cet objet (aucun matériau lié ni trait).', 'info');
+    return;
+  }
+
+  // 3) Snapshots pour l'annulation.
+  const prevEquip = { ...(c.equipement || {}) };
+  const prevBonus = { ...(c.statsBonus || {}) };
+  const prevHist  = Array.isArray(c.inventoryHistory) ? [...c.inventoryHistory] : c.inventoryHistory;
+  const prevFrags = c.traitFragments ? JSON.parse(JSON.stringify(c.traitFragments)) : undefined;
+
+  const frags = c.traitFragments ? JSON.parse(JSON.stringify(c.traitFragments)) : {};
+  if (gainFrags) {
+    frags[slot] = frags[slot] || {};
+    for (const t of traits) frags[slot][t] = (parseInt(frags[slot][t]) || 0) + 1;
+  }
+
+  // 4) Nouvel inventaire : retire l'objet, ajoute les matériaux ; resync équip.
+  const newInv = prevInv.filter((_, i) => i !== invIndex).concat(returned);
+  c.inventaire = newInv;
+  const sync = syncEquipmentAfterInventoryMutation(c, [invIndex]);
+
+  const actor = { actorUid: STATE.user?.uid || '', actorName: STATE.profile?.pseudo || STATE.user?.pseudo || c.nom || '', source: 'VTT · recyclage' };
+  const hist = [ makeInventoryHistoryEntry('delete', item, 1, { ...actor, note: 'démonté' }) ];
+  for (const { shopItem, qty } of returnedLog) hist.push(makeInventoryHistoryEntry('add', shopItemToInvEntry(shopItem, {}), qty, actor));
+  const historyPatch = inventoryHistoryPayload(c, hist);
+
+  c.equipement = sync.equipement; c.statsBonus = sync.statsBonus;
+  c.traitFragments = frags; c.inventoryHistory = historyPatch.inventoryHistory;
+  _msPop = null;
+  _renderMiniSheet(uid);
+  try {
+    await updateDoc(_chrRef(charId), { inventaire: newInv, equipement: sync.equipement, statsBonus: sync.statsBonus, traitFragments: frags, ...historyPatch });
+  } catch (e) {
+    console.error('[vtt] recycle', e);
+    c.inventaire = prevInv; c.equipement = prevEquip; c.statsBonus = prevBonus;
+    c.traitFragments = prevFrags; c.inventoryHistory = prevHist;
+    _renderMiniSheet(uid); showNotif('Erreur démontage', 'error'); return;
+  }
+
+  const matTxt  = returnedLog.length ? returnedLog.map(x => `${x.qty}× ${x.shopItem.nom}`).join(', ') : 'aucun matériau';
+  const fragTxt = gainFrags ? ` · trait${traits.length>1?'s':''} débloqué${traits.length>1?'s':''} : ${traits.join(', ')}` : '';
+  showNotif(`🔧 ${item.nom || 'Objet'} démonté → ${matTxt}${fragTxt}`, 'success', { action: { label: 'Annuler', onClick: async () => {
+    const cc = VS.characters[charId]; if (!cc) return;
+    cc.inventaire = prevInv; cc.equipement = prevEquip; cc.statsBonus = prevBonus;
+    cc.traitFragments = prevFrags; cc.inventoryHistory = prevHist;
+    _renderMiniSheet(uid);
+    updateDoc(_chrRef(charId), { inventaire: prevInv, equipement: prevEquip, statsBonus: prevBonus, traitFragments: prevFrags ?? {}, ...(prevHist !== undefined ? { inventoryHistory: prevHist } : {}) })
+      .catch(err => { console.error('[vtt] undo recycle', err); showNotif('Restauration impossible', 'error'); });
   } } });
 }
 
@@ -1397,6 +1489,7 @@ function _msTabInventaire(c, uid, canEdit) {
           ${isEquipCat && (!isEq || total > 1) ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsEquipPicker" data-vtt-args="${c.id}|${uid}|${idxToEquip}" title="Équiper" aria-label="Équiper">${_msIco('equip')}</button>` : ''}
           ${isEq ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsUnequipAll" data-vtt-args="${c.id}|${uid}|${idxToUnequip}" title="Déséquiper" aria-label="Déséquiper">${_msIco('unlock')}</button>` : ''}
           <button class="vtt-ms-it-btn" data-vtt-fn="_vttMsPop" data-vtt-args="send|send-${firstIdx}|${firstIdx}" data-pid="send-${firstIdx}" title="Donner" aria-label="Donner">${_msIco('send')}</button>
+          ${craftCategoryForItem(item) ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsRecycle" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Démonter (récupérer matériaux + traits)" aria-label="Démonter">${_msIco('recycle')}</button>` : ''}
           <button class="vtt-ms-it-btn danger" data-vtt-fn="_vttMsDeleteItem" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Supprimer" aria-label="Supprimer">${_msIco('trash')}</button>
         </div>`:''}
       </div>`;
@@ -1720,11 +1813,20 @@ function _forgeCompetence(c) {
   return { bonus, label: `${compName} (${skill?.stat || '—'}) ${bonus >= 0 ? '+' + bonus : bonus}`, disc };
 }
 
-// Pool de traits = traits des objets boutique du même slot de fragment & rareté = palier.
+// Pool de traits proposé au craft.
+//  - Palier 1★ : LIBRE — traits des objets boutique du même slot & rareté 1.
+//  - Paliers 2★/3★ : VERROUILLÉ — uniquement les traits DÉBLOQUÉS (fragments
+//    possédés pour ce slot, obtenus en recyclant du loot). C'est ça qui donne au
+//    craft sa longévité : loot → recyclage → fragments → re-craft.
 function _forgeTraitPool() {
-  const rar = _forge.tier, slot = _forgeFragSlot();
+  const slot = _forgeFragSlot();
+  if (_forge.tier >= 2) {
+    const c = VS.characters[_forgeCtx?.charId];
+    const frags = c?.traitFragments?.[slot] || {};
+    return Object.keys(frags).filter(t => (parseInt(frags[t]) || 0) > 0).sort((a, b) => a.localeCompare(b, 'fr'));
+  }
   const match = (it) => {
-    if ((parseInt(it?.rarete) || 0) !== rar) return false;
+    if ((parseInt(it?.rarete) || 0) !== 1) return false;
     if (_forge.kind === 'arme')   return (it.template || '').toLowerCase() === 'arme' || /arme|baguette|bouclier|main\s*libre/i.test(it.format || '');
     if (_forge.kind === 'armure') return it.slotArmure === slot;
     return it.slotBijou === slot;
@@ -1828,9 +1930,11 @@ function _renderForge() {
       </select></label>`;
   }
 
+  const traitEmpty = _forge.tier >= 2 ? '🔒 aucun trait débloqué — recycle du loot de ce slot' : 'aucun trait à ce palier';
   const traitOpts = traitPool.length
     ? `<option value="">— choisir —</option>` + traitPool.map(t => opt(t, _forge.traitName, t)).join('')
-    : `<option value="">aucun trait pour ce slot/palier</option>`;
+    : `<option value="">${traitEmpty}</option>`;
+  const traitLock = _forge.tier >= 2 ? `<div class="vtt-forge-meta">🔒 Palier ${'★'.repeat(_forge.tier)} : seuls les traits <b>débloqués</b> (recyclage/loot) sont disponibles.</div>` : '';
   const matHtml = matRows.length
     ? matRows.map(m => `<span class="vtt-ms-craft-ingr">${_esc(m.name)}<b class="${m.ok ? 'ok' : 'ko'}">${m.have}/${m.need}</b></span>`).join('')
     : `<span class="vtt-forge-warn">Aucun matériau lié pour « ${cat || '?'} » ${_rareteLabel(_forge.tier)} — à définir dans Réglages du craft.</span>`;
@@ -1847,6 +1951,7 @@ function _renderForge() {
       ${cat ? `<div class="vtt-forge-meta">Catégorie : <b>${cat}</b> · Discipline : <b>${comp.disc || '—'}</b> · Jet : d20 + ${_esc(comp.label || '—')} vs DD <b>${dd}</b></div>` : ''}
       ${baseSum ? `<div class="vtt-forge-base">Base : ${baseSum}</div>` : ''}
       <div class="vtt-forge-mats"><span class="vtt-forge-lbl">Matériaux requis</span><div class="vtt-ms-craft-ingrs">${matHtml}</div></div>
+      ${traitLock}
       <label class="vtt-forge-row"><span>Trait</span><select id="forge-trait">${traitOpts}</select></label>
       <label class="vtt-forge-row"><span>Nom</span><input id="forge-name" type="text" maxlength="40" placeholder="Nom de ton objet" value="${_esc(_forge.name)}"></label>
       ${_forgeResult ? `<div class="vtt-ms-craft-res ${_forgeResult.success ? 'win' : 'lose'}">${_esc(_forgeResult.txt)}</div>` : ''}
@@ -2394,6 +2499,7 @@ export {
   _vttMsCraftSearch,
   _vttMsCraftClear,
   _vttMsDeleteItem,
+  _vttMsRecycle,
   _vttMsDeleteNote,
   _vttMsEquip,
   _vttMsEquipPicker,
