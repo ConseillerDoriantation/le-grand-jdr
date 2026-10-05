@@ -156,6 +156,11 @@ const AURA_PALETTE = {
   blue: '#4f8cff', arcane: '#9d6fff', crimson: '#ff5a7e',
   gold: '#e8b84b', emerald: '#22c38e', ember: '#ff9544',
 };
+const CHARACTER_LIFE_STATUSES = Object.freeze({
+  alive: { label: 'En vie' },
+  dead: { label: 'Mort' },
+  other: { label: 'Autre' },
+});
 const _auraColor = (key) => AURA_PALETTE[key] || AURA_PALETTE.blue;
 const _charBlurActions = {};
 let _charCalcPopover = null;
@@ -177,6 +182,13 @@ function _identityStateFor(c) {
     _identityUi.vitalBreakdown = null;
   }
   return _identityUi;
+}
+
+function _characterLifeStatus(c) {
+  const raw = _norm(c?.lifeStatus || 'alive');
+  if (['dead', 'mort', 'morte', 'decede', 'decedee'].includes(raw)) return 'dead';
+  if (['other', 'autre'].includes(raw)) return 'other';
+  return 'alive';
 }
 
 const _calcRow = (label, value, detail = '') => `
@@ -915,6 +927,23 @@ function _identityPopoverHtml(c, canEdit, { xpCur, xpPalier, xpPct }) {
   const ui = _identityStateFor(c);
   if (!ui.popover) return '';
   if (ui.popover === 'builds') return canEdit ? _buildBuildManagerHtml(c) : '';
+  if (ui.popover === 'status') {
+    if (!canEdit) return '';
+    const current = _characterLifeStatus(c);
+    const descriptions = {
+      alive: 'Participe normalement à l’aventure',
+      dead: 'Portrait affiché en noir et blanc',
+      other: 'Situation particulière ou indéterminée',
+    };
+    return `<section class="ids-pop ids-pop-status" role="menu" aria-label="État du personnage">
+      <span class="ids-pop-kicker">État du personnage</span>
+      <div class="ids-status-options">
+        ${Object.entries(CHARACTER_LIFE_STATUSES).map(([value, meta]) => `<button type="button" class="ids-status-option is-${value}${value === current ? ' active' : ''}" role="menuitemradio" aria-checked="${value === current}" data-action="setCharacterLifeStatus" data-id="${c.id}" data-status="${value}">
+          <i aria-hidden="true"></i><span><b>${meta.label}</b><small>${descriptions[value]}</small></span><em aria-hidden="true">✓</em>
+        </button>`).join('')}
+      </div>
+    </section>`;
+  }
   if (ui.popover === 'appearance') {
     if (!canEdit) return '';
     const isCustom = !!c.auraColor;
@@ -987,6 +1016,8 @@ function _identityFormHtml(c) {
 function _buildSidebarHtml(c, canEdit, { pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckFree, deckMax }) {
   const ui = _identityStateFor(c);
   const owner = _characterOwnerMeta(c);
+  const lifeStatus = _characterLifeStatus(c);
+  const lifeStatusLabel = CHARACTER_LIFE_STATUSES[lifeStatus].label;
   const ready = xpPalier > 0 && xpCur >= xpPalier;
   const classRace = [c.classe, c.race].filter(Boolean).map(_esc).join(' · ') || 'Identité à compléter';
   const vital = (key, label, current, max, percent, barClass) => `<div class="ids-vital ${key}${percent < 25 ? ' danger' : ''}"${key === 'pv' ? ' id="vital-hp"' : ''}>
@@ -1002,7 +1033,7 @@ function _buildSidebarHtml(c, canEdit, { pvCur, pvMax, pvPct, hpBarCls, pmCur, p
     </div>
 
     <div class="ids-hero">
-      <div class="ids-portrait${ready ? ' is-ready' : ''}">
+      <div class="ids-portrait${ready ? ' is-ready' : ''}${lifeStatus === 'dead' ? ' is-dead' : ''}">
         <svg viewBox="0 0 144 144" aria-label="${xpPct}% d'expérience"><circle class="ids-ring-bg" cx="72" cy="72" r="65"></circle><circle class="ids-ring" cx="72" cy="72" r="65" pathLength="100" stroke-dasharray="${xpPct} ${Math.max(0, 100 - xpPct)}"></circle></svg>
         ${c.photo
           ? `<button type="button" class="ids-portrait-in is-clickable" data-action="openCharacterPortraitViewer" data-id="${c.id}" title="Afficher le portrait en entier" aria-label="Afficher le portrait de ${_esc(c.nom || 'ce personnage')} en entier">${characterPortraitContent(c, { imgStyle: `transform:scale(${c.photoZoom || 1}) translate(${c.photoX || 0}px,${c.photoY || 0}px);transform-origin:center`, fallbackTag: 'span' })}</button>`
@@ -1010,7 +1041,13 @@ function _buildSidebarHtml(c, canEdit, { pvCur, pvMax, pvPct, hpBarCls, pmCur, p
         ${canEdit ? `<button class="ids-portrait-edit" data-action="toggleIdentityPopover" data-popover="appearance" data-id="${c.id}" title="Modifier l'apparence">✎</button>` : ''}
         <button class="ids-level" data-action="toggleIdentityPopover" data-popover="xp" data-id="${c.id}" title="Voir la progression"><small>NIV</small>${c.niveau || 1}</button>
       </div>
-      ${ui.editing ? _identityFormHtml(c) : `<div class="ids-copy"><h2>${_esc(c.nom || 'Sans nom')}</h2><p>${classRace}</p>${_characterTitlesHtml(c, false)}
+      ${ui.editing ? _identityFormHtml(c) : `<div class="ids-copy"><h2>${_esc(c.nom || 'Sans nom')}</h2><p>${classRace}</p>
+        ${canEdit ? `<button type="button" class="ids-life is-${lifeStatus}" data-action="toggleIdentityPopover" data-popover="status" data-id="${c.id}" title="Modifier l’état du personnage" aria-label="État : ${lifeStatusLabel}. Modifier">
+          <i aria-hidden="true"></i>
+          <span>${lifeStatusLabel}</span>
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5l3-3"/></svg>
+        </button>` : `<span class="ids-life is-${lifeStatus}" title="État du personnage"><i aria-hidden="true"></i><span>${lifeStatusLabel}</span></span>`}
+        ${_characterTitlesHtml(c, false)}
         <button class="ids-xp-line${ready ? ' ready' : ''}" data-action="toggleIdentityPopover" data-popover="xp" data-id="${c.id}">${ready ? `<b>Niveau ${(c.niveau || 1) + 1} prêt</b><span>· gérer</span>` : `<b>${_identityNumber(xpCur)}</b><span>/ ${_identityNumber(xpPalier)} XP · encore ${_identityNumber(Math.max(0, xpPalier - xpCur))}</span>`}</button>
         ${canEdit ? `<button class="ids-edit-open" data-action="identityStartEdit" data-id="${c.id}">✎ Modifier l'identité</button>` : ''}
       </div>`}
@@ -1200,6 +1237,8 @@ function _toggleIdentityPopover(btn) {
     if (!popover) return;
     const anchor = ui.popover === 'appearance'
       ? side.querySelector('.ids-portrait') || btn
+      : ui.popover === 'status'
+        ? side.querySelector('.ids-life') || btn
       : ui.popover === 'builds'
         ? side.querySelector('.ids-build') || btn
         : side.querySelector('.ids-hero') || btn;
@@ -1290,6 +1329,25 @@ function _toggleIdentityVitalBreakdown(btn) {
   const ui = _identityStateFor(c);
   ui.vitalBreakdown = ui.vitalBreakdown === btn.dataset.calc ? null : btn.dataset.calc;
   _rerenderIdentity(c);
+}
+
+async function _setCharacterLifeStatus(el) {
+  const c = getCharacterById(el.dataset.id) || charSession.getCurrentChar();
+  if (!c || !canControlCharacter(c)) return;
+  const next = CHARACTER_LIFE_STATUSES[el.dataset.status] ? el.dataset.status : 'alive';
+  const previous = _characterLifeStatus(c);
+  if (next === previous) return;
+  c.lifeStatus = next;
+  _identityUi.popover = null;
+  _removeIdentityPopover();
+  _rerenderIdentity(c);
+  try {
+    await updateInCol('characters', c.id, { lifeStatus: next });
+  } catch (error) {
+    c.lifeStatus = previous;
+    _rerenderIdentity(c);
+    notifySaveError(error);
+  }
 }
 
 function _closeIdentityPopover() {
@@ -2630,6 +2688,7 @@ registerActions({
   deleteChar:              (btn)    => deleteChar(btn.dataset.id),
   setCharAura:             (btn)    => setCharAura(btn.dataset.id, btn.dataset.auraKey),
   setCharAuraColor:        (el)     => setCharAuraColor(el.dataset.id, el.value),
+  setCharacterLifeStatus:  (btn)    => _setCharacterLifeStatus(btn),
   openSendGoldModal:       (btn)    => openSendGoldModal(btn.dataset.id),
 
   // Ledger

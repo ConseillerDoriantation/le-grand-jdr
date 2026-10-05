@@ -116,6 +116,18 @@ test('les contrôles identité réutilisent les actions métier existantes', () 
   ]) assert.match(source, new RegExp(`data-(?:action|change)="${action}"`));
   assert.match(source, /data-change="setCharAuraColor"/);
   assert.match(source, /data-action="setCharAura"/);
+  assert.match(source, /data-action="setCharacterLifeStatus"/);
+});
+
+test('le statut de vie reste discret et un personnage mort a son portrait en noir et blanc', () => {
+  assert.match(source, /const CHARACTER_LIFE_STATUSES = Object\.freeze/);
+  assert.match(sidebar, /class="ids-life is-\$\{lifeStatus\}"/);
+  assert.match(source, /class="ids-pop ids-pop-status"/);
+  assert.match(source, /role="menuitemradio"/);
+  assert.match(sidebar, /lifeStatus === 'dead' \? ' is-dead' : ''/);
+  assert.match(source, /updateInCol\('characters', c\.id, \{ lifeStatus: next \}\)/);
+  assert.match(css, /\.cs-v3 \.ids-portrait\.is-dead \.ids-portrait-in img \{[^}]*filter: grayscale\(1\)/s);
+  assert.match(css, /\.cs-v3 \.ids-life \{[^}]*border-radius: 999px/s);
 });
 
 test('l’édition groupée de l’identité persiste nom, classe, race et titres en une écriture', () => {
