@@ -76,10 +76,13 @@ let _stCropper   = null;
 
 // ── Préférences persistées (handoff STORY.md §11) ─────────────────────────────
 const STORY_PREFS_KEY = 'story-prefs-v2';
-const STORY_PREFS_DEFAULT = { view: 'carte', search: '', statut: '', playerScope: 'all', mapDensity: 1, mapX: null };
+const STORY_PREFS_DEFAULT = { view: 'carte', search: '', statut: '', playerScope: 'all', mapDensity: 1, mapX: null, listSort: { k: 'ch', d: 1 }, listGroup: 'none' };
 function getStoryPrefs() {
-  try { return { ...STORY_PREFS_DEFAULT, ...(JSON.parse(localStorage.getItem(STORY_PREFS_KEY)) || {}) }; }
-  catch { return { ...STORY_PREFS_DEFAULT }; }
+  let p;
+  try { p = { ...STORY_PREFS_DEFAULT, ...(JSON.parse(localStorage.getItem(STORY_PREFS_KEY)) || {}) }; }
+  catch { p = { ...STORY_PREFS_DEFAULT }; }
+  if (p.view === 'chronique') p.view = 'saga';   // vue Chronique retirée (handoff v2)
+  return p;
 }
 function setStoryPrefs(patch) {
   try { localStorage.setItem(STORY_PREFS_KEY, JSON.stringify({ ...getStoryPrefs(), ...patch })); }
@@ -888,10 +891,9 @@ async function renderStory() {
         </select>
         <span class="count">${filteredItems.length} mission${filteredItems.length>1?'s':''}</span>
         <div class="views" role="tablist" aria-label="Mode d'affichage de la trame">
-          <button class="${prefs.view==='carte'?'on':''}" data-action="_stSetView" data-view="carte" role="tab" aria-selected="${prefs.view === 'carte'}">🗺️ Carte</button>
-          <button class="${prefs.view==='saga'?'on':''}" data-action="_stSetView" data-view="saga" role="tab" aria-selected="${prefs.view === 'saga'}">📚 Saga</button>
-          <button class="${prefs.view==='chronique'?'on':''}" data-action="_stSetView" data-view="chronique" role="tab" aria-selected="${prefs.view === 'chronique'}">📖 Chronique</button>
-          <button class="${prefs.view==='list'?'on':''}" data-action="_stSetView" data-view="list" role="tab" aria-selected="${prefs.view === 'list'}">📋 Liste</button>
+          <button class="${prefs.view==='carte'?'on':''}" data-action="_stSetView" data-view="carte" role="tab" aria-selected="${prefs.view === 'carte'}">Carte</button>
+          <button class="${prefs.view==='saga'?'on':''}" data-action="_stSetView" data-view="saga" role="tab" aria-selected="${prefs.view === 'saga'}">Saga</button>
+          <button class="${prefs.view==='list'?'on':''}" data-action="_stSetView" data-view="list" role="tab" aria-selected="${prefs.view === 'list'}">Liste</button>
         </div>
       </div>
 
@@ -913,9 +915,8 @@ async function renderStory() {
             // Wrap chaque vue : si UNE mission corrompue plante le renderer, on
             // affiche un message clair plutôt qu'une "Erreur de chargement" globale.
             const view = prefs.view || 'carte';
-            const fn = view === 'saga'      ? _renderSagaView
-                     : view === 'chronique' ? _renderChroniqueView
-                     : view === 'list'      ? _renderListView
+            const fn = view === 'saga' ? _renderSagaView
+                     : view === 'list' ? _renderListView
                      : _renderMapView;
             try {
               return fn(filteredItems);
@@ -942,7 +943,8 @@ async function renderStory() {
   </div>
   `;
 
-  if (prefs.view === 'carte') requestAnimationFrame(() => _initMapInteractions());
+  const _initView = prefs.view === 'saga' ? _initSaga : prefs.view === 'list' ? _initList : _initMapInteractions;
+  requestAnimationFrame(() => _initView());
 }
 
 function _stSetFilter(key, val) { setStoryPrefs({ [key]: val }); PAGES.story?.(); }
@@ -1357,146 +1359,292 @@ function _initMapInteractions() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// VUE SAGA — Étagères horizontales par axe (handoff §7)
+// VUES SAGA & LISTE v2 (handoff Trame v2 — Chronique retirée)
+// Mêmes données filtrées que la Carte, numérotation de chapitres commune (_chMap).
 // ══════════════════════════════════════════════════════════════════════════════
-function _renderSagaView(missions) {
-  const byAxe = new Map();
-  missions.forEach(m => {
-    const k = m.axe || '__none__';
-    if (!byAxe.has(k)) byAxe.set(k, []);
-    byAxe.get(k).push(m);
-  });
-  byAxe.forEach(list => list.sort((a,b) => (a.ordre||0) - (b.ordre||0)));
+const _pad2 = n => String(n).padStart(2, '0');
 
-  return `<div class="saga">
-    ${[...byAxe.entries()].sort((A, B) => _axeRank(A[0]) - _axeRank(B[0])).map(([axe, list]) => {
-      const color = axe === '__none__' ? '#7a8fa8' : (STORE.axeMap[axe] || '#7a8fa8');
-      const label = axe === '__none__' ? 'Hors axe' : axe;
-      const term = list.filter(m => m.statut === 'Terminée').length;
-      const pct = list.length ? Math.round((term / list.length) * 100) : 0;
-      return `<section class="shelf" style="--axe-color:${color}">
-        <header class="shelf-head">
-          <span class="shelf-marker"></span>
-          <h2 class="shelf-title">${_esc(label)}</h2>
-          <span class="shelf-count">${list.length} CH.</span>
-          <span class="shelf-rule"></span>
-          <div class="shelf-prog">
-            <div class="shelf-bar"><div class="shelf-fill" style="width:${pct}%"></div></div>
-            <span class="shelf-pct">${pct}%</span>
-          </div>
-        </header>
-        <div class="rail">
-          ${list.map((m, i) => _renderPoster(m, i)).join('')}
-        </div>
-      </section>`;
-    }).join('')}
-  </div>`;
+// Numérotation commune aux 3 vues : une valeur d'`ordre` = un chapitre.
+function _chMap(missions) {
+  const o = [...new Set(missions.map(m => m.ordre || 0))].sort((a, b) => a - b);
+  return new Map(o.map((x, i) => [x, i + 1]));
+}
+// Regroupe par axe (triés par rang), missions triées par ordre puis date.
+function _axeLanes(missions) {
+  const by = new Map();
+  missions.forEach(m => { const k = m.axe || '__none__'; if (!by.has(k)) by.set(k, []); by.get(k).push(m); });
+  return [...by.entries()].sort((A, B) => _axeRank(A[0]) - _axeRank(B[0])).map(([key, list]) => {
+    list.sort((a, b) => (a.ordre || 0) - (b.ordre || 0) || (a.date || '').localeCompare(b.date || ''));
+    return { key, list,
+      color: key === '__none__' ? 'var(--text-muted)' : axeColor(key),
+      label: key === '__none__' ? 'Hors axe' : key,
+      done: list.filter(m => m.statut === 'Terminée').length };
+  });
+}
+const _cover = (m, n) => m.imageUrl ? `<img src="${_esc(m.imageUrl)}" alt="" loading="lazy">` : `<span class="sg-cov-n">${_pad2(n)}</span>`;
+function _charByIdMap() {
+  return new Map((getCachedCollection('characters') || STATE.characters || []).map(c => [c.id, c]));
+}
+// Avatars empilés (max N) + « +n ».
+function _tvAvatars(parts, max) {
+  const list = Array.isArray(parts) ? parts : [];
+  const shown = list.slice(0, max).map(p => characterAvatarHtml(p, { tag: 'span', className: 'av', border: 'none', background: 'transparent' })).join('');
+  return shown + (list.length > max ? `<span class="av more">+${list.length - max}</span>` : '');
+}
+// Participants → [{ entry, nom, me }] (chaînes = charId, ou objets).
+function _tvParts(m, myIds, charById) {
+  const uid = STATE.user?.uid || '';
+  return (Array.isArray(m.participants) ? m.participants : []).filter(p => p != null).map(p => {
+    const id = typeof p === 'string' ? p : (p?.charId || p?.id || '');
+    const pUid = typeof p === 'object' ? p?.uid : '';
+    const nom = (typeof p === 'object' && (p?.nom || p?.name)) || charById.get(id)?.nom || id;
+    return { entry: p, nom, me: (id && myIds.has(id)) || (uid && pUid === uid) };
+  });
 }
 
-function _renderPoster(m, idx) {
-  const st = stCfg(m);
-  const prog = itemProgress(m);
-  const parts = m.participants || [];
-  return `<article class="poster" style="--st-color:${st.color}" data-action="openStoryDetail" data-id="${m.id}">
-    <div class="poster-art">
-      ${m.imageUrl
-        ? `<img src="${_esc(m.imageUrl)}" alt="" loading="lazy">`
-        : `<span class="poster-glyph">${m.type === 'mission' ? '🎯' : '📖'}</span>`}
-      <div class="poster-num">CH.${String(idx + 1).padStart(2,'0')}</div>
-      <div class="poster-statut">${st.icon} ${_esc(m.statut || 'En attente')}</div>
-      <div class="poster-prog"><i style="width:${prog}%"></i></div>
-    </div>
-    <div class="poster-body">
-      <h3 class="poster-title">${_esc(m.titre || 'Sans titre')}</h3>
-      ${m.date ? `<div class="poster-date">${_esc(m.date)}</div>` : ''}
-      ${parts.length ? `<div class="poster-parts">
-        ${parts.slice(0, 4).map(p => {
-          return characterAvatarHtml(p, { tag: 'span', className: 'av', border: 'none', background: 'transparent' });
-        }).join('')}
-        ${parts.length > 4 ? `<span class="av more">+${parts.length-4}</span>` : ''}
+// ─── SAGA ──────────────────────────────────────────────────────────────────
+const _SAGA_OPEN = {};
+let _SAGA_LAST = [], _sgEscBound = false;
+
+function _renderSagaView(missions) {
+  _SAGA_LAST = missions;
+  const ch = _chMap(missions);
+  return `<div class="sg">${_axeLanes(missions).map(l => _sgSection(l, ch)).join('')}</div>`;
+}
+
+function _sgSection(l, ch) {
+  const open = l.list.find(m => m.id === _SAGA_OPEN[l.key]);
+  const pct = l.list.length ? Math.round(l.done / l.list.length * 100) : 0;
+  const myIds = _tmMyCharIds(), charById = _charByIdMap();
+  // Missions à venir consécutives empilées par 3 dans une même colonne.
+  const items = []; let stack = null;
+  l.list.forEach(m => {
+    if (_tmKey(m) === 'todo') {
+      if (!stack || stack.length === 3) { stack = []; items.push(stack); }
+      stack.push(m);
+    } else { stack = null; items.push(m); }
+  });
+  return `<section class="sg-axe" data-axe="${_esc(l.key)}" style="--axe:${l.color}">
+    <header class="sg-h">
+      <i class="sg-sw"></i>
+      <h2>${_esc(l.label)}</h2>
+      <span class="sg-n">${l.done} / ${l.list.length} terminée${l.done > 1 ? 's' : ''}</span>
+      <span class="sg-bar"><i style="width:${pct}%"></i></span>
+      <div class="sg-nav"><button data-sgs="-1" aria-label="Défiler vers la gauche">‹</button><button data-sgs="1" aria-label="Défiler vers la droite">›</button></div>
+    </header>
+    <div class="sg-rail">${items.map(it => Array.isArray(it)
+      ? `<div class="sg-later">${it.map(m => _sgCard(m, ch, open, myIds, charById)).join('')}</div>`
+      : _sgCard(it, ch, open, myIds, charById)).join('')}</div>
+    ${open ? _sgReader(open, l, ch, myIds, charById) : ''}
+  </section>`;
+}
+
+function _sgCard(m, ch, open, myIds, charById) {
+  const k = _tmKey(m), n = ch.get(m.ordre || 0), s = stCfg(m), on = open && open.id === m.id ? ' open' : '';
+  const ev = m.type === 'event' ? ' · Événement' : '';
+  if (k === 'todo') return `<button class="sg-c todo${on}" data-sg="${_esc(m.id)}" aria-expanded="${!!on}">
+      <span class="sg-ch">Ch. ${_pad2(n)}${ev}</span><b>${_esc(m.titre || 'Sans titre')}</b>
+    </button>`;
+  const prog = itemProgress(m), mine = _tmMine(m, myIds);
+  return `<button class="sg-c k-${k}${on}" data-sg="${_esc(m.id)}" style="--st:${s.color}" aria-expanded="${!!on}">
+    <span class="sg-cov">${_cover(m, n)}
+      <span class="sg-tag">${s.icon} ${_esc(m.statut || 'En attente')}${k === 'live' ? ` · ${prog}%` : ''}</span>
+      ${mine ? '<span class="sg-me">Toi</span>' : ''}
+      ${k === 'live' ? `<span class="sg-pr"><i style="width:${prog}%"></i></span>` : ''}
+    </span>
+    <span class="sg-body">
+      <span class="sg-ch">Ch. ${_pad2(n)}${ev}</span>
+      <b>${_esc(m.titre || 'Sans titre')}</b>
+      <small>${[m.date, m.lieu].filter(Boolean).map(_esc).join(' · ') || '&nbsp;'}</small>
+      ${(m.participants || []).length ? `<span class="sg-av">${_tvAvatars(m.participants, 4)}</span>` : ''}
+    </span>
+  </button>`;
+}
+
+function _sgReader(m, l, ch, myIds, charById) {
+  const i = l.list.indexOf(m), prev = l.list[i - 1], next = l.list[i + 1];
+  const n = ch.get(m.ordre || 0), s = stCfg(m), gs = m.groupes || [], parts = _tvParts(m, myIds, charById);
+  const meta = [m.date, m.lieu].filter(Boolean).map(_esc);
+  return `<article class="sg-rd" aria-label="${_esc(m.titre || 'Sans titre')}">
+    <div class="sg-rd-cov">${_cover(m, n)}</div>
+    <div class="sg-rd-main">
+      <div class="sg-rd-eye"><span>Ch. ${_pad2(n)}${m.type === 'event' ? ' · Événement' : ''}</span><span style="color:${s.color}">${s.icon} ${_esc(m.statut || 'En attente')}${m.statut === 'En cours' ? ` · ${itemProgress(m)}%` : ''}</span>${meta.map(x => `<span>${x}</span>`).join('')}</div>
+      <h3>${_esc(m.titre || 'Sans titre')}</h3>
+      ${m.description ? `<p class="sg-rd-txt">${_nl2br(m.description)}</p>` : `<p class="sg-rd-txt empty">${_tmKey(m) === 'todo' ? 'Cette mission n’a pas encore été jouée.' : 'Pas encore de récit pour cette mission.'}</p>`}
+      ${gs.length || parts.length ? `<div class="sg-rd-cols">
+        ${gs.length ? `<div class="sg-rd-g"><h4>Groupes</h4>${gs.map(g => {
+          const o = groupOutcome(g), v = parseInt(g.reussite);
+          return `<div><span>${_esc(g.nom || 'Groupe')}</span><em><i style="width:${isNaN(v) ? 0 : Math.max(0, Math.min(100, v))}%;background:${o.color}"></i></em><b style="color:${o.color}">${isNaN(v) ? '—' : v + '%'}</b></div>`;
+        }).join('')}</div>` : ''}
+        ${parts.length ? `<div class="sg-rd-p"><h4>Ont participé</h4><div>${parts.map(p =>
+          `<span class="sg-pp${p.me ? ' me' : ''}">${characterAvatarHtml(p.entry, { tag: 'span', className: 'av', border: 'none', background: 'transparent' })}${_esc(p.nom)}${p.me ? ' <em>toi</em>' : ''}</span>`).join('')}</div></div>` : ''}
       </div>` : ''}
+    </div>
+    <div class="sg-rd-act">
+      <button class="sg-rd-x" data-sgclose aria-label="Replier">×</button>
+      <span class="sg-sp"></span>
+      <div class="sg-rd-step">
+        <button data-sg="${prev ? _esc(prev.id) : ''}" ${prev ? '' : 'disabled'} title="${prev ? _esc(prev.titre || '') : ''}">‹ Précédente</button>
+        <button data-sg="${next ? _esc(next.id) : ''}" ${next ? '' : 'disabled'} title="${next ? _esc(next.titre || '') : ''}">Suivante ›</button>
+      </div>
+      <button class="sg-rd-open" data-sgopen="${_esc(m.id)}">Ouvrir la fiche</button>
     </div>
   </article>`;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// VUE CHRONIQUE — Chapitres livre (handoff §8)
-// ══════════════════════════════════════════════════════════════════════════════
-function _renderChroniqueView(missions) {
-  const sorted = [...missions].sort((a,b) => (a.ordre||0)-(b.ordre||0) || (a.date||'').localeCompare(b.date||''));
-  return `<div class="chronique">
-    ${sorted.map((m, i) => {
-      const st = stCfg(m);
-      const prog = itemProgress(m);
-      const axeCol = m.axe ? (STORE.axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
-      const parts = m.participants || [];
-      return `<article class="chap" style="--axe-color:${axeCol};--st-color:${st.color}">
-        <div class="chap-side">
-          <div class="chap-num">${String(i+1).padStart(2,'0')}</div>
-          ${i < sorted.length-1 ? '<div class="chap-thread"></div>' : ''}
-        </div>
-        <div class="chap-body" data-action="openStoryDetail" data-id="${m.id}">
-          <div class="chap-banner">
-            ${m.imageUrl ? `<img src="${_esc(m.imageUrl)}" alt="" loading="lazy">` : `<span>${m.type === 'mission' ? '🎯' : '📖'}</span>`}
-          </div>
-          <div class="chap-meta-top">
-            ${m.axe ? `<span class="chap-axe">${_esc(m.axe)}</span>` : ''}
-            <span class="chap-statut">${st.icon} ${_esc(m.statut || 'En attente')}</span>
-            ${m.date ? `<span class="chap-date">📅 ${_esc(m.date)}</span>` : ''}
-            ${m.lieu ? `<span class="chap-date">📍 ${_esc(m.lieu)}</span>` : ''}
-          </div>
-          <h2 class="chap-title">${_esc(m.titre || 'Sans titre')}</h2>
-          ${m.description
-            ? `<p class="chap-desc">${_nl2br(m.description)}</p>`
-            : `<p class="chap-desc empty">— La chronique ne dit rien de cette mission —</p>`}
-          <div class="chap-foot">
-            ${parts.length ? `<div class="chap-parts">
-              ${parts.slice(0, 10).map(p => {
-                return characterAvatarHtml(p, { tag: 'span', className: 'av lg', border: 'none', background: 'transparent' });
-              }).join('')}
-            </div>` : '<div></div>'}
-            <div class="chap-prog">
-              <span>${prog}%</span>
-              <div class="bar"><i style="width:${prog}%;background:${st.color}"></i></div>
-            </div>
-          </div>
-        </div>
-      </article>`;
-    }).join('')}
+function _initSaga() {
+  const root = document.querySelector('.sg'); if (!root) return;
+  const ch = () => _chMap(_SAGA_LAST);
+  const placeRail = (sec, smooth) => {
+    const rail = sec.querySelector('.sg-rail');
+    const target = sec.querySelector('.sg-c.open') || sec.querySelector('.sg-c.k-live') || [...sec.querySelectorAll('.sg-c:not(.todo)')].pop();
+    if (!target) return;
+    const el = target.closest('.sg-later') || target;
+    const left = el.offsetLeft, right = left + el.offsetWidth;
+    if (smooth) {
+      if (left < rail.scrollLeft) rail.scrollTo({ left: left - 24, behavior: 'smooth' });
+      else if (right > rail.scrollLeft + rail.clientWidth) rail.scrollTo({ left: right - rail.clientWidth + 24, behavior: 'smooth' });
+    } else rail.scrollLeft = Math.max(0, left - 232);
+  };
+  root.querySelectorAll('.sg-axe').forEach(sec => placeRail(sec, false));
+
+  const redraw = (sec, focusId) => {
+    const lane = _axeLanes(_SAGA_LAST).find(l => l.key === sec.dataset.axe); if (!lane) return;
+    const sl = sec.querySelector('.sg-rail').scrollLeft;
+    const tmp = document.createElement('div'); tmp.innerHTML = _sgSection(lane, ch());
+    const fresh = tmp.firstElementChild; sec.replaceWith(fresh);
+    fresh.querySelector('.sg-rail').scrollLeft = sl;
+    placeRail(fresh, true);
+    if (focusId) fresh.querySelector(`.sg-rail [data-sg="${focusId}"]`)?.focus({ preventScroll: true });
+  };
+
+  root.onclick = e => {
+    const sec = e.target.closest('.sg-axe'); if (!sec) return;
+    const nav = e.target.closest('[data-sgs]');
+    if (nav) { const r = sec.querySelector('.sg-rail'); r.scrollBy({ left: +nav.dataset.sgs * r.clientWidth * .8, behavior: 'smooth' }); return; }
+    const op = e.target.closest('[data-sgopen]');
+    if (op) { openStoryDetail(op.dataset.sgopen); return; }
+    if (e.target.closest('[data-sgclose]')) { const id = _SAGA_OPEN[sec.dataset.axe]; delete _SAGA_OPEN[sec.dataset.axe]; redraw(sec, id); return; }
+    const c = e.target.closest('[data-sg]');
+    if (!c || !c.dataset.sg) return;
+    const id = c.dataset.sg;
+    if (c.classList.contains('sg-c') && _SAGA_OPEN[sec.dataset.axe] === id) { openStoryDetail(id); return; }
+    _SAGA_OPEN[sec.dataset.axe] = id;
+    redraw(sec, c.classList.contains('sg-c') ? id : null);
+  };
+
+  if (!_sgEscBound) {
+    _sgEscBound = true;
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape') return;
+      // Ne pas replier si une fiche mission (modale) est ouverte.
+      if (document.getElementById('modal-overlay')?.classList.contains('show')) return;
+      const root2 = document.querySelector('.sg'); if (!root2) return;
+      const sec = document.activeElement?.closest?.('.sg-axe') || [...root2.querySelectorAll('.sg-axe')].find(s => s.querySelector('.sg-rd'));
+      if (!sec || !_SAGA_OPEN[sec.dataset.axe]) return;
+      const id = _SAGA_OPEN[sec.dataset.axe]; delete _SAGA_OPEN[sec.dataset.axe];
+      const lane = _axeLanes(_SAGA_LAST).find(l => l.key === sec.dataset.axe); if (!lane) return;
+      const sl = sec.querySelector('.sg-rail').scrollLeft;
+      const tmp = document.createElement('div'); tmp.innerHTML = _sgSection(lane, _chMap(_SAGA_LAST));
+      const fresh = tmp.firstElementChild; sec.replaceWith(fresh);
+      fresh.querySelector('.sg-rail').scrollLeft = sl;
+      fresh.querySelector(`[data-sg="${id}"]`)?.focus({ preventScroll: true });
+    });
+  }
+}
+
+// ─── LISTE ─────────────────────────────────────────────────────────────────
+const _LS_COLS = [['ch', 'Ch.'], ['titre', 'Mission'], ['axe', 'Axe'], ['statut', 'Statut'], ['grp', 'Groupes'], ['parts', 'Joueurs'], ['prog', 'Avancement'], ['date', 'Date']];
+const _LS_ST = ['En cours', 'Terminée', 'Échouée', 'En attente'];
+const _LS_GROUPS = [['none', 'Aucun'], ['axe', 'Axe'], ['ch', 'Chapitre'], ['statut', 'Statut']];
+let _LIST_LAST = [];
+
+function _renderListView(missions) {
+  _LIST_LAST = missions;
+  const ch = _chMap(missions);
+  const prefs = getStoryPrefs();
+  const sort = prefs.listSort || { k: 'ch', d: 1 }, grp = prefs.listGroup || 'none';
+  const val = {
+    ch: m => ch.get(m.ordre || 0),
+    titre: m => _normalize(m.titre),
+    axe: m => m.axe ? _axeRank(m.axe) : 999,
+    statut: m => _LS_ST.indexOf(m.statut || 'En attente'),
+    grp: m => (m.groupes || []).length,
+    parts: m => (m.participants || []).length,
+    prog: m => itemProgress(m),
+    date: m => m.date ? ch.get(m.ordre || 0) : 9999,
+  }[sort.k] || (() => 0);
+  const rows = [...missions].sort((a, b) => {
+    const A = val(a), B = val(b);
+    return (A < B ? -1 : A > B ? 1 : 0) * sort.d || (a.ordre || 0) - (b.ordre || 0);
+  });
+
+  let blocks;
+  if (grp === 'none') blocks = [{ rows }];
+  else {
+    const keyOf = { axe: m => m.axe || '__none__', ch: m => ch.get(m.ordre || 0), statut: m => m.statut || 'En attente' }[grp];
+    const map = new Map();
+    rows.forEach(m => { const k = keyOf(m); if (!map.has(k)) map.set(k, []); map.get(k).push(m); });
+    const keys = [...map.keys()].sort((a, b) => grp === 'axe' ? ((a === '__none__' ? 999 : _axeRank(a)) - (b === '__none__' ? 999 : _axeRank(b)))
+      : grp === 'ch' ? a - b : _LS_ST.indexOf(a) - _LS_ST.indexOf(b));
+    blocks = keys.map(k => ({ rows: map.get(k),
+      label: grp === 'axe' ? (k === '__none__' ? 'Hors axe' : k) : grp === 'ch' ? `Chapitre ${_pad2(k)}` : k,
+      sw: grp === 'axe' ? (k === '__none__' ? 'var(--text-muted)' : axeColor(k)) : grp === 'statut' ? (STATUT_CFG[k]?.color) : null }));
+  }
+
+  const head = _LS_COLS.map(([k, l]) => {
+    const on = sort.k === k;
+    return `<button class="c-${k}${on ? ' on' : ''}" data-lsort="${k}" aria-sort="${on ? (sort.d > 0 ? 'ascending' : 'descending') : 'none'}">${l}<i>${on ? (sort.d > 0 ? '↑' : '↓') : ''}</i></button>`;
+  }).join('');
+
+  const row = m => {
+    const s = stCfg(m), prog = itemProgress(m), gs = m.groupes || [], n = ch.get(m.ordre || 0);
+    const outs = gs.map(groupOutcome), mixed = new Set(outs.map(o => o.label)).size > 1;
+    return `<div class="ls-r" role="row" tabindex="0" data-lsopen="${_esc(m.id)}" style="--st:${s.color}">
+      <span class="c-ch">${_pad2(n)}</span>
+      <span class="c-titre"><b>${_esc(m.titre || 'Sans titre')}</b>${m.type === 'event' || m.lieu ? `<small>${[m.type === 'event' ? 'Événement' : '', _esc(m.lieu || '')].filter(Boolean).join(' · ')}</small>` : ''}</span>
+      <span class="c-axe">${m.axe ? `<i style="background:${axeColor(m.axe)}"></i><span>${_esc(m.axe)}</span>` : '<span class="dim">—</span>'}</span>
+      <span class="c-statut"><em>${s.icon} ${_esc(m.statut || 'En attente')}</em></span>
+      <span class="c-grp">${gs.length ? `<span class="ls-dots${mixed ? ' mixed' : ''}" title="${gs.map((g, i) => `${_esc(g.nom || 'Groupe')} : ${outs[i].label}`).join(' · ')}${mixed ? ' (issues différentes)' : ''}">${outs.map(o => `<i style="background:${o.color}"></i>`).join('')}</span>` : '<span class="dim">—</span>'}</span>
+      <span class="c-parts">${(m.participants || []).length ? `<span class="ls-av">${_tvAvatars(m.participants, 3)}</span>` : '<span class="dim">—</span>'}</span>
+      <span class="c-prog"><span class="ls-bar"><i style="width:${prog}%"></i></span><b>${prog}%</b></span>
+      <span class="c-date">${m.date ? _esc(m.date) : '<span class="dim">—</span>'}</span>
+    </div>`;
+  };
+
+  return `<div class="ls">
+    <div class="ls-tools"><span>Regrouper par</span><div class="ls-seg">${_LS_GROUPS.map(([k, l]) => `<button class="${grp === k ? 'on' : ''}" data-lgrp="${k}">${l}</button>`).join('')}</div></div>
+    <div class="ls-t" role="table"><div class="ls-in">
+      <div class="ls-r ls-hd" role="row">${head}</div>
+      ${blocks.map(b => `${b.label ? `<div class="ls-gh">${b.sw ? `<i style="background:${b.sw}"></i>` : ''}${_esc(b.label)}<span>${b.rows.length}</span></div>` : ''}${b.rows.map(row).join('')}`).join('')}
+    </div></div>
   </div>`;
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// VUE LISTE — Tableau compact (handoff §9)
-// ══════════════════════════════════════════════════════════════════════════════
-function _renderListView(missions) {
-  return `<div class="list-table">
-    <div class="list-head">
-      <div>#</div>
-      <div>Mission</div>
-      <div>Axe</div>
-      <div>Statut</div>
-      <div>Progression</div>
-      <div>Date</div>
-    </div>
-    ${missions.map((m, i) => {
-      const st = stCfg(m);
-      const prog = itemProgress(m);
-      const axeCol = m.axe ? (STORE.axeMap[m.axe] || '#7a8fa8') : '#7a8fa8';
-      return `<div class="list-row" style="--axe-color:${axeCol};--st-color:${st.color}"
-        data-action="openStoryDetail" data-id="${m.id}">
-        <div class="list-num">${String(i+1).padStart(2,'0')}</div>
-        <div class="list-titre">${_esc(m.titre || 'Sans titre')}${m.lieu ? `<span class="list-lieu"> · ${_esc(m.lieu)}</span>` : ''}</div>
-        <div class="list-axe">${m.axe ? `<span class="dot"></span><span>${_esc(m.axe)}</span>` : '<span class="dim">—</span>'}</div>
-        <div class="list-statut">${st.icon} ${_esc(m.statut || 'En attente')}${_groupsDotsHtml(m)}</div>
-        <div class="list-prog">
-          <div class="bar"><i style="width:${prog}%"></i></div>
-          <span>${prog}%</span>
-        </div>
-        <div class="list-date">${m.date ? _esc(m.date) : '—'}</div>
-      </div>`;
-    }).join('')}
-  </div>`;
+function _initList() {
+  const root = document.querySelector('.ls'); if (!root) return;
+  const redraw = () => { const x = root.querySelector('.ls-t').scrollLeft; root.outerHTML = _renderListView(_LIST_LAST); _initList(); const t = document.querySelector('.ls .ls-t'); if (t) t.scrollLeft = x; };
+  root.onclick = e => {
+    const so = e.target.closest('[data-lsort]');
+    if (so) {
+      const cur = getStoryPrefs().listSort || { k: 'ch', d: 1 }, k = so.dataset.lsort;
+      setStoryPrefs({ listSort: { k, d: cur.k === k ? -cur.d : (k === 'prog' || k === 'parts' || k === 'grp' ? -1 : 1) } });
+      redraw(); return;
+    }
+    const g = e.target.closest('[data-lgrp]');
+    if (g) { setStoryPrefs({ listGroup: g.dataset.lgrp }); redraw(); return; }
+    const r = e.target.closest('[data-lsopen]');
+    if (r) openStoryDetail(r.dataset.lsopen);
+  };
+  root.onkeydown = e => {
+    const r = e.target.closest('[data-lsopen]'); if (!r) return;
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openStoryDetail(r.dataset.lsopen); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const all = [...root.querySelectorAll('[data-lsopen]')], i = all.indexOf(r);
+      all[i + (e.key === 'ArrowDown' ? 1 : -1)]?.focus();
+    }
+  };
 }
 
 // ── RENDU TIMELINE ────────────────────────────────────────────────────────────
