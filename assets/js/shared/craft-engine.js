@@ -25,6 +25,8 @@ export const DEFAULT_CRAFT_CONFIG = {
   // Part des matériaux rendue en cas d'ÉCHEC. Défaut 0 = perte totale (loot
   // généreux : 2 matériaux par créature). Le MJ peut la remonter (ex. 0.25).
   refundFractionOnFail: 0,
+  // Part des matériaux de craft rendue en RECYCLANT un objet (démontage).
+  recycleFraction: 0.5,
 };
 
 // Emplacement de l'objet → POOL de traits piochables au craft.
@@ -64,6 +66,46 @@ export function craftCategoryFor({ kind, nature, ranged, armorType, bijouSlot } 
     return String(bijouSlot || '').toLowerCase().includes('amulet') ? 'amulette' : 'anneau';
   }
   return null;
+}
+
+/**
+ * Signaux de craft d'un objet d'inventaire (pour déduire sa catégorie) :
+ * { kind:'arme'|'armure'|'bijou'|null, nature, ranged, bouclier, mainLibre,
+ *   armorType, bijouSlot }.
+ */
+export function itemCraftSignals(item = {}) {
+  const tpl = String(item?.template || '').toLowerCase();
+  const fmt = String(item?.format || '');
+  if (tpl === 'arme' || /arme|bouclier|baguette|main\s*libre/i.test(fmt)) {
+    const m = String(item?.portee || '').replace(',', '.').match(/(\d+(?:\.\d+)?)\s*m/i);
+    return {
+      kind: 'arme',
+      nature: item?.nature || 'physique',
+      ranged: !!m && parseFloat(m[1]) > 1.5,
+      bouclier: /bouclier/i.test(fmt),
+      mainLibre: /main\s*libre/i.test(fmt),
+    };
+  }
+  if (item?.slotArmure) return { kind: 'armure', armorType: item.typeArmure || '' };
+  if (item?.slotBijou)  return { kind: 'bijou', bijouSlot: item.slotBijou };
+  return { kind: null };
+}
+
+/** Catégorie de craft d'un objet d'inventaire (applique bouclier→lourde, main libre→distance). */
+export function craftCategoryForItem(item = {}) {
+  const s = itemCraftSignals(item);
+  if (s.kind === 'arme') {
+    if (s.bouclier) return 'armureLourde';
+    if (s.mainLibre) return 'armeDist';
+  }
+  return craftCategoryFor(s);
+}
+
+/** Quantité de matériaux rendue en recyclant (arrondi inférieur). */
+export function craftRecycleQty(craftQty, config) {
+  const frac = _CFG(config).recycleFraction;
+  const f = Number.isFinite(+frac) ? Math.max(0, Math.min(1, +frac)) : 0;
+  return Math.floor((parseInt(craftQty, 10) || 0) * f);
 }
 
 /** Discipline (forge/confection/orfevre) requise pour fabriquer ce type d'objet. */

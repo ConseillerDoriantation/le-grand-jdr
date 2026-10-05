@@ -9,6 +9,7 @@ import {
   normalizeMaterialRequirements, countInventoryItem, missingMaterials, hasCraftMaterials,
   resolveCraftRoll, craftRefundOnFail, traitPoolFor, craftableTraits, isTraitAllowed,
   buildCraftedItem, resolveCraftAttempt,
+  itemCraftSignals, craftCategoryForItem, craftRecycleQty,
 } from '../assets/js/shared/craft-engine.js';
 
 const TRAITS = [
@@ -37,6 +38,31 @@ test('catégorie déduite de la nature, pas de la famille', () => {
   assert.equal(craftCategoryFor({ kind: 'bijou', bijouSlot: 'Amulette' }), 'amulette');
   assert.equal(craftCategoryFor({ kind: 'bijou', bijouSlot: 'Anneau' }), 'anneau');
   assert.equal(craftCategoryFor({ kind: 'autre' }), null);
+});
+
+test('craftCategoryForItem : déduit depuis un objet d inventaire', () => {
+  assert.equal(craftCategoryForItem({ template: 'arme', nature: 'physique', portee: 'Contact' }), 'armeCaC');
+  assert.equal(craftCategoryForItem({ template: 'arme', nature: 'magique' }), 'armeMagique');
+  assert.equal(craftCategoryForItem({ template: 'arme', nature: 'physique', portee: '9m' }), 'armeDist');
+  // Bouclier → armure lourde ; main libre → distance (choix MJ).
+  assert.equal(craftCategoryForItem({ format: 'Bouclier' }), 'armureLourde');
+  assert.equal(craftCategoryForItem({ format: 'Main Libre' }), 'armeDist');
+  assert.equal(craftCategoryForItem({ slotArmure: 'Torse', typeArmure: 'Lourde' }), 'armureLourde');
+  assert.equal(craftCategoryForItem({ slotBijou: 'Amulette' }), 'amulette');
+  assert.equal(craftCategoryForItem({ template: 'potion' }), null);
+});
+
+test('craftRecycleQty : moitié par défaut, arrondi inférieur, configurable', () => {
+  assert.equal(craftRecycleQty(10), 5);
+  assert.equal(craftRecycleQty(15), 7);
+  assert.equal(craftRecycleQty(10, { recycleFraction: 0.25 }), 2);
+  assert.equal(craftRecycleQty(10, { recycleFraction: 0 }), 0);
+});
+
+test('itemCraftSignals : genre/nature/portée', () => {
+  assert.deepEqual(itemCraftSignals({ template: 'arme', nature: 'magique', portee: '9m' }), { kind: 'arme', nature: 'magique', ranged: true, bouclier: false, mainLibre: false });
+  assert.equal(itemCraftSignals({ slotArmure: 'Tête', typeArmure: 'Légère' }).kind, 'armure');
+  assert.equal(itemCraftSignals({}).kind, null);
 });
 
 test('discipline : défauts (Forge/Confection/Orfèvre) selon le type', () => {
