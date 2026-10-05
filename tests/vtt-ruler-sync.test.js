@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+
+const readSource = url => readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
 import {
   MJ_RULER_LINGER_MS, MJ_RULER_IDLE_MS, MJ_RULER_MAX_AGE_MS,
   mjRulerPage, mjRulerFinalPayload, mjRulerRemainingMs,
@@ -40,14 +42,14 @@ test('rien n\'est affiché hors scène, avant réception, ou pour une vieille di
 });
 
 test('vtt-ruler n\'écrit ni départ « longueur 0 » ni effacement à l\'expiration', () => {
-  const ruler = readFileSync(new URL('../assets/js/features/vtt/vtt-ruler.js', import.meta.url), 'utf8');
+  const ruler = readSource(new URL('../assets/js/features/vtt/vtt-ruler.js', import.meta.url));
   const start = ruler.slice(ruler.indexOf('export function _startRuler(')).split('\n}\n')[0];
   assert.match(start, /_clearRuler\(\{ broadcast: false \}\)/);
   assert.match(start, /if \(_mjRulerBroadcasting\) _broadcastMjRuler\(/);
   assert.match(ruler, /_rulerHideTimer = setTimeout\(_expireRuler, MJ_RULER_LINGER_MS\)/);
   const expire = ruler.slice(ruler.indexOf('function _expireRuler(')).split('\n}\n')[0];
   assert.match(expire, /_clearRuler\(\{ broadcast: false \}\)/);
-  const vtt = readFileSync(new URL('../assets/js/features/vtt/vtt.js', import.meta.url), 'utf8');
+  const vtt = readSource(new URL('../assets/js/features/vtt/vtt.js', import.meta.url));
   assert.match(vtt, /_renderMjRulerRemote\(VS\.session\.mjRuler, \{ fromSession: true, confirmed: !snap\.metadata\.fromCache \}\)/);
   // Amorçage sur confirmation serveur, réarmé à chaque (ré)abonnement du joueur.
   const remote = ruler.slice(ruler.indexOf('export function _renderMjRulerRemote(')).split('\n}\n')[0];

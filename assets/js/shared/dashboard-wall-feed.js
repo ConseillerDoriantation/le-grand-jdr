@@ -31,16 +31,16 @@ export function mergeWallFeeds(...feeds) {
   return [...byId.values()];
 }
 
-// Ce que montre le panneau : les non-lus des autres d'abord, puis l'ordre du mur
-// (épinglés, puis plus récents), et le nombre de non-lus.
+// Ce que montre le panneau : l'ordre du mur (épinglés, puis plus récents), avec
+// le nombre de non-lus calculé séparément. Le filet rouge suffit à distinguer
+// les nouveaux sans faire sauter les publications épinglées.
 export function dashboardWallView({ docs = [], legacyItems = [], seenAt = 0, uid = '' } = {}) {
   const posts = sortBastionWallPosts([
     ...docs.filter(doc => doc.id !== 'main' && (doc.kind === 'post' || doc.text)),
     ...legacyItems.map((post, index) => ({ ...post, id: post.id || `legacy_${index}`, legacy: true })),
   ]);
   const unread = bastionWallUnreadCount(posts, seenAt, uid);
-  const highlighted = posts.filter(post => post.ts > seenAt && post.uid !== uid);
-  const shown = [...highlighted, ...posts.filter(post => !highlighted.includes(post))].slice(0, DASHBOARD_WALL_SHOWN);
+  const shown = posts.slice(0, DASHBOARD_WALL_SHOWN);
   return { unread, shown };
 }
 

@@ -8,8 +8,9 @@ import { loadChars, loadCollection, loadCollectionAfter, loadCollectionWhere, ge
 import { subscribeRecentWhere } from '../data/firestore-queries.js';
 import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
-import { isFeatureEnabled, isFeatureAllowedByPlan } from '../shared/features.js';
-import { isUsableSummary, storyItemsFromSummary, summarizeAchievements, summarizeCollection } from '../shared/dashboard-summary.js';
+import { isFeatureEnabled } from '../shared/features.js';
+import { activeGroupsFromSources, compactDashboardSessions, isUsableSummary } from '../shared/dashboard-summary.js';
+import { isAgendaSessionUpcoming } from '../shared/agenda-sessions.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { loadStats, peekStats, applyStatsLegacyRollup, resetStats, deleteCharStats, deleteCharDateStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
 import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, mergeVttRollDetails, normalizeSkillStats, topStatTies, vttLogTimeMs } from '../shared/stats-analysis.js';
@@ -23,7 +24,7 @@ import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-
 import { getRouteSub } from '../shared/route.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 import { canControlCharacter, getControlledCharacters } from '../shared/character-state.js';
-import { dedupeQuestParticipants, questParticipantFromChar, toggleQuestParticipant } from '../shared/participants.js';
+import { dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey } from '../shared/bastion-wall.js';
 import { createDashboardWallFeed, dashboardWallView } from '../shared/dashboard-wall-feed.js';
 
@@ -31,30 +32,6 @@ import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
 import { loadAllUsers, relinkPlayerAccount } from '../core/adventure.js';
 const renderCharSheet   = (...args) => charSession.renderSheet(...args);
-
-// Masque les blocs du dashboard liés à une fonctionnalité désactivée pour l'aventure
-// courante, puis les sections/labels devenus orphelins (plus aucun contenu visible).
-// Appelé après le rendu (vue joueur ET MJ partagent #dash-root).
-function _hideDisabledDashboardBlocks(root) {
-  if (!root) return;
-  // 1. Cartes/CTA/boutons ciblant une feature off (la plupart ont data-navigate racine).
-  root.querySelectorAll('[data-navigate]').forEach(el => {
-    if (!isFeatureEnabled(el.getAttribute('data-navigate'))) el.style.display = 'none';
-  });
-  // 2. Wrappers connus sans titre (action/héros) devenus vides → masqués.
-  const _visibleContent = (el, skipLabel = false) => [...el.children].some(c =>
-    (!skipLabel || !c.classList.contains('dv2-section-label')) &&
-    c.style.display !== 'none' &&
-    (c.children.length > 0 || c.textContent.trim() !== ''));
-  root.querySelectorAll('.dv2-player-action, .dv2-player-hero').forEach(w => {
-    if (w.children.length && !_visibleContent(w)) w.style.display = 'none';
-  });
-  // 3. Sections à titre (dv2-section-label) sans plus aucun contenu visible → masquées.
-  root.querySelectorAll('.dv2-section-label').forEach(label => {
-    const section = label.parentElement;
-    if (section && !_visibleContent(section, true)) section.style.display = 'none';
-  });
-}
 
 // ── Statistiques : état léger pour la vue « par séance » (évite une relecture) ──
 let _statsData = null;                 // dernier doc stats chargé (pour la modale par date)
@@ -2631,1257 +2608,340 @@ function _statsOpenManageModal() {
 
 // Flux du mur du tableau de bord en cours (un seul à la fois, cf. dashboard()).
 let _dashWallFeed = null;
+let _dashUi = null;
 
 const PAGES = {
 
-  // ─── DASHBOARD ──────────────────────────────────────────────────────────────
+  // ─── DASHBOARD V3 ───────────────────────────────────────────────────────────
   async dashboard() {
     const content = document.getElementById('main-content');
+    content.innerHTML = `<div class="db" id="dash-root">${appSplashHtml()}</div>`;
 
-    // Loader splash visible tant que les données ne sont pas chargées.
-    // Le wrapper #dash-root est conservé : le rendu final l'utilise pour s'y injecter.
-    content.innerHTML = `<div class="dash-root" id="dash-root">${appSplashHtml()}</div>`;
+    let allChars = sortCharactersForDisplay(getCachedCollection('characters') || []);
+    let story = STATE.isAdmin ? (getCachedCollection('story') || []) : [];
+    let quests = STATE.isAdmin ? (getCachedCollection('quests') || []) : [];
+    let agenda = null;
+    let summary = null;
+    let presence = [];
+    let wallDocs = [];
+    let wallRead = null;
+    let pickGroupId = '';
+    let paintQueued = false;
+    const groupOverrides = new Map();
+    const uidAliases = _uidAliasesForCurrentUser();
+    const aliasSet = new Set(uidAliases);
 
-    const uid = STATE.isAdmin ? null : STATE.user.uid;
-
-    // ── Données RÉACTIVES (rendu NON-bloquant) ─────────────────────────
-    // Le dashboard ne bloque plus sur le réseau : 1er rendu immédiat depuis le
-    // cache (instantané sur cache chaud, squelette vide sinon), puis re-rendu à
-    // l'arrivée de chaque source via les abonnements en bas de fonction. Ces
-    // watch() se branchent sur les listeners session-live (0 lecture en plus)
-    // et sont nettoyés par unwatchAll() à la navigation.
-    let allChars        = sortCharactersForDisplay(getCachedCollection('characters') || []);
-    let storyItems      = getCachedCollection('story')        || [];
-    let achievementsRaw = getCachedCollection('achievements') || [];
-    let quests          = getCachedCollection('quests')       || [];
-    let collectionItems = getCachedCollection('collection')   || [];
-    // Joueur : résumé tenu par le MJ (settings/dashboardSummary). Tant qu'il est
-    // utilisable, Trame / Hauts-faits / Collection complètes ne sont pas lus.
-    let dashSummary     = null;
-    let wallDocs        = [];
-    let wallLegacy      = [];
-    let wallRead        = null;
+    const iconPaths = {
+      calendar: '<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>',
+      clock: '<circle cx="8" cy="8" r="5.8"/><path d="M8 5v3.2l2 1.3"/>',
+      'map-pin': '<path d="M8 14s4.5-4.2 4.5-7.5a4.5 4.5 0 00-9 0C3.5 9.8 8 14 8 14z"/><circle cx="8" cy="6.5" r="1.6"/>',
+      flag: '<path d="M3.5 14V2.5M3.5 3h8.5l-2 3 2 3H3.5"/>',
+      play: '<path d="M5 3.2v9.6c0 .5.5.8 1 .5l7.3-4.8a.6.6 0 000-1L6 2.7c-.5-.3-1 0-1 .5z" fill="currentColor" stroke="none"/>',
+      shield: '<path d="M8 1.8l5 2v4c0 3.2-2.2 5.3-5 6.4-2.8-1.1-5-3.2-5-6.4v-4z"/>',
+      coin: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5.5v5"/>',
+      plus: '<path d="M8 3v10M3 8h10"/>',
+      edit: '<path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/>',
+      'arrow-right': '<path d="M3 8h10M9 4l4 4-4 4"/>',
+      'refresh-cw': '<path d="M13 5V2l-2 2a5.5 5.5 0 10.8 7.3M3 11v3l2-2"/>',
+    };
+    const icon = (id, size = 13) => `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[id] || ''}</svg>`;
     const wallSeenAt = () => {
-      let seenAt = 0;
-      try { seenAt = Number(localStorage.getItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid)) || 0); } catch { /* stockage privé indisponible */ }
-      return Math.max(seenAt, Number(wallRead?.seenAt) || 0);
+      let local = 0;
+      try { local = Number(localStorage.getItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid))) || 0; } catch { /* stockage privé */ }
+      return Math.max(local, Number(wallRead?.seenAt) || 0);
     };
-    let bastionDoc      = null;
-    let nextSession     = null;
-    let nextSessionReady = false;
-    let sessionStats     = null;
-    let sessionAvails    = [];
-
-    let _presenceWatched = false;  // abonnement présence MJ : 1 seule fois
-    let _paintQueued     = false;
-    let _sessionCenterModulePromise = null;
-    let _sessionCenterRenderPromise = null;
-    let _sessionCenterDirty = false;
-    let _sessionCenterNeedsMount = true;
-
-    const mountSessionCenter = () => {
-      _sessionCenterDirty = true;
-      if (_sessionCenterRenderPromise) return;
-      _sessionCenterModulePromise ||= import('./session-center.js');
-      _sessionCenterRenderPromise = _sessionCenterModulePromise
-        .then(async ({ renderSessionCenterInto }) => {
-          // Une seule hydratation à la fois. Les sources arrivées pendant le
-          // chargement sont reprises au tour suivant au lieu d'annuler sans
-          // cesse le rendu en cours.
-          do {
-            _sessionCenterDirty = false;
-            const context = {
-              quests,
-              story: storyItems,
-              chars: allChars,
-              // Stats et disponibilités enrichissent la séance, mais ne doivent
-              // jamais retarder l'affichage de sa date et de son groupe.
-              stats: sessionStats,
-              avails: sessionAvails,
-            };
-            // Tant que le listener agenda n'a pas répondu, laisser le centre
-            // utiliser directement le doc session-live déjà amorcé.
-            if (nextSessionReady) context.agendaDoc = nextSession;
-            await renderSessionCenterInto('dashboard-session-center', context);
-          } while (_sessionCenterDirty
-            && STATE.currentPage === 'dashboard'
-            && document.getElementById('dashboard-session-center'));
-        })
-        .catch(err => console.error('[dashboard] centre de session indisponible', err))
-        .finally(() => {
-          _sessionCenterRenderPromise = null;
-          if (_sessionCenterDirty && STATE.currentPage === 'dashboard') mountSessionCenter();
-        });
+    const schedulePaint = () => {
+      if (paintQueued) return;
+      paintQueued = true;
+      requestAnimationFrame(paint);
     };
-
-    const paint = () => {
-      _paintQueued = false;
-      if (STATE.currentPage !== 'dashboard' || !document.getElementById('dash-root')) return;
-      // Les autres blocs du dashboard se reconstruisent lorsque leurs données
-      // arrivent. Conserver le centre de session évite de réafficher son loader
-      // et de perdre son état à chacun de ces rafraîchissements indépendants.
-      const preservedSessionCenter = document.getElementById('dashboard-session-center');
-
-      // Les personnages délégués sont utilisables comme les personnages du
-      // compte et ne doivent pas réapparaître dans le bloc « autres membres ».
-      const chars = uid ? getControlledCharacters(allChars, uid) : allChars;
-      const controlledIds = new Set(chars.map(c => c.id));
-      const allPartyChars = uid ? allChars.filter(c => !controlledIds.has(c.id)) : [];
-      // Hauts-faits : compteur + 5 plus récents, secrets invisibles aux joueurs.
-      // Même helper pour le résumé MJ et les données complètes → rendu identique.
-      const achievementsView = dashSummary
-        ? (dashSummary.achievements || { count: 0, top: [] })
-        : summarizeAchievements(achievementsRaw, { isAdmin: STATE.isAdmin });
-      // STATE.characters est le cache global de l'aventure. Les vues filtrent
-      // localement ce qu'elles affichent, sinon les pages liées aux personnages
-      // perdent les portraits/participants après un passage par le dashboard.
-      STATE.characters = allChars;
-
-    // Formate la prochaine séance pour affichage (date FR + créneau)
-    const _SLOT_LABELS = { m: '🌞 Matin', a: '☀️ Aprem', s: '🌙 Soir' };
-    function _formatNextSession(sess) {
-      if (!sess || !sess.date) return null;
-      const d = new Date(sess.date + 'T12:00:00');
-      const dateFr = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-      return { dateFr, slotLabel: _SLOT_LABELS[sess.slot] || '', questTitle: sess.questTitle || '' };
-    }
-    // agenda_session/next contient une LISTE de séances validées (rétro-compat :
-    // ancien doc à plat = liste de 1). On affiche la plus proche visible par le
-    // joueur (membres du groupe concerné + MJ).
-    const _isSessVisible = (s) => {
-      const u = s?.participantUids;
-      return STATE.isAdmin || !Array.isArray(u) || !u.length || u.includes(uid);
+    const todayIso = () => {
+      const date = new Date();
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     };
-    const _allSessions = Array.isArray(nextSession?.sessions)
-      ? nextSession.sessions
-      : (nextSession?.date ? [nextSession] : []);
-    const _visibleSessions = _allSessions
-      .filter(_isSessVisible)
-      .sort((a, b) => (a?.date || '').localeCompare(b?.date || ''));
-    const nextSessionFmt = _formatNextSession(_visibleSessions[0]);
-    const _otherSessions = Math.max(0, _visibleSessions.length - 1);
-
-    // Icône SVG inline (jeu d'icônes maison) — rendu homogène cross-OS vs émoji.
-    const _svg = (id, color) => `<svg class="dv2-svg-ico"${color ? ` style="color:${color}"` : ''} aria-hidden="true"><use href="./assets/img/icons.svg#icon-${id}"/></svg>`;
-
-    // ── Action du moment : bloc primaire promu en haut du hub (MJ & joueur) ──
-    // Le « jouer » est l'action n°1 : on l'élève au-dessus du reste et on y
-    // greffe la prochaine séance validée (contexte immédiatement utile).
-    const primaryBlock = `
-      <div class="dash-vtt-cta dash-vtt-cta--primary" data-navigate="vtt">
-        <span class="dash-vtt-icon">${_svg('dice', '#6aa7ff')}</span>
-        <div class="dash-vtt-text">
-          <span class="dash-vtt-label">Entrer dans la table</span>
-          <span class="dash-vtt-sub">${nextSessionFmt
-            ? `Prochaine séance : ${_esc(nextSessionFmt.dateFr)} · ${nextSessionFmt.slotLabel}${_otherSessions ? ` · +${_otherSessions} autre${_otherSessions > 1 ? 's' : ''}` : ''}`
-            : 'Lancer ou rejoindre la session de jeu'}</span>
-        </div>
-        <span class="dash-vtt-arrow">→</span>
-      </div>`;
-
-    const pseudo = STATE.profile?.pseudo || 'Aventurier';
-
-    // Mission active
-    const mission = storyItems
-      .filter(i => i.type === 'mission' && i.statut === 'En cours')
-      .sort((a,b) => (b.ordre||0) - (a.ordre||0))[0] || null;
-
-    // Progression trame
-    const totalMissions = storyItems.filter(i => i.type === 'mission').length;
-    const doneMissions  = storyItems.filter(i => i.type === 'mission' && i.statut === 'Terminée').length;
-
-    // Bastion — compatibilité ancien & nouveau modèle
-    function _bastionLevel(d) {
-      if (!d) return null;
-      // Nouveau modèle : niveau = nb salles construites + 1
-      if (d.salles && typeof d.salles === 'object' && !Array.isArray(d.salles)) {
-        return 1 + Object.values(d.salles).filter(s => (s?.niveau || 0) > 0).length;
-      }
-      // Ancien modèle : niveau = nb améliorations débloquées + 1
-      return 1 + (d.ameliorationsCustom || []).filter(a => (a.fondsActuels||0) >= (a.cout||1) && (a.cout||1) > 0).length;
-    }
-    function _bastionSallesArr(d) {
-      if (!d?.salles) return [];
-      if (Array.isArray(d.salles)) return d.salles.filter(s => s?.nom);
-      // Nouveau modèle : { [slug]: {niveau, ...} }
-      return Object.entries(d.salles)
-        .filter(([_, s]) => (s?.niveau || 0) > 0)
-        .map(([slug, s]) => ({ nom: slug.charAt(0).toUpperCase() + slug.slice(1), niveau: s.niveau }));
-    }
-    const bastionLevel  = _bastionLevel(bastionDoc);
-    const bastionNom    = bastionDoc?.nom || 'Le Bastion';
-
-    // ── Carte mini personnage ─────────────────────────────────────────
-    function _charMini(c) {
-      const pvMax   = calcPVMax(c) || c.pvBase || 10;
-      const pmMax   = calcPMMax(c) || c.pmBase || 10;
-      const pvCur   = c.pvActuel ?? pvMax;
-      const pmCur   = c.pmActuel ?? pmMax;
-      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = calcCA(c) || 10;
-      const or      = calcOr(c) || 0;
-      const portrait = characterPortraitContent(c, { imgStyle: 'width:100%;height:100%;object-fit:cover;display:block', fallbackStyle: "font-family:'Cinzel',serif;font-size:1.3rem;font-weight:700;color:var(--gold)" });
-      return `
-      <div class="dash-char-mini" data-action="_goToChar" data-id="${c.id}">
-        <div class="dash-char-mini-portrait">
-          ${portrait}
-          <div class="dash-char-mini-portrait-fade"></div>
-        </div>
-        <div class="dash-char-mini-body">
-          <div class="dash-cm-namerow">
-            <span class="dash-cm-name">${_esc(c.nom||'?')}</span>
-            <span class="dash-hero-badge">Niv.&nbsp;${c.niveau||1}</span>
-          </div>
-          ${c.classe ? `<div class="dash-cm-sub">${_esc(c.classe)}${c.race?` · ${_esc(c.race)}`:''}</div>` : ''}
-          <div class="dash-cm-bars">
-            <div class="dash-bar-row">
-              <span class="dash-bar-icon">${_svg('heart', '#ff6b6b')}</span>
-              <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
-              <span class="dash-bar-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
-            </div>
-            <div class="dash-bar-row">
-              <span class="dash-bar-icon">${_svg('sparkles', '#4adbf7')}</span>
-              <div class="dash-bar-track"><div class="dash-bar-fill dash-bar-fill--pm" style="width:${pmPct}%"></div></div>
-              <span class="dash-bar-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
-            </div>
-          </div>
-          <div class="dash-cm-chips">
-            <span class="dash-chip">${_svg('shield')} ${ca}</span>
-            <span class="dash-chip dash-chip--gold">${_svg('coin')} ${or}</span>
-          </div>
-        </div>
-        <div class="dash-hero-arrow">→</div>
-      </div>`;
-    }
-
-    // ── Carte héros principale (1 seul perso joueur) ──────────────────
-    function _charFeatured(c) {
-      const pvMax   = calcPVMax(c) || c.pvBase || 10;
-      const pmMax   = calcPMMax(c) || c.pmBase || 10;
-      const pvCur   = c.pvActuel ?? pvMax;
-      const pmCur   = c.pmActuel ?? pmMax;
-      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = calcCA(c) || 10;
-      const or      = calcOr(c) || 0;
-      const portrait = characterPortraitContent(c, { fallbackStyle: "font-family:'Cinzel',serif;font-size:1.6rem;font-weight:700;color:var(--gold)" });
-      return `
-      <div class="dash-hero" data-action="_goToChar" data-id="${c.id}">
-        <div class="dash-hero-glow"></div>
-        <div class="dash-hero-portrait">
-          <div class="dash-hero-portrait-inner">${portrait}</div>
-          <div class="dash-hero-portrait-fade"></div>
-        </div>
-        <div class="dash-hero-body">
-          <div>
-            <div class="dash-hero-name">${_esc(c.nom||'Mon personnage')}</div>
-            <div class="dash-hero-meta">
-              <span class="dash-hero-badge">Niv. ${c.niveau||1}</span>
-              ${c.classe ? `<span class="dash-hero-badge">${_esc(c.classe)}</span>` : ''}
-            </div>
-            ${c.titre ? `<div class="dash-hero-titre">${_esc(c.titre)}</div>` : ''}
-          </div>
-          <div>
-            <div class="dash-hero-bars">
-              <div class="dash-bar-row">
-                <span class="dash-bar-icon">${_svg('heart', '#ff6b6b')}</span>
-                <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
-                <span class="dash-bar-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
-              </div>
-              <div class="dash-bar-row">
-                <span class="dash-bar-icon">${_svg('sparkles', '#4adbf7')}</span>
-                <div class="dash-bar-track"><div class="dash-bar-fill dash-bar-fill--pm" style="width:${pmPct}%"></div></div>
-                <span class="dash-bar-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
-              </div>
-            </div>
-            <div class="dash-hero-chips">
-              <span class="dash-chip">${_svg('shield')} CA <strong>${ca}</strong></span>
-              <span class="dash-chip dash-chip--gold">${_svg('coin')} <strong>${or}</strong> or</span>
-            </div>
-          </div>
-        </div>
-        <div class="dash-hero-arrow">→</div>
-      </div>`;
-    }
-
-    // ── Carte admin ultra-compacte (ligne de tableau) ────────────────
-    function _charRow(c) {
-      const pvMax   = calcPVMax(c) || c.pvBase || 10;
-      const pmMax   = calcPMMax(c) || c.pmBase || 10;
-      const pvCur   = c.pvActuel ?? pvMax;
-      const pmCur   = c.pmActuel ?? pmMax;
-      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = calcCA(c) || 10;
-      const or      = calcOr(c) || 0;
-      const avatar = characterPortraitContent(c, { imgStyle: 'width:100%;height:100%;object-fit:cover;display:block', fallbackStyle: "font-family:'Cinzel',serif;font-size:.8rem;font-weight:700;color:var(--gold)" });
-      // Couleur par joueur (hash sur le pseudo)
-      const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#22d3ee'];
-      const pcol  = PCOLS[(c.ownerPseudo||'?').split('').reduce((a,x)=>a+x.charCodeAt(0),0) % PCOLS.length];
-      return `
-      <div class="dv2-char-row" data-action="_goToChar" data-id="${c.id}" style="--pcol:${pcol}">
-
-        <div class="dv2-cr-top">
-          <div class="dv2-cr-avatar">${avatar}</div>
-          <div class="dv2-flex1">
-            <div class="dv2-cr-namerow">
-              <span class="dv2-cr-name">${_esc(c.nom||'?')}</span>
-              <span class="dv2-cr-badge">Niv.${c.niveau||1}</span>
-            </div>
-            <div class="dv2-cr-sub">${c.classe||''}${c.race?` · ${c.race}`:''}</div>
-          </div>
-          <div class="dv2-cr-tag" style="color:${pcol};background:${pcol}18;border:1px solid ${pcol}44">${_esc(c.ownerPseudo||'?')}</div>
-        </div>
-
-        <div class="dv2-cr-bottom">
-          <div class="dv2-cr-bars">
-            <div class="dv2-cr-barrow">
-              <span class="dv2-cr-icon">${_svg('heart', '#ff6b6b')}</span>
-              <div class="dv2-cr-track"><div class="dv2-cr-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
-              <span class="dv2-cr-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
-            </div>
-            <div class="dv2-cr-barrow">
-              <span class="dv2-cr-icon">${_svg('sparkles', '#4adbf7')}</span>
-              <div class="dv2-cr-track"><div class="dv2-cr-fill dv2-cr-fill--pm" style="width:${pmPct}%"></div></div>
-              <span class="dv2-cr-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
-            </div>
-          </div>
-          <div class="dv2-cr-side">
-            <span class="dv2-cr-side-row dv2-cr-ca">${_svg('shield')} <strong>${ca}</strong></span>
-            <span class="dv2-cr-side-row dv2-cr-or">${_svg('coin')} ${or}</span>
-          </div>
-        </div>
-
-      </div>`;
-    }
-
-    // ── Section personnages ───────────────────────────────────────────
-    let charsHtml = '';
-    if (STATE.isAdmin) {
-      if (chars.length === 0) {
-        charsHtml = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.2rem;text-align:center;color:var(--text-dim);font-size:.85rem">
-          <div style="font-size:1.5rem;margin-bottom:.4rem;opacity:.35">📜</div>Aucun personnage dans cette aventure</div>`;
-      } else {
-        // Tri : ordre alphabétique du nom du personnage (cohérent avec le reste de l'app).
-        const sorted = sortCharactersForDisplay(chars);
-        charsHtml = `
-        <div class="dash-grid-charlist">
-          ${sorted.map(c => _charRow(c)).join('')}
-        </div>`;
-      }
-    } else {
-      if (chars.length === 0) {
-        charsHtml = `
-        <div class="dash-hero" data-navigate="characters">
-          <div class="dash-hero-body" style="flex-direction:row;align-items:center;gap:1rem;padding:1.3rem 1.5rem">
-            <div style="width:48px;height:48px;border-radius:50%;background:rgba(232,184,75,.08);
-              border:1px dashed rgba(232,184,75,.3);display:flex;align-items:center;justify-content:center;
-              font-size:1.3rem;flex-shrink:0">⚔️</div>
-            <div style="flex:1">
-              <div class="dash-hero-name" style="font-size:.95rem">Créer mon personnage</div>
-              <div style="font-size:.78rem;color:var(--text-dim);margin-top:2px">Bienvenue ${_esc(pseudo)} ! Commence par créer ta fiche de héros.</div>
-            </div>
-            <div class="dash-hero-arrow">→</div>
-          </div>
-        </div>`;
-      } else if (chars.length === 1) {
-        charsHtml = _charFeatured(chars[0]);
-      } else {
-        charsHtml = `
-        <div class="dash-grid-charmini">
-          ${chars.map(c => _charMini(c)).join('')}
-        </div>`;
-      }
-    }
-
-    // ── Render ────────────────────────────────────────────────────────
-    const dash = document.getElementById('dash-root');
-    if (!dash) return;
-
-    const _myUid           = STATE.user?.uid;
-    const _myUidAliases    = [
-      _myUid,
-      ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
-      ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
-    ].filter(Boolean);
-    const { total: collectionTotal, unlocked: collectionUnlocked } = dashSummary
-      ? (dashSummary.collection || { total: 0, unlocked: 0 })
-      : summarizeCollection(collectionItems);
-    const collectionPct    = collectionTotal > 0 ? Math.round((collectionUnlocked / collectionTotal) * 100) : 0;
-    // Groupes « En cours » de la Trame (quêtes liées à une mission). L'ancien
-    // modèle de quêtes autonomes est abandonné — le hub reflète la Trame.
-    // Missions clôturées (Terminée/Échouée) → leurs groupes ne doivent plus
-    // compter comme « en cours », même si le statut du groupe n'a pas été basculé.
-    const _doneMissionIds = new Set(
-      storyItems.filter(i => i.statut === 'Terminée' || i.statut === 'Échouée').map(i => i.id)
-    );
-    const activeGroups     = quests
-      .filter(q => q.missionId && (q.statut || 'active') === 'active' && !_doneMissionIds.has(q.missionId))
-      .sort((a, b) => (b.createdAt||'') > (a.createdAt||'') ? 1 : -1);
-    const _missionTitleById = new Map(storyItems.map(i => [i.id, i.titre || 'Mission']));
-
-    setDashboardQuests(quests);
-
-    // ── Helpers ────────────────────────────────────────────────────────
-
-    // Mini-portrait
-    const _portMini = (p, size = 26) => characterAvatarHtml(p, { size, border: '2px solid var(--bg-card)', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
-
-    // Carte d'un groupe de la Trame (lecture seule → on rejoint/gère dans la Trame).
-    const _dashGroupCard = q => {
-      const parts        = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases });
-      const missionTitle = _missionTitleById.get(q.missionId) || 'Mission';
-      const joined       = parts.some(p => _myUidAliases.includes(p.uid));
-      const portHtml     = parts.slice(0, 5).map(p => _portMini(p, 24)).join('');
-      return `
-      <div class="quest-card quest-card--active" data-navigate="story">
-        <div class="quest-card-hd">
-          <span class="quest-badge" style="background:rgba(79,140,255,.13);color:#7aa7ff;border-color:rgba(79,140,255,.3)">🎯 ${_esc(missionTitle)}</span>
-          ${joined ? `<span style="margin-left:auto;font-size:.7rem;color:#22c38e;font-weight:700">✓ Rejoint</span>` : ''}
-        </div>
-        <div class="quest-card-title">${_esc(q.titre || 'Groupe')}</div>
-        ${q.recompense ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
-        <div class="quest-parts">${portHtml}${parts.length > 5 ? `<span class="quest-parts-count">+${parts.length - 5}</span>` : ''}<span class="quest-parts-count">${parts.length} membre${parts.length > 1 ? 's' : ''}</span></div>
-      </div>`;
+    const parseIso = value => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+      return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
     };
-
-    // Barre progression trame (v2)
-    const _progBar = () => {
-      if (totalMissions === 0) return '';
-      const pct = Math.round(doneMissions / totalMissions * 100);
-      return `
-      <div class="dv2-panel-card dv2-progress-card" data-navigate="story">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim)">📖 Progression aventure</span>
-          <span style="font-size:.72rem;color:var(--arcane);font-weight:700;font-family:var(--font-display)">${doneMissions}/${totalMissions} missions</span>
-        </div>
-        <div class="dv2-mission-prog-track">
-          <div class="dv2-mission-prog-fill" data-w="${pct}%"><div class="dv2-mission-shimmer"></div></div>
-        </div>
-      </div>`;
-    };
-
-    // ── Helpers joueur v2 ─────────────────────────────────────────────
-
-    function _heroCardV2(c) {
-      const pvMax   = calcPVMax(c) || c.pvBase || 10;
-      const pmMax   = calcPMMax(c) || c.pmBase || 10;
-      const pvCur   = c.pvActuel ?? pvMax;
-      const pmCur   = c.pmActuel ?? pmMax;
-      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const xpCur   = c.exp || 0;
-      const xpNext  = calcPalier(c.niveau || 1);
-      const xpPct   = Math.min(100, Math.round(xpCur / xpNext * 100));
-      const ca      = calcCA(c) || 10;
-      const or      = calcOr(c) || 0;
-      const portrait = characterPortraitContent(c);
-      return `
-      <div class="dv2-hero-card" data-action="_goToChar" data-id="${c.id}">
-        <div class="dv2-hero-inner">
-          <div class="dv2-portrait-wrap">
-            <div class="dv2-portrait">${portrait}</div>
-            <div class="dv2-portrait-level">NIV.&nbsp;${c.niveau||1}</div>
-          </div>
-          <div class="dv2-hero-info">
-            <div>
-              <div class="dv2-chips">
-                ${c.classe ? `<span class="dv2-chip dv2-chip-blue">${_esc(c.classe)}</span>` : ''}
-                ${c.race   ? `<span class="dv2-chip dv2-chip-purple">${_esc(c.race)}</span>` : ''}
-              </div>
-              <div class="dv2-hero-name">${_esc(c.nom||'Mon Héros')}</div>
-              ${c.titre ? `<div class="dv2-hero-title">${_esc(c.titre)}</div>` : ''}
-            </div>
-            <div class="dv2-stat-bars">
-              <div class="dv2-bar-row">
-                <span class="dv2-bar-label" style="color:#22c38e">PV</span>
-                <div class="dv2-bar-track"><div class="dv2-bar-fill dv2-bar-hp" data-w="${pvPct}%"></div></div>
-                <span class="dv2-bar-val">${pvCur}/${pvMax}</span>
-              </div>
-              <div class="dv2-bar-row">
-                <span class="dv2-bar-label" style="color:#6aa7ff">PM</span>
-                <div class="dv2-bar-track"><div class="dv2-bar-fill dv2-bar-mp" data-w="${pmPct}%"></div></div>
-                <span class="dv2-bar-val">${pmCur}/${pmMax}</span>
-              </div>
-              <div class="dv2-bar-row">
-                <span class="dv2-bar-label" style="color:#c084fc">XP</span>
-                <div class="dv2-bar-track"><div class="dv2-bar-fill dv2-bar-xp" data-w="${xpPct}%"><div class="dv2-bar-xp-shimmer"></div></div></div>
-                <span class="dv2-bar-val">${xpCur}/${xpNext}</span>
-              </div>
-            </div>
-            <div class="dv2-stats-row">
-              <div class="dv2-stat-pill">
-                <div class="dv2-stat-pill-val" style="color:#f4c430">${_svg('coin')} ${or}</div>
-                <div class="dv2-stat-pill-lbl">Or</div>
-              </div>
-              <div class="dv2-stat-pill">
-                <div class="dv2-stat-pill-val" style="color:var(--gold-2)">${_svg('shield')} ${ca}</div>
-                <div class="dv2-stat-pill-lbl">CA</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    }
-
-    function _partyCardV2(partyChars) {
-      const byPlayer = {};
-      partyChars.forEach(c => {
-        const key = c.uid || c.ownerPseudo || c.id;
-        if (!byPlayer[key] || (c.niveau||1) > (byPlayer[key].niveau||1)) byPlayer[key] = c;
-      });
-      const members = Object.values(byPlayer).slice(0, 5);
-      setDashboardPartyChars(partyChars);
-      return `
-      <div class="dv2-party-card">
-        <div class="dv2-panel-header">
-          <div class="dv2-panel-title">⚔️ Groupe <span class="dv2-panel-count">${members.length}</span></div>
-        </div>
-        ${members.length > 0 ? members.map(c => {
-          const av = characterPortraitContent(c, { fallbackTag: 'span' });
-          const isOwn = canControlCharacter(c);
-          return `
-          <div class="dv2-party-member" data-action="_openQuickView" data-id="${c.id}"
-            title="Cliquer pour aperçu rapide">
-            <div class="dv2-party-avatar">${av}</div>
-            <div class="dv2-flex1">
-              <div class="dv2-party-name">${_esc(c.nom||'?')}</div>
-              <div class="dv2-party-sub">Niv.${c.niveau||1}${c.classe?` · ${_esc(c.classe)}`:''}</div>
-            </div>
-            ${isOwn ? `<button class="dv2-party-fullopen" data-action="_goToChar" data-id="${c.id}" data-stop-propagation
-              title="Ouvrir la fiche complète">→</button>` : ''}
-            <div class="dv2-party-dot"></div>
-          </div>`;
-        }).join('') : `<div class="dv2-empty-sm dv2-party-empty">
-          <span class="dv2-presence-empty-ico">${_svg('users')}</span>
-          <span>Les membres de ton groupe apparaîtront ici dès que vous partagez une aventure.</span>
-        </div>`}
-        ${nextSessionFmt ? `
-        <div class="dv2-party-footer dv2-party-footer--session">
-          <div class="dv2-party-session-label">Prochaine séance prévue pour :</div>
-          <div class="dv2-party-session-chip dv2-party-session-chip--validated">
-            <span class="dv2-pss-date">${_esc(nextSessionFmt.dateFr)}</span>
-            <span class="dv2-pss-slot">${nextSessionFmt.slotLabel}</span>
-            ${nextSessionFmt.questTitle ? `<span class="dv2-pss-quest">${_esc(nextSessionFmt.questTitle)}</span>` : ''}
-          </div>
-          ${_otherSessions ? `<div class="dv2-party-session-more">+${_otherSessions} autre${_otherSessions > 1 ? 's' : ''} créneau${_otherSessions > 1 ? 'x' : ''} validé${_otherSessions > 1 ? 's' : ''}</div>` : ''}
-        </div>`
-        : STATE.adventure ? `
-        <div class="dv2-party-footer">
-          <div class="dv2-party-session-label">Aventure en cours</div>
-          <div class="dv2-party-session-chip">${STATE.adventure.emoji||'⚔️'} ${_esc(STATE.adventure.nom||'Aventure')}</div>
-        </div>` : ''}
-      </div>`;
-    }
-
-    function _missionCardV2() {
-      if (!mission) return '';
-      const pct = totalMissions > 0 ? Math.round(doneMissions / totalMissions * 100) : 0;
-      return `
-      <div class="dv2-mission-card" data-navigate="story">
-        <div class="dv2-mission-header">
-          <div class="dv2-mission-icon">${mission.imageUrl
-            ? `<img src="${mission.imageUrl}" alt="${_esc(mission.nom || mission.titre || '')}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
-            : '⚔️'}</div>
-          <div class="dv2-mission-info">
-            <div class="dv2-mission-type">Mission active${mission.acte ? ` · ${_esc(mission.acte)}` : ''}</div>
-            <div class="dv2-mission-name">${_esc(mission.titre||'Mission')}</div>
-            ${mission.lieu ? `<div style="font-size:.72rem;color:var(--text-dim);margin-top:3px">📍 ${_esc(mission.lieu)}</div>` : ''}
-          </div>
-          <div class="dv2-mission-status"><span style="opacity:.7">●</span>&nbsp;En cours</div>
-        </div>
-        ${mission.description ? `<div class="dv2-mission-desc">${_esc(mission.description)}</div>` : ''}
-        ${totalMissions > 0 ? `
-        <div class="dv2-mission-progress">
-          <div class="dv2-mission-prog-labels">
-            <span>Progression de l'aventure</span>
-            <span class="dv2-mission-prog-val">${doneMissions}/${totalMissions}</span>
-          </div>
-          <div class="dv2-mission-prog-track">
-            <div class="dv2-mission-prog-fill" data-w="${pct}%"><div class="dv2-mission-shimmer"></div></div>
-          </div>
-        </div>` : ''}
-      </div>`;
-    }
-
-    function _statsGridV2(c) {
-      const pvMax = calcPVMax(c) || c.pvBase || 10;
-      const pmMax = calcPMMax(c) || c.pmBase || 10;
-      const pvCur = c.pvActuel ?? pvMax;
-      const pmCur = c.pmActuel ?? pmMax;
-      const pvPct = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-      const pmPct = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const ca = calcCA(c) || 10;
-      const or = calcOr(c) || 0;
-      return `
-      <div class="dv2-stats-grid">
-        <div class="dv2-stat-card dv2-sc-gold" data-action="_goToChar" data-id="${c.id}">
-          <span class="dv2-stat-card-icon">${_svg('coin', '#f4c430')}</span>
-          <div class="dv2-stat-card-val" style="color:#f4c430">${or}</div>
-          <div class="dv2-stat-card-lbl">Or</div>
-        </div>
-        <div class="dv2-stat-card dv2-sc-shield" data-action="_goToChar" data-id="${c.id}">
-          <span class="dv2-stat-card-icon">${_svg('shield', 'var(--gold-2)')}</span>
-          <div class="dv2-stat-card-val" style="color:var(--gold-2)">${ca}</div>
-          <div class="dv2-stat-card-lbl">Classe d'armure</div>
-        </div>
-        <div class="dv2-stat-card dv2-sc-hp" data-action="_goToChar" data-id="${c.id}">
-          <span class="dv2-stat-card-icon">${_svg('heart', '#22c38e')}</span>
-          <div class="dv2-stat-card-val" style="color:#22c38e">${pvCur}<span style="font-size:.65em;opacity:.55">/${pvMax}</span></div>
-          <div class="dv2-stat-card-lbl">Points de vie</div>
-          <div class="dv2-stat-card-sub">${pvPct}% restants</div>
-        </div>
-        <div class="dv2-stat-card dv2-sc-mp" data-action="_goToChar" data-id="${c.id}">
-          <span class="dv2-stat-card-icon">${_svg('sparkles', '#b99fff')}</span>
-          <div class="dv2-stat-card-val" style="color:#b99fff">${pmCur}<span style="font-size:.65em;opacity:.55">/${pmMax}</span></div>
-          <div class="dv2-stat-card-lbl">Points de magie</div>
-          <div class="dv2-stat-card-sub">${pmPct}% restants</div>
-        </div>
-      </div>`;
-    }
-
-    function _shortcutsV2() {
-      const S = [
-        { page:'bestiaire',  icon:'🐉', label:'Bestiaire',  bg:'rgba(255,90,126,.15)',  bc:'rgba(255,90,126,.3)',  col:'#ff5a7e' },
-        { page:'recettes',   icon:'🍳', label:'Recettes',   bg:'rgba(34,195,142,.15)',  bc:'rgba(34,195,142,.3)',  col:'#22c38e' },
-        { page:'shop',       icon:'🛍️', label:'Boutique',   bg:'rgba(244,196,48,.15)',  bc:'rgba(244,196,48,.3)',  col:'#f4c430' },
-        { page:'map',        icon:'🗺️', label:'Carte',      bg:'rgba(79,140,255,.15)',  bc:'rgba(79,140,255,.3)',  col:'#4f8cff' },
-        { page:'collection', icon:'🃏', label:'Collection', bg:'rgba(34,211,238,.15)',  bc:'rgba(34,211,238,.3)',  col:'#22d3ee' },
-        { page:'vtt',        icon:'🎲', label:'Table VTT',  bg:'rgba(157,111,255,.15)', bc:'rgba(157,111,255,.3)', col:'#9d6fff' },
-        { page:'bastion',    icon:'🏰', label:'Bastion',    bg:'rgba(255,149,68,.15)',  bc:'rgba(255,149,68,.3)',  col:'#ff9544' },
-        { page:'characters', icon:'⚔️', label:'Personnage', bg:'rgba(232,184,75,.15)',  bc:'rgba(232,184,75,.3)',  col:'#e8b84b' },
-      ].filter(s => isFeatureEnabled(s.page));
-      if (!S.length) return '';
-      return `<div class="dv2-shortcuts-grid">${S.map(s => `
-        <button class="dv2-shortcut" data-navigate="${s.page}">
-          <div class="dv2-shortcut-icon" style="background:${s.bg};border-color:${s.bc};color:${s.col}">${s.icon}</div>
-          <span class="dv2-shortcut-label">${s.label}</span>
-        </button>`).join('')}</div>`;
-    }
-
-    function _groupsPanelV2() {
-      if (!isFeatureEnabled('story')) return ''; // Trame désactivée
-      // Mes groupes « En cours » (ceux que j'ai rejoints), sinon tous les groupes actifs.
-      const mine = activeGroups.filter(q => (q.participants || []).some(p => _myUidAliases.includes(p.uid)));
-      const list = (mine.length ? mine : activeGroups).slice(0, 5);
-      return `
-      <div class="dv2-panel-card">
-        <div class="dv2-panel-header">
-          <div class="dv2-panel-title">👥 Mes groupes <span class="dv2-panel-count">${mine.length || activeGroups.length}</span></div>
-          <button class="dv2-section-action" data-navigate="story">Trame →</button>
-        </div>
-        ${list.length ? list.map(q => {
-          const joined = (q.participants || []).some(p => _myUidAliases.includes(p.uid));
-          const missionTitle = _missionTitleById.get(q.missionId) || 'Mission';
-          const count = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases }).length;
-          return `
-          <div class="dv2-quest-item" data-navigate="story">
-            <div class="dv2-quest-icon dv2-qi-main">🎯</div>
-            <div class="dv2-flex1">
-              <div class="dv2-quest-name">${_esc(q.titre || 'Groupe')}</div>
-              <div class="dv2-quest-sub">${_esc(missionTitle)}${joined ? ' · ✓ Rejoint' : ''}</div>
-            </div>
-            <div class="dv2-quest-rarity dv2-rarity-rare">${count} 👤</div>
-          </div>`;
-        }).join('') : `<div class="dv2-empty-sm">Aucun groupe en cours. Rejoins-en un dans la <strong>Trame</strong>.</div>`}
-      </div>`;
-    }
-
-    function _achievementsPanelV2() {
-      if (!isFeatureEnabled('achievements')) return ''; // Hauts-Faits désactivés
-      return `
-      <div class="dv2-panel-card">
-        <div class="dv2-panel-header">
-          <div class="dv2-panel-title">🏆 Hauts-faits <span class="dv2-panel-count">${achievementsView.count}</span></div>
-          <button class="dv2-section-action" data-navigate="achievements">Voir tout →</button>
-        </div>
-        ${achievementsView.top.length > 0 ? achievementsView.top.map(a => `
-        <div class="dv2-ach-item">
-          <div class="dv2-ach-icon">${a.icone||'🏆'}</div>
-          <div class="dv2-flex1">
-            <div class="dv2-ach-name">${_esc(a.titre||a.nom||'Haut-fait')}</div>
-            <div class="dv2-ach-desc">${_esc(a.description||'')}</div>
-          </div>
-          ${a.xp ? `<div class="dv2-ach-xp">+${a.xp}&nbsp;XP</div>` : ''}
-        </div>`).join('') : `<div class="dv2-empty-sm">Aucun haut-fait.</div>`}
-      </div>`;
-    }
-
-    function _bastionCardV2() {
-      // Détection du nouveau modèle (salles = objet) vs ancien (array)
-      const isNewModel = bastionDoc?.salles && typeof bastionDoc.salles === 'object' && !Array.isArray(bastionDoc.salles);
-      const emoji   = bastionDoc?.emoji || '🏰';
-      const semaine = bastionDoc?.semaine;
-      const or      = bastionDoc?.or || 0;
-      const salles  = _bastionSallesArr(bastionDoc).slice(0, 6);
-
-      // Constructions en cours (nouveau modèle uniquement)
-      let buildingCount = 0;
-      if (isNewModel) {
-        buildingCount = Object.values(bastionDoc.salles || {})
-          .filter(s => s?.weeksLeftToBuild > 0).length;
-      }
-
-      const ev = bastionDoc?.evenementCourant;
-      return `
-      <div class="dv2-bastion-card" data-navigate="bastion">
-        <div class="dv2-bastion-header">
-          <div class="dv2-bastion-icon">${_esc(emoji)}</div>
-          <div class="dv2-flex1">
-            <div class="dv2-bastion-name">${_esc(bastionNom)}</div>
-            <div class="dv2-bastion-level">${semaine ? `Période ${semaine}` : `Niveau ${bastionLevel}`}${bastionDoc?.lieu ? ` · ${_esc(bastionDoc.lieu)}` : ''}</div>
-          </div>
-          <button class="dv2-section-action" data-navigate="bastion" data-stop-propagation>Gérer →</button>
-        </div>
-
-        ${isNewModel ? `
-        <div class="dv2-bastion-stats">
-          <div class="dv2-bs-stat"><span class="dv2-bs-stat-ico">💰</span><span class="dv2-bs-stat-val">${or}</span><span class="dv2-bs-stat-lbl">or</span></div>
-          ${buildingCount > 0 ? `<div class="dv2-bs-stat dv2-bs-stat--build"><span class="dv2-bs-stat-ico">🏗</span><span class="dv2-bs-stat-val">${buildingCount}</span><span class="dv2-bs-stat-lbl">en construction</span></div>` : ''}
-        </div>` : ''}
-
-        ${salles.length > 0 ? `
-        <div class="dv2-bastion-rooms">${salles.map(s=>`
-          <div class="dv2-bastion-room"><div class="dv2-bastion-room-dot"></div>${_esc(s.nom)}${s.niveau ? ` <span style="font-size:.62rem;opacity:.7">Niv.${s.niveau}</span>` : ''}</div>`).join('')}
-        </div>` : `<div class="dv2-bastion-note" style="background:none;border:none;color:var(--text-dim);font-style:italic">Aucune salle construite</div>`}
-        ${ev && ev !== 'calme' ? `<div class="dv2-bastion-note">⚠️ ${_esc(ev)}</div>` : ''}
-      </div>`;
-    }
-
-    // ── Render ──────────────────────────────────────────────────────────
-    function _dashboardMetric({ page, icon, value, label, tone = '#7fb0ff', sub = '' }) {
-      if (page && !isFeatureEnabled(page)) return '';
-      return `
-      <button type="button" class="dv2-dash-metric" data-navigate="${page}">
-        <span class="dv2-dash-metric-ico" style="color:${tone}">${icon}</span>
-        <span class="dv2-dash-metric-main">
-          <strong style="color:${tone}">${value}</strong>
-          <span>${label}</span>
-          ${sub ? `<small>${sub}</small>` : ''}
-        </span>
-      </button>`;
-    }
-
-    function _quickActionButton({ page, icon, label, note, tone = '#7fb0ff' }) {
-      if (!isFeatureEnabled(page)) return '';
-      return `
-      <button type="button" class="dv2-dash-action" data-navigate="${page}">
-        <span class="dv2-dash-action-ico" style="color:${tone}">${icon}</span>
-        <span class="dv2-dash-action-copy">
-          <strong>${label}</strong>
-          <small>${note}</small>
-        </span>
-      </button>`;
-    }
-
-    function _gmPilotPanel() {
-      const visibleSessionCount = _visibleSessions.length;
-      const activeMissionCount = storyItems.filter(i => i.type === 'mission' && i.statut === 'En cours').length;
-      return `
-      <section class="dv2-dash-panel dv2-dash-panel--pilot">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Pilotage</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div class="dv2-dash-metrics">
-          ${_dashboardMetric({ page: 'characters', icon: _svg('users'), value: chars.length, label: 'personnages' })}
-          ${_dashboardMetric({ page: 'story', icon: _svg('scroll'), value: activeGroups.length, label: 'groupes actifs', tone: '#b99fff', sub: `${activeMissionCount} mission${activeMissionCount > 1 ? 's' : ''}` })}
-          ${_dashboardMetric({ page: 'agenda', icon: _svg('calendar'), value: visibleSessionCount, label: 'seances calees', tone: '#22c38e' })}
-          ${_dashboardMetric({ page: 'collection', icon: _svg('layers'), value: `${collectionUnlocked}/${collectionTotal}`, label: 'collection', tone: '#f4c430', sub: collectionTotal ? `${collectionPct}% debloque` : 'vide' })}
-        </div>
-      </section>`;
-    }
-
-    function _gmAttentionPanel() {
-      const statusRows = chars
-        .map(c => {
-          const pvMax = calcPVMax(c) || c.pvBase || 10;
-          const pmMax = calcPMMax(c) || c.pmBase || 10;
-          const pvCur = c.pvActuel ?? pvMax;
-          const pmCur = c.pmActuel ?? pmMax;
-          const pvPct = pvMax > 0 ? Math.round((pvCur / pvMax) * 100) : 100;
-          const pmPct = pmMax > 0 ? Math.round((pmCur / pmMax) * 100) : 100;
-          const reasons = [];
-          if (pvPct <= 35) reasons.push(`PV ${pvCur}/${pvMax}`);
-          if (pmPct <= 25) reasons.push(`PM ${pmCur}/${pmMax}`);
-          return { c, pvPct, pmPct, reasons };
-        })
-        .filter(row => row.reasons.length)
-        .sort((a, b) => (a.pvPct - b.pvPct) || (a.pmPct - b.pmPct))
-        .slice(0, 5);
-      if (!statusRows.length) return '';
-      return `
-      <section class="dv2-dash-panel">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">PV / PM bas</span>
-          <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" data-navigate="characters">Fiches -></button>
-        </div>
-        <div class="dv2-dash-watchlist">
-          ${statusRows.map(({ c, reasons }) => {
-            const avatar = characterAvatarHtml(c, { size: 34, border: '2px solid rgba(255,90,126,.4)', background: 'rgba(255,90,126,.12)' });
-            return `
-            <button type="button" class="dv2-dash-watch" data-action="_goToChar" data-id="${c.id}">
-              ${avatar}
-              <span class="dv2-dash-watch-copy">
-                <strong>${_esc(c.nom || '?')}</strong>
-                <small>${_esc(reasons.join(' · '))}</small>
-              </span>
-            </button>`;
-          }).join('')}
-        </div>
-      </section>`;
-    }
-
-    function _gmActionsPanel() {
-      const actions = [
-        { page: 'vtt', icon: _svg('dice'), label: 'Ouvrir la table', note: 'jouer, tokens, combats', tone: '#7fb0ff' },
-        { page: 'story', icon: _svg('scroll'), label: 'Preparer la trame', note: 'missions et groupes', tone: '#22d3ee' },
-        { page: 'statistiques', icon: _svg('trophy'), label: 'Lire les stats', note: 'recaps de session', tone: '#a78bfa' },
-        { page: 'bestiaire', icon: _svg('sword'), label: 'Bestiaire', note: 'creatures et rencontres', tone: '#ff5a7e' },
-        { page: 'shop', icon: _svg('coin'), label: 'Boutique', note: 'objets et economie', tone: '#f4c430' },
-        { page: 'admin', icon: _svg('cog'), label: 'Reglages', note: 'outils MJ', tone: '#ff9544' },
-      ];
-      return `
-      <section class="dv2-dash-panel">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Actions MJ</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div class="dv2-dash-actions">${actions.map(_quickActionButton).join('')}</div>
-      </section>`;
-    }
-
-    function _playerActionsPanel() {
-      const actions = [
-        { page: 'characters', icon: _svg('scroll'), label: 'Ouvrir la fiche', note: 'profil, combat, inventaire', tone: '#e8b84b' },
-        { page: 'collection', icon: _svg('layers'), label: 'Collection', note: 'cartes debloquees', tone: '#22d3ee' },
-        { page: 'map', icon: _svg('map'), label: 'Carte', note: 'monde et reperes', tone: '#4f8cff' },
-      ];
-      return `
-      <section class="dv2-dash-panel">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Reprendre</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div class="dv2-dash-actions">${actions.map(_quickActionButton).join('')}</div>
-      </section>`;
-    }
-
-    function _playerJoinableGroupsPanel() {
-      if (!isFeatureEnabled('story') || STATE.isAdmin) return '';
-      const charById = new Map(allChars.map(c => [c.id, c]));
-      const playerHasChar = allChars.some(c => _myUidAliases.includes(c.uid));
-      const rows = activeGroups
-        .map(q => {
-          const parts = dedupeQuestParticipants(q.participants || [], { uidAliases: _myUidAliases });
-          const joined = parts.some(p => _myUidAliases.includes(p.uid));
-          return { q, parts, joined, missionTitle: _missionTitleById.get(q.missionId) || 'Mission' };
-        })
-        .sort((a, b) => Number(a.joined) - Number(b.joined) || (b.q.createdAt || '').localeCompare(a.q.createdAt || ''))
-        .slice(0, 5);
-      return `
-      <section class="dv2-dash-panel dv2-groups-panel">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Groupes ouverts</span>
-          <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" data-navigate="story">Trame -></button>
-        </div>
-        <div class="dv2-groups-list">
-          ${rows.length ? rows.map(({ q, parts, joined, missionTitle }) => {
-            const members = parts.map(p => {
-              const c = p.charId ? charById.get(p.charId) : null;
-              const person = c ? { ...p, ...c } : p;
-              return { raw: p, char: c, html: characterAvatarHtml(person, {
-                size: 30,
-                className: 'dv2-group-avatar',
-                title: c?.nom || p.nom || '?',
-                border: joined && _myUidAliases.includes(p.uid) ? '2px solid rgba(34,195,142,.8)' : '2px solid var(--bg-panel)',
-                background: 'rgba(79,140,255,.14)',
-              }) };
-            });
-            return `
-            <article class="dv2-group-card${joined ? ' is-joined' : ''}">
-              <div class="dv2-group-top">
-                <span class="dv2-group-state">${joined ? 'Rejoint' : 'Ouvert'}</span>
-                <span class="dv2-group-mission">${_esc(missionTitle)}</span>
-              </div>
-              <div class="dv2-group-name">${_esc(q.titre || 'Groupe')}</div>
-              <div class="dv2-group-members">
-                ${members.length ? members.slice(0, 6).map(m => m.char
-                  ? `<button type="button" class="dv2-group-avatar-btn" data-action="_dashQuickChar" data-id="${m.char.id}" title="${_esc(m.char.nom || '?')}">${m.html}</button>`
-                  : `<span class="dv2-group-avatar-btn is-static" title="${_esc(m.raw.nom || '?')}">${m.html}</span>`).join('')
-                  : `<span class="dv2-group-none">Aucun membre</span>`}
-                ${members.length > 6 ? `<span class="dv2-group-more">+${members.length - 6}</span>` : ''}
-              </div>
-              <div class="dv2-group-foot">
-                <span>${members.length} membre${members.length > 1 ? 's' : ''}</span>
-                <button type="button" class="dv2-group-join${joined ? ' is-leave' : ''}" data-action="_dashToggleQuest" data-id="${_esc(q.id)}" ${playerHasChar || joined ? '' : 'disabled'}>
-                  ${joined ? 'Quitter' : playerHasChar ? 'Rejoindre' : 'Créer une fiche'}
-                </button>
-              </div>
-            </article>`;
-          }).join('') : `<div class="dv2-dash-empty">Aucun groupe ouvert pour le moment.</div>`}
-        </div>
-      </section>`;
-    }
-
-    function _playerProgressPanel() {
-      const achievementCount = achievementsView.count;
-      return `
-      <section class="dv2-dash-panel dv2-dash-panel--pilot">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Mes reperes</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div class="dv2-dash-metrics">
-          ${_dashboardMetric({ page: 'characters', icon: _svg('users'), value: chars.length, label: 'personnage' + (chars.length > 1 ? 's' : '') })}
-          ${_dashboardMetric({ page: 'collection', icon: _svg('layers'), value: `${collectionUnlocked}/${collectionTotal}`, label: 'cartes', tone: '#22d3ee', sub: collectionTotal ? `${collectionPct}%` : 'vide' })}
-          ${_dashboardMetric({ page: 'achievements', icon: _svg('trophy'), value: achievementCount, label: 'hauts-faits', tone: '#22c38e' })}
-          ${bastionDoc ? _dashboardMetric({ page: 'bastion', icon: _svg('shield'), value: bastionLevel || 1, label: 'bastion', tone: '#f4c430' }) : ''}
-        </div>
-      </section>`;
-    }
-
-    const advBanner = STATE.adventure ? `
-    <div class="dash-adv-banner" data-action="openAdventureSwitcher" style="cursor:${(STATE.adventures?.length||0)>1?'pointer':'default'}">
-      <span style="font-size:1.1rem">${STATE.adventure.emoji||'⚔️'}</span>
-      <span class="dash-adv-name">${_esc(STATE.adventure.nom)}</span>
-      ${(STATE.adventures?.length||0)>1?`<span style="font-size:.7rem;color:var(--text-dim);border:1px solid var(--border);border-radius:6px;padding:1px 6px">⇄ Changer</span>`:''}
-      <span class="dash-adv-tag">Aventure active</span>
-    </div>` : '';
-    const sessionHub = `
-      <section class="dv2-session-hub">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Session</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div id="dashboard-session-center" class="sc-root">${appSplashHtml('Chargement des séances…')}</div>
-      </section>`;
-
-    function _dashboardWallPanel() {
-      if (!isFeatureEnabled('bastion')) return '';
-      const seenAt = wallSeenAt();
-      const { unread, shown } = dashboardWallView({ docs: wallDocs, legacyItems: wallLegacy, seenAt, uid: STATE.user?.uid });
-      const timeAgo = ts => {
-        const minutes = Math.max(0, Math.floor((Date.now() - Number(ts || 0)) / 60000));
-        if (minutes < 1) return "à l'instant";
-        if (minutes < 60) return `il y a ${minutes} min`;
-        if (minutes < 1440) return `il y a ${Math.floor(minutes / 60)} h`;
-        return `il y a ${Math.floor(minutes / 1440)} j`;
+    const dateInfo = value => {
+      const date = parseIso(value);
+      if (!date) return { day: '--', month: '', weekday: '', short: 'Date à définir', when: '' };
+      const base = parseIso(todayIso());
+      const days = Math.round((date - base) / 86_400_000);
+      return {
+        day: String(date.getDate()).padStart(2, '0'),
+        month: new Intl.DateTimeFormat('fr-FR', { month: 'short' }).format(date).replace('.', ''),
+        weekday: new Intl.DateTimeFormat('fr-FR', { weekday: 'long' }).format(date),
+        short: new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).format(date).replace('.', ''),
+        when: days === 0 ? "aujourd’hui" : days === 1 ? 'demain' : days > 1 ? `dans ${days} jours` : '',
       };
+    };
+    const slotMeta = slot => ({
+      m: { label: 'Matin', hours: '9 h – 13 h' },
+      a: { label: 'Après-midi', hours: '14 h – 18 h' },
+      s: { label: 'Soir', hours: '19 h – 23 h' },
+    }[slot] || { label: 'Créneau', hours: 'à préciser' });
+    const timeAgo = raw => {
+      const ts = typeof raw === 'number' ? raw : (raw?.toMillis?.() ?? Date.parse(raw || '') ?? 0);
+      const mins = Math.max(0, Math.floor((Date.now() - ts) / 60_000));
+      if (mins < 1) return "à l’instant";
+      if (mins < 60) return `${mins} min`;
+      const hours = Math.floor(mins / 60);
+      if (hours < 24) return `${hours} h`;
+      const days = Math.floor(hours / 24);
+      return `${days} j`;
+    };
+    const controlledChars = () => STATE.isAdmin
+      ? allChars
+      : getControlledCharacters(allChars, STATE.user?.uid);
+    const liveUids = () => {
+      const now = Date.now();
+      return new Set((presence || [])
+        .filter(item => item?.uid && item.uid !== STATE.user?.uid)
+        .filter(item => {
+          const ts = item.lastSeen?.toMillis?.() ?? 0;
+          return ts > 0 && now - ts < PRESENCE_TTL_MS;
+        })
+        .map(item => item.uid));
+    };
+    const groups = () => {
+      const base = STATE.isAdmin
+        ? activeGroupsFromSources(story, quests)
+        : (isUsableSummary(summary) ? summary.groups : []);
+      return base.map(group => ({
+        ...group,
+        participants: groupOverrides.get(group.id) || group.participants || [],
+      }));
+    };
+    const sessions = () => {
+      const base = STATE.isAdmin
+        ? compactDashboardSessions(agenda, quests)
+        : (isUsableSummary(summary) ? summary.sessions : []);
+      const order = { m: 0, a: 1, s: 2 };
+      return base
+        .filter(session => isAgendaSessionUpcoming(session, todayIso()))
+        .filter(session => STATE.isAdmin
+          || !session.participantUids?.length
+          || session.participantUids.some(uid => aliasSet.has(uid)))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date))
+          || (order[a.slot] ?? 9) - (order[b.slot] ?? 9));
+    };
+    const charForParticipant = participant => allChars.find(char => char.id === participant?.charId)
+      || allChars.find(char => char.uid === participant?.uid)
+      || { nom: participant?.nom || 'Personnage', uid: participant?.uid || '' };
+    const avatar = (entity, className = '', live = false) => {
+      const sizes = { sm: 24, lg: 46, xl: 56 };
+      const sizeClass = className.split(/\s+/).find(value => sizes[value]);
+      return characterAvatarHtml(entity, {
+        size: sizes[sizeClass] || 32,
+        className: `db-av ${className}${live ? ' live' : ''}`.trim(),
+        border: 'none',
+        background: 'var(--surface-2)',
+      });
+    };
+    const groupJoined = group => (group?.participants || []).some(participant =>
+      aliasSet.has(participant?.uid)
+      || controlledChars().some(char => char.id && char.id === participant?.charId));
+    const groupForChar = (char, list = groups()) => list.find(group =>
+      (group.participants || []).some(participant => participant?.charId === char.id
+        || (!participant?.charId && participant?.uid === char.uid)));
+    const freeChars = list => {
+      const busy = new Set(list.flatMap(group => (group.participants || []).map(participant => participant?.charId).filter(Boolean)));
+      return controlledChars().filter(char => !busy.has(char.id));
+    };
+    const bars = char => {
+      const pvMax = calcPVMax(char) || char.pvBase || 10;
+      const pmMax = calcPMMax(char) || char.pmBase || 10;
+      const pv = char.hp ?? char.pvActuel ?? pvMax;
+      const pm = char.pmActuel ?? pmMax;
+      const pvPct = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pv / pvMax * 100))) : 0;
+      const pmPct = pmMax > 0 ? Math.max(0, Math.min(100, Math.round(pm / pmMax * 100))) : 0;
+      return `<span class="db-bars">
+        <span class="db-bar${pvPct < 30 ? ' low' : ''}">PV<i><u style="width:${pvPct}%;--c:${pvPct < 30 ? 'var(--crimson)' : pvPct < 55 ? 'var(--amber)' : 'var(--emerald)'}"></u></i><b>${pv}/${pvMax}</b></span>
+        <span class="db-bar">PM<i><u style="width:${pmPct}%;--c:var(--gold)"></u></i><b>${pm}/${pmMax}</b></span>
+      </span>`;
+    };
+
+    const sessionSection = (list, groupList) => {
+      if (!list.length) return `<section class="db-ses"><div class="db-none">
+        <div><b>Aucune séance prévue${STATE.isAdmin ? '' : ' pour tes groupes'}</b><p>${STATE.isAdmin ? 'Planifie une date pour un groupe de la Trame.' : 'Rejoins un groupe ci-dessous ou indique tes disponibilités au MJ.'}</p></div>
+        <button type="button" class="db-btn" data-navigate="agenda">${icon('calendar')} ${STATE.isAdmin ? 'Planifier une séance' : 'Mes disponibilités'}</button>
+        <button type="button" class="db-go" data-navigate="vtt">${icon('play', 15)} Entrer dans la table</button>
+      </div></section>`;
+      const first = list[0];
+      const group = groupList.find(item => item.id === first.questId) || {};
+      const date = dateInfo(first.date);
+      const slot = slotMeta(first.slot);
+      const participants = (group.participants || []).map(charForParticipant);
+      return `<section class="db-ses"><div class="db-ses-in">
+        <div class="db-cal"><span>${_esc(date.month)}</span><b>${date.day}</b><small>${_esc(date.weekday)}</small></div>
+        <div class="db-ses-t"><span class="db-ses-k">Prochaine séance${date.when ? ` <em>${_esc(date.when)}</em>` : ''}</span>
+          <h1>${_esc(group.missionTitle || 'Séance de l’aventure')}</h1>
+          <div class="db-ses-m"><span>${icon('clock')}${_esc(slot.label)} · ${_esc(slot.hours)}</span>${group.location ? `<span>${icon('map-pin')}${_esc(group.location)}</span>` : ''}${group.title ? `<span>${icon('flag')}${_esc(group.title)}${group.act ? ` · ${_esc(group.act)}` : ''}</span>` : ''}</div>
+          <div class="db-ses-p">${participants.length ? `<span class="db-stack">${participants.slice(0, 6).map(char => avatar(char, 'sm', liveUids().has(char.uid))).join('')}</span>` : ''}${participants.length} personnage${participants.length > 1 ? 's' : ''}</div>
+        </div>
+        <div class="db-ses-a"><button type="button" class="db-go" data-navigate="vtt">${icon('play', 15)} Entrer dans la table</button><button type="button" class="db-link" data-navigate="story">Voir la mission ${icon('arrow-right')}</button></div>
+      </div>${list.length > 1 ? `<div class="db-more">${list.slice(1).map(item => {
+        const itemGroup = groupList.find(groupItem => groupItem.id === item.questId) || {};
+        const itemDate = dateInfo(item.date);
+        const itemChars = (itemGroup.participants || []).map(charForParticipant);
+        return `<button type="button" class="db-mr" data-navigate="agenda"><b>${_esc(itemDate.short)}</b><span>${_esc(itemGroup.title || 'Groupe')} <em>· ${_esc(itemGroup.missionTitle || 'Mission')}</em></span>${itemChars.length ? `<span class="db-stack">${itemChars.slice(0, 5).map(char => avatar(char, 'sm', liveUids().has(char.uid))).join('')}</span>` : ''}</button>`;
+      }).join('')}</div>` : ''}</section>`;
+    };
+
+    const playerCharactersSection = groupList => {
+      const chars = controlledChars();
+      const card = char => {
+        const pvMax = calcPVMax(char) || char.pvBase || 10;
+        const low = pvMax > 0 && (char.hp ?? char.pvActuel ?? pvMax) / pvMax < .3;
+        const group = groupForChar(char, groupList);
+        return `<button type="button" class="db-ch" data-action="_dashQuickChar" data-id="${_esc(char.id)}"><span class="db-ch-h">${avatar(char, 'lg')}<span><b>${_esc(char.nom || '?')}</b><small>${_esc([char.classe, char.race].filter(Boolean).join(' · '))}</small></span><span class="db-lv">Niv. ${char.niveau || 1}</span></span>${bars(char)}<span class="db-ch-f"><span class="db-chip">${icon('shield')} CA <b>${calcCA(char) || 10}</b></span><span class="db-chip">${icon('coin')} <b>${calcOr(char) || 0}</b> or</span>${group ? `<span class="db-chip grp">${icon('flag')}${_esc(group.title)}</span>` : ''}${low ? '<span class="db-chip warn">PV bas</span>' : ''}</span></button>`;
+      };
+      return `<section class="db-sec"><div class="db-sh"><h2>${chars.length > 1 ? 'Mes personnages' : 'Mon personnage'}</h2>${chars.length > 1 ? `<span class="n">${chars.length}</span>` : ''}</div><div class="db-chars">${chars.length ? chars.map(card).join('') : `<button type="button" class="db-new" data-navigate="characters">${icon('plus')} Créer mon personnage</button>`}</div></section>`;
+    };
+
+    const gmCharactersSection = groupList => {
+      const online = liveUids();
+      return `<section class="db-sec"><div class="db-sh"><h2>Personnages</h2><span class="n">${allChars.length}</span><span class="sp"></span><button type="button" class="db-link" data-navigate="characters">Toutes les fiches ${icon('arrow-right')}</button></div><div class="db-card">${allChars.length ? allChars.map(char => {
+        const group = groupForChar(char, groupList);
+        const connected = online.has(char.uid);
+        const owner = char.ownerPseudo || char.joueur || char.playerName || 'Joueur';
+        return `<button type="button" class="db-tr" data-action="_dashQuickChar" data-id="${_esc(char.id)}"><span class="db-who">${avatar(char, '', connected)}<span><b>${_esc(char.nom || '?')}</b><small>${connected ? '<em>Connecté</em> · ' : ''}${_esc(owner)}${char.classe ? ` · ${_esc(char.classe)} niv. ${char.niveau || 1}` : ''}</small></span></span>${bars(char)}${group ? `<span class="db-chip grp">${_esc(group.title)}</span>` : '<span class="db-chip">Sans groupe</span>'}</button>`;
+      }).join('') : '<div class="db-empty"><b>Aucun personnage</b>Les fiches de l’aventure apparaîtront ici.</div>'}</div></section>`;
+    };
+
+    const groupsSection = groupList => {
+      const available = freeChars(groupList);
+      const sorted = STATE.isAdmin ? groupList : [...groupList].sort((a, b) => Number(groupJoined(a)) - Number(groupJoined(b)));
+      const openCount = groupList.filter(group => !groupJoined(group)).length;
+      const card = group => {
+        const joined = !STATE.isAdmin && groupJoined(group);
+        const members = (group.participants || []).map(charForParticipant);
+        const session = sessions().find(item => item.questId === group.id);
+        const picker = pickGroupId === group.id ? `<div class="db-pick"><small>Avec quel personnage ?</small><div>${available.length ? available.map(char => `<button type="button" class="c" data-action="_dashPickQuestChar" data-id="${_esc(group.id)}" data-char="${_esc(char.id)}">${avatar(char, 'sm')}${_esc(char.nom || '?')}</button>`).join('') : '<small>Tous tes personnages sont déjà dans un groupe.</small>'}</div></div>` : '';
+        const action = STATE.isAdmin
+          ? `<button type="button" class="db-link" data-navigate="story">Gérer ${icon('arrow-right')}</button>`
+          : joined
+            ? `<button type="button" class="db-btn ghost" data-action="_dashToggleQuest" data-id="${_esc(group.id)}">Quitter</button>`
+            : available.length
+              ? `<button type="button" class="db-btn pri" data-action="_dashToggleQuest" data-id="${_esc(group.id)}">Rejoindre</button>`
+              : `<button type="button" class="db-btn" disabled>Aucun personnage libre</button>`;
+        return `<article class="db-g${joined ? ' in' : ''}"><div class="db-g-k"><span>${_esc([group.act, group.missionTitle].filter(Boolean).join(' · ') || 'Mission')}</span><em>${joined ? 'Rejoint' : STATE.isAdmin ? `${members.length} membre${members.length > 1 ? 's' : ''}` : 'Ouvert'}</em></div><h3>${_esc(group.title || 'Groupe')}</h3><p>${icon('calendar')}${session ? `Séance ${_esc(dateInfo(session.date).short.toLowerCase())}` : 'Pas encore de date'}</p>${picker}<div class="db-g-f">${members.length ? `<span class="db-stack">${members.slice(0, 5).map(char => avatar(char, 'sm', liveUids().has(char.uid))).join('')}</span>` : ''}<small>${members.length ? `${members.length} membre${members.length > 1 ? 's' : ''}` : 'Aucun membre'}</small>${action}</div></article>`;
+      };
+      return `<section class="db-sec"><div class="db-sh"><h2>${STATE.isAdmin ? 'Groupes actifs' : 'Groupes ouverts'}</h2><span class="n">${STATE.isAdmin ? groupList.length : openCount}</span><span class="sp"></span><button type="button" class="db-link" data-navigate="story">Trame ${icon('arrow-right')}</button></div><div class="db-groups">${sorted.length ? sorted.map(card).join('') : '<div class="db-card db-empty"><b>Aucun groupe actif</b>Les groupes ouverts de la Trame apparaîtront ici.</div>'}</div></section>`;
+    };
+
+    const wallSection = () => {
+      const seenAt = wallSeenAt();
+      const { unread, shown } = dashboardWallView({ docs: wallDocs, seenAt, uid: STATE.user?.uid });
       const card = post => {
         const char = allChars.find(item => item.id === post.charId) || { nom: post.charName || post.author || 'Personnage', photo: post.charImage || '' };
         const type = BASTION_WALL_TYPES[post.type] || BASTION_WALL_TYPES.message;
-        const counts = bastionWallReactionCounts(post);
-        const reactionCount = Object.values(counts).reduce((sum, count) => sum + count, 0);
-        const plain = String(post.text || '').replace(/\s+/g, ' ').trim();
-        const snippet = plain.length > 150 ? `${plain.slice(0, 147)}…` : plain;
+        const reactions = Object.values(bastionWallReactionCounts(post)).reduce((sum, value) => sum + value, 0);
+        const replies = Number(post.commentCount) || (post.comments || []).length;
         const isUnread = post.ts > seenAt && post.uid !== STATE.user?.uid;
-        const status = post.status && post.status !== 'active' ? (post.status === 'resolved' ? ' · Résolue' : ' · Annulée') : '';
-        const commentCount = Math.max(Number(post.commentCount) || 0, (post.comments || []).length);
-        return `<button type="button" class="dv2-wall-post${isUnread ? ' is-unread' : ''}" data-navigate="bastion" data-nav-sub="post:${_esc(post.id)}">
-          ${characterAvatarHtml(char, { size: 36, className: 'dv2-wall-avatar' })}
-          <span class="dv2-wall-post-copy"><span class="dv2-wall-post-meta"><strong>${_esc(post.charName || post.author || char.nom || 'Personnage')}</strong><b class="dv2-wall-type" style="--wall-type:${type.color}">${type.icon} ${type.label}${status}</b><small>${timeAgo(post.ts)}</small>${isUnread ? '<i>Nouveau</i>' : ''}</span><span class="dv2-wall-post-text">${_esc(snippet || ((post.imageCount || post.images?.length) ? `A partagé ${post.imageCount || post.images.length} image${(post.imageCount || post.images.length) > 1 ? 's' : ''}` : 'Nouvelle publication'))}</span><span class="dv2-wall-post-stats">${reactionCount ? `${reactionCount} réaction${reactionCount > 1 ? 's' : ''}` : 'Aucune réaction'} · ${commentCount} réponse${commentCount > 1 ? 's' : ''}</span></span>
-          ${post.imagePreview || post.images?.[0] ? `<img class="dv2-wall-thumb" src="${_esc(post.imagePreview || post.images[0])}" alt="">` : '<span class="dv2-wall-arrow">→</span>'}
-        </button>`;
+        return `<button type="button" class="db-w${isUnread ? ' unread' : ''}" data-navigate="bastion" data-nav-sub="post:${_esc(post.id)}">${avatar(char)}<span class="db-w-b"><span class="db-w-h"><b>${_esc(post.charName || post.author || char.nom || 'Personnage')}</b><span class="db-ty" style="--t:${_esc(type.color)}">${_esc(type.label)}</span>${post.pinned ? '<span class="db-pin">Épinglé</span>' : ''}<span>· ${timeAgo(post.ts)}</span></span><p>${_esc(post.text || 'Nouvelle publication')}</p><span class="db-w-s">${reactions} réaction${reactions > 1 ? 's' : ''} · ${replies} réponse${replies > 1 ? 's' : ''}</span></span></button>`;
       };
-      return `<section class="dv2-dash-panel dv2-wall-panel">
-        <div class="dv2-section-label"><span class="dv2-section-label-text">Mur du Bastion</span>${unread ? `<span class="dv2-wall-unread">${unread} non ${unread > 1 ? 'lus' : 'lu'}</span>` : ''}<div class="dv2-section-label-line"></div><button class="dv2-section-action" data-navigate="bastion">Ouvrir →</button></div>
-        <div class="dv2-wall-list">${shown.length ? shown.map(card).join('') : '<button class="dv2-wall-empty" data-navigate="bastion"><span>📌</span><strong>Le mur est prêt</strong><small>Publie la première nouvelle du Bastion.</small></button>'}</div>
-      </section>`;
+      return `<section class="db-sec db-wall"><div class="db-sh"><h2>Mur du Bastion</h2>${unread ? `<span class="new">${unread} nouveau${unread > 1 ? 'x' : ''}</span>` : ''}<span class="sp"></span><button type="button" class="db-link" data-navigate="bastion">Ouvrir ${icon('arrow-right')}</button></div><div class="db-card">${shown.length ? shown.map(card).join('') : '<div class="db-empty"><b>Le mur est prêt</b>Publiez la première nouvelle du Bastion.</div>'}<div class="db-wf"><button type="button" class="db-btn" data-navigate="bastion">${icon('edit')} Publier</button>${unread ? '<button type="button" class="db-btn ghost" data-action="_dashMarkWallRead">Tout marquer lu</button>' : ''}</div></div></section>`;
+    };
+
+    function paint() {
+      paintQueued = false;
+      const root = document.getElementById('dash-root');
+      if (!root || STATE.currentPage !== 'dashboard') return;
+      STATE.characters = allChars;
+      setDashboardPartyChars(allChars);
+      setDashboardQuests(quests);
+      const groupList = groups();
+      const sessionList = sessions();
+      const hasJoinedGroup = groupList.some(groupJoined);
+      const characterSection = STATE.isAdmin ? gmCharactersSection(groupList) : playerCharactersSection(groupList);
+      const groupSection = groupsSection(groupList);
+      const main = STATE.isAdmin || hasJoinedGroup
+        ? [sessionSection(sessionList, groupList), characterSection, groupSection]
+        : [sessionSection(sessionList, groupList), groupSection, characterSection];
+      const pseudo = STATE.profile?.pseudo || STATE.profile?.displayName || STATE.user?.displayName || String(STATE.user?.email || '').split('@')[0] || 'aventurier';
+      const adventure = STATE.adventure?.nom || 'Aventure';
+      const initials = adventure.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toUpperCase() || 'A';
+      const online = liveUids().size;
+      root.innerHTML = `<div class="db-top"><button type="button" class="db-adv" data-action="openAdventureSwitcher"><span class="sig">${_esc(initials)}</span><b>${_esc(adventure)}</b><small>${icon('refresh-cw')}Changer</small></button><span class="db-hello">${STATE.isAdmin ? `<span class="db-on"><i></i>${online} joueur${online > 1 ? 's' : ''} connecté${online > 1 ? 's' : ''}</span>` : ''}<span>Bonsoir, <b>${_esc(pseudo)}</b>${STATE.isAdmin ? ' · Maître de jeu' : ''}</span></span></div><div class="db-grid"><div class="db-col">${main.join('')}</div><div class="db-col">${isFeatureEnabled('bastion') ? wallSection() : ''}</div></div>`;
     }
 
-    if (STATE.isAdmin) {
-
-      // ── VUE MJ v2 ─────────────────────────────────────────────────────
-      dash.className = 'dv2-root';
-      dash.innerHTML = `
-      ${advBanner}
-
-      <!-- En-tête MJ -->
-      <div class="dv2-header">
-        <div>
-          <div class="dv2-greeting-label">Console Maître du Jeu</div>
-          <div class="dv2-greeting-title">Bonjour, ${_esc(pseudo)}</div>
-        </div>
-        <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Aventure active</div>
-      </div>
-
-      ${sessionHub}
-
-      <section class="dv2-dashboard-grid dv2-dashboard-grid--admin">
-        <aside class="dv2-dashboard-side">
-          ${_gmPilotPanel()}
-          ${_gmAttentionPanel()}
-          <div id="dash-presence"></div>
-          ${_gmActionsPanel()}
-          ${totalMissions > 0 ? `
-          <section class="dv2-dash-panel">
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Progression aventure</span>
-              <div class="dv2-section-label-line"></div>
-              <button class="dv2-section-action" data-navigate="story">Ouvrir -></button>
-            </div>
-            ${_progBar()}
-          </section>` : ''}
-        </aside>
-        <div class="dv2-dashboard-main">
-          ${_dashboardWallPanel()}
-          <section class="dv2-dash-panel">
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Personnages</span>
-              <div class="dv2-section-label-line"></div>
-              <button class="dv2-section-action" data-navigate="characters">Voir tous -></button>
-            </div>
-            <div class="dv2-panel-card">${charsHtml
-              ? `<div style="padding:12px">${charsHtml}</div>`
-              : `<div class="dv2-empty-md">Aucun personnage dans cette aventure.</div>`}
-            </div>
-          </section>
-        </div>
-      </section>`;
-
-      // ── Présence temps réel (MJ uniquement) ─────────────────────────
-      // Filtre : actif si lastSeen < PRESENCE_TTL_MS (cohérent avec la présence VTT)
-      // Exclut le MJ lui-même. Cleanup auto via unwatchAll au prochain navigate.
-      const _renderPresence = (list) => {
-        const slot = document.getElementById('dash-presence');
-        if (!slot) return;
-        const now = Date.now();
-        const active = (list || [])
-          .filter(p => p.uid && p.uid !== _myUid)
-          .map(p => ({ ...p, ts: p.lastSeen?.toMillis?.() ?? 0 }))
-          .filter(p => p.ts > 0 && (now - p.ts) < PRESENCE_TTL_MS)
-          .sort((a, b) => (a.pseudo || '').localeCompare(b.pseudo || '', 'fr'));
-        if (!active.length) {
-          slot.innerHTML = `
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Joueurs connectés</span>
-              <div class="dv2-section-label-line"></div>
-            </div>
-            <div class="dv2-panel-card">
-              <div class="dv2-presence-empty">
-                <span class="dv2-presence-empty-ico">${_svg('users')}</span>
-                <div class="dv2-presence-empty-txt">
-                  <span class="dv2-presence-empty-title">Personne autour de la table</span>
-                  <span class="dv2-presence-empty-sub">Les joueurs connectés apparaîtront ici en temps réel.</span>
-                </div>
-              </div>
-            </div>`;
+    const replaceParticipants = (groupId, participants) => {
+      groupOverrides.set(groupId, participants);
+      if (STATE.isAdmin) quests = quests.map(quest => quest.id === groupId ? { ...quest, participants } : quest);
+      schedulePaint();
+    };
+    const persistParticipants = async (group, participants, leaving) => {
+      const previous = group.participants || [];
+      replaceParticipants(group.id, participants);
+      const enriched = participants.map(participant => {
+        const char = allChars.find(item => item.id === participant?.charId);
+        return char ? questParticipantFromChar(char, participant.uid || char.uid) : participant;
+      });
+      const saved = await _dashSaveQuestParticipants(group.id, enriched, { leaving });
+      if (!saved) replaceParticipants(group.id, previous);
+      return saved;
+    };
+    _dashUi = {
+      characterIds: () => (STATE.isAdmin ? allChars : controlledChars()).map(char => char.id),
+      async toggleQuest(groupId) {
+        const groupList = groups();
+        const group = groupList.find(item => item.id === groupId);
+        if (!group) { showNotif('Groupe introuvable.', 'error'); return; }
+        if (groupJoined(group)) {
+          const next = (group.participants || []).filter(participant => !aliasSet.has(participant?.uid));
+          await persistParticipants(group, next, true);
+          pickGroupId = '';
           return;
         }
-        const pills = active.map(p => {
-          const ch = (STATE.characters || []).find(c => c.uid === p.uid) || null;
-          const portrait = characterAvatarHtml(ch || p, { size: 30, border: '2px solid rgba(34,195,142,.55)', background: 'rgba(34,195,142,.15)', color: 'var(--gold)' });
-          return `
-          <div class="dv2-presence-pill">
-            ${portrait}
-            <div class="dv2-presence-meta">
-              <span class="dv2-presence-name">${_esc(p.pseudo||'?')}</span>
-              ${ch ? `<span class="dv2-presence-char">${_esc(ch.nom||'?')}</span>` : ''}
-            </div>
-          </div>`;
-        }).join('');
-        slot.innerHTML = `
-          <div class="dv2-section-label">
-            <span class="dv2-section-label-text">Joueurs connectés (${active.length})</span>
-            <div class="dv2-section-label-line"></div>
-          </div>
-          <div class="dv2-panel-card">
-            <div class="dv2-presence-list">${pills}</div>
-          </div>`;
-      };
-      // Abonnement présence une seule fois (sinon chaque paint recrée un listener
-      // éphémère → lectures inutiles). _renderPresence lit STATE.characters (à jour).
-      if (!_presenceWatched) { _presenceWatched = true; watch('presence', 'presence', _renderPresence); }
-
-    } else {
-
-      // ── VUE JOUEUR v2 ─────────────────────────────────────────────────
-
-      // Groupe : co-membres des groupes (Trame) que j'ai rejoints
-      const _joinedGroups = activeGroups.filter(q =>
-        Array.isArray(q.participants) && q.participants.some(p => _myUidAliases.includes(p.uid))
-      );
-      const _missionUids = new Set(
-        _joinedGroups.flatMap(q => (q.participants || []).map(p => p.uid)).filter(u => !_myUidAliases.includes(u))
-      );
-      const partyMembers = _joinedGroups.length > 0
-        ? [...chars, ...allPartyChars.filter(c => _missionUids.has(c.uid))]
-        : [];
-
-      // Bloc héros : une carte par personnage du joueur + carte groupe à côté du premier
-      let heroBlock = '';
-      if (chars.length === 0) {
-        heroBlock = `
-        <div class="dv2-hero-card" data-navigate="characters">
-          <div class="dv2-hero-inner" style="padding:2rem;justify-content:center;text-align:center">
-            <div>
-              <div style="font-size:2rem;margin-bottom:.75rem">⚔️</div>
-              <div class="dv2-hero-name" style="font-size:1.1rem;margin-bottom:.4rem">Créer mon personnage</div>
-              <div style="font-size:.8rem;color:var(--text-dim)">Bienvenue ${_esc(pseudo)} ! Commence par créer ta fiche de héros.</div>
-            </div>
-          </div>
-        </div>`;
-      } else if (chars.length === 1) {
-        heroBlock = `
-        <div class="dash-grid-herocards dash-grid-herocards--single">
-          ${_heroCardV2(chars[0])}
-        </div>`;
-      } else {
-        // Plusieurs personnages : grille adaptative.
-        // auto-fit (vs auto-fill) étire les colonnes pour utiliser toute la largeur
-        heroBlock = `
-        <div class="dash-grid-herocards">
-          ${chars.map(c => _heroCardV2(c)).join('')}
-        </div>`;
-      }
-
-      dash.className = 'dv2-root';
-      dash.innerHTML = `
-      ${advBanner}
-
-      <div class="dv2-header">
-        <div>
-          <div class="dv2-greeting-label">Bonjour, aventurier</div>
-          <div class="dv2-greeting-title">Bienvenue, ${_esc(pseudo)}</div>
-        </div>
-        <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Aventure active</div>
-      </div>
-
-      ${sessionHub}
-
-      <section class="dv2-dashboard-grid dv2-dashboard-grid--player">
-        <aside class="dv2-dashboard-side">
-          ${_playerActionsPanel()}
-          ${_playerProgressPanel()}
-          ${bastionDoc ? `
-          <div>
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Bastion</span>
-              <div class="dv2-section-label-line"></div>
-            </div>
-            ${_bastionCardV2()}
-          </div>` : ''}
-        </aside>
-        <div class="dv2-dashboard-main">
-          ${_dashboardWallPanel()}
-          <div class="dv2-player-hero">
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Mon personnage</span>
-              <div class="dv2-section-label-line"></div>
-              <button class="dv2-section-action" data-navigate="characters">Ouvrir la fiche -></button>
-            </div>
-            ${heroBlock}
-          </div>
-          ${_playerJoinableGroupsPanel()}
-          <div class="dv2-player-adventure">
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Aventure</span>
-              <div class="dv2-section-label-line"></div>
-            </div>
-            ${_achievementsPanelV2()}
-          </div>
-        </div>
-      </section>`;
-    }
-
-    // ── Fonctionnalités désactivées : masquer les blocs + sections orphelines ──
-    const sessionPlaceholder = document.getElementById('dashboard-session-center');
-    if (preservedSessionCenter && sessionPlaceholder && preservedSessionCenter !== sessionPlaceholder) {
-      sessionPlaceholder.replaceWith(preservedSessionCenter);
-    }
-    if (_sessionCenterNeedsMount) {
-      _sessionCenterNeedsMount = false;
-      mountSessionCenter();
-    }
-    _hideDisabledDashboardBlocks(dash);
-
-    // ── Navigation personnage ──────────────────────────────────────────
-
-    // ── Toast RPG (injecter une seule fois) ───────────────────────────
-    if (!document.getElementById('dv2-toast-container')) {
-      const tc = document.createElement('div');
-      tc.id = 'dv2-toast-container';
-      tc.className = 'dv2-toast-container';
-      document.body.appendChild(tc);
-    }
-    let _showRPGToast = (type = 'xp', title = '', sub = '', badge = '') => {
-      const tc = document.getElementById('dv2-toast-container');
-      if (!tc) return;
-      const el = document.createElement('div');
-      el.className = `dv2-toast dv2-toast-${type}`;
-      const icons = { xp:'✨', gold:'💰', achievement:'🏆' };
-      const cols  = { xp:'#c084fc', gold:'#f4c430', achievement:'#22c38e' };
-      el.innerHTML = `<div class="dv2-toast-icon">${icons[type]||'✨'}</div><div class="dv2-toast-body"><div class="dv2-toast-title">${title}</div>${sub?`<div class="dv2-toast-sub">${sub}</div>`:''}</div>${badge?`<div class="dv2-toast-badge" style="color:${cols[type]||'#fff'}">${badge}</div>`:''}`;
-      tc.appendChild(el);
-      setTimeout(() => { el.classList.add('dv2-leaving'); setTimeout(() => el.remove(), 350); }, 3500);
-    };
-
-      // ── Largeurs de barres — à CHAQUE paint (le DOM est reconstruit) ──
-      requestAnimationFrame(() => {
-        document.querySelectorAll('.dv2-bar-fill[data-w], .dv2-mission-prog-fill[data-w]').forEach(el => {
-          el.style.width = el.dataset.w;
-        });
-      });
-
-    }; // ── fin paint() ────────────────────────────────────────────────────
-
-    // Coalescing : plusieurs sources qui arrivent dans la même frame → 1 paint.
-    const schedulePaint = () => {
-      if (_paintQueued) return;
-      _paintQueued = true;
-      requestAnimationFrame(paint);
-    };
-
-    // ── Rendu initial (cache / squelette) puis abonnements réactifs ────────
-    // Les watch()/watchDoc() se branchent sur les listeners session-live
-    // (0 lecture facturée en plus) ou lazy-priment à la demande ; tous nettoyés
-    // par unwatchAll() à la navigation. Le 1er snapshot cache vide est ignoré
-    // côté firestore (gate trustworthy) → pas de flash "0" figé.
-    paint();
-    watch('dash-characters',   'characters',   d => { allChars = sortCharactersForDisplay(d || []); _sessionCenterNeedsMount = true; schedulePaint(); });
-    watch('dash-quests',       'quests',       d => { quests = d || []; _sessionCenterNeedsMount = true; schedulePaint(); });
-    const watchFullSources = () => {
-      watch('dash-story',        'story',        d => { storyItems = d || []; _sessionCenterNeedsMount = true; schedulePaint(); });
-      watch('dash-achievements', 'achievements', d => { achievementsRaw = d || []; schedulePaint(); });
-      watch('dash-collection',   'collection',   d => { collectionItems = d || []; schedulePaint(); });
-    };
-    if (STATE.isAdmin) {
-      watchFullSources();
-    } else {
-      // Quota : le résumé tenu par le MJ (1 document) remplace la lecture complète
-      // de Trame + Hauts-faits + Collection (base64 compris). Absent ou incomplet
-      // (MJ pas encore repassé après le déploiement) → repli sur la lecture complète.
-      let fullSourcesWatched = false;
-      watchDoc('dash-summary', 'settings', 'dashboardSummary', summary => {
-        if (fullSourcesWatched) return;
-        const usable = isUsableSummary(summary, {
-          achievements: isFeatureAllowedByPlan('achievements'),
-          collection: isFeatureAllowedByPlan('collection'),
-        });
-        if (!usable) {
-          fullSourcesWatched = true;
-          dashSummary = null;
-          storyItems = getCachedCollection('story') || [];
-          watchFullSources();
+        const available = freeChars(groupList);
+        if (!available.length) {
+          if (!controlledChars().length) {
+            showNotif('Crée d’abord un personnage pour rejoindre un groupe.', 'info');
+            goToChar('');
+          } else showNotif('Tous tes personnages sont déjà dans un groupe.', 'info');
+          return;
+        }
+        if (available.length > 1) {
+          pickGroupId = pickGroupId === groupId ? '' : groupId;
           schedulePaint();
           return;
         }
-        dashSummary = summary;
-        storyItems = storyItemsFromSummary(summary);
-        _sessionCenterNeedsMount = true;
+        await this.pickQuestChar(groupId, available[0].id);
+      },
+      async pickQuestChar(groupId, charId) {
+        const group = groups().find(item => item.id === groupId);
+        const char = controlledChars().find(item => item.id === charId);
+        if (!group || !char) { showNotif('Groupe ou personnage introuvable.', 'error'); return; }
+        const next = [
+          ...(group.participants || []).filter(participant => !aliasSet.has(participant?.uid)),
+          questParticipantFromChar(char, STATE.user?.uid || char.uid),
+        ];
+        pickGroupId = '';
+        await persistParticipants(group, next, false);
+      },
+      async markWallRead() {
+        const seenAt = Date.now();
+        wallRead = { ...(wallRead || {}), seenAt, updatedAt: seenAt };
+        try { localStorage.setItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid), String(seenAt)); } catch { /* stockage privé */ }
+        _dashWallFeed?.setSeenAt(seenAt);
         schedulePaint();
-      });
+        if (STATE.user?.uid) await saveDoc('bastionWallReads', STATE.user.uid, { seenAt, updatedAt: seenAt }, { silent: true }).catch(() => {});
+      },
+    };
+    const uiRef = _dashUi;
+
+    paint();
+    watch('dash-characters', 'characters', data => { allChars = sortCharactersForDisplay(data || []); schedulePaint(); });
+    if (STATE.isAdmin) {
+      watch('dash-story', 'story', data => { story = data || []; schedulePaint(); });
+      watch('dash-quests', 'quests', data => { quests = data || []; schedulePaint(); });
+      watchDoc('dash-agenda', 'agenda_session', 'next', data => { agenda = data; schedulePaint(); });
+      watch('dash-presence', 'presence', data => { presence = data || []; schedulePaint(); });
+    } else {
+      watchDoc('dash-summary', 'settings', 'dashboardSummary', data => { summary = isUsableSummary(data) ? data : null; schedulePaint(); }, { silent: true });
     }
-    // Mur du Bastion (4 publications + non-lus) : flux bornés au lieu des 80
-    // dernières (shared/dashboard-wall-feed.js), arrêtés à la navigation comme
-    // les watch*. Bastion désactivé → panneau absent, aucun abonnement.
     if (isFeatureEnabled('bastion')) {
       _dashWallFeed?.stop();
       const wallFeed = createDashboardWallFeed(
@@ -3890,35 +2950,21 @@ const PAGES = {
       );
       _dashWallFeed = wallFeed;
       wallFeed.start(wallSeenAt());
-      document.addEventListener('app:page-changed', () => {
-        wallFeed.stop();
-        if (_dashWallFeed === wallFeed) _dashWallFeed = null;
-      }, { once: true });
-      watchDoc('dash-bastion-wall-legacy', 'bastionAnnonces', 'main', d => { wallLegacy = Array.isArray(d?.items) ? d.items : []; schedulePaint(); });
-      if (STATE.user?.uid) watchDoc('dash-bastion-wall-read', 'bastionWallReads', STATE.user.uid, d => {
-        wallRead = d;
+      if (STATE.user?.uid) watchDoc('dash-bastion-wall-read', 'bastionWallReads', STATE.user.uid, data => {
+        wallRead = data;
         wallFeed.setSeenAt(wallSeenAt());
         schedulePaint();
       }, { silent: true });
+      document.addEventListener('app:page-changed', () => {
+        wallFeed.stop();
+        if (_dashWallFeed === wallFeed) _dashWallFeed = null;
+        if (_dashUi === uiRef) _dashUi = null;
+      }, { once: true });
+    } else {
+      document.addEventListener('app:page-changed', () => {
+        if (_dashUi === uiRef) _dashUi = null;
+      }, { once: true });
     }
-    watchDoc('dash-bastion',   'bastion',        'main', d => { bastionDoc  = d; schedulePaint(); });
-    watchDoc('dash-agenda',    'agenda_session', 'next', d => {
-      nextSession = d;
-      nextSessionReady = true;
-      _sessionCenterNeedsMount = true;
-      schedulePaint();
-    });
-    // Ces deux sources peuvent être nettement plus lourdes que le planning.
-    // Elles complètent le centre en arrière-plan sans bloquer son premier rendu.
-    void Promise.all([
-      loadStats().catch(() => null),
-      loadCollection('availabilities').catch(() => []),
-    ]).then(([stats, avails]) => {
-      if (STATE.currentPage !== 'dashboard') return;
-      sessionStats = stats;
-      sessionAvails = avails || [];
-      mountSessionCenter();
-    });
   },
 
   // ─── CHARACTERS ─────────────────────────────────────────────────────────────
@@ -4672,7 +3718,7 @@ async function goToChar(id, tab = null) {
 async function _dashQuickChar(id) {
   if (!id) return;
   const { quickViewChar } = await import('./characters/quick-view.js');
-  quickViewChar(id);
+  quickViewChar(id, { list: _dashUi?.characterIds?.() || [] });
 }
 
 function _uidAliasesForCurrentUser() {
@@ -4681,12 +3727,6 @@ function _uidAliasesForCurrentUser() {
     ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
     ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
   ].filter(Boolean);
-}
-
-function _charsForUidAliases(chars = [], uidAliases = []) {
-  const aliases = new Set((Array.isArray(uidAliases) ? uidAliases : []).filter(Boolean));
-  if (!aliases.size) return [];
-  return sortCharactersForDisplay((chars || []).filter(c => aliases.has(c?.uid)));
 }
 
 async function _dashSaveQuestParticipants(questId, participants, { leaving = false } = {}) {
@@ -4703,62 +3743,19 @@ async function _dashSaveQuestParticipants(questId, participants, { leaving = fal
 
 async function _dashToggleQuest(btn) {
   const questId = btn?.dataset?.id;
-  if (!questId) return;
-  const quests = getCachedCollection('quests') || await loadCollection('quests');
-  const q = (quests || []).find(x => x.id === questId);
-  if (!q) { showNotif('Groupe introuvable.', 'error'); return; }
-  const uid = STATE.user?.uid || '';
-  const uidAliases = _uidAliasesForCurrentUser();
-  const cur = toggleQuestParticipant(q.participants || [], { uid, uidAliases });
-  if (cur.leaving) {
-    if (btn) btn.disabled = true;
-    await _dashSaveQuestParticipants(questId, cur.participants, { leaving: true });
-    if (btn) btn.disabled = false;
-    return;
-  }
-  const myChars = _charsForUidAliases(getCachedCollection('characters') || [], uidAliases);
-  if (!myChars.length) {
-    showNotif('Crée d’abord un personnage pour rejoindre un groupe.', 'info');
-    goToChar('');
-    return;
-  }
-  if (myChars.length > 1) {
-    const rows = myChars.map(c => {
-      const av = characterAvatarHtml(c, { size: 38, border: 'none', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
-      const sub = [c.classe, c.race].filter(Boolean).join(' · ');
-      return `<button class="btn btn-outline" style="display:flex;align-items:center;gap:.75rem;padding:.6rem .9rem;text-align:left;width:100%"
-        data-action="_dashPickQuestChar" data-id="${_esc(questId)}" data-char="${_esc(c.id)}">
-        ${av}
-        <span style="min-width:0">
-          <span style="display:block;font-weight:750;color:var(--text)">${_esc(c.nom || '?')}</span>
-          ${sub ? `<small style="display:block;color:var(--text-dim)">${_esc(sub)}</small>` : ''}
-        </span>
-      </button>`;
-    }).join('');
-    openModal('Rejoindre le groupe', `<div style="display:flex;flex-direction:column;gap:.45rem">${rows}</div>`);
-    return;
-  }
-  const next = toggleQuestParticipant(q.participants || [], { uid, uidAliases, char: myChars[0] });
+  if (!questId || !_dashUi?.toggleQuest) return;
   if (btn) btn.disabled = true;
-  await _dashSaveQuestParticipants(questId, next.participants);
-  if (btn) btn.disabled = false;
+  try { await _dashUi.toggleQuest(questId); }
+  finally { if (btn?.isConnected) btn.disabled = false; }
 }
 
 async function _dashPickQuestChar(btn) {
   const questId = btn?.dataset?.id;
   const charId = btn?.dataset?.char;
-  if (!questId || !charId) return;
-  const quests = getCachedCollection('quests') || await loadCollection('quests');
-  const q = (quests || []).find(x => x.id === questId);
-  const char = (getCachedCollection('characters') || []).find(c => c.id === charId);
-  if (!q || !char) { showNotif('Groupe ou personnage introuvable.', 'error'); return; }
-  const next = toggleQuestParticipant(q.participants || [], {
-    uid: STATE.user?.uid || '',
-    uidAliases: _uidAliasesForCurrentUser(),
-    char,
-  });
-  const saved = await _dashSaveQuestParticipants(questId, next.participants);
-  if (saved) closeModalDirect();
+  if (!questId || !charId || !_dashUi?.pickQuestChar) return;
+  if (btn) btn.disabled = true;
+  try { await _dashUi.pickQuestChar(questId, charId); }
+  finally { if (btn?.isConnected) btn.disabled = false; }
 }
 
 registerActions({
@@ -4767,6 +3764,7 @@ registerActions({
   _dashQuickChar:        (btn) => _dashQuickChar(btn.dataset.id),
   _dashToggleQuest:      (btn) => _dashToggleQuest(btn),
   _dashPickQuestChar:    (btn) => _dashPickQuestChar(btn),
+  _dashMarkWallRead:     ()    => _dashUi?.markWallRead?.(),
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
   _adminRepairQuestParticipants: () => _adminRepairQuestParticipants(),
   _adminRepairVttData:           () => _adminRepairVttData(),
