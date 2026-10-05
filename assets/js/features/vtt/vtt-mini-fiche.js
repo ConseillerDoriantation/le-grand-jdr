@@ -1838,7 +1838,7 @@ function _renderForge() {
 
   openModal('🔨 Forger un équipement', `
     <div class="vtt-forge">
-      <p class="vtt-forge-hint">Aperçu — <b>aucun matériau n'est consommé</b> tant que le MJ n'a pas validé le rendu.</p>
+      <p class="vtt-forge-hint">⚠️ Les matériaux sont <b>consommés même en cas d'échec</b>.</p>
       ${kindSeg}
       ${specific}
       <label class="vtt-forge-row"><span>Palier</span><select id="forge-tier">
@@ -1851,9 +1851,9 @@ function _renderForge() {
       <label class="vtt-forge-row"><span>Nom</span><input id="forge-name" type="text" maxlength="40" placeholder="Nom de ton objet" value="${_esc(_forge.name)}"></label>
       ${_forgeResult ? `<div class="vtt-ms-craft-res ${_forgeResult.success ? 'win' : 'lose'}">${_esc(_forgeResult.txt)}</div>` : ''}
       <div class="vtt-forge-ft">
-        <button class="vtt-ms-craft-btn" id="forge-run" ${canForge ? '' : 'disabled'} title="${canForge ? 'Simuler le jet' : 'Choisis type, matériaux et trait'}">🎲 Forger (aperçu)</button>
+        <button class="vtt-ms-craft-btn${canForge ? ' pri' : ''}" id="forge-run" ${canForge ? '' : 'disabled'} title="${canForge ? 'Lancer le jet d\'Artisanat' : 'Choisis type, matériaux et trait'}">🔨 Forger</button>
       </div>
-    </div>`, { subtitle: 'Craft génératif · aperçu', accent: '#e8b84b' });
+    </div>`, { subtitle: 'Craft génératif', accent: '#e8b84b' });
 
   _bindForge();
 }
@@ -1878,29 +1878,99 @@ function _bindForge() {
   if (run) run.onclick = () => _forgeRun();
 }
 
-// Aperçu : lance le jet et montre l'objet qui SERAIT produit. N'écrit rien.
-function _forgeRun() {
-  const { charId } = _forgeCtx || {};
+// Forge RÉELLE : jet d'Artisanat → consomme les matériaux (succès OU échec),
+// ajoute l'objet si réussi, rend les matériaux selon le % de remboursement en
+// cas d'échec. Mirrore le chemin inventaire éprouvé de _vttMsCraft + log table.
+let _forgeBusy = false;
+async function _forgeRun() {
+  if (_forgeBusy) return;
+  const { charId, uid } = _forgeCtx || {};
+  if (!_msCanEdit(uid)) return;
   const c = VS.characters[charId]; if (!c) return;
-  const base = _forgeBase(); if (!base) return;
+  const base = _forgeBase(); if (!base) { showNotif('Choisis un type.', 'info'); return; }
   const nameEl = document.getElementById('forge-name'); if (nameEl) _forge.name = nameEl.value;
+  if (!_forge.traitName) { showNotif('Choisis un trait.', 'info'); return; }
+  const requirements = _forgeRequirements();
+  if (!requirements.length) { showNotif('Aucun matériau lié pour cette catégorie/palier (Réglages du craft).', 'error'); return; }
+
+  // 1) Entrées à consommer, par itemId (convention 1 entrée = 1 unité).
+  const oldInv = [...(c.inventaire || [])];
+  const removedSet = new Set();
+  const removedByReq = [];
+  for (const req of requirements) {
+    let left = req.quantite; const removed = [];
+    for (let i = 0; i < oldInv.length && left > 0; i++) {
+      if (!removedSet.has(i) && oldInv[i]?.itemId === req.itemId) { removedSet.add(i); removed.push(oldInv[i]); left--; }
+    }
+    if (left > 0) { showNotif('Matériaux insuffisants.', 'error'); return; }
+    removedByReq.push({ req, removed });
+  }
+
+  // 2) Jet (compétence de discipline) via le moteur.
   const comp = _forgeCompetence(c);
   const d20 = Math.floor(Math.random() * 20) + 1;
   const res = resolveCraftAttempt({
-    inventory: c.inventaire || [],
-    requirements: _forgeRequirements(),
+    inventory: c.inventaire || [], requirements,
     d20, competenceBonus: comp.bonus, tier: _forge.tier, config: getCraftSettings(),
-    base,
-    trait: _forge.traitName ? { nom: _forge.traitName } : null,
+    base, trait: { nom: _forge.traitName },
     name: _forge.name, nature: _forge.kind === 'arme' ? _forge.nature : '', rarete: _forge.tier,
     author: STATE.user?.uid || '',
   });
+  if (!res.ok) { showNotif('Matériaux insuffisants.', 'error'); return; }
   const dd = craftDD(_forge.tier);
-  if (!res.ok) { _forgeResult = { success: false, txt: 'Matériaux insuffisants.' }; _renderForge(); return; }
-  const label = res.item?.nom || base.typeArme || base.typeArmure || base.slotBijou || 'objet';
+
+  // 3) Nouvel inventaire : retire les matériaux, ajoute l'objet (succès) ou rend
+  //    les remboursements (échec).
+  const actor = { actorUid: STATE.user?.uid || '', actorName: STATE.profile?.pseudo || STATE.user?.pseudo || c.nom || '' };
+  const removedIdx = [...removedSet];
+  const newInv = oldInv.filter((_, i) => !removedSet.has(i));
+  const hist = [];
+  for (const { req, removed } of removedByReq) {
+    hist.push(makeInventoryHistoryEntry('consume', removed[0] || { itemId: req.itemId, nom: req.itemId }, req.quantite, { ...actor, source: 'Forge VTT', note: _forge.name || '' }));
+  }
+  let produced = null, totalRendu = 0;
+  if (res.success) {
+    produced = res.item; newInv.push(produced);
+    hist.push(makeInventoryHistoryEntry('add', produced, 1, { ...actor, source: 'Forge VTT', note: _forge.name || '' }));
+  } else {
+    for (const { req, removed } of removedByReq) {
+      const rendu = (res.refunds || []).find(x => x.itemId === req.itemId)?.rendu || 0;
+      for (let k = 0; k < rendu; k++) newInv.push({ ...(removed[0] || { itemId: req.itemId }) });
+      if (rendu > 0) { totalRendu += rendu; hist.push(makeInventoryHistoryEntry('add', removed[0] || { itemId: req.itemId }, rendu, { ...actor, source: 'Forge VTT · remboursement', note: _forge.name || '' })); }
+    }
+  }
+  const historyPatch = inventoryHistoryPayload(c, hist);
+
+  // 4) Resync équipement (indices retirés) + écriture unique.
+  _forgeBusy = true;
+  c.inventaire = newInv;
+  const sync = syncEquipmentAfterInventoryMutation(c, removedIdx);
+  try {
+    await updateDoc(_chrRef(charId), { inventaire: newInv, equipement: sync.equipement, statsBonus: sync.statsBonus, ...historyPatch });
+    c.equipement = sync.equipement; c.statsBonus = sync.statsBonus; c.inventoryHistory = historyPatch.inventoryHistory;
+  } catch (e) {
+    console.error('[vtt] forge', e); c.inventaire = oldInv; _forgeBusy = false;
+    showNotif('Erreur sauvegarde', 'error'); return;
+  }
+  _forgeBusy = false;
+
+  // 5) Jet de compétence (stats) + log VTT (visible à la table).
+  try { await bumpSkill(c.id, c.nom || '', comp.disc ? `Forge · ${comp.disc}` : 'Forge', { natural: d20, total: res.roll.total, crit: d20 === 20, fumble: d20 === 1 }); } catch {}
+  const authorName = STATE.profile?.pseudo || STATE.profile?.prenom || c.nom || 'Joueur';
+  addDoc(_logCol(), {
+    type: 'craft', authorId: STATE.user?.uid || null, authorName, characterId: charId || null,
+    charName: c.nom || '', recipeName: produced?.nom || _forge.name || 'Forge',
+    statLabel: comp.disc ? `Forge · ${comp.disc}` : 'Forge', mod: comp.bonus, d20, total: res.roll.total, dd, passed: res.success,
+    ...(VS.session?.live && VS.session?.statsSessionKey ? { statsSessionKey: VS.session.statsSessionKey, statsSessionDate: VS.session.statsSessionDate || '' } : {}),
+    createdAt: serverTimestamp(),
+  }).catch(() => {});
+
+  const perte = totalRendu > 0 ? 'matériaux en partie récupérés' : 'matériaux perdus';
   _forgeResult = res.success
-    ? { success: true,  txt: `✅ d20[${res.roll.d20}]+${comp.bonus} = ${res.roll.total} ≥ DD ${dd} → « ${label} » serait créé (aperçu).` }
-    : { success: false, txt: `❌ d20[${res.roll.d20}]+${comp.bonus} = ${res.roll.total} < DD ${dd} → échec (aperçu, matériaux perdus en réel).` };
+    ? { success: true,  txt: `✅ d20[${d20}] +${comp.bonus} = ${res.roll.total} ≥ DD ${dd} → « ${produced.nom} » forgé et ajouté au sac !` }
+    : { success: false, txt: `❌ d20[${d20}] +${comp.bonus} = ${res.roll.total} < DD ${dd} → échec, ${perte}.` };
+  showNotif(res.success ? `🔨 « ${produced.nom} » forgé !` : '🔨 Échec — matériaux perdus', res.success ? 'success' : 'error');
+  if (VS.miniUid) _renderMiniSheet(VS.miniUid);   // rafraîchit le sac en fond
   _renderForge();
 }
 
