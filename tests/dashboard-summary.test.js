@@ -73,7 +73,11 @@ test('dashboard v3 : quatre blocs, ordre joueur sans groupe et panneau latéral 
   const css = read('assets/css/dashboard.css');
   const dashboard = pages.match(/async dashboard\(\) \{([\s\S]*?)\n  \},\n\n  \/\/ ─── CHARACTERS/)?.[1] || '';
   for (const label of ['Prochaine séance', 'Personnages', 'Groupes actifs', 'Groupes ouverts', 'Mur du Bastion']) assert.match(dashboard, new RegExp(label));
-  assert.match(dashboard, /hasJoinedGroup[\s\S]*\[sessionSection\(sessionList, groupList\), groupSection, characterSection\]/);
+  // La séance est un bandeau pleine largeur rendu AVANT la grille ; sous la
+  // grille, l'ordre joueur sans groupe reste « groupes puis personnages ».
+  assert.match(dashboard, /const sessionBanner = sessionSection\(sessionList, groupList\)/);
+  assert.match(dashboard, /hasJoinedGroup[\s\S]*\[groupSection, characterSection\]/);
+  assert.match(dashboard, /\$\{sessionBanner\}<div class="db-grid/);
   assert.match(css, /grid-template-columns:minmax\(0,1\.62fr\) minmax\(300px,1fr\)/);
   assert.match(css, /\.db-wall\{position:sticky/);
   assert.match(css, /@container \(max-width:900px\)/);

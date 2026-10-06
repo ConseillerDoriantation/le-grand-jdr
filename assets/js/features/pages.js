@@ -2857,14 +2857,18 @@ const PAGES = {
       const hasJoinedGroup = groupList.some(groupJoined);
       const characterSection = STATE.isAdmin ? gmCharactersSection(groupList) : playerCharactersSection(groupList);
       const groupSection = groupsSection(groupList);
+      // La séance occupe toute la largeur en tête ; les autres sections se
+      // répartissent dans la grille 2 colonnes dessous (évite le couloir étroit).
+      const sessionBanner = sessionSection(sessionList, groupList);
       const main = STATE.isAdmin || hasJoinedGroup
-        ? [sessionSection(sessionList, groupList), characterSection, groupSection]
-        : [sessionSection(sessionList, groupList), groupSection, characterSection];
+        ? [characterSection, groupSection]
+        : [groupSection, characterSection];
       const pseudo = STATE.profile?.pseudo || STATE.profile?.displayName || STATE.user?.displayName || String(STATE.user?.email || '').split('@')[0] || 'aventurier';
       const adventure = STATE.adventure?.nom || 'Aventure';
       const initials = adventure.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toUpperCase() || 'A';
       const online = liveUids().size;
-      root.innerHTML = `<div class="db-top"><button type="button" class="db-adv" data-action="openAdventureSwitcher"><span class="sig">${_esc(initials)}</span><b>${_esc(adventure)}</b><small>${icon('refresh-cw')}Changer</small></button><span class="db-hello">${STATE.isAdmin ? `<span class="db-on"><i></i>${online} joueur${online > 1 ? 's' : ''} connecté${online > 1 ? 's' : ''}</span>` : ''}<span>Bonsoir, <b>${_esc(pseudo)}</b>${STATE.isAdmin ? ' · Maître de jeu' : ''}</span></span></div><div class="db-grid"><div class="db-col">${main.join('')}</div><div class="db-col">${isFeatureEnabled('bastion') ? wallSection() : ''}</div></div>`;
+      const wall = isFeatureEnabled('bastion') ? wallSection() : '';
+      root.innerHTML = `<div class="db-top"><button type="button" class="db-adv" data-action="openAdventureSwitcher"><span class="sig">${_esc(initials)}</span><b>${_esc(adventure)}</b><small>${icon('refresh-cw')}Changer</small></button><span class="db-hello">${STATE.isAdmin ? `<span class="db-on"><i></i>${online} joueur${online > 1 ? 's' : ''} connecté${online > 1 ? 's' : ''}</span>` : ''}<span>Bonsoir, <b>${_esc(pseudo)}</b>${STATE.isAdmin ? ' · Maître de jeu' : ''}</span></span></div>${sessionBanner}<div class="db-grid${wall ? '' : ' solo'}"><div class="db-col">${main.join('')}</div>${wall ? `<div class="db-col">${wall}</div>` : ''}</div>`;
     }
 
     const replaceParticipants = (groupId, participants) => {
