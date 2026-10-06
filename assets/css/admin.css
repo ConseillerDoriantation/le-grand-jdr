@@ -2,7 +2,7 @@
    CONSOLE MJ v2 — 3 onglets (À traiter · Joueurs · Réglages)
    Tokens de l'app (tokens.css) ; thème clair hérité. Préfixe .cmj-*.
    ══════════════════════════════════════════════════════════════════════════════ */
-.cmj { --ease: cubic-bezier(.22,1,.36,1); max-width: 1280px; margin: 0 auto; padding: 18px 24px 80px; font-variant-numeric: tabular-nums; color: var(--text); }
+.cmj { --ease: cubic-bezier(.22,1,.36,1); max-width: 1280px; margin: 0 auto; padding: 18px 24px 80px; font-size: 13px; line-height: 1.4; font-variant-numeric: tabular-nums; color: var(--text); }
 .cmj :where(button) { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; text-align: left; -webkit-appearance: none; appearance: none; }
 .cmj-ic { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .cmj kbd { font: inherit; font-size: 10.5px; font-weight: 700; padding: 1px 5px; border-radius: 5px; border: 1px solid var(--border-md); background: var(--surface-2); color: var(--text-muted); }
@@ -43,7 +43,7 @@
 .cmj-inbox { display: grid; grid-template-columns: 232px minmax(0,1fr); gap: 24px; align-items: start; }
 .cmj-side { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 16px; }
 .cmj-nav { display: flex; flex-direction: column; gap: 2px; }
-.cmj-nv { display: grid; grid-template-columns: 18px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; color: var(--text-muted); font-weight: 600; text-align: left; }
+.cmj-nv { display: grid; grid-template-columns: 18px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; color: var(--text-muted); font-size: 12.5px; font-weight: 600; text-align: left; }
 .cmj-nv:hover { background: var(--surface-1); color: var(--text); }
 .cmj-nv.on { background: var(--surface-2); color: var(--text); box-shadow: inset 2px 0 0 var(--gold); }
 .cmj-nv b { font-size: 11.5px; font-weight: 700; color: var(--text-dim); }
