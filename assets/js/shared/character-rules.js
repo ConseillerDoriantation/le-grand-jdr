@@ -315,10 +315,10 @@ function _parseFormula(source, variables = {}) {
     return value;
   };
 
-  if (peek().type === 'eof') throw new Error('La formule est vide.');
+  if (peek().type === 'eof') throw new Error('La formule est vide');
   const result = expression();
-  if (peek().type !== 'eof') throw new Error(`Élément inattendu : ${peek().value || peek().type}.`);
-  if (!Number.isFinite(result)) throw new Error('Le résultat doit être un nombre fini.');
+  if (peek().type !== 'eof') throw new Error(`Élément inattendu : ${peek().value || peek().type}`);
+  if (!Number.isFinite(result)) throw new Error('Le résultat n’est pas un nombre fini');
   return result;
 }
 
