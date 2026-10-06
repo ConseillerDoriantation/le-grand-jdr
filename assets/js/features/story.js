@@ -20,6 +20,7 @@ import { characterAvatarHtml } from '../shared/portraits.js';
 import { storyParticipantsFromGroups, toggleQuestParticipant, dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { removeQuestAgendaSessions } from '../shared/agenda-sessions.js';
+import { watchPageCollection } from '../shared/realtime.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
 // Palette d'axes distincte des couleurs de statut (En cours / Terminée / Échouée)
@@ -87,6 +88,21 @@ function getStoryPrefs() {
 function setStoryPrefs(patch) {
   try { localStorage.setItem(STORY_PREFS_KEY, JSON.stringify({ ...getStoryPrefs(), ...patch })); }
   catch {}
+}
+
+// Abonnement live de la Trame : re-render quand une mission change (statut,
+// ordre, récit, participants…) sans attendre une actualisation manuelle.
+// Garde par signature : l'émission initiale (asynchrone) de subscribeCollection
+// renvoie les données déjà affichées → signature identique → aucun re-render,
+// donc pas de boucle. Collection session-live : zéro lecture facturée en plus.
+let _storySig = null;
+function _storySignature(items = []) {
+  return (items || []).map(m =>
+    `${m.id}:${m.statut || ''}:${m.ordre ?? ''}:${m.acte || ''}:${m.axe || ''}:${m.date || ''}:${m.lieu || ''}:${m.type || ''}` +
+    `:${m.titre || ''}:${m.visibleJoueurs === false ? 0 : 1}:${m.imageUrl ? 1 : 0}:${(m.description || '').length}` +
+    `:${(Array.isArray(m.participants) ? m.participants.length : 0)}` +
+    `:${(Array.isArray(m.groupes) ? m.groupes.map(g => `${g.nom || ''}=${g.reussite ?? ''}`).join('~') : '')}`
+  ).join('|');
 }
 
 function _storyMissionIdsForPlayer(items = [], groups = []) {
@@ -781,6 +797,14 @@ async function renderStory() {
   STORE.axeColors = Object.fromEntries(Object.entries(axesDoc?.colors || {})
     .map(([axe, color]) => [axe, _normalizeAxeColor(color)])
     .filter(([, color]) => color));
+
+  // Live : re-render dès qu'une mission change (unwatchAll() nettoie à la
+  // navigation, donc on ré-arme l'abonnement à chaque rendu). Voir _storySignature.
+  _storySig = _storySignature(items);
+  watchPageCollection('story-live', 'story', 'story', data => {
+    if (_storySignature(data) === _storySig) return;   // émission initiale ou faux positif
+    renderStory();
+  });
 
   const prefs = getStoryPrefs();
   const visibleItems = items.filter(i => STATE.isAdmin || i.visibleJoueurs !== false);
