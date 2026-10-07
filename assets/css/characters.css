@@ -22934,3 +22934,24 @@ body .modal:has(.at) > #modal-body { padding: 0 !important; height: auto !import
   .at-foot { flex-wrap: wrap; } .at-info { flex-basis: 100%; } .at-head small { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .at * { transition: none !important; } }
+
+/* Types d'armure — paliers (partie B) */
+.at-sec-h { display: flex; align-items: center; gap: 10px; }
+.at-tiers { display: flex; flex-direction: column; gap: 10px; }
+.at-tier { border: 1px solid var(--border-md); border-radius: 13px; background: var(--surface-2); overflow: hidden; }
+.at-tier.live { border-color: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 16%, transparent); }
+.at-tier.bad { border-color: color-mix(in srgb, var(--crimson) 55%, transparent); }
+.at-tier-h { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.at-tier-h > div { min-width: 0; } .at-tier-h b { font-size: 13px; font-weight: 700; } .at-tier-h small { display: block; font-size: 11px; color: var(--text-dim); } .at-tier-h small.ko { color: var(--crimson); }
+.at-pips { display: inline-flex; gap: 4px; }
+.at-pip { width: 22px; height: 22px; border-radius: 7px; border: 1px solid var(--border-md); background: var(--surface-sunken); color: var(--text-dim); font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+.at-pip.on { background: var(--c); border-color: var(--c); color: #0b1220; }
+.at-live-tag { font-size: 10.5px; font-weight: 700; color: var(--c); white-space: nowrap; }
+.at-tier .at-fx { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.at-tier-f { position: relative; padding: 0 12px 12px; }
+.at-addfx { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 9px; border: 1px dashed var(--border-md); color: var(--text-muted); font-weight: 600; font-size: 12px; } .at-addfx:hover { color: var(--text); border-color: var(--border-strong); } .at-addfx .at-ic { width: 14px; height: 14px; }
+.at-fxm { position: absolute; left: 12px; top: 36px; z-index: 20; width: 300px; padding: 6px; border-radius: 12px; background: var(--surface-3); border: 1px solid var(--border-strong); box-shadow: 0 24px 64px rgba(0,0,0,.55); display: flex; flex-direction: column; gap: 2px; }
+.at-fxm button { display: grid; grid-template-columns: 36px 1fr; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; text-align: left; } .at-fxm button:hover:not(:disabled) { background: var(--surface-4); } .at-fxm button:disabled { opacity: .4; }
+.at-fxm b { font-size: 12.5px; } .at-fxm small { display: block; font-size: 11px; color: var(--text-muted); }
+.at-addtier { display: flex; align-items: center; justify-content: center; gap: 7px; height: 36px; border-radius: 10px; border: 1px dashed var(--border-md); color: var(--text-muted); font-weight: 600; font-size: 12.5px; } .at-addtier:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); } .at-addtier:disabled { opacity: .4; } .at-addtier .at-ic { width: 14px; height: 14px; }
+.at-empty-fx { padding: 12px; border-radius: 9px; border: 1px dashed var(--border-md); font-size: 12px; color: var(--text-dim); text-align: center; }

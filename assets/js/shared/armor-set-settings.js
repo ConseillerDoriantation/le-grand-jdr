@@ -125,6 +125,14 @@ function _emptyModifiers() {
     spellPmDelta: 0,
     toucherBonus: 0,
     damageReduction: 0,
+    // Partie B — champs agrégés des nouveaux effets de palier. Présents dans le
+    // modèle et calculés par getArmorSetData ; leur branchement combat se fait
+    // effet par effet (certains sont encore masqués dans l'éditeur).
+    caBonus: 0,
+    damageBonus: 0,
+    moveDelta: 0,
+    saveBonus: {},
+    resistances: [],
     rollImpact: _emptyRollImpact(),
   };
 }
@@ -166,8 +174,106 @@ function _normalizeModifiers(modifiers = {}) {
   normalized.spellPmDelta = _num(modifiers.spellPmDelta);
   normalized.toucherBonus = _num(modifiers.toucherBonus);
   normalized.damageReduction = Math.max(0, _num(modifiers.damageReduction));
+  normalized.caBonus = _num(modifiers.caBonus);
+  normalized.damageBonus = _num(modifiers.damageBonus);
+  normalized.moveDelta = Number(((_num(modifiers.moveDelta)) || 0).toFixed(2));
+  const sb = {};
+  if (modifiers.saveBonus && typeof modifiers.saveBonus === 'object') {
+    STAT_ROLL_TARGETS.forEach(([k]) => { const v = _num(modifiers.saveBonus[k]); if (v) sb[k] = v; });
+  }
+  normalized.saveBonus = sb;
+  normalized.resistances = [...new Set((Array.isArray(modifiers.resistances) ? modifiers.resistances : []).map(x => String(x || '').trim()).filter(Boolean))];
   normalized.rollImpact = _normalizeRollImpact(modifiers.rollImpact || {});
   return normalized;
+}
+
+// ── Paliers (partie B) ────────────────────────────────────────────────────────
+// Effet d'un palier : { kind, value?, mode?, target?, stat?, element? }.
+const _TIER_KINDS = new Set(['toucher', 'pm', 'dr', 'roll', 'ca', 'dmg', 'save', 'resist', 'move']);
+function _normalizeTierEffect(raw = {}) {
+  const kind = _TIER_KINDS.has(raw.kind) ? raw.kind : null;
+  if (!kind) return null;
+  if (kind === 'roll') {
+    const mode = _normalizeRollMode(raw.mode) || 'disadvantage';
+    const target = String(raw.target || '').trim();
+    if (!target) return { kind, mode, target: '' };
+    return { kind, mode, target };
+  }
+  if (kind === 'save') return { kind, stat: String(raw.stat || 'constitution'), value: _num(raw.value) || 1 };
+  if (kind === 'resist') return { kind, element: String(raw.element || raw.el || '').trim() || 'Feu' };
+  const step = kind === 'move' ? 1.5 : 1;
+  let v = _num(raw.value);
+  if (!v) v = kind === 'pm' ? -step : step;
+  if (kind === 'dr' && v < 1) v = 1;
+  return { kind, value: Number(v.toFixed(2)) };
+}
+// Effets dérivés de l'ancien `modifiers` (migration en lecture).
+function _effectsFromModifiers(m = {}) {
+  const out = [];
+  if (_num(m.toucherBonus)) out.push({ kind: 'toucher', value: _num(m.toucherBonus) });
+  if (_num(m.spellPmDelta)) out.push({ kind: 'pm', value: _num(m.spellPmDelta) });
+  if (_num(m.damageReduction) > 0) out.push({ kind: 'dr', value: _num(m.damageReduction) });
+  const im = _normalizeRollImpact(m.rollImpact || {});
+  Object.entries(im.statModes).forEach(([k, mode]) => out.push({ kind: 'roll', mode, target: 'stat:' + k }));
+  im.skillModes.forEach(r => out.push({ kind: 'roll', mode: r.mode, target: 'skill:' + r.name }));
+  return out;
+}
+function _normalizeTiers(raw = {}, index = 0) {
+  if (Array.isArray(raw.tiers)) {
+    return raw.tiers.map(t => ({
+      pieces: Math.max(1, parseInt(t?.pieces, 10) || 1),
+      effects: (Array.isArray(t?.effects) ? t.effects : []).map(_normalizeTierEffect).filter(Boolean),
+    }));
+  }
+  // Migration : ancien set tout-ou-rien → un palier « complet » (seuil élevé,
+  // borné au nombre d'emplacements d'armure à la lecture). 99 = « set complet ».
+  const effects = _effectsFromModifiers(raw.modifiers || {});
+  return effects.length ? [{ pieces: 99, effects }] : [];
+}
+// Agrège une liste d'effets en un objet modifiers (champs existants + nouveaux).
+function _aggregateTierEffects(effects = []) {
+  const m = _emptyModifiers();
+  const addRoll = (target, mode) => {
+    if (!target || !mode) return;
+    if (target.startsWith('stat:')) {
+      const k = target.slice(5); const cur = m.rollImpact.statModes[k];
+      m.rollImpact.statModes[k] = cur && cur !== mode ? 'normal' : mode;
+    } else {
+      const name = target.slice(6); const r = m.rollImpact.skillModes.find(x => x.name === name);
+      if (r) r.mode = (r.mode !== mode ? 'normal' : mode); else m.rollImpact.skillModes.push({ name, mode });
+    }
+  };
+  effects.forEach(e => {
+    switch (e.kind) {
+      case 'toucher': m.toucherBonus += _num(e.value); break;
+      case 'pm': m.spellPmDelta += _num(e.value); break;
+      case 'dr': m.damageReduction += _num(e.value); break;
+      case 'ca': m.caBonus += _num(e.value); break;
+      case 'dmg': m.damageBonus += _num(e.value); break;
+      case 'move': m.moveDelta += _num(e.value); break;
+      case 'save': if (e.stat) m.saveBonus[e.stat] = (m.saveBonus[e.stat] || 0) + _num(e.value); break;
+      case 'resist': if (e.element && !m.resistances.includes(e.element)) m.resistances.push(e.element); break;
+      case 'roll': addRoll(e.target, e.mode); break;
+    }
+  });
+  // Les modes 'normal' (avantage+désavantage annulés) sont retirés.
+  Object.keys(m.rollImpact.statModes).forEach(k => { if (m.rollImpact.statModes[k] === 'normal') delete m.rollImpact.statModes[k]; });
+  m.rollImpact.skillModes = m.rollImpact.skillModes.filter(r => r.mode && r.mode !== 'normal');
+  m.moveDelta = Number(m.moveDelta.toFixed(2));
+  return m;
+}
+// Paliers atteints à `count` pièces (seuils bornés à `maxPieces`), puis agrégés
+// selon `cumulative`. Exporté pour getArmorSetData et l'éditeur.
+export function armorSetAppliedTiers(set = {}, count = 0, maxPieces = Infinity) {
+  const tiers = Array.isArray(set.tiers) ? set.tiers : [];
+  const reached = tiers
+    .map(t => ({ ...t, eff: Math.min(t.pieces, maxPieces) }))
+    .filter(t => t.eff <= count)
+    .sort((a, b) => a.eff - b.eff);
+  return set.cumulative === false ? reached.slice(-1) : reached;
+}
+export function armorSetAggregateAtCount(set = {}, count = 0, maxPieces = Infinity) {
+  return _aggregateTierEffects(armorSetAppliedTiers(set, count, maxPieces).flatMap(t => t.effects));
 }
 
 export function normalizeArmorSetKey(value = '') {
@@ -183,16 +289,23 @@ function _normalizeSet(raw = {}, index = 0) {
   const type = String(raw.type || raw.label || '').trim();
   const key = normalizeArmorSetKey(type || raw.id || `set-${index + 1}`);
   const label = String(raw.label || type || raw.id || `Set ${index + 1}`).trim();
-  return {
+  const cumulative = raw.cumulative !== false;
+  const tiers = _normalizeTiers(raw, index);
+  const set = {
     id: normalizeArmorSetKey(raw.id || key) || `set-${index + 1}`,
     type,
     label,
     enabled: raw.enabled !== false,
-    tone: raw.tone || 'neutral',
+    tone: raw.tone || 'neutral',   // conservé en lecture pour compat ; `color` fait foi
     color: _safeColor(raw.color, _toneColor(raw.tone || 'neutral')),
     description: String(raw.description || '').trim(),
-    modifiers: _normalizeModifiers(raw.modifiers || {}),
+    cumulative,
+    tiers,
   };
+  // `modifiers` reste présent (agrégat « set complet ») pour les lecteurs
+  // historiques (formatArmorSetEffect, getArmorTypeMeta, getArmorSetRollModeFor).
+  set.modifiers = _aggregateTierEffects(armorSetAppliedTiers(set, Infinity, Infinity).flatMap(t => t.effects));
+  return set;
 }
 
 function _normalizeSettings(stored = {}, defaults = DEFAULT_ARMOR_SETS) {
@@ -722,20 +835,21 @@ function _renderAdminPrevious() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODALE « TYPES D'ARMURE & SETS » v2 — PARTIE A (UI maître/détail).
-// Conserve le modèle actuel (modifiers / rollImpact) : getArmorSetData et
-// saveArmorSetSettings sont inchangés (aucun risque combat). Un seul palier
-// implicite = « set complet », effets existants (TCH/PM/RD/JET). Les paliers,
-// la grille de pièces et les effets « Nouveau » (partie B) sont volontairement
-// absents de cette version.
+// MODALE « TYPES D'ARMURE & SETS » v2 — UI maître/détail + PALIERS (partie B).
+// Édite le modèle `tiers`/`cumulative`. Le moteur (armorSetAppliedTiers,
+// getArmorSetData) et saveArmorSetSettings suivent le même format. Les effets
+// non encore branchés dans le combat (CA, DGT, SVG, RES, DEP) sont masqués du
+// menu : seuls TCH/PM/RD/JET — déjà actifs en jeu — sont proposés (brief §171).
 // ══════════════════════════════════════════════════════════════════════════════
 const _AT_STAT_NAMES = { force: 'Force', dexterite: 'Dextérité', constitution: 'Constitution', intelligence: 'Intelligence', sagesse: 'Sagesse', charisme: 'Charisme' };
+// Effets proposés dans l'éditeur (branchés). `multi` = ajoutable plusieurs fois.
 const _AT_KINDS = {
-  toucher: { b: 'TCH', n: 'Toucher', d: 'Bonus aux jets d’attaque', v: 1, good: e => e.v > 0 },
-  pm: { b: 'PM', n: 'Coût des sorts', d: 'PM ajoutés ou retirés', v: -1, good: e => e.v < 0 },
+  toucher: { b: 'TCH', n: 'Toucher', d: 'Bonus aux jets d’attaque', v: 1, good: e => e.value > 0 },
+  pm: { b: 'PM', n: 'Coût des sorts', d: 'PM ajoutés ou retirés', v: -1, good: e => e.value < 0 },
   dr: { b: 'RD', n: 'Réduction de dégâts', d: 'Soustraite aux dégâts subis', v: 1, min: 1, good: () => true },
   roll: { b: 'JET', n: 'Avantage / désavantage', d: 'Sur une carac ou compétence', multi: 1, good: e => e.mode === 'advantage' },
 };
+const _AT_BADGE = { toucher: 'TCH', pm: 'PM', dr: 'RD', roll: 'JET', ca: 'CA', dmg: 'DGT', save: 'SVG', resist: 'RES', move: 'DEP' };
 const _AT_SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
 <symbol id="at-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></symbol>
 <symbol id="at-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
@@ -747,23 +861,13 @@ const _AT_SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hid
 </defs></svg>`;
 const _atIc = id => `<svg class="at-ic"><use href="#at-${id}"></use></svg>`;
 
-// Snapshot enregistré, type édité, confirmation du pied, palette ouverte, menu
-// d'effets, état des pièces simulées, nb d'objets par type, emplacements d'armure.
-let _atSaved = [];
-let _atSelId = null;
-let _atAsk = null;      // 'close' | 'del' | null
-let _atColOpen = false;
-let _atMenuOpen = false;
-let _atSim = [];
-let _atCounts = null;
-let _atSlotLabels = [];
-let _atMax = 0;
-let _atMounted = false;
+let _atSaved = [], _atSelId = null, _atAsk = null, _atColOpen = false, _atMenuTi = null, _atSim = [], _atCounts = null, _atSlotLabels = [], _atMax = 0, _atMounted = false;
 
 const _atSg = v => (v > 0 ? '+' : v < 0 ? '−' : '') + String(Math.abs(v)).replace('.', ',');
 const _atCur = () => _draft.find(s => s.id === _atSelId) || _draft[0] || null;
 const _atKey = s => normalizeArmorSetKey(s);
-const _atDirty = s => { const o = _atSaved.find(x => x.id === s.id); return !o || JSON.stringify(o) !== JSON.stringify(s); };
+const _atDirty = s => { const o = _atSaved.find(x => x.id === s.id); return !o || JSON.stringify(_atCmp(o)) !== JSON.stringify(_atCmp(s)); };
+const _atCmp = s => ({ type: s.type, color: s.color, enabled: s.enabled !== false, description: s.description, cumulative: s.cumulative !== false, tiers: s.tiers });
 const _atOrderChanged = () => _draft.map(s => s.id).join('|') !== _atSaved.map(s => s.id).join('|');
 const _atChanges = () => _draft.filter(_atDirty).length + _atSaved.filter(o => !_draft.some(s => s.id === o.id)).length;
 const _atAnyDirty = () => _atChanges() > 0 || _atOrderChanged();
@@ -771,104 +875,53 @@ function _atErrs(s) {
   const e = [];
   if (!String(s.type || '').trim()) e.push('name');
   else if (_draft.some(o => o !== s && _atKey(o.type) === _atKey(s.type))) e.push('dupname');
+  (s.tiers || []).forEach((t, i) => {
+    if ((s.tiers || []).some((o, j) => j !== i && o.pieces === t.pieces)) e.push('tier' + i);
+    if (t.effects.some(f => f.kind === 'roll' && !f.target)) e.push('tgt' + i);
+  });
   return e;
 }
 const _atAllErr = () => _draft.filter(s => _atErrs(s).length);
 const _atCount = s => (_atCounts == null ? null : (_atCounts[normalizeArmorSetKey(s.type)] || 0));
+const _atFxCount = s => (s.tiers || []).reduce((a, t) => a + t.effects.length, 0);
 const _atTgtL = t => !t ? '—' : t.startsWith('stat:') ? (_AT_STAT_NAMES[t.slice(5)] || t.slice(5)) : t.slice(6);
-
-function _atRolls(set) {
-  const im = _normalizeRollImpact(set.modifiers?.rollImpact || {});
-  const out = [];
-  Object.entries(im.statModes).forEach(([k, m]) => { if (m) out.push({ target: 'stat:' + k, mode: m }); });
-  im.skillModes.forEach(r => { if (r.name) out.push({ target: 'skill:' + r.name, mode: r.mode }); });
-  return out;
-}
-function _atRollRemove(set, target) {
-  set.modifiers = _normalizeModifiers(set.modifiers || {});
-  if (target.startsWith('stat:')) delete set.modifiers.rollImpact.statModes[target.slice(5)];
-  else { const name = target.slice(6); set.modifiers.rollImpact.skillModes = set.modifiers.rollImpact.skillModes.filter(r => r.name !== name); }
-}
-function _atRollSet(set, target, mode) {
-  set.modifiers = _normalizeModifiers(set.modifiers || {});
-  if (target.startsWith('stat:')) set.modifiers.rollImpact.statModes[target.slice(5)] = mode;
-  else { const name = target.slice(6); const r = set.modifiers.rollImpact.skillModes.find(x => x.name === name); if (r) r.mode = mode; else set.modifiers.rollImpact.skillModes.push({ name, mode }); }
-}
-function _atRollRetarget(set, oldT, newT) {
-  if (oldT === newT || !newT) return;
-  const mode = _atRolls(set).find(r => r.target === oldT)?.mode || 'disadvantage';
-  _atRollRemove(set, oldT); _atRollSet(set, newT, mode);
-}
-function _atEffects(set) {
-  const m = set.modifiers || {}; const out = [];
-  if ((m.toucherBonus || 0) !== 0) out.push({ k: 'toucher', v: m.toucherBonus });
-  if ((m.spellPmDelta || 0) !== 0) out.push({ k: 'pm', v: m.spellPmDelta });
-  if ((m.damageReduction || 0) > 0) out.push({ k: 'dr', v: m.damageReduction });
-  _atRolls(set).forEach(r => out.push({ k: 'roll', mode: r.mode, target: r.target }));
-  return out;
-}
-function _atAddEffect(set, k) {
-  set.modifiers = _normalizeModifiers(set.modifiers || {}); const m = set.modifiers;
-  if (k === 'toucher') { if (!m.toucherBonus) m.toucherBonus = 1; }
-  else if (k === 'pm') { if (!m.spellPmDelta) m.spellPmDelta = -1; }
-  else if (k === 'dr') { if (!(m.damageReduction > 0)) m.damageReduction = 1; }
-  else if (k === 'roll') {
-    const used = new Set(_atRolls(set).map(r => r.target));
-    const target = (_diceSkills || []).map(s => 'skill:' + s.name).find(t => !used.has(t)) || STAT_ROLL_TARGETS.map(([s]) => 'stat:' + s).find(t => !used.has(t));
-    if (target) _atRollSet(set, target, 'disadvantage');
-  }
-}
-function _atRemoveEffect(set, k, target) {
-  set.modifiers = _normalizeModifiers(set.modifiers || {}); const m = set.modifiers;
-  if (k === 'toucher') m.toucherBonus = 0;
-  else if (k === 'pm') m.spellPmDelta = 0;
-  else if (k === 'dr') m.damageReduction = 0;
-  else if (k === 'roll' && target) _atRollRemove(set, target);
-}
-function _atStep(set, k, target, dir) {
-  set.modifiers = _normalizeModifiers(set.modifiers || {}); const m = set.modifiers;
-  const K = _AT_KINDS[k], step = K.step || 1;
-  const field = k === 'toucher' ? 'toucherBonus' : k === 'pm' ? 'spellPmDelta' : 'damageReduction';
-  let v = +((m[field] || 0) + dir * step).toFixed(1);
-  if (v === 0) v = +(dir * step).toFixed(1);
-  if (K.min && v < K.min) v = K.min;
-  m[field] = v;
-}
-const _atEffTxt = e => {
-  switch (e.k) {
-    case 'toucher': return `Toucher ${_atSg(e.v)}`;
-    case 'pm': return `Sorts ${_atSg(e.v)} PM`;
-    case 'dr': return `Dégâts subis −${e.v}`;
-    case 'roll': return `${e.mode === 'advantage' ? 'Avantage' : 'Désavantage'} ${_atTgtL(e.target)}`;
+const _atBadgeCls = f => (_AT_KINDS[f.kind] ? (_AT_KINDS[f.kind].good(f) ? 'good' : 'bad') : '');
+function _atEffTxt(f) {
+  switch (f.kind) {
+    case 'toucher': return `Toucher ${_atSg(f.value)}`;
+    case 'pm': return `Sorts ${_atSg(f.value)} PM`;
+    case 'dr': return `Dégâts subis −${f.value}`;
+    case 'roll': return `${f.mode === 'advantage' ? 'Avantage' : 'Désavantage'} ${_atTgtL(f.target)}`;
+    case 'ca': return `CA ${_atSg(f.value)}`;
+    case 'dmg': return `Dégâts ${_atSg(f.value)}`;
+    case 'save': return `Sauvegarde ${_AT_STAT_NAMES[f.stat] || f.stat} ${_atSg(f.value)}`;
+    case 'resist': return `Résistance ${f.element}`;
+    case 'move': return `Déplacement ${_atSg(f.value)} m`;
   }
   return '';
-};
+}
 
 /* ── Rendu ── */
 function _atListHtml() {
   return `<span class="at-lbl">Types</span>` + _draft.map(s => {
-    const err = _atErrs(s).length, dirty = _atDirty(s), cnt = _atCount(s), eff = _atEffects(s).length;
-    const sub = s.enabled === false ? 'Inactif' : eff ? `Set complet · ${eff} effet${eff > 1 ? 's' : ''}` : 'Type boutique, sans effet';
+    const err = _atErrs(s).length, dirty = _atDirty(s), cnt = _atCount(s), fx = _atFxCount(s), tiers = (s.tiers || []).length;
+    const sub = s.enabled === false ? 'Inactif' : fx ? `${tiers} palier${tiers > 1 ? 's' : ''} · ${fx} effet${fx > 1 ? 's' : ''}` : 'Type boutique, sans effet';
     const mark = err ? '<span class="at-err" title="À corriger"></span>' : dirty ? '<span class="at-dirty" title="Modifié"></span>' : (cnt == null ? '' : `<span class="at-cnt" title="Objets boutique">${cnt}</span>`);
     return `<div class="at-row${s.id === _atSelId ? ' on' : ''}${s.enabled === false ? ' off' : ''}" style="--c:${_esc(s.color)}" role="button" tabindex="0" data-at-sel="${_esc(s.id)}"><span class="at-dot"></span><span style="min-width:0"><span class="at-nm">${_esc(s.type) || '<i style="color:var(--crimson)">Sans nom</i>'}</span><span class="at-sub">${_esc(sub)}</span></span>${mark}</div>`;
   }).join('')
     + `<button type="button" class="at-add" data-at-add>${_atIc('plus')}Nouveau type</button>`
-    + `<div class="at-rule"><b>Règle du set</b>Le bonus s'active quand tous les emplacements d'armure (${_esc(_atSlotLabels.join(', ') || 'armure')}) portent ce type.</div>`;
+    + `<div class="at-rule"><b>Règle du set</b>Chaque pièce portée dans un emplacement d'armure (${_esc(_atSlotLabels.join(', ') || 'armure')}) compte pour son type. Une pièce d'un autre type ne casse plus le set : elle ne compte simplement pas.</div>`;
 }
-function _atEffRowHtml(set, e) {
-  const g = _AT_KINDS[e.k].good(e);
-  let ctl;
-  if (e.k === 'roll') {
-    const used = new Set(_atRolls(set).map(r => r.target));
-    const opt = (val, label) => `<option value="${_esc(val)}"${e.target === val ? ' selected' : ''}${used.has(val) && e.target !== val ? ' disabled' : ''}>${_esc(label)}</option>`;
-    ctl = `<div class="at-seg"><button type="button" class="g${e.mode === 'advantage' ? ' on' : ''}" data-at-rollmode="${_esc(e.target)}:advantage">Avantage</button><button type="button" class="b${e.mode === 'disadvantage' ? ' on' : ''}" data-at-rollmode="${_esc(e.target)}:disadvantage">Désavantage</button></div>`
-      + `<select class="at-sel" data-at-rolltgt="${_esc(e.target)}"><optgroup label="Caractéristiques">${STAT_ROLL_TARGETS.map(([k]) => opt('stat:' + k, (_AT_STAT_NAMES[k] || k) + ' (tous les jets)')).join('')}</optgroup><optgroup label="Compétences">${(_diceSkills || []).map(sk => opt('skill:' + sk.name, sk.name + (sk.stat ? ` (${sk.stat})` : ''))).join('')}</optgroup></select>`;
-  } else {
-    ctl = `<div class="at-stp"><button type="button" data-at-step="${e.k}::-1" aria-label="Moins">−</button><span>${_atSg(e.v)}</span><button type="button" data-at-step="${e.k}::1" aria-label="Plus">+</button></div>`;
+function _atStpHtml(ti, fi, f) { return `<div class="at-stp"><button type="button" data-at-step="${ti}:${fi}:-1" aria-label="Moins">−</button><span>${_atSg(f.value)}</span><button type="button" data-at-step="${ti}:${fi}:1" aria-label="Plus">+</button></div>`; }
+function _atCtlHtml(set, ti, fi, f) {
+  if (f.kind === 'roll') {
+    const opt = (val, label) => `<option value="${_esc(val)}"${f.target === val ? ' selected' : ''}>${_esc(label)}</option>`;
+    return `<div class="at-seg"><button type="button" class="g${f.mode === 'advantage' ? ' on' : ''}" data-at-rollmode="${ti}:${fi}:advantage">Avantage</button><button type="button" class="b${f.mode === 'disadvantage' ? ' on' : ''}" data-at-rollmode="${ti}:${fi}:disadvantage">Désavantage</button></div>`
+      + `<select class="at-sel${f.target ? '' : ' bad'}" data-at-rolltgt="${ti}:${fi}"><option value="">Cible…</option><optgroup label="Caractéristiques">${STAT_ROLL_TARGETS.map(([k]) => opt('stat:' + k, (_AT_STAT_NAMES[k] || k) + ' (tous les jets)')).join('')}</optgroup><optgroup label="Compétences">${(_diceSkills || []).map(sk => opt('skill:' + sk.name, sk.name + (sk.stat ? ` (${sk.stat})` : ''))).join('')}</optgroup></select>`;
   }
-  const ksub = e.k === 'roll' ? (e.target?.startsWith('skill:') ? 'Prioritaire sur la règle de carac' : 'Tous les jets de cette carac') : e.k === 'pm' ? (e.v < 0 ? 'Réduction' : 'Surcoût') : _AT_KINDS[e.k].d;
-  return `<div class="at-e"><span class="at-badge ${g ? 'good' : 'bad'}">${_AT_KINDS[e.k].b}</span><span class="at-k">${_AT_KINDS[e.k].n}<small>${_esc(ksub)}</small></span><span class="at-ctl">${ctl}</span><button type="button" class="at-rm" data-at-rmfx="${e.k}:${_esc(e.target || '')}" title="Retirer">${_atIc('x')}</button></div>`;
+  return _atStpHtml(ti, fi, f);
 }
+function _atKsub(f) { if (f.kind === 'roll') return f.target?.startsWith('skill:') ? 'Prioritaire sur la règle de carac' : 'Tous les jets de cette carac'; if (f.kind === 'pm') return f.value < 0 ? 'Réduction' : 'Surcoût'; return _AT_KINDS[f.kind]?.d || ''; }
 function _atMainHtml() {
   const s = _atCur();
   if (!s) return `<div class="at-empty"><p>Aucun type d’armure.</p><button type="button" class="at-btn gh" data-at-add>Nouveau type</button></div>`;
@@ -877,34 +930,43 @@ function _atMainHtml() {
     : e.includes('dupname') ? ['ko', 'Un autre type porte déjà ce nom.']
       : (o && o.type && _atKey(o.type) !== _atKey(s.type) && n) ? ['warn', `Renommage : ${n} objets, personnages et contenus seront mis à jour à l’enregistrement.`]
         : ['', n == null ? '' : n ? `Utilisé par ${n} objet${n > 1 ? 's' : ''} de la boutique` : 'Aucun objet de la boutique n’utilise encore ce type'];
-  const effs = _atEffects(s);
-  const used = new Set(effs.map(x => x.k));
-  let h = `<div class="at-eh" style="--c:${_esc(s.color)}"><div class="at-colr"><button type="button" class="at-colr-b" data-at-col aria-label="Couleur du type"><span></span></button><div class="at-colr-m"${_atColOpen ? '' : ' hidden'}>${ARMOR_SET_COLORS.map(([c]) => `<button type="button" style="--c:${c}" class="${c.toLowerCase() === String(s.color).toLowerCase() ? 'on' : ''}" data-at-color="${c}" aria-label="${c}"></button>`).join('')}<label class="at-colr-free" title="Couleur libre"><input type="color" value="${_esc(_safeColor(s.color))}" data-at-colorfree><span style="--c:${_esc(s.color)}"></span></label></div></div><div class="at-t"><input class="at-name${e.length ? ' bad' : ''}" id="at-fName" value="${_esc(s.type)}" placeholder="Ex. Légère, Runique, Tissu" aria-label="Nom du type"><small class="${st[0]}" id="at-nameSt">${_esc(st[1])}</small></div><div class="at-acts"><label class="at-mini"><button type="button" class="at-sw${s.enabled !== false ? ' on' : ''}" data-at-tog role="switch" aria-checked="${s.enabled !== false}" aria-label="Actif"></button>${s.enabled !== false ? 'Actif' : 'Inactif'}</label><button type="button" class="at-ib" data-at-mv="-1" title="Monter" ${i <= 0 ? 'disabled' : ''}>${_atIc('up')}</button><button type="button" class="at-ib" data-at-mv="1" title="Descendre" ${i >= _draft.length - 1 ? 'disabled' : ''}>${_atIc('down')}</button><button type="button" class="at-ib" data-at-dup title="Dupliquer">${_atIc('dup')}</button><button type="button" class="at-ib del" data-at-del title="Supprimer">${_atIc('trash')}</button></div></div>`;
-  h += `<section class="at-sec"><div class="at-sec-h"><span class="at-lbl">Effets du set complet</span></div><div class="at-fx">${effs.length ? effs.map(x => _atEffRowHtml(s, x)).join('') : '<div class="at-empty-fx">Aucun effet. Le set sert seulement à classer les objets de la boutique.</div>'}</div><div class="at-sec-f"><button type="button" class="at-addfx" data-at-menu>${_atIc('plus')}Ajouter un effet</button>${_atMenuOpen ? `<div class="at-fxm">${Object.entries(_AT_KINDS).map(([k, v]) => `<button type="button" data-at-addfx="${k}" ${!v.multi && used.has(k) ? 'disabled' : ''}><span class="at-badge">${v.b}</span><span><b>${v.n}</b><small>${_esc(v.d)}</small></span></button>`).join('')}</div>` : ''}</div><p class="at-hint">Le bonus s'applique quand les ${_atMax} emplacements d'armure portent ce type.</p></section>`;
-  h += `<section class="at-sec"><span class="at-lbl">Texte joueur</span><input class="at-inp" id="at-fDesc" value="${_esc(s.description)}" placeholder="${_esc(effs.map(_atEffTxt).join(' · ') || 'Ex. Les runes s’éveillent au contact de la magie.')}"><p class="at-hint">Affiché dans l’infobulle du set. Laissé vide, la fiche affiche les effets générés.</p></section>`;
+  const simCount = _atSim.filter(x => x === 'me').length;
+  const liveTiers = new Set(armorSetAppliedTiers(s, simCount, _atMax));
+  let h = `<div class="at-eh" style="--c:${_esc(s.color)}"><div class="at-colr"><button type="button" class="at-colr-b" data-at-col aria-label="Couleur du type"><span></span></button><div class="at-colr-m"${_atColOpen ? '' : ' hidden'}>${ARMOR_SET_COLORS.map(([c]) => `<button type="button" style="--c:${c}" class="${c.toLowerCase() === String(s.color).toLowerCase() ? 'on' : ''}" data-at-color="${c}" aria-label="${c}"></button>`).join('')}<label class="at-colr-free" title="Couleur libre"><input type="color" value="${_esc(_safeColor(s.color))}" data-at-colorfree><span style="--c:${_esc(s.color)}"></span></label></div></div><div class="at-t"><input class="at-name${e.includes('name') || e.includes('dupname') ? ' bad' : ''}" id="at-fName" value="${_esc(s.type)}" placeholder="Ex. Légère, Runique, Tissu" aria-label="Nom du type"><small class="${st[0]}" id="at-nameSt">${_esc(st[1])}</small></div><div class="at-acts"><label class="at-mini"><button type="button" class="at-sw${s.enabled !== false ? ' on' : ''}" data-at-tog role="switch" aria-checked="${s.enabled !== false}" aria-label="Actif"></button>${s.enabled !== false ? 'Actif' : 'Inactif'}</label><button type="button" class="at-ib" data-at-mv="-1" title="Monter" ${i <= 0 ? 'disabled' : ''}>${_atIc('up')}</button><button type="button" class="at-ib" data-at-mv="1" title="Descendre" ${i >= _draft.length - 1 ? 'disabled' : ''}>${_atIc('down')}</button><button type="button" class="at-ib" data-at-dup title="Dupliquer">${_atIc('dup')}</button><button type="button" class="at-ib del" data-at-del title="Supprimer">${_atIc('trash')}</button></div></div>`;
+  h += `<section class="at-sec"><div class="at-sec-h"><span class="at-lbl">Paliers de set</span><span class="at-sp"></span><label class="at-mini" title="Désactivé : seul le palier le plus haut atteint s’applique"><button type="button" class="at-sw${s.cumulative !== false ? ' on' : ''}" data-at-cumul role="switch" aria-checked="${s.cumulative !== false}" aria-label="Paliers cumulés"></button>Paliers cumulés</label></div><div class="at-tiers">`;
+  const order = (s.tiers || []).map((t, ti) => [t, ti]).sort((a, b) => a[0].pieces - b[0].pieces);
+  order.forEach(([t, ti]) => {
+    const dup = e.includes('tier' + ti), used = new Set(t.effects.map(f => f.kind));
+    const eff = Math.min(t.pieces, _atMax);
+    h += `<div class="at-tier${liveTiers.has(t) ? ' live' : ''}${dup ? ' bad' : ''}" style="--c:${_esc(s.color)}"><div class="at-tier-h"><div class="at-pips" role="group" aria-label="Pièces requises">${_atSlotLabels.map((_, p) => `<button type="button" class="at-pip${p < eff ? ' on' : ''}" data-at-pip="${ti}:${p + 1}" title="${p + 1} pièce${p ? 's' : ''}">${p + 1}</button>`).join('')}</div><div><b>${eff === _atMax ? 'Set complet' : `${eff} pièce${eff > 1 ? 's' : ''}`}</b>${dup ? '<small class="ko">Deux paliers au même seuil</small>' : `<small>${eff}/${_atMax} pièces ${_esc(s.type) || ''}</small>`}</div><span class="at-sp"></span>${liveTiers.has(t) ? '<span class="at-live-tag">Actif dans la simulation</span>' : ''}<button type="button" class="at-rm" data-at-rmtier="${ti}" title="Supprimer le palier">${_atIc('x')}</button></div><div class="at-fx">`;
+    h += t.effects.length ? t.effects.map((f, fi) => `<div class="at-e"><span class="at-badge ${_atBadgeCls(f)}">${_AT_BADGE[f.kind]}</span><span class="at-k">${_AT_KINDS[f.kind]?.n || f.kind}<small>${_esc(_atKsub(f))}</small></span><span class="at-ctl">${_atCtlHtml(s, ti, fi, f)}</span><button type="button" class="at-rm" data-at-rmfx="${ti}:${fi}" title="Retirer">${_atIc('x')}</button></div>`).join('') : '<div class="at-empty-fx">Aucun effet sur ce palier.</div>';
+    h += `</div><div class="at-tier-f"><button type="button" class="at-addfx" data-at-menu="${ti}">${_atIc('plus')}Ajouter un effet</button>${_atMenuTi === ti ? `<div class="at-fxm">${Object.entries(_AT_KINDS).map(([k, v]) => `<button type="button" data-at-addfx="${ti}:${k}" ${!v.multi && used.has(k) ? 'disabled' : ''}><span class="at-badge">${v.b}</span><span><b>${v.n}</b><small>${_esc(v.d)}</small></span></button>`).join('')}</div>` : ''}</div></div>`;
+  });
+  const free = Array.from({ length: _atMax }, (_, k) => k + 1).filter(x => !(s.tiers || []).some(t => Math.min(t.pieces, _atMax) === x));
+  h += `<button type="button" class="at-addtier" data-at-addtier ${free.length ? '' : 'disabled'}>${_atIc('plus')}${free.length ? `Ajouter un palier (${free[free.length - 1] === _atMax ? 'set complet' : free[free.length - 1] + ' pièces'})` : 'Tous les seuils sont utilisés'}</button></div>`;
+  h += `<p class="at-hint">${(s.tiers || []).length ? (s.cumulative !== false ? 'Les paliers s’additionnent : à 3 pièces, les effets à 2 pièces restent actifs.' : 'Seul le palier le plus haut atteint s’applique.') : 'Sans palier, ce type sert uniquement à classer les objets dans la boutique.'}</p></section>`;
+  h += `<section class="at-sec"><span class="at-lbl">Texte joueur</span><input class="at-inp" id="at-fDesc" value="${_esc(s.description)}" placeholder="${_esc(armorSetAppliedTiers(s, _atMax, _atMax).flatMap(t => t.effects).map(_atEffTxt).join(' · ') || 'Ex. Les runes s’éveillent au contact de la magie.')}"><p class="at-hint">Affiché dans l’infobulle du set. Laissé vide, la fiche affiche les effets générés.</p></section>`;
   return h;
 }
 function _atSimHtml() {
-  const s = _atCur();
-  if (!s) return '';
+  const s = _atCur(); if (!s) return '';
   const count = _atSim.filter(x => x === 'me').length;
-  const active = _atMax > 0 && count === _atMax;
-  const effs = active ? _atEffects(s) : [];
+  const applied = armorSetAppliedTiers(s, count, _atMax);
+  const fx = applied.flatMap(t => t.effects.map(f => [f, Math.min(t.pieces, _atMax)]));
+  const next = (s.tiers || []).filter(t => Math.min(t.pieces, _atMax) > count).sort((a, b) => a.pieces - b.pieces)[0];
   const name = _esc(s.type) || 'ce type';
   let h = `<h2>Simulation</h2><p>Équipe un personnage fictif pour voir le set en jeu.</p><div class="at-pcs" style="--c:${_esc(s.color)}">${_atSlotLabels.map((sl, i) => `<div class="at-pc"><span>${_esc(sl)}</span><div class="at-seg">${[['me', _esc(s.type) || 'Ce type'], ['other', 'Autre'], ['none', 'Vide']].map(([v, l]) => `<button type="button" class="${_atSim[i] === v ? 'on' + (v === 'me' ? ' me' : '') : ''}" data-at-sim="${i}:${v}">${l}</button>`).join('')}</div></div>`).join('')}</div>`;
-  h += `<div class="at-score${active ? ' live' : ''}" style="--c:${_esc(s.color)}"><b>${count}/${_atMax}</b><span>${active ? 'Set complet actif' : `Encore ${_atMax - count} pièce${_atMax - count > 1 ? 's' : ''} pour le set complet`}</span></div>`;
-  h += `<div class="at-sec"><span class="at-lbl">Effets appliqués</span><div class="at-res">${effs.length ? effs.map(f => `<div class="at-ln"><span class="at-badge ${_AT_KINDS[f.k].good(f) ? 'good' : 'bad'}">${_AT_KINDS[f.k].b}</span><span>${_esc(_atEffTxt(f))}<em>complet</em></span></div>`).join('') : '<span class="at-none">Aucun effet actif.</span>'}</div></div>`;
-  if (active) {
-    const r = [];
-    effs.forEach(f => {
-      if (f.k === 'toucher') r.push(['Attaque', `1d20 + mod ${_atSg(f.v)}`]);
-      if (f.k === 'roll') r.push([_atTgtL(f.target) || 'Jet', f.mode === 'advantage' ? '2d20, garder le haut' : '2d20, garder le bas']);
-      if (f.k === 'pm') r.push(['Sort à 5 PM', `${Math.max(0, 5 + f.v)} PM`]);
-      if (f.k === 'dr') r.push(['Coup de 8 dégâts', `${Math.max(0, 8 - f.v)} subis`]);
-    });
-    if (r.length) h += `<div class="at-sec"><span class="at-lbl">Exemples de jets</span><div class="at-rolls">${r.map(([a, b]) => `<div class="at-roll"><span>${_esc(a)}</span><b>${_esc(b)}</b></div>`).join('')}</div></div>`;
-  }
-  h += `<div class="at-sec"><span class="at-lbl">Sur la fiche</span><div class="at-chipline"><span class="at-pchip${active ? '' : ' off'}" style="--c:${_esc(s.color)}" title="${_esc(s.description)}"><i>${_atSlotLabels.map((_, i) => `<u class="${i < count ? 'on' : ''}"></u>`).join('')}</i>${active ? name : `Set ${count}/${_atMax}`}${active ? `<span>${_esc(s.description || effs.map(_atEffTxt).join(' · '))}</span>` : ''}</span></div></div>`;
+  h += `<div class="at-score${applied.length ? ' live' : ''}" style="--c:${_esc(s.color)}"><b>${count}/${_atMax}</b><span>${applied.length ? `${applied.length > 1 ? 'Paliers' : 'Palier'} ${applied.map(t => Math.min(t.pieces, _atMax) === _atMax ? 'complet' : Math.min(t.pieces, _atMax)).join(' + ')} actif${applied.length > 1 ? 's' : ''}` : next ? `Encore ${Math.min(next.pieces, _atMax) - count} pièce${Math.min(next.pieces, _atMax) - count > 1 ? 's' : ''} pour le premier palier` : 'Aucun palier défini'}</span></div>`;
+  h += `<div class="at-sec"><span class="at-lbl">Effets appliqués</span><div class="at-res">${fx.length ? fx.map(([f, p]) => `<div class="at-ln"><span class="at-badge ${_atBadgeCls(f)}">${_AT_BADGE[f.kind]}</span><span>${_esc(_atEffTxt(f))}<em>${p === _atMax ? 'complet' : p + ' p.'}</em></span></div>`).join('') : '<span class="at-none">Aucun effet actif.</span>'}</div>${next && applied.length ? `<span class="at-none">Prochain palier à ${Math.min(next.pieces, _atMax)} pièces : ${next.effects.map(_atEffTxt).join(' · ') || 'aucun effet'}</span>` : ''}</div>`;
+  const r = [];
+  fx.map(x => x[0]).forEach(f => {
+    if (f.kind === 'toucher') r.push(['Attaque', `1d20 + mod ${_atSg(f.value)}`]);
+    if (f.kind === 'roll') r.push([_atTgtL(f.target) || 'Jet', f.mode === 'advantage' ? '2d20, garder le haut' : '2d20, garder le bas']);
+    if (f.kind === 'pm') r.push(['Sort à 5 PM', `${Math.max(0, 5 + f.value)} PM`]);
+    if (f.kind === 'dr') r.push(['Coup de 8 dégâts', `${Math.max(0, 8 - f.value)} subis`]);
+  });
+  if (r.length) h += `<div class="at-sec"><span class="at-lbl">Exemples de jets</span><div class="at-rolls">${r.map(([a, b]) => `<div class="at-roll"><span>${_esc(a)}</span><b>${_esc(b)}</b></div>`).join('')}</div></div>`;
+  h += `<div class="at-sec"><span class="at-lbl">Sur la fiche</span><div class="at-chipline"><span class="at-pchip${applied.length ? '' : ' off'}" style="--c:${_esc(s.color)}" title="${_esc(s.description)}"><i>${_atSlotLabels.map((_, i) => `<u class="${i < count ? 'on' : ''}"></u>`).join('')}</i>${applied.length ? name : `Set ${count}/${_atMax}`}${applied.length ? `<span>${_esc(s.description || fx.map(x => _atEffTxt(x[0])).join(' · '))}</span>` : ''}</span></div></div>`;
   return h;
 }
 function _atFootHtml() {
@@ -921,6 +983,11 @@ function _atRenderFoot() { const el = document.getElementById('at-foot'); if (el
 function _atRender() { _atRenderList(); _atRenderMain(); _atRenderSim(); _atRenderFoot(); }
 
 /* ── Actions ── */
+function _atNewTierEffect(k) {
+  const v = _AT_KINDS[k];
+  if (k === 'roll') return { kind: 'roll', mode: 'disadvantage', target: '' };
+  return { kind: k, value: v.v };
+}
 async function _atSave() {
   if (_atAllErr().length || !_atAnyDirty()) return;
   try {
@@ -937,36 +1004,35 @@ async function _atSave() {
     _atRender();
   } catch (error) { showNotif(error?.message || 'Erreur de sauvegarde.', 'error'); }
 }
-function _atCloseGuard() {
-  if (_atAsk) return true;
-  if (_atAnyDirty()) { _atAsk = 'close'; _atRenderFoot(); return true; }
-  return false;
-}
+function _atCloseGuard() { if (_atAsk) return true; if (_atAnyDirty()) { _atAsk = 'close'; _atRenderFoot(); return true; } return false; }
 function _atMount() {
   if (_atMounted) return; _atMounted = true;
   document.addEventListener('click', ev => {
     if (!document.querySelector('.at')) return;
     let soft = false;
-    if (_atMenuOpen && !ev.target.closest('.at-sec-f')) { _atMenuOpen = false; soft = true; }
+    if (_atMenuTi !== null && !ev.target.closest('.at-tier-f')) { _atMenuTi = null; soft = true; }
     if (_atColOpen && !ev.target.closest('.at-colr')) { _atColOpen = false; soft = true; }
-    const t = ev.target.closest('[data-at-sel],[data-at-add],[data-at-col],[data-at-color],[data-at-tog],[data-at-mv],[data-at-dup],[data-at-del],[data-at-delok],[data-at-menu],[data-at-addfx],[data-at-rmfx],[data-at-step],[data-at-rollmode],[data-at-sim],[data-at-revert],[data-at-save],[data-at-close],[data-at-keep],[data-at-discard]');
+    const t = ev.target.closest('[data-at-sel],[data-at-add],[data-at-col],[data-at-color],[data-at-tog],[data-at-cumul],[data-at-mv],[data-at-dup],[data-at-del],[data-at-delok],[data-at-pip],[data-at-rmtier],[data-at-addtier],[data-at-menu],[data-at-addfx],[data-at-rmfx],[data-at-step],[data-at-rollmode],[data-at-sim],[data-at-revert],[data-at-save],[data-at-close],[data-at-keep],[data-at-discard]');
     if (!t) { if (soft) _atRenderMain(); return; }
     const d = t.dataset, s = _atCur();
-    if (d.atSel != null) { _atSelId = d.atSel; _atMenuOpen = false; _atColOpen = false; return _atRender(); }
-    if ('atAdd' in d) { const id = `type-${Date.now()}`; _draft.push(_normalizeSet({ id, type: '', label: '', enabled: true, tone: 'neutral', description: '', color: ARMOR_SET_COLORS[_draft.length % ARMOR_SET_COLORS.length][0], modifiers: _emptyModifiers() }, _draft.length)); _atSelId = id; _atRender(); document.getElementById('at-fName')?.focus(); return; }
+    if (d.atSel != null) { _atSelId = d.atSel; _atMenuTi = null; _atColOpen = false; return _atRender(); }
+    if ('atAdd' in d) { const id = `type-${Date.now()}`; _draft.push(_normalizeSet({ id, type: '', label: '', enabled: true, tone: 'neutral', description: '', color: ARMOR_SET_COLORS[_draft.length % ARMOR_SET_COLORS.length][0], cumulative: true, tiers: [{ pieces: _atMax, effects: [] }] }, _draft.length)); _atSelId = id; _atRender(); document.getElementById('at-fName')?.focus(); return; }
     if ('atCol' in d) { _atColOpen = !_atColOpen; return _atRenderMain(); }
     if (d.atColor) { if (s) s.color = _safeColor(d.atColor, s.color); _atColOpen = false; return _atRender(); }
     if ('atTog' in d) { if (s) s.enabled = s.enabled === false; return _atRender(); }
-    if ('atCumul' in d) return;
+    if ('atCumul' in d) { if (s) s.cumulative = s.cumulative === false; return _atRender(); }
     if (d.atMv) { const i = _draft.indexOf(s), j = i + (+d.atMv); if (_draft[j]) { [_draft[i], _draft[j]] = [_draft[j], _draft[i]]; _atRender(); } return; }
     if ('atDup' in d) { if (!s) return; const id = `type-${Date.now()}`; _draft.splice(_draft.indexOf(s) + 1, 0, { ..._clone(s), id, type: s.type + ' (copie)' }); _atSelId = id; return _atRender(); }
     if ('atDel' in d) { _atAsk = 'del'; return _atRenderFoot(); }
     if ('atDelok' in d) { const i = _draft.indexOf(s); _draft.splice(i, 1); _atSelId = (_draft[i] || _draft[i - 1])?.id || null; _atAsk = null; return _atRender(); }
-    if ('atMenu' in d) { _atMenuOpen = !_atMenuOpen; return _atRenderMain(); }
-    if (d.atAddfx) { if (s) _atAddEffect(s, d.atAddfx); _atMenuOpen = false; return _atRender(); }
-    if (d.atRmfx) { if (s) { const [k, ...rest] = d.atRmfx.split(':'); _atRemoveEffect(s, k, rest.join(':')); } return _atRender(); }
-    if (d.atStep) { if (s) { const p = d.atStep.split(':'); _atStep(s, p[0], p[1], +p[2]); } return _atRender(); }
-    if (d.atRollmode) { if (s) { const idx = d.atRollmode.lastIndexOf(':'); _atRollSet(s, d.atRollmode.slice(0, idx), d.atRollmode.slice(idx + 1)); } return _atRender(); }
+    if (d.atPip) { const [ti, nn] = d.atPip.split(':'); if (s?.tiers[ti]) s.tiers[ti].pieces = +nn; return _atRender(); }
+    if (d.atRmtier != null) { if (s) s.tiers.splice(+d.atRmtier, 1); return _atRender(); }
+    if ('atAddtier' in d) { if (s) { const free = Array.from({ length: _atMax }, (_, k) => k + 1).filter(x => !s.tiers.some(t => Math.min(t.pieces, _atMax) === x)); if (free.length) s.tiers.push({ pieces: free[free.length - 1], effects: [] }); } return _atRender(); }
+    if (d.atMenu != null) { _atMenuTi = _atMenuTi === +d.atMenu ? null : +d.atMenu; return _atRenderMain(); }
+    if (d.atAddfx) { const [ti, k] = d.atAddfx.split(':'); if (s?.tiers[ti]) s.tiers[ti].effects.push(_atNewTierEffect(k)); _atMenuTi = null; return _atRender(); }
+    if (d.atRmfx) { const [ti, fi] = d.atRmfx.split(':'); if (s?.tiers[ti]) s.tiers[ti].effects.splice(+fi, 1); return _atRender(); }
+    if (d.atStep) { const [ti, fi, dir] = d.atStep.split(':'); const f = s?.tiers[ti]?.effects[fi]; if (f) { const K = _AT_KINDS[f.kind], step = K.step || 1; let v = +((f.value || 0) + (+dir) * step).toFixed(1); if (v === 0) v = +((+dir) * step).toFixed(1); if (K.min && v < K.min) v = K.min; f.value = v; } return _atRender(); }
+    if (d.atRollmode) { const [ti, fi, m] = d.atRollmode.split(':'); const f = s?.tiers[ti]?.effects[fi]; if (f) f.mode = m; return _atRender(); }
     if (d.atSim) { const [i, v] = d.atSim.split(':'); _atSim[+i] = v; _atRenderMain(); return _atRenderSim(); }
     if ('atRevert' in d) { _draft = _clone(_atSaved); if (!_atCur()) _atSelId = _draft[0]?.id || null; return _atRender(); }
     if ('atSave' in d) return _atSave();
@@ -980,7 +1046,7 @@ function _atMount() {
     if (ev.target.id === 'at-fName') {
       s.type = ev.target.value; s.label = ev.target.value;
       _atRenderList(); _atRenderSim(); _atRenderFoot();
-      const e = _atErrs(s); ev.target.classList.toggle('bad', e.length);
+      const e = _atErrs(s); ev.target.classList.toggle('bad', e.includes('name') || e.includes('dupname'));
       const stEl = document.getElementById('at-nameSt'), o = _atSaved.find(x => x.id === s.id), n = _atCount(s);
       const st = e.includes('name') ? ['ko', 'Donne un nom au type.'] : e.includes('dupname') ? ['ko', 'Un autre type porte déjà ce nom.'] : (o && _atKey(o.type) !== _atKey(s.type) && n) ? ['warn', `Renommage : ${n} objets, personnages et contenus seront mis à jour à l’enregistrement.`] : ['', n == null ? '' : n ? `Utilisé par ${n} objet${n > 1 ? 's' : ''} de la boutique` : 'Aucun objet de la boutique n’utilise encore ce type'];
       if (stEl) { stEl.className = st[0]; stEl.textContent = st[1]; }
@@ -990,11 +1056,11 @@ function _atMount() {
   document.addEventListener('change', ev => {
     if (!document.querySelector('.at')) return;
     const s = _atCur(); if (!s) return;
-    if (ev.target.hasAttribute('data-at-rolltgt')) { _atRollRetarget(s, ev.target.getAttribute('data-at-rolltgt'), ev.target.value); _atRender(); }
+    if (ev.target.hasAttribute('data-at-rolltgt')) { const [ti, fi] = ev.target.getAttribute('data-at-rolltgt').split(':'); const f = s.tiers[ti]?.effects[fi]; if (f) { f.target = ev.target.value; _atRender(); } }
   });
   document.addEventListener('keydown', ev => {
     if (!document.querySelector('.at')) return;
-    if (ev.key === 'Escape') { if (_atMenuOpen || _atColOpen) { ev.stopPropagation(); _atMenuOpen = false; _atColOpen = false; _atRenderMain(); return; } if (_atAsk) { ev.stopPropagation(); ev.preventDefault(); _atAsk = null; _atRenderFoot(); return; } return; }
+    if (ev.key === 'Escape') { if (_atMenuTi !== null || _atColOpen) { ev.stopPropagation(); _atMenuTi = null; _atColOpen = false; _atRenderMain(); return; } if (_atAsk) { ev.stopPropagation(); ev.preventDefault(); _atAsk = null; _atRenderFoot(); return; } return; }
     if (ev.target.matches('input,select')) return;
     if ((ev.key === 'ArrowUp' || ev.key === 'ArrowDown') && ev.target.closest('.at-list')) { ev.preventDefault(); const i = _draft.indexOf(_atCur()), nx = _draft[i + (ev.key === 'ArrowUp' ? -1 : 1)]; if (nx) { _atSelId = nx.id; _atRender(); document.querySelector('.at-row.on')?.focus(); } }
     if (ev.key === 'Enter' && ev.target.dataset?.atSel) ev.target.click();
@@ -1007,7 +1073,7 @@ function _renderAdmin() {
     <div class="at-body"><nav class="at-list" id="at-list"></nav><div class="at-main" id="at-main"></div><aside class="at-simw" id="at-sim"></aside></div>
     <footer class="at-foot" id="at-foot"></footer>
   </div>`);
-  _atAsk = null; _atMenuOpen = false; _atColOpen = false;
+  _atAsk = null; _atMenuTi = null; _atColOpen = false;
   setModalCloseGuard(_atCloseGuard);
   _atMount();
   _atRender();
@@ -1015,9 +1081,7 @@ function _renderAdmin() {
 
 async function _ensureAdminUi() {
   if (_adminUiPromise) return _adminUiPromise;
-  _adminUiPromise = Promise.all([
-    import('./html.js'), import('./modal.js'), import('./notifications.js'),
-  ]).then(([html, modal, notifications]) => {
+  _adminUiPromise = Promise.all([import('./html.js'), import('./modal.js'), import('./notifications.js')]).then(([html, modal, notifications]) => {
     _esc = html._esc;
     openModal = modal.openModal;
     closeModalDirect = modal.closeModalDirect;
@@ -1032,11 +1096,6 @@ async function _ensureAdminUi() {
 export async function openArmorSetsAdmin() {
   await _ensureAdminUi();
   await Promise.all([loadArmorSetSettings(), _loadDiceSkills()]);
-  _draft = _clone(getArmorSetSettings().sets || []);
-  _draft.forEach(s => { s.modifiers = _normalizeModifiers(s.modifiers || {}); });
-  _atSaved = _clone(_draft);
-  _atSelId = _draft[0]?.id || null;
-  // Emplacements d'armure (pour la simulation) + compteurs boutique.
   _atSlotLabels = []; _atMax = 0; _atCounts = null;
   try {
     const { getEquipmentSlotsByKind } = await import('./equipment-slots.js');
@@ -1044,6 +1103,13 @@ export async function openArmorSetsAdmin() {
     _atSlotLabels = slots.map(sl => sl.label || sl.id);
     _atMax = _atSlotLabels.length;
   } catch { _atSlotLabels = ['Tête', 'Torse', 'Pieds']; _atMax = 3; }
+  if (!_atMax) { _atSlotLabels = ['Armure']; _atMax = 1; }
+  // Brouillon : paliers bornés au nombre d'emplacements (seuil « complet ») pour
+  // l'édition, le moteur re-borne de son côté. _normalizeSet a déjà migré.
+  _draft = _clone(getArmorSetSettings().sets || []);
+  _draft.forEach(s => { (s.tiers || []).forEach(t => { t.pieces = Math.min(Math.max(1, t.pieces), _atMax); }); });
+  _atSaved = _clone(_draft);
+  _atSelId = _draft[0]?.id || null;
   _atSim = Array.from({ length: _atMax }, () => 'me');
   try {
     const { getCachedCollection, loadCollection } = await import('../data/firestore.js');

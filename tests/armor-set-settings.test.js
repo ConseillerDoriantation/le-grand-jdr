@@ -79,6 +79,11 @@ test('armor set : les types et effets personnalisés sont pilotés par aventure'
     spellPmDelta: 1,
     toucherBonus: -1,
     damageReduction: 3,
+    caBonus: 0,
+    damageBonus: 0,
+    moveDelta: 0,
+    saveBonus: {},
+    resistances: [],
     rollImpact: { statModes: {}, skillModes: [] },
   });
 });
