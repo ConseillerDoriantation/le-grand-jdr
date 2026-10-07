@@ -22980,6 +22980,12 @@ body .modal:has(.wf) > #modal-body { padding: 0 !important; height: auto !import
 }
 :root[data-theme="light"] .wf { --good: #0b8a5a; --bad: #c81e4a; }
 .wf * { box-sizing: border-box; }
+/* L'app ne remet pas les boutons à plat (contrairement à la maquette) : sans ça,
+   les boutons .wf sans fond propre (lignes de liste, « Ajouter », ×…) prennent le
+   chrome gris natif et gonflent en taille. :where() = spécificité nulle → chaque
+   composant .wf-* garde ses styles (fond, bordure, padding) par ordre de source. */
+.wf :where(button) { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; -webkit-appearance: none; appearance: none; }
+.wf :where(input, textarea) { -webkit-appearance: none; appearance: none; }
 .wf .wf-sp { flex: 1; }
 .wf-ic { width: 16px; height: 16px; flex: none; }
 
