@@ -22566,7 +22566,11 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-v3 .ids-xp-pop-head b { color: var(--text); }
 .cs-v3 .ids-xp-track { height: 5px; margin-top: 7px; overflow: hidden; border-radius: 4px; background: var(--surface-3); }
 .cs-v3 .ids-xp-track i { display: block; height: 100%; border-radius: inherit; background: var(--aura); }
-.cs-v3 .ids-pop-xp > p { margin: 6px 0 9px; color: var(--text-dim); font-size: .66rem; }
+.cs-v3 .ids-xp-current-line { display: flex; align-items: baseline; gap: 3px; margin: 6px 0 9px; color: var(--text-dim); font-size: .66rem; }
+.cs-v3 .ids-xp-current-line > b { color: var(--text); font-size: .72rem; }
+.cs-v3 .ids-xp-current { padding: 0; border: 0; border-bottom: 1px dashed var(--border-strong); background: transparent; color: var(--text); font: 700 .72rem var(--font-body); cursor: text; }
+.cs-v3 .ids-xp-current:hover { border-color: var(--gold-2); color: var(--gold-2); }
+.cs-v3 .ids-xp-current-line .cs-inline-num { width: 72px; height: 26px; padding: 3px 6px; border: 1px solid var(--border-bright); border-radius: 6px; outline: none; background: var(--surface-sunken); color: var(--text); font-size: .72rem; font-weight: 700; }
 .cs-v3 .ids-xp-add { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
 .cs-v3 .ids-xp-add input { min-width: 0; height: 31px; padding: 5px 8px; border: 1px solid var(--border-md); border-radius: 7px; outline: none; background: var(--surface-sunken); color: var(--text); font-size: .72rem; }
 .cs-v3 .ids-xp-add button { padding: 5px 9px; border: 1px solid var(--border-md); border-radius: 7px; background: var(--surface-3); color: var(--text-soft); font-size: .7rem; font-weight: 600; cursor: pointer; }

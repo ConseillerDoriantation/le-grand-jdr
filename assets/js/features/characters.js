@@ -967,8 +967,10 @@ function _identityPopoverHtml(c, canEdit, { xpCur, xpPalier, xpPct }) {
     <header><b>Progression</b><button data-action="closeIdentityPopover" aria-label="Fermer">×</button></header>
     <div class="ids-xp-pop-head"><span>Niveau ${c.niveau || 1}</span><b>${xpPct}%</b></div>
     <div class="ids-xp-track"><i style="width:${xpPct}%"></i></div>
-    <p>${_identityNumber(xpCur)} / ${_identityNumber(xpPalier)} XP</p>
-    ${canEdit ? `<div class="ids-xp-add"><input type="number" id="xp-add-input-${c.id}" placeholder="Gain d'XP" data-char-id="${c.id}" data-xp-input><button data-action="addXpDelta" data-id="${c.id}">Ajouter</button></div>
+    <p class="ids-xp-current-line">${canEdit
+      ? `<button class="ids-xp-current" data-action="inlineEditNum" data-id="${c.id}" data-field="exp" data-min="0" data-max="999999" title="Modifier l’XP actuel">${_identityNumber(xpCur)}</button>`
+      : `<b>${_identityNumber(xpCur)}</b>`}<span>/ ${_identityNumber(xpPalier)} XP</span></p>
+    ${canEdit ? `<div class="ids-xp-add"><input type="number" id="xp-add-input-${c.id}" placeholder="Gain d'XP" data-char-id="${c.id}" data-xp-input data-enter-click="#xp-add-button-${c.id}" aria-label="Ajouter de l'expérience"><button id="xp-add-button-${c.id}" data-action="addXpDelta" data-id="${c.id}">Ajouter</button></div>
     ${ready ? `<button class="ids-levelup" data-action="identityLevelUp" data-id="${c.id}">Niveau ${(c.niveau || 1) + 1}<small>Garde ${xpCur - xpPalier} XP</small></button>` : ''}` : ''}
     ${STATE.isAdmin ? `<div class="ids-manual-level"><span>Niveau manuel</span><div>
       <button data-action="adjustIdentityLevel" data-id="${c.id}" data-delta="-1" aria-label="Baisser le niveau">−</button>
@@ -1454,9 +1456,6 @@ function renderCharSheet(c, keepTab) {
 
   _renderTabV3(v3Tab, c, canEdit);
 
-  document.querySelector('[data-xp-input]')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); addXpDelta(e.currentTarget.dataset.charId); }
-  });
   restoreViewContextAfterRender(area, sheetViewContext, {
     includeWindow: true,
     includeFocus: true,

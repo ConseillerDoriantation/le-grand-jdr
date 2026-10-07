@@ -48,6 +48,13 @@ test('le popover Apparence décrit seulement l’effet réel de l’aura et pré
   assert.match(source, /document\.addEventListener\('pointerdown',[\s\S]*?_identityUi\.popover = null;[\s\S]*?_removeIdentityPopover\(\)/);
 });
 
+test('le total d XP se modifie directement en cliquant sur sa valeur', () => {
+  assert.match(source, /class="ids-xp-current"[^>]*data-action="inlineEditNum"[^>]*data-field="exp"/);
+  assert.match(source, /data-enter-click="#xp-add-button-\$\{c\.id\}"/);
+  assert.doesNotMatch(source, /class="ids-xp-total"/);
+  assert.match(css, /\.cs-v3 \.ids-xp-current:hover/);
+});
+
 test('PV PM et chiffres clés suivent l’ordre visuel de la maquette', () => {
   assert.match(sidebar, /ids-vital-head[^]*ids-vital-value[^]*ids-step/);
   assert.match(sidebar, /Base <b>\$\{key === 'pv'/);
