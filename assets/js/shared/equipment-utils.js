@@ -16,8 +16,11 @@ import { weaponHands } from './weapon-family.js';
 import {
   formatArmorSetEffect,
   getArmorSetDefinition,
+  getArmorSetSettings,
   getArmorTypeOptions,
   getEmptyArmorSetModifiers,
+  armorSetAppliedTiers,
+  armorSetAggregateAtCount,
   normalizeArmorSetKey,
 } from './armor-set-settings.js';
 
@@ -405,9 +408,44 @@ export function getArmorSetChipText(setData = {}) {
   return setData.activeEffect?.chipText || '';
 }
 
+// Combine plusieurs jeux de modifiers (plusieurs sets actifs) en un seul.
+function _combineArmorModifiers(list = []) {
+  const m = getEmptyArmorSetModifiers();
+  const addRoll = (impact) => {
+    Object.entries(impact.statModes || {}).forEach(([k, mode]) => {
+      const cur = m.rollImpact.statModes[k];
+      m.rollImpact.statModes[k] = cur && cur !== mode ? 'normal' : mode;
+    });
+    (impact.skillModes || []).forEach(({ name, mode }) => {
+      const r = m.rollImpact.skillModes.find(x => x.name === name);
+      if (r) r.mode = (r.mode !== mode ? 'normal' : mode); else m.rollImpact.skillModes.push({ name, mode });
+    });
+  };
+  list.forEach(mod => {
+    m.spellPmDelta += Number(mod.spellPmDelta || 0);
+    m.toucherBonus += Number(mod.toucherBonus || 0);
+    m.damageReduction += Number(mod.damageReduction || 0);
+    m.caBonus += Number(mod.caBonus || 0);
+    m.damageBonus += Number(mod.damageBonus || 0);
+    m.moveDelta += Number(mod.moveDelta || 0);
+    Object.entries(mod.saveBonus || {}).forEach(([k, v]) => { m.saveBonus[k] = (m.saveBonus[k] || 0) + Number(v || 0); });
+    (mod.resistances || []).forEach(el => { if (!m.resistances.includes(el)) m.resistances.push(el); });
+    addRoll(mod.rollImpact || {});
+  });
+  Object.keys(m.rollImpact.statModes).forEach(k => { if (m.rollImpact.statModes[k] === 'normal') delete m.rollImpact.statModes[k]; });
+  m.rollImpact.skillModes = m.rollImpact.skillModes.filter(r => r.mode && r.mode !== 'normal');
+  m.moveDelta = Number(m.moveDelta.toFixed(2));
+  return m;
+}
+
+// Partie B — paliers + plusieurs sets simultanés. Une pièce d'un autre type ne
+// casse plus le set : elle ne compte simplement pas. Chaque type atteint ses
+// paliers selon son nombre de pièces portées ; les effets de tous les sets
+// actifs s'agrègent. Les champs historiques restent renseignés (compat).
 export function getArmorSetData(c = {}) {
   const equip = c?.equipement || {};
   const trackedSlots = getEquipmentSlotsByKind('armor').map(slot => slot.id);
+  const max = trackedSlots.length;
   const slots = trackedSlots.map(slot => {
     const item = equip?.[slot] || {};
     return { slot, item, type: normalizeArmorType(item?.typeArmure), equipped: Boolean(item?.nom) };
@@ -416,19 +454,35 @@ export function getArmorSetData(c = {}) {
   const equippedCount = slots.filter(entry => entry.equipped).length;
   const typedSlots    = slots.filter(entry => entry.type);
   const counts        = typedSlots.reduce((acc, entry) => { acc[entry.type] = (acc[entry.type] || 0) + 1; return acc; }, {});
-  const fullType      = trackedSlots.length > 0
-    ? (Object.keys(counts).find(type => counts[type] === trackedSlots.length) || '')
-    : '';
-  const activeEffect  = fullType ? getArmorTypeMeta(fullType) : null;
-  const mixed         = !fullType && Object.keys(counts).length > 1;
   const dominantType  = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+  const setsByKey     = new Map((getArmorSetSettings().sets || [])
+    .filter(set => set.enabled !== false)
+    .map(set => [normalizeArmorSetKey(set.type), set]));
+
+  // Sets actifs : un type porté dont au moins un palier est atteint.
+  const activeSets = [];
+  Object.entries(counts).forEach(([type, count]) => {
+    const set = setsByKey.get(normalizeArmorSetKey(type));
+    if (!set) return;
+    const applied = armorSetAppliedTiers(set, count, max);
+    if (!applied.length) return;
+    activeSets.push({ type, count, set, applied, modifiers: armorSetAggregateAtCount(set, count, max) });
+  });
+  // fullType / activeEffect = le set actif avec le plus de pièces (compat).
+  activeSets.sort((a, b) => b.count - a.count || b.applied.length - a.applied.length);
+  const dominantActive = activeSets[0] || null;
+  const fullType       = dominantActive?.type || '';
+  const activeEffect   = fullType ? getArmorTypeMeta(fullType) : null;
+  const mixed          = Object.keys(counts).length > 1;
+  const modifiers      = activeSets.length ? _combineArmorModifiers(activeSets.map(s => s.modifiers)) : getEmptyArmorSetModifiers();
 
   return {
     trackedSlots, slots, counts, equippedCount, fullType, dominantType, mixed,
-    isComplete: trackedSlots.length > 0 && equippedCount === trackedSlots.length,
-    isActive:   Boolean(fullType && activeEffect?.set),
+    activeSets,
+    isComplete: max > 0 && equippedCount === max,
+    isActive:   activeSets.length > 0,
     activeEffect,
-    modifiers:  (fullType && activeEffect?.set) ? activeEffect.modifiers : getEmptyArmorSetModifiers(),
+    modifiers,
   };
 }
 

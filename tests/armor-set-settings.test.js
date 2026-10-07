@@ -48,6 +48,51 @@ test('armor set : un type mixte ou incomplet ne donne aucun bonus', () => {
   assert.equal(incomplete.isComplete, false);
 });
 
+test('armor set B : un palier partiel s’applique sans set complet, une autre pièce ne casse pas', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS); // 3 emplacements d'armure
+  setArmorSetSettingsForTests([
+    { id: 'lourd', type: 'Lourde', enabled: true, cumulative: true, tiers: [
+      { pieces: 2, effects: [{ kind: 'toucher', value: 2 }] },
+      { pieces: 3, effects: [{ kind: 'dr', value: 2 }] },
+    ] },
+  ]);
+  // 2 pièces Lourde + 1 autre type : le palier 2 est atteint (la pièce d'un
+  // autre type ne casse plus le set), le palier 3 non.
+  const partial = getArmorSetData({ equipement: {
+    'Tête': { nom: 'Casque', typeArmure: 'Lourde' },
+    Torse: { nom: 'Plastron', typeArmure: 'Lourde' },
+    Bottes: { nom: 'Bottes légères', typeArmure: 'Légère' },
+  } });
+  assert.equal(partial.isActive, true);
+  assert.equal(partial.modifiers.toucherBonus, 2);
+  assert.equal(partial.modifiers.damageReduction, 0);
+
+  // 3 pièces Lourde : les deux paliers cumulés s'appliquent.
+  const full = getArmorSetData({ equipement: {
+    'Tête': { nom: 'Casque', typeArmure: 'Lourde' },
+    Torse: { nom: 'Plastron', typeArmure: 'Lourde' },
+    Bottes: { nom: 'Grèves', typeArmure: 'Lourde' },
+  } });
+  assert.equal(full.modifiers.toucherBonus, 2);
+  assert.equal(full.modifiers.damageReduction, 2);
+});
+
+test('armor set B : plusieurs sets actifs en même temps s’agrègent', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  setArmorSetSettingsForTests([
+    { id: 'a', type: 'Alpha', enabled: true, cumulative: true, tiers: [{ pieces: 1, effects: [{ kind: 'toucher', value: 1 }] }] },
+    { id: 'b', type: 'Beta', enabled: true, cumulative: true, tiers: [{ pieces: 1, effects: [{ kind: 'pm', value: -1 }] }] },
+  ]);
+  const data = getArmorSetData({ equipement: {
+    'Tête': { nom: 'A', typeArmure: 'Alpha' },
+    Torse: { nom: 'B', typeArmure: 'Beta' },
+  } });
+  assert.equal(data.isActive, true);
+  assert.equal(data.activeSets.length, 2);
+  assert.equal(data.modifiers.toucherBonus, 1);
+  assert.equal(data.modifiers.spellPmDelta, -1);
+});
+
 test('armor set : les types et effets personnalisés sont pilotés par aventure', () => {
   setEquipmentSlotsForTests([
     { id: 'Arme', label: 'Arme', kind: 'weapon', role: 'primaryWeapon' },
