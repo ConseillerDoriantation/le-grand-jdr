@@ -22939,6 +22939,8 @@ body .modal:has(.at) > #modal-body { padding: 0 !important; height: auto !import
 .at-sec-h { display: flex; align-items: center; gap: 10px; }
 .at-tiers { display: flex; flex-direction: column; gap: 10px; }
 .at-tier { border: 1px solid var(--border-md); border-radius: 13px; background: var(--surface-2); overflow: hidden; }
+/* Laisse le menu « Ajouter un effet » déborder du bloc Palier (sinon overflow:hidden le masque). */
+.at-tier:has(.at-fxm) { overflow: visible; }
 .at-tier.live { border-color: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 16%, transparent); }
 .at-tier.bad { border-color: color-mix(in srgb, var(--crimson) 55%, transparent); }
 .at-tier-h { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
