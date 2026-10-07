@@ -228,6 +228,12 @@ export function getCharFullDamageProfile(c) {
     const key = _RES_KIND_TO_PROFILE[r.k];
     if (key && r.t && !out[key].includes(r.t)) { out[key].push(r.t); any = true; }
   }
+  // Résistances accordées par un set d'armure actif (effet de palier « resist »).
+  try {
+    for (const id of (getArmorSetData(c)?.modifiers?.resistances || [])) {
+      if (id && !out.resistances.includes(id)) { out.resistances.push(id); any = true; }
+    }
+  } catch { /* set data indisponible : on garde le profil équipement + inné */ }
   return any ? out : null;
 }
 

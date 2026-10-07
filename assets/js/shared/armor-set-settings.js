@@ -89,6 +89,11 @@ const _num = value => {
   const n = parseInt(value, 10);
   return Number.isFinite(n) ? n : 0;
 };
+// Variante flottante : le déplacement (« move ») se compte en pas de 1,5 m.
+const _numF = value => {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : 0;
+};
 const _toneColor = tone => ({
   light: '#22c38e',
   medium: '#4f8cff',
@@ -176,7 +181,7 @@ function _normalizeModifiers(modifiers = {}) {
   normalized.damageReduction = Math.max(0, _num(modifiers.damageReduction));
   normalized.caBonus = _num(modifiers.caBonus);
   normalized.damageBonus = _num(modifiers.damageBonus);
-  normalized.moveDelta = Number(((_num(modifiers.moveDelta)) || 0).toFixed(2));
+  normalized.moveDelta = Number((_numF(modifiers.moveDelta) || 0).toFixed(2));
   const sb = {};
   if (modifiers.saveBonus && typeof modifiers.saveBonus === 'object') {
     STAT_ROLL_TARGETS.forEach(([k]) => { const v = _num(modifiers.saveBonus[k]); if (v) sb[k] = v; });
@@ -202,7 +207,7 @@ function _normalizeTierEffect(raw = {}) {
   if (kind === 'save') return { kind, stat: String(raw.stat || 'constitution'), value: _num(raw.value) || 1 };
   if (kind === 'resist') return { kind, element: String(raw.element || raw.el || '').trim() || 'Feu' };
   const step = kind === 'move' ? 1.5 : 1;
-  let v = _num(raw.value);
+  let v = kind === 'move' ? _numF(raw.value) : _num(raw.value);
   if (!v) v = kind === 'pm' ? -step : step;
   if (kind === 'dr' && v < 1) v = 1;
   return { kind, value: Number(v.toFixed(2)) };
@@ -250,7 +255,7 @@ function _aggregateTierEffects(effects = []) {
       case 'dr': m.damageReduction += _num(e.value); break;
       case 'ca': m.caBonus += _num(e.value); break;
       case 'dmg': m.damageBonus += _num(e.value); break;
-      case 'move': m.moveDelta += _num(e.value); break;
+      case 'move': m.moveDelta += _numF(e.value); break;
       case 'save': if (e.stat) m.saveBonus[e.stat] = (m.saveBonus[e.stat] || 0) + _num(e.value); break;
       case 'resist': if (e.element && !m.resistances.includes(e.element)) m.resistances.push(e.element); break;
       case 'roll': addRoll(e.target, e.mode); break;
@@ -393,6 +398,11 @@ export function formatArmorSetEffect(set = {}) {
   if (mod.damageReduction) {
     parts.push(`Degats subis -${mod.damageReduction}`);
   }
+  if (mod.caBonus) parts.push(`CA ${mod.caBonus > 0 ? '+' : '-'}${Math.abs(mod.caBonus)}`);
+  if (mod.damageBonus) parts.push(`Degats ${mod.damageBonus > 0 ? '+' : '-'}${Math.abs(mod.damageBonus)}`);
+  if (mod.moveDelta) parts.push(`Deplacement ${mod.moveDelta > 0 ? '+' : '-'}${String(Math.abs(mod.moveDelta)).replace('.', ',')} m`);
+  Object.entries(mod.saveBonus || {}).forEach(([k, v]) => { if (v) parts.push(`Sauvegarde ${(_AT_STAT_NAMES[k] || k)} ${v > 0 ? '+' : '-'}${Math.abs(v)}`); });
+  if (Array.isArray(mod.resistances) && mod.resistances.length) parts.push(`Resistance ${mod.resistances.join(', ')}`);
   const rollParts = formatArmorSetRollImpacts(mod.rollImpact);
   if (rollParts) parts.push(rollParts);
   return parts.join(' · ') || set.description || 'Aucun effet chiffre';
@@ -837,16 +847,21 @@ function _renderAdminPrevious() {
 // ══════════════════════════════════════════════════════════════════════════════
 // MODALE « TYPES D'ARMURE & SETS » v2 — UI maître/détail + PALIERS (partie B).
 // Édite le modèle `tiers`/`cumulative`. Le moteur (armorSetAppliedTiers,
-// getArmorSetData) et saveArmorSetSettings suivent le même format. Les effets
-// non encore branchés dans le combat (CA, DGT, SVG, RES, DEP) sont masqués du
-// menu : seuls TCH/PM/RD/JET — déjà actifs en jeu — sont proposés (brief §171).
+// getArmorSetData) et saveArmorSetSettings suivent le même format. Les neuf
+// effets sont branchés en jeu : TCH/PM/RD/JET + CA (calcCA), DGT (dégâts d'arme),
+// DEP (calcVitesse), SVG (jet de sauvegarde VTT), RES (profil de dégâts).
 // ══════════════════════════════════════════════════════════════════════════════
 const _AT_STAT_NAMES = { force: 'Force', dexterite: 'Dextérité', constitution: 'Constitution', intelligence: 'Intelligence', sagesse: 'Sagesse', charisme: 'Charisme' };
 // Effets proposés dans l'éditeur (branchés). `multi` = ajoutable plusieurs fois.
 const _AT_KINDS = {
   toucher: { b: 'TCH', n: 'Toucher', d: 'Bonus aux jets d’attaque', v: 1, good: e => e.value > 0 },
-  pm: { b: 'PM', n: 'Coût des sorts', d: 'PM ajoutés ou retirés', v: -1, good: e => e.value < 0 },
+  dmg: { b: 'DGT', n: 'Dégâts d’arme', d: 'Ajoutés aux dégâts infligés', v: 1, good: e => e.value > 0 },
+  ca: { b: 'CA', n: 'Classe d’armure', d: 'Bonus de CA', v: 1, good: e => e.value > 0 },
   dr: { b: 'RD', n: 'Réduction de dégâts', d: 'Soustraite aux dégâts subis', v: 1, min: 1, good: () => true },
+  pm: { b: 'PM', n: 'Coût des sorts', d: 'PM ajoutés ou retirés', v: -1, good: e => e.value < 0 },
+  move: { b: 'DEP', n: 'Déplacement', d: 'Vitesse ajoutée (mètres)', v: 1.5, step: 1.5, good: e => e.value > 0 },
+  save: { b: 'SVG', n: 'Jet de sauvegarde', d: 'Bonus à une caractéristique', v: 1, multi: 1, good: e => e.value > 0 },
+  resist: { b: 'RES', n: 'Résistance', d: 'À un type de dégâts', multi: 1, good: () => true },
   roll: { b: 'JET', n: 'Avantage / désavantage', d: 'Sur une carac ou compétence', multi: 1, good: e => e.mode === 'advantage' },
 };
 const _AT_BADGE = { toucher: 'TCH', pm: 'PM', dr: 'RD', roll: 'JET', ca: 'CA', dmg: 'DGT', save: 'SVG', resist: 'RES', move: 'DEP' };
@@ -861,7 +876,7 @@ const _AT_SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hid
 </defs></svg>`;
 const _atIc = id => `<svg class="at-ic"><use href="#at-${id}"></use></svg>`;
 
-let _atSaved = [], _atSelId = null, _atAsk = null, _atColOpen = false, _atMenuTi = null, _atSim = [], _atCounts = null, _atSlotLabels = [], _atMax = 0, _atMounted = false;
+let _atSaved = [], _atSelId = null, _atAsk = null, _atColOpen = false, _atMenuTi = null, _atSim = [], _atCounts = null, _atSlotLabels = [], _atMax = 0, _atMounted = false, _atDmgTypes = [];
 
 const _atSg = v => (v > 0 ? '+' : v < 0 ? '−' : '') + String(Math.abs(v)).replace('.', ',');
 const _atCur = () => _draft.find(s => s.id === _atSelId) || _draft[0] || null;
@@ -895,7 +910,7 @@ function _atEffTxt(f) {
     case 'ca': return `CA ${_atSg(f.value)}`;
     case 'dmg': return `Dégâts ${_atSg(f.value)}`;
     case 'save': return `Sauvegarde ${_AT_STAT_NAMES[f.stat] || f.stat} ${_atSg(f.value)}`;
-    case 'resist': return `Résistance ${f.element}`;
+    case 'resist': return `Résistance ${_atDmgTypes.find(t => t.id === f.element)?.label || f.element}`;
     case 'move': return `Déplacement ${_atSg(f.value)} m`;
   }
   return '';
@@ -919,9 +934,24 @@ function _atCtlHtml(set, ti, fi, f) {
     return `<div class="at-seg"><button type="button" class="g${f.mode === 'advantage' ? ' on' : ''}" data-at-rollmode="${ti}:${fi}:advantage">Avantage</button><button type="button" class="b${f.mode === 'disadvantage' ? ' on' : ''}" data-at-rollmode="${ti}:${fi}:disadvantage">Désavantage</button></div>`
       + `<select class="at-sel${f.target ? '' : ' bad'}" data-at-rolltgt="${ti}:${fi}"><option value="">Cible…</option><optgroup label="Caractéristiques">${STAT_ROLL_TARGETS.map(([k]) => opt('stat:' + k, (_AT_STAT_NAMES[k] || k) + ' (tous les jets)')).join('')}</optgroup><optgroup label="Compétences">${(_diceSkills || []).map(sk => opt('skill:' + sk.name, sk.name + (sk.stat ? ` (${sk.stat})` : ''))).join('')}</optgroup></select>`;
   }
+  if (f.kind === 'save') {
+    const opts = STAT_ROLL_TARGETS.map(([k]) => `<option value="${k}"${f.stat === k ? ' selected' : ''}>${_esc(_AT_STAT_NAMES[k] || k)}</option>`).join('');
+    return `<select class="at-sel" data-at-fxstat="${ti}:${fi}">${opts}</select>` + _atStpHtml(ti, fi, f);
+  }
+  if (f.kind === 'resist') {
+    const list = _atDmgTypes.length ? _atDmgTypes : [{ id: f.element || 'feu', label: f.element || 'Feu', icon: '' }];
+    const opts = list.map(t => `<option value="${_esc(t.id)}"${f.element === t.id ? ' selected' : ''}>${_esc(((t.icon ? t.icon + ' ' : '') + (t.label || t.id)))}</option>`).join('');
+    return `<select class="at-sel" data-at-fxel="${ti}:${fi}">${opts}</select>`;
+  }
   return _atStpHtml(ti, fi, f);
 }
-function _atKsub(f) { if (f.kind === 'roll') return f.target?.startsWith('skill:') ? 'Prioritaire sur la règle de carac' : 'Tous les jets de cette carac'; if (f.kind === 'pm') return f.value < 0 ? 'Réduction' : 'Surcoût'; return _AT_KINDS[f.kind]?.d || ''; }
+function _atKsub(f) {
+  if (f.kind === 'roll') return f.target?.startsWith('skill:') ? 'Prioritaire sur la règle de carac' : 'Tous les jets de cette carac';
+  if (f.kind === 'pm') return f.value < 0 ? 'Réduction' : 'Surcoût';
+  if (f.kind === 'save') return 'Ajouté au jet de sauvegarde';
+  if (f.kind === 'resist') return 'Dégâts de ce type réduits de moitié';
+  return _AT_KINDS[f.kind]?.d || '';
+}
 function _atMainHtml() {
   const s = _atCur();
   if (!s) return `<div class="at-empty"><p>Aucun type d’armure.</p><button type="button" class="at-btn gh" data-at-add>Nouveau type</button></div>`;
@@ -984,9 +1014,10 @@ function _atRender() { _atRenderList(); _atRenderMain(); _atRenderSim(); _atRend
 
 /* ── Actions ── */
 function _atNewTierEffect(k) {
-  const v = _AT_KINDS[k];
-  if (k === 'roll') return { kind: 'roll', mode: 'disadvantage', target: '' };
-  return { kind: k, value: v.v };
+  // _normalizeTierEffect pose les bons défauts par genre (save→constitution+1,
+  // resist→élément, move→+1.5, pm→-1, dr min 1…). Repli défensif si genre inconnu.
+  if (k === 'resist') return { kind: 'resist', element: (_atDmgTypes[0]?.id) || 'feu' };
+  return _normalizeTierEffect({ kind: k }) || { kind: k, value: _AT_KINDS[k]?.v ?? 1 };
 }
 async function _atSave() {
   if (_atAllErr().length || !_atAnyDirty()) return;
@@ -1057,6 +1088,8 @@ function _atMount() {
     if (!document.querySelector('.at')) return;
     const s = _atCur(); if (!s) return;
     if (ev.target.hasAttribute('data-at-rolltgt')) { const [ti, fi] = ev.target.getAttribute('data-at-rolltgt').split(':'); const f = s.tiers[ti]?.effects[fi]; if (f) { f.target = ev.target.value; _atRender(); } }
+    else if (ev.target.hasAttribute('data-at-fxstat')) { const [ti, fi] = ev.target.getAttribute('data-at-fxstat').split(':'); const f = s.tiers[ti]?.effects[fi]; if (f) { f.stat = ev.target.value; _atRender(); } }
+    else if (ev.target.hasAttribute('data-at-fxel')) { const [ti, fi] = ev.target.getAttribute('data-at-fxel').split(':'); const f = s.tiers[ti]?.effects[fi]; if (f) { f.element = ev.target.value; _atRender(); } }
   });
   document.addEventListener('keydown', ev => {
     if (!document.querySelector('.at')) return;
@@ -1096,6 +1129,11 @@ async function _ensureAdminUi() {
 export async function openArmorSetsAdmin() {
   await _ensureAdminUi();
   await Promise.all([loadArmorSetSettings(), _loadDiceSkills()]);
+  _atDmgTypes = [];
+  try {
+    const { loadDamageTypes } = await import('./damage-types.js');
+    _atDmgTypes = (await loadDamageTypes() || []).map(t => ({ id: t.id, label: t.label || t.id, icon: t.icon || '' })).filter(t => t.id);
+  } catch { _atDmgTypes = []; }
   _atSlotLabels = []; _atMax = 0; _atCounts = null;
   try {
     const { getEquipmentSlotsByKind } = await import('./equipment-slots.js');

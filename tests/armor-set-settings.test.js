@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getArmorSetData, normalizeArmorType } from '../assets/js/shared/equipment-utils.js';
+import { getArmorSetData, normalizeArmorType, getCharFullDamageProfile } from '../assets/js/shared/equipment-utils.js';
 import { LEGACY_EQUIPMENT_SLOTS, setEquipmentSlotsForTests } from '../assets/js/shared/equipment-slots.js';
 import { DEFAULT_ARMOR_SETS, LEGACY_ARMOR_SETS, getArmorTypeOptions, setArmorSetSettingsForTests } from '../assets/js/shared/armor-set-settings.js';
 
@@ -75,6 +75,41 @@ test('armor set B : un palier partiel s’applique sans set complet, une autre p
   } });
   assert.equal(full.modifiers.toucherBonus, 2);
   assert.equal(full.modifiers.damageReduction, 2);
+});
+
+test('armor set B : les nouveaux effets (ca/dmg/move/save/resist) sont agrégés', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  setArmorSetSettingsForTests([
+    { id: 'plaque', type: 'Plaque', enabled: true, cumulative: true, tiers: [{ pieces: 2, effects: [
+      { kind: 'ca', value: 2 },
+      { kind: 'dmg', value: 1 },
+      { kind: 'move', value: 1.5 },
+      { kind: 'save', stat: 'constitution', value: 2 },
+      { kind: 'resist', element: 'feu' },
+    ] }] },
+  ]);
+  const data = getArmorSetData({ equipement: {
+    'Tête': { nom: 'Heaume', typeArmure: 'Plaque' },
+    Torse: { nom: 'Plastron', typeArmure: 'Plaque' },
+  } });
+  assert.equal(data.isActive, true);
+  assert.equal(data.modifiers.caBonus, 2);
+  assert.equal(data.modifiers.damageBonus, 1);
+  assert.equal(data.modifiers.moveDelta, 1.5);
+  assert.equal(data.modifiers.saveBonus.constitution, 2);
+  assert.deepEqual(data.modifiers.resistances, ['feu']);
+});
+
+test('armor set B : une résistance de set entre dans le profil de dégâts', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  setArmorSetSettingsForTests([
+    { id: 'plaque', type: 'Plaque', enabled: true, cumulative: true, tiers: [{ pieces: 2, effects: [{ kind: 'resist', element: 'feu' }] }] },
+  ]);
+  const prof = getCharFullDamageProfile({ equipement: {
+    'Tête': { nom: 'Heaume', typeArmure: 'Plaque' },
+    Torse: { nom: 'Plastron', typeArmure: 'Plaque' },
+  } });
+  assert.ok(prof && prof.resistances.includes('feu'));
 });
 
 test('armor set B : plusieurs sets actifs en même temps s’agrègent', () => {

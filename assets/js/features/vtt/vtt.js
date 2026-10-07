@@ -11210,7 +11210,9 @@ async function _vttRollAttack() {
             const d1 = Math.floor(Math.random() * 20) + 1;
             const d2 = rollMode === 'advantage' || rollMode === 'disadvantage' ? Math.floor(Math.random() * 20) + 1 : null;
             const d20 = rollMode === 'advantage' ? Math.max(d1, d2) : rollMode === 'disadvantage' ? Math.min(d1, d2) : d1;
-            const mod = _tokenStatMod(curTgtData, saveStat);
+            // Bonus de sauvegarde accordé par un set d'armure actif (effet « save »).
+            const setSaveBonus = char ? (getArmorSetData(char).modifiers.saveBonus?.[saveStat] || 0) : 0;
+            const mod = _tokenStatMod(curTgtData, saveStat) + setSaveBonus;
             const total = d20 + mod;
             passed = d20 === 20 || (d20 !== 1 && total >= saveDC);
             saveResult = { saveStat, saveDC, d20, d20rolls: d2 == null ? null : [d1, d2], mod, total, rollMode };
