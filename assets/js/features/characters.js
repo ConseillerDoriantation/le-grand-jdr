@@ -1744,12 +1744,19 @@ function renderCharCombatV3(c, canEdit) {
   }).join('');
   let setHint = '';
   if ((armorSet.trackedSlots || []).length && !armorSet.isActive) {
-    const types = Object.keys(armorSet.counts || {});
-    setHint = armorSet.equippedCount < armorSet.trackedSlots.length
-      ? `Porte ${armorSet.trackedSlots.length} pièces du même type pour activer un bonus d’ensemble.`
-      : types.length > 1
-        ? `Types mélangés (${types.join(', ')}) : il faut ${armorSet.trackedSlots.length} pièces du même type.`
-        : 'Aucun bonus d’ensemble configuré pour ce type.';
+    // Nouvelle règle (paliers) : une pièce d'un autre type ne casse plus le set,
+    // elle ne compte juste pas. On guide vers le prochain palier du type dominant.
+    const domType = armorSet.dominantType || '';
+    const domCount = (armorSet.counts || {})[domType] || 0;
+    const domTiers = domType ? (getArmorTypeMeta(domType)?.set?.tiers || []) : [];
+    const maxPieces = armorSet.trackedSlots.length;
+    const nextTier = domTiers
+      .map(t => Math.min(t.pieces, maxPieces))
+      .filter(p => p > domCount)
+      .sort((a, b) => a - b)[0];
+    setHint = nextTier != null
+      ? `Encore ${nextTier - domCount} pièce${nextTier - domCount > 1 ? 's' : ''} ${domType} pour le ${nextTier === maxPieces ? 'set complet' : `palier à ${nextTier} pièces`}.`
+      : 'Aucun bonus d’ensemble configuré pour ce type.';
   }
   const activeSetName = armorSet.activeEffect?.set?.label || armorSet.fullType || '';
   const activeSetEffect = armorSet.activeEffect?.chipText || '';

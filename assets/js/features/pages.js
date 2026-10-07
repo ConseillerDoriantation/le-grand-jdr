@@ -730,6 +730,265 @@ async function _adminRepairVttData() {
   await PAGES.admin();
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// CONSOLE MJ v2 — contrôleur (3 onglets : À traiter · Joueurs · Réglages)
+// Rendu + interactions séparés du calcul des données (admin() fournit le vm) :
+// les changements d'UI (onglet, filtre, recherche, tri, dépli) re-rendent SANS
+// relire Firestore ; seules les actions correctives relancent PAGES.admin().
+// ══════════════════════════════════════════════════════════════════════════════
+const _CMJ_TAB_KEY = 'admin-tab';
+const _CMJ_SECTIONS = [
+  { id: 'comptes', label: 'Comptes',            ic: 'users'   },
+  { id: 'persos',  label: 'Personnages',        ic: 'user-x'  },
+  { id: 'sorts',   label: 'Sorts à valider',    ic: 'sparkle', bulk: 'Tout valider' },
+  { id: 'quetes',  label: 'Groupes de mission', ic: 'flag',    bulk: 'Réparer', auto: true },
+  { id: 'vtt',     label: 'Table VTT',          ic: 'hex',     bulk: 'Réparer', auto: true },
+];
+const _cmjState = { tab: '', sec: 'all', cur: 0, open: new Set(), pq: '', pf: 'all', psort: 'pseudo', sq: '', refocus: null, vm: null };
+let _cmjMounted = false;
+const _CMJ_PALETTE = ['#e8b84b', '#4f8cff', '#f4c430', '#22c38e', '#9d6fff', '#ff9544', '#5bc0eb', '#ff5a7e'];
+
+// Sprite d'icônes (traits 1,8) — ids préfixés cmj- pour éviter toute collision.
+const _CMJ_SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<symbol id="cmj-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+<symbol id="cmj-user-x" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M17 8l5 5M22 8l-5 5"/></symbol>
+<symbol id="cmj-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></symbol>
+<symbol id="cmj-flag" viewBox="0 0 24 24"><path d="M4 22V4M4 4h12l-2 4 2 4H4"/></symbol>
+<symbol id="cmj-hex" viewBox="0 0 24 24"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="cmj-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+<symbol id="cmj-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+<symbol id="cmj-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="cmj-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="cmj-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></symbol>
+<symbol id="cmj-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+<symbol id="cmj-sigma" viewBox="0 0 24 24"><path d="M18 7V4H6l6 8-6 8h12v-3"/></symbol>
+<symbol id="cmj-bag" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></symbol>
+<symbol id="cmj-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z"/></symbol>
+<symbol id="cmj-sword" viewBox="0 0 24 24"><path d="M14.5 17.5L3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2"/></symbol>
+<symbol id="cmj-swords" viewBox="0 0 24 24"><path d="M14.5 17.5L3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M9.5 17.5L21 6V3h-3L6.5 14.5M11 19l-6-6M8 16l-4 4"/></symbol>
+<symbol id="cmj-zap" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+<symbol id="cmj-star" viewBox="0 0 24 24"><path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8L3.6 9.7l5.8-.8z"/></symbol>
+<symbol id="cmj-layers" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></symbol>
+<symbol id="cmj-dice" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="16" cy="8" r=".9" fill="currentColor"/><circle cx="12" cy="12" r=".9" fill="currentColor"/><circle cx="8" cy="16" r=".9" fill="currentColor"/><circle cx="16" cy="16" r=".9" fill="currentColor"/></symbol>
+<symbol id="cmj-drop" viewBox="0 0 24 24"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.31 0z"/></symbol>
+<symbol id="cmj-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></symbol>
+<symbol id="cmj-trophy" viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM7 5H4a2 2 0 0 0 0 4h3M17 5h3a2 2 0 0 1 0 4h-3"/></symbol>
+<symbol id="cmj-skull" viewBox="0 0 24 24"><path d="M12 3a8 8 0 0 0-8 8c0 2.6 1.2 4.4 3 5.5V20h10v-3.5c1.8-1.1 3-2.9 3-5.5a8 8 0 0 0-8-8z"/><circle cx="9" cy="11" r="1.5"/><circle cx="15" cy="11" r="1.5"/><path d="M10 20v-2M14 20v-2"/></symbol>
+</defs></svg>`;
+
+const _cmjIc = (id, cls = '') => `<svg class="cmj-ic ${cls}" aria-hidden="true"><use href="#cmj-${id}"></use></svg>`;
+const _cmjVisible = () => (_cmjState.vm?.items || []).filter(i => _cmjState.sec === 'all' || i.sec === _cmjState.sec);
+
+// ── Validation de sort depuis la console (même logique que spells.js) ──
+async function _adminValidateSpell(charId, idx) {
+  if (!STATE.isAdmin) return;
+  const c = (STATE.characters || []).find(x => x.id === charId); if (!c) return;
+  const i = parseInt(idx); const sorts = (c.deck_sorts || []).map(s => ({ ...s }));
+  if (!sorts[i]) return;
+  sorts[i].mjValidation = 'ok'; sorts[i].mjValidated = true;
+  try {
+    await saveDoc('characters', c.id, { deck_sorts: sorts });
+    c.deck_sorts = sorts;
+    showNotif(`« ${sorts[i].nom || 'Sort'} » validé.`, 'success');
+  } catch (e) { notifySaveError(e); return; }
+  await PAGES.admin();
+}
+async function _adminValidateAllSpells() {
+  if (!STATE.isAdmin) return;
+  const pending = (_cmjState.vm?.items || []).filter(i => i.sec === 'sorts');
+  if (!pending.length) return;
+  const byChar = new Map();
+  pending.forEach(it => {
+    const [, cid, idx] = it.id.split(':');
+    if (!byChar.has(cid)) byChar.set(cid, new Set());
+    byChar.get(cid).add(parseInt(idx));
+  });
+  let total = 0;
+  for (const [cid, idxs] of byChar) {
+    const c = (STATE.characters || []).find(x => x.id === cid); if (!c) continue;
+    const sorts = (c.deck_sorts || []).map(s => ({ ...s }));
+    idxs.forEach(i => { if (sorts[i]) { sorts[i].mjValidation = 'ok'; sorts[i].mjValidated = true; total++; } });
+    try { await saveDoc('characters', c.id, { deck_sorts: sorts }); c.deck_sorts = sorts; }
+    catch (e) { notifySaveError(e); }
+  }
+  if (total) showNotif(`${total} sort${total > 1 ? 's validés' : ' validé'}.`, 'success');
+  await PAGES.admin();
+}
+
+// ── Rendu ──
+function _cmjOpen(vm) {
+  _cmjState.vm = vm;
+  if (!_cmjState.tab) {
+    const stored = (() => { try { return localStorage.getItem(_CMJ_TAB_KEY) || ''; } catch { return ''; } })();
+    _cmjState.tab = ['todo', 'players', 'settings'].includes(stored) ? stored : (vm.items.length ? 'todo' : 'settings');
+  }
+  if (_cmjState.tab === 'todo' && !vm.items.length) _cmjState.tab = 'settings';
+  if (_cmjState.cur >= _cmjVisible().length) _cmjState.cur = Math.max(0, _cmjVisible().length - 1);
+  _cmjRender();
+  _cmjMount();
+}
+function _cmjSetTab(id) {
+  _cmjState.tab = id; try { localStorage.setItem(_CMJ_TAB_KEY, id); } catch {}
+  _cmjState.refocus = null; _cmjRender(); window.scrollTo(0, 0);
+}
+function _cmjRender() {
+  const root = document.getElementById('main-content'); if (!root) return;
+  const vm = _cmjState.vm || { items: [], players: [], settings: [] };
+  const n = vm.items.length;
+  const tabs = [
+    { id: 'todo', l: 'À traiter', badge: n, hot: n > 0 },
+    { id: 'players', l: 'Joueurs', badge: vm.players.length },
+    { id: 'settings', l: 'Réglages' },
+  ];
+  const tabsHtml = tabs.map((t, i) => `<button type="button" role="tab" class="cmj-tab${_cmjState.tab === t.id ? ' on' : ''}" data-cmj-tab="${t.id}" aria-selected="${_cmjState.tab === t.id}" title="${t.l} (${i + 1})">${_esc(t.l)}${t.badge != null ? `<span class="cmj-n${t.hot ? ' hot' : ''}">${t.badge}</span>` : ''}</button>`).join('');
+  const view = _cmjState.tab === 'players' ? _cmjRenderPlayers() : _cmjState.tab === 'settings' ? _cmjRenderSettings() : _cmjRenderTodo();
+  root.innerHTML = `<div class="cmj">${_CMJ_SPRITE}
+    <div class="cmj-head">
+      <div class="cmj-brand"><h1>Console MJ</h1><small>${_esc(vm.adventure || 'Aventure')} · ${vm.players.length} membre${vm.players.length > 1 ? 's' : ''}</small></div>
+      <div class="cmj-tabs" role="tablist">${tabsHtml}</div>
+    </div>
+    <div class="cmj-body">${view}</div>
+  </div>`;
+  _cmjAfterRender();
+}
+function _cmjRow(i) {
+  const idx = _cmjVisible().indexOf(i);
+  const sp = i.spell;
+  const tag = i.tone === 'danger' ? '<span class="cmj-pill red">Bloquant</span>' : '';
+  const pri = i.act === 'Valider' ? 'cmj-btn ok' : (i.auto || /Ouvrir|Créer/.test(i.act)) ? 'cmj-btn gh' : 'cmj-btn pri';
+  return `<div class="cmj-row${_cmjState.open.has(i.id) ? ' open' : ''}${idx === _cmjState.cur ? ' cur' : ''}" data-id="${_esc(i.id)}">
+    <div class="cmj-rw" tabindex="-1" data-cmj-idx="${idx}"><span class="cmj-mk ${i.tone}" aria-hidden="true"></span>
+      <div class="cmj-rt"><b>${_esc(i.title)}${i.who ? `<span class="cmj-who">${_esc(i.who)}</span>` : ''}${tag}</b><small>${sp ? `${_esc(sp.cout)} · ${_esc(sp.portee)}` : _esc(i.detail || '')}</small></div>
+      <div class="cmj-ra">${sp ? `<button type="button" class="cmj-btn gh" ${i.secondary || ''}>Ouvrir la fiche</button>` : ''}<button type="button" class="${pri}" ${i.attrs || ''}>${i.act === 'Valider' ? _cmjIc('check') : ''}${_esc(i.act)}</button>${sp ? `<button type="button" class="cmj-exp" data-cmj-exp="${_esc(i.id)}" aria-label="Détail du sort" aria-expanded="${_cmjState.open.has(i.id)}">${_cmjIc('chev')}</button>` : ''}</div>
+    </div>
+    ${sp ? `<div class="cmj-spell"><div><div class="cmj-facts"><span>Coût <b>${_esc(sp.cout)}</b></span><span>Portée <b>${_esc(sp.portee)}</b></span></div>${sp.effet ? `<p>${_esc(sp.effet)}</p>` : '<p class="cmj-dim">Pas de description.</p>'}${sp.runes.length ? `<div class="cmj-runes">${sp.runes.map(r => `<span>${_esc(r)}</span>`).join('')}</div>` : ''}</div></div>` : ''}
+  </div>`;
+}
+function _cmjRenderTodo() {
+  const vm = _cmjState.vm;
+  if (!vm.items.length) return `<div class="cmj-empty"><span class="cmj-ok">${_cmjIc('check')}</span><h3>Rien à traiter</h3><p>Comptes, personnages, sorts, groupes et tokens sont alignés. Les nouveaux points apparaîtront ici.</p></div>`;
+  const count = s => vm.items.filter(i => i.sec === s).length;
+  const autos = vm.items.filter(i => i.auto);
+  const autoOps = new Set(autos.map(i => i.attrs)).size;
+  const nav = [{ id: 'all', label: 'Tout', ic: 'inbox' }, ..._CMJ_SECTIONS].map(s => {
+    const c = s.id === 'all' ? vm.items.length : count(s.id);
+    return `<button type="button" class="cmj-nv${_cmjState.sec === s.id ? ' on' : ''}${c ? '' : ' zero'}" data-cmj-sec="${s.id}">${_cmjIc(s.ic)}<span>${_esc(s.label)}</span><b>${c}</b></button>`;
+  }).join('');
+  const vis = _cmjVisible();
+  if (_cmjState.cur >= vis.length) _cmjState.cur = Math.max(0, vis.length - 1);
+  const secs = _CMJ_SECTIONS.filter(s => _cmjState.sec === 'all' || _cmjState.sec === s.id).map(s => {
+    const rows = vis.filter(i => i.sec === s.id);
+    if (!rows.length) return '';
+    const bulk = s.bulk && rows.length > 1 ? `<button type="button" class="cmj-btn gh" data-cmj-bulk="${s.id}">${_cmjIc(s.id === 'sorts' ? 'check' : 'wrench')}${_esc(s.bulk)} (${rows.length})</button>` : '';
+    return `<section class="cmj-sec"><div class="cmj-sh">${_cmjIc(s.ic)}<h3>${_esc(s.label)}</h3><span class="cmj-c">${rows.length}</span><span class="cmj-sp"></span>${s.auto ? '<span class="cmj-tagauto">Réparable automatiquement</span>' : ''}${bulk}</div><div class="cmj-rows">${rows.map(_cmjRow).join('')}</div></section>`;
+  }).join('');
+  return `<div class="cmj-inbox">
+    <aside class="cmj-side"><nav class="cmj-nav" aria-label="Filtrer par sujet">${nav}</nav>
+      ${autos.length ? `<div class="cmj-auto"><span class="cmj-lbl">Correction automatique</span><p><b>${autos.length} point${autos.length > 1 ? 's' : ''}</b> se corrigent sans décision de ta part : participants de groupes et tokens VTT.</p><button type="button" class="cmj-btn pri" data-cmj-autoall>${_cmjIc('wrench')}Tout réparer</button></div>` : ''}
+      <div class="cmj-keys"><span><kbd>↑</kbd><kbd>↓</kbd> naviguer</span><span><kbd>Entrée</kbd> action</span><span><kbd>Espace</kbd> détail du sort</span></div>
+    </aside>
+    <div><div class="cmj-ihead"><h2>${vm.items.length} point${vm.items.length > 1 ? 's' : ''} à traiter</h2><small>${autos.length ? `dont ${autos.length} réparable${autos.length > 1 ? 's' : ''} en ${autoOps} opération${autoOps > 1 ? 's' : ''}` : 'chacun demande une décision'}</small></div>${secs}</div>
+  </div>`;
+}
+function _cmjRenderPlayers() {
+  const vm = _cmjState.vm;
+  const issues = vm.players.filter(p => p.issue).length;
+  const q = _cmjState.pq.trim().toLowerCase();
+  let list = vm.players.filter(p => (_cmjState.pf === 'all' || p.issue) && (!q || [p.pseudo, p.email, ...p.chars].join(' ').toLowerCase().includes(q)));
+  const k = _cmjState.psort;
+  list = list.slice().sort((a, b) => k === 'since' ? String(b.since).localeCompare(String(a.since)) : k === 'role' ? (a.role === 'mj' ? -1 : b.role === 'mj' ? 1 : a.pseudo.localeCompare(b.pseudo, 'fr')) : a.pseudo.localeCompare(b.pseudo, 'fr'));
+  const hb = (id, l) => `<button type="button" data-cmj-psort="${id}" class="${k === id ? 'on' : ''}">${_esc(l)}${k === id ? ' ↓' : ''}</button>`;
+  const prow = p => {
+    const live = p.issue && vm.items.some(i => i.id === p.issueItem);
+    return `<div class="cmj-pr"><div class="cmj-pl"><span class="cmj-av" style="--c:${p.color}">${_esc((p.pseudo[0] || '?').toUpperCase())}</span><div><b>${_esc(p.pseudo)}</b><small>${_esc(p.email || '')}</small></div></div>
+      <span class="cmj-rl">${p.role === 'mj' ? '<span class="cmj-pill blu">MJ</span>' : '<span class="cmj-dt">Joueur</span>'}</span>
+      <div class="cmj-chars">${p.chars.length ? p.chars.map(c => `<span>${_esc(c)}</span>`).join('') : `<em>${p.role === 'mj' ? '—' : 'Aucun'}</em>`}</div>
+      <span class="cmj-dt">${_esc(p.sinceLabel || '—')}</span>
+      <span class="cmj-st">${p.issue ? (live ? `<button type="button" class="cmj-pill ${p.issueTone}" data-cmj-goto="${p.issueItem}" title="Voir dans À traiter">${_esc(p.issueLabel)} →</button>` : `<span class="cmj-pill ${p.issueTone}">${_esc(p.issueLabel)}</span>`) : ''}</span>
+      <div class="cmj-pa">${p.issue && p.issueAct && live ? `<button type="button" class="cmj-btn gh" ${p.issueAttrs}>${_esc(p.issueAct)}</button>` : ''}</div></div>`;
+  };
+  return `<div class="cmj-tool"><label class="cmj-search">${_cmjIc('search')}<input type="search" id="cmj-pq" placeholder="Pseudo, e-mail ou personnage…" value="${_esc(_cmjState.pq)}" aria-label="Rechercher un joueur"><kbd>/</kbd></label><span class="cmj-sp"></span>
+    <div class="cmj-seg" role="group" aria-label="Filtre"><button type="button" data-cmj-pf="all" class="${_cmjState.pf === 'all' ? 'on' : ''}">Tous <em>${vm.players.length}</em></button><button type="button" data-cmj-pf="issue" class="${_cmjState.pf === 'issue' ? 'on' : ''}">À vérifier <em>${issues}</em></button></div></div>
+    <div class="cmj-ptab"><div class="cmj-pr hd">${hb('pseudo', 'Joueur')}${hb('role', 'Rôle')}<span>Personnages</span>${hb('since', 'Inscription')}<span>État</span><span></span></div>
+    ${list.length ? list.map(prow).join('') : `<div class="cmj-nores">Aucun joueur ne correspond.</div>`}</div>`;
+}
+function _cmjRenderSettings() {
+  const vm = _cmjState.vm;
+  const q = _cmjState.sq.trim().toLowerCase();
+  const hl = s => { const e = _esc(s); if (!q) return e; const i = s.toLowerCase().indexOf(q); return i < 0 ? e : _esc(s.slice(0, i)) + '<mark>' + _esc(s.slice(i, i + q.length)) + '</mark>' + _esc(s.slice(i + q.length)); };
+  const groups = vm.settings.map(g => ({ ...g, items: g.items.filter(x => !q || (x.t + ' ' + x.s + ' ' + g.label).toLowerCase().includes(q)) })).filter(g => g.items.length);
+  return `<div class="cmj-tool"><label class="cmj-search">${_cmjIc('search')}<input type="search" id="cmj-sq" placeholder="Rechercher un réglage…" value="${_esc(_cmjState.sq)}" aria-label="Rechercher un réglage"><kbd>/</kbd></label></div>
+    ${groups.length ? `<div class="cmj-sgrid">${groups.map(g => `<section class="cmj-grp"><h3 class="cmj-lbl">${_esc(g.label)}</h3><div class="cmj-list">${g.items.map(x => `<button type="button" class="cmj-strow" data-action="_adminLazyOpen" data-fn="${_esc(x.fn)}" data-module="${_esc(x.mod)}"><span class="cmj-sic" style="--a:${x.a}">${_cmjIc(x.ic)}</span><span class="cmj-strow-txt"><b>${hl(x.t)}</b><small>${hl(x.s)}</small></span>${_cmjIc('right', 'go')}</button>`).join('')}</div></section>`).join('')}</div>`
+      : `<div class="cmj-empty"><h3>Aucun réglage trouvé</h3><p>Essaie « dégâts », « runes » ou « émotes ».</p></div>`}`;
+}
+function _cmjAfterRender() {
+  if (_cmjState.refocus) {
+    const el = document.getElementById(_cmjState.refocus);
+    if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch {} }
+    _cmjState.refocus = null;
+  }
+}
+function _cmjMoveCur(d) {
+  const vis = _cmjVisible(); if (!vis.length) return;
+  _cmjState.cur = Math.max(0, Math.min(vis.length - 1, _cmjState.cur + d));
+  document.querySelectorAll('.cmj-row.cur').forEach(r => r.classList.remove('cur'));
+  const el = document.querySelector(`.cmj-rw[data-cmj-idx="${_cmjState.cur}"]`);
+  if (el) { el.parentElement.classList.add('cur'); el.focus(); const r = el.getBoundingClientRect(); if (r.top < 100 || r.bottom > innerHeight - 20) window.scrollBy({ top: r.top - innerHeight / 2, behavior: 'smooth' }); }
+}
+function _cmjToggle(id) {
+  _cmjState.open.has(id) ? _cmjState.open.delete(id) : _cmjState.open.add(id);
+  const r = document.querySelector(`.cmj-row[data-id="${CSS.escape(id)}"]`);
+  if (r) { r.classList.toggle('open', _cmjState.open.has(id)); r.querySelector('.cmj-exp')?.setAttribute('aria-expanded', _cmjState.open.has(id)); }
+}
+// Déclenche l'action principale de la ligne courante (dernier bouton d'action,
+// hors chevron) — réutilise le câblage du bouton (registre data-action ou nav).
+function _cmjActivateCur() {
+  const cur = _cmjVisible()[_cmjState.cur]; if (!cur) return;
+  const row = document.querySelector(`.cmj-row[data-id="${CSS.escape(cur.id)}"]`); if (!row) return;
+  const btns = row.querySelectorAll('.cmj-ra .cmj-btn');
+  btns[btns.length - 1]?.click();
+}
+async function _cmjRepairAll() {
+  try { await _adminRepairQuestParticipants(); } catch (e) { console.error('[cmj] repair quests', e); }
+  try { await _adminRepairVttData(); } catch (e) { console.error('[cmj] repair vtt', e); }
+}
+function _cmjMount() {
+  if (_cmjMounted) return; _cmjMounted = true;
+  document.addEventListener('click', e => {
+    if (!document.querySelector('.cmj')) return;
+    const t = e.target.closest('[data-cmj-tab],[data-cmj-sec],[data-cmj-exp],[data-cmj-bulk],[data-cmj-autoall],[data-cmj-pf],[data-cmj-psort],[data-cmj-goto],.cmj-rw');
+    if (!t) return;
+    if (t.dataset.cmjTab) return _cmjSetTab(t.dataset.cmjTab);
+    if (t.dataset.cmjSec) { _cmjState.sec = t.dataset.cmjSec; _cmjState.cur = 0; return _cmjRender(); }
+    if (t.dataset.cmjExp) return _cmjToggle(t.dataset.cmjExp);
+    if (t.dataset.cmjBulk) { const s = t.dataset.cmjBulk; return s === 'sorts' ? _adminValidateAllSpells() : s === 'quetes' ? _adminRepairQuestParticipants() : _adminRepairVttData(); }
+    if (t.hasAttribute('data-cmj-autoall')) { return _cmjRepairAll(); }
+    if (t.dataset.cmjPf) { _cmjState.pf = t.dataset.cmjPf; return _cmjRender(); }
+    if (t.dataset.cmjPsort) { _cmjState.psort = t.dataset.cmjPsort; return _cmjRender(); }
+    if (t.dataset.cmjGoto) { _cmjState.sec = 'all'; _cmjState.tab = 'todo'; try { localStorage.setItem(_CMJ_TAB_KEY, 'todo'); } catch {} _cmjState.cur = _cmjVisible().findIndex(i => i.id === t.dataset.cmjGoto); _cmjRender(); const r = document.querySelector(`.cmj-row[data-id="${CSS.escape(t.dataset.cmjGoto)}"]`); if (r) { r.classList.add('flash'); r.querySelector('.cmj-rw')?.focus({ preventScroll: false }); } return; }
+    if (t.classList.contains('cmj-rw') && !e.target.closest('button')) { _cmjState.cur = +t.dataset.cmjIdx; _cmjMoveCur(0); const id = t.parentElement.dataset.id; if (_cmjVisible().find(i => i.id === id)?.spell) _cmjToggle(id); }
+  });
+  document.addEventListener('input', e => {
+    if (!document.querySelector('.cmj')) return;
+    if (e.target.id === 'cmj-pq') { _cmjState.pq = e.target.value; _cmjState.refocus = 'cmj-pq'; _cmjRender(); }
+    if (e.target.id === 'cmj-sq') { _cmjState.sq = e.target.value; _cmjState.refocus = 'cmj-sq'; _cmjRender(); }
+  });
+  document.addEventListener('keydown', e => {
+    if (!document.querySelector('.cmj')) return;
+    const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
+    if (typing) { if (e.key === 'Escape') document.activeElement.blur(); return; }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (['1', '2', '3'].includes(e.key)) return _cmjSetTab(['todo', 'players', 'settings'][+e.key - 1]);
+    if (e.key === '/') { const i = document.getElementById('cmj-pq') || document.getElementById('cmj-sq'); if (_cmjState.tab !== 'todo' && i) { e.preventDefault(); i.focus(); } return; }
+    if (_cmjState.tab !== 'todo') return;
+    const vis = _cmjVisible(); const cur = vis[_cmjState.cur];
+    if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); _cmjMoveCur(1); }
+    else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); _cmjMoveCur(-1); }
+    else if (e.key === 'Enter' && cur && !e.target.closest('button')) { e.preventDefault(); _cmjActivateCur(); }
+    else if (e.key === ' ' && cur?.spell && !e.target.closest('button')) { e.preventDefault(); _cmjToggle(cur.id); }
+  });
+}
+
 function _statsNormCombat(cm = {}) {
   const n = _statsNum;
   return {
@@ -2857,14 +3116,18 @@ const PAGES = {
       const hasJoinedGroup = groupList.some(groupJoined);
       const characterSection = STATE.isAdmin ? gmCharactersSection(groupList) : playerCharactersSection(groupList);
       const groupSection = groupsSection(groupList);
+      // La séance occupe toute la largeur en tête ; les autres sections se
+      // répartissent dans la grille 2 colonnes dessous (évite le couloir étroit).
+      const sessionBanner = sessionSection(sessionList, groupList);
       const main = STATE.isAdmin || hasJoinedGroup
-        ? [sessionSection(sessionList, groupList), characterSection, groupSection]
-        : [sessionSection(sessionList, groupList), groupSection, characterSection];
+        ? [characterSection, groupSection]
+        : [groupSection, characterSection];
       const pseudo = STATE.profile?.pseudo || STATE.profile?.displayName || STATE.user?.displayName || String(STATE.user?.email || '').split('@')[0] || 'aventurier';
       const adventure = STATE.adventure?.nom || 'Aventure';
       const initials = adventure.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toUpperCase() || 'A';
       const online = liveUids().size;
-      root.innerHTML = `<div class="db-top"><button type="button" class="db-adv" data-action="openAdventureSwitcher"><span class="sig">${_esc(initials)}</span><b>${_esc(adventure)}</b><small>${icon('refresh-cw')}Changer</small></button><span class="db-hello">${STATE.isAdmin ? `<span class="db-on"><i></i>${online} joueur${online > 1 ? 's' : ''} connecté${online > 1 ? 's' : ''}</span>` : ''}<span>Bonsoir, <b>${_esc(pseudo)}</b>${STATE.isAdmin ? ' · Maître de jeu' : ''}</span></span></div><div class="db-grid"><div class="db-col">${main.join('')}</div><div class="db-col">${isFeatureEnabled('bastion') ? wallSection() : ''}</div></div>`;
+      const wall = isFeatureEnabled('bastion') ? wallSection() : '';
+      root.innerHTML = `<div class="db-top"><button type="button" class="db-adv" data-action="openAdventureSwitcher"><span class="sig">${_esc(initials)}</span><b>${_esc(adventure)}</b><small>${icon('refresh-cw')}Changer</small></button><span class="db-hello">${STATE.isAdmin ? `<span class="db-on"><i></i>${online} joueur${online > 1 ? 's' : ''} connecté${online > 1 ? 's' : ''}</span>` : ''}<span>Bonsoir, <b>${_esc(pseudo)}</b>${STATE.isAdmin ? ' · Maître de jeu' : ''}</span></span></div>${sessionBanner}<div class="db-grid${wall ? '' : ' solo'}"><div class="db-col">${main.join('')}</div>${wall ? `<div class="db-col">${wall}</div>` : ''}</div>`;
     }
 
     const replaceParticipants = (groupId, participants) => {
@@ -3178,32 +3441,6 @@ const PAGES = {
     ]);
     const content = document.getElementById('main-content');
 
-    // Réglages du jeu : seules fonctions propres à cette page (le reste — boutique,
-    // trame, PNJ… — est déjà accessible via la navigation, d'où la suppression des
-    // « actions rapides » redondantes). Chaque tuile ouvre sa modale (lazy CSS+JS).
-    const SETTINGS = [
-      { g:'combat', ic:'⚔️', t:"Formats d'arme",     s:'Physique / magique par format',   a:'#ff8b6b', fn:'openWeaponFormatsAdmin', mod:'characters' },
-      { g:'combat', ic:'⚡', t:'Types de dégâts',     s:'Éléments, résistances, couleurs', a:'#f4c430', fn:'openDamageTypesAdmin',   mod:'characters' },
-      { g:'combat', ic:'🗡️', t:'Styles de combat',    s:"Bonus selon l'arme équipée",      a:'#9d8cff', fn:'openCombatStylesAdmin',  mod:'characters' },
-      { g:'combat', ic:'🔮', t:'Matrices de sorts',   s:'Runes, noyaux, combinaisons',     a:'#bca0ff', fn:'openSpellMatricesAdmin', mod:'characters' },
-      { g:'combat', ic:'∑',  t:'Règles de personnage', s:'Modificateurs, PV, PM, CA, deck', a:'#5bc0eb', fn:'openCharacterRulesAdmin', mod:'characters' },
-      { g:'combat', ic:'🎒', t:"Slots d'équipement", s:'Emplacements utilisés sur les fiches', a:'#22c38e', fn:'openEquipmentSlotsAdmin', mod:'characters' },
-      { g:'combat', ic:'🧩', t:"Types d'armure", s:'Types boutique et bonus de set', a:'#7eb0ff', fn:'openArmorSetsAdmin', mod:'characters' },
-      { g:'combat', ic:'✦',  t:'Système de sorts', s:'Forge de runes ou création classique', a:'#e8b84b', fn:'openSpellSystemAdmin', mod:'characters' },
-      { g:'table',  ic:'🏆', t:'Catégories de hauts-faits', s:'Galerie, filtres et couleurs', a:'#e8b84b', fn:'openAchievementCategoriesAdmin', mod:'achievements', requires:'achievements' },
-      { g:'table',  ic:'👹', t:'Rangs du bestiaire', s:'Menaces, filtres et couleurs', a:'#ff5a7e', fn:'openBestiaryRanksAdmin', mod:'bestiary', requires:'bestiaire' },
-      { g:'table',  ic:'🎲', t:'Compétences de dés',  s:'Jets personnalisés',              a:'#4f8cff', fn:'_ouvrirGestionDes',      mod:'histoire' },
-      { g:'table',  ic:'😄', t:'Émotes VTT',          s:'Réactions sur la table',          a:'#22c38e', fn:'_ouvrirGestionEmotes',   mod:'vtt/vtt' },
-      { g:'table',  ic:'🎭', t:'États & conditions',  s:'Effets appliqués aux tokens',     a:'#f97316', fn:'_vttConditionConfig',    mod:'vtt/vtt' },
-    ];
-    const tile = (x) => `
-      <button class="adm-tile" style="--a:${x.a}" data-action="_adminLazyOpen" data-fn="${x.fn}" data-module="${x.mod}" title="${_esc(x.t)}">
-        <span class="adm-tile-ic">${x.ic}</span>
-        <span class="adm-tile-txt"><span class="adm-tile-t">${_esc(x.t)}</span><span class="adm-tile-s">${_esc(x.s)}</span></span>
-        <span class="adm-tile-arrow">→</span>
-      </button>`;
-    const grid = (g) => `<div class="adm-tiles">${SETTINGS.filter(x => x.g === g && (!x.requires || isFeatureEnabled(x.requires))).map(tile).join('')}</div>`;
-
     const adv = STATE.adventure || {};
     const memberUids = new Set([...(adv.accessList || []), ...(adv.players || []), ...(adv.admins || [])]);
     const profiles = adv.memberProfiles || {};
@@ -3377,177 +3614,117 @@ const PAGES = {
         });
       }
     });
-    const healthIssues = [
-      ...duplicateEmailGroups.map(g => ({
-        icon: '🪪',
-        title: 'Compte doublonné probable',
-        text: `${g.email} · ${g.uids.length} comptes actifs`,
-        tone: 'is-warn',
-        attrs: `data-action="_adminMergeDuplicate" data-uids="${_esc(g.uids.join(','))}" data-email="${_esc(g.email)}"`,
-        action: 'Fusionner',
-      })),
-      ...invalidOwnerChars.map(c => ({
-        icon: '👤',
-        title: 'Personnage sans propriétaire fiable',
-        text: `${c.nom || 'Personnage'} · ${c.ownerPseudo || userLabel(c.uid)}`,
-        tone: 'is-danger',
-        attrs: `data-action="_goToChar" data-id="${_esc(c.id)}"`,
-      })),
-      ...questParticipantIssues.map(i => ({
-        icon: '📌',
-        title: i.title,
-        text: i.text,
-        tone: 'is-warn',
-        attrs: 'data-action="_adminRepairQuestParticipants"',
-        action: 'Réparer',
-      })),
-      ...tokenIssues.map(i => ({
-        icon: '🎲',
-        title: i.title,
-        text: i.text,
-        tone: 'is-info',
-        attrs: i.repairable
-          ? 'data-action="_adminRepairVttData"'
-          : i.charId
-            ? `data-action="_goToChar" data-id="${_esc(i.charId)}"`
-            : 'data-navigate="vtt"',
-        action: i.repairable ? 'Réparer' : 'Ouvrir',
-      })),
-    ];
-    const actionTotal = relinkItems.length + invalidOwnerChars.length + playersWithoutChar.length + pendingSpells.length;
-    const actionCard = (html, attrs = '', tone = '') =>
-      `<button type="button" class="adm-action-card ${tone}" ${attrs}>${html}<span class="adm-action-arrow">→</span></button>`;
-    const actionCenterItems = [
-      ...relinkItems.slice(0, 4).map(({ user, uid, oldUid }) => actionCard(`
-        <span class="adm-action-ico">🔗</span>
-        <span class="adm-action-body">
-          <span class="adm-action-title">Compte à relier</span>
-          <span class="adm-action-text">${_esc(user.pseudo || user.email || uid)}</span>
-        </span>`,
-        `data-action="_adminRelinkPlayer" data-old-uid="${_esc(oldUid)}" data-new-uid="${_esc(uid)}" data-name="${_esc(user.pseudo || user.email || uid)}"`,
-        'is-warn')),
-      ...invalidOwnerChars.slice(0, 4).map(c => actionCard(`
-        <span class="adm-action-ico">👤</span>
-        <span class="adm-action-body">
-          <span class="adm-action-title">Personnage sans compte actif</span>
-          <span class="adm-action-text">${_esc(c.nom || 'Personnage')} · ${_esc(c.ownerPseudo || 'propriétaire inconnu')}</span>
-        </span>`,
-        `data-action="_goToChar" data-id="${_esc(c.id)}"`,
-        'is-danger')),
-      ...pendingSpells.slice(0, 4).map(({ c, s }) => actionCard(`
-        <span class="adm-action-ico">✨</span>
-        <span class="adm-action-body">
-          <span class="adm-action-title">Sort à valider</span>
-          <span class="adm-action-text">${_esc(s.nom || 'Sort')} · ${_esc(c.nom || 'Personnage')}</span>
-        </span>`,
-        `data-action="_goToChar" data-id="${_esc(c.id)}" data-tab="sorts"`,
-        'is-info')),
-      ...playersWithoutChar.slice(0, 3).map(uid => actionCard(`
-        <span class="adm-action-ico">📜</span>
-        <span class="adm-action-body">
-          <span class="adm-action-title">Joueur sans personnage</span>
-          <span class="adm-action-text">${_esc(userLabel(uid))}</span>
-        </span>`,
-        `data-navigate="characters"`,
-        'is-muted')),
-    ];
-    const hiddenActionCount = Math.max(0, actionTotal - actionCenterItems.length);
-    const actionCenter = `
-      <section class="adm-action-center">
-        <div class="adm-action-head">
-          <div>
-            <div class="adm-action-kicker">À traiter</div>
-            <h2>Centre d'action MJ</h2>
-          </div>
-          <div class="adm-action-score ${actionTotal ? 'is-hot' : 'is-ok'}">
-            <strong>${actionTotal}</strong>
-            <span>${actionTotal > 1 ? 'points' : 'point'}</span>
-          </div>
-        </div>
-        <div class="adm-action-metrics">
-          <span><b>${relinkItems.length}</b> relink</span>
-          <span><b>${invalidOwnerChars.length}</b> persos</span>
-          <span><b>${pendingSpells.length}</b> sorts</span>
-          <span><b>${playersWithoutChar.length}</b> joueurs</span>
-        </div>
-        ${actionTotal
-          ? `<div class="adm-action-list">${actionCenterItems.join('')}${hiddenActionCount ? `<div class="adm-action-more">+${hiddenActionCount} autre${hiddenActionCount>1?'s':''} point${hiddenActionCount>1?'s':''}</div>` : ''}</div>`
-          : `<div class="adm-action-empty"><b>Tout est propre.</b><span>Aucun compte, personnage ou sort ne demande ton attention.</span></div>`}
-      </section>`;
-    const healthCard = (issue) => {
-      const tag = issue.attrs ? 'button' : 'div';
-      const type = tag === 'button' ? ' type="button"' : '';
-      return `<${tag}${type} class="adm-health-card ${issue.tone || ''}" ${issue.attrs || ''}>
-        <span class="adm-health-ico">${issue.icon || '•'}</span>
-        <span class="adm-health-body">
-          <span class="adm-health-title">${_esc(issue.title || 'Diagnostic')}</span>
-          <span class="adm-health-text">${_esc(issue.text || '')}</span>
-        </span>
-        ${tag === 'button' ? `<span class="adm-health-action">${_esc(issue.action || 'Ouvrir')}</span>` : ''}
-      </${tag}>`;
-    };
-    const healthPreview = healthIssues.slice(0, 10);
-    const hiddenHealthCount = Math.max(0, healthIssues.length - healthPreview.length);
-    const dataHealth = `
-      <section class="adm-health">
-        <div class="adm-health-head">
-          <div>
-            <div class="adm-action-kicker">Diagnostic</div>
-            <h2>Santé des données</h2>
-          </div>
-          <div class="adm-health-state ${healthIssues.length ? 'is-warn' : 'is-ok'}">${healthIssues.length ? `${healthIssues.length} alerte${healthIssues.length > 1 ? 's' : ''}` : 'OK'}</div>
-        </div>
-        <div class="adm-health-metrics">
-          <span><b>${duplicateEmailGroups.length}</b> doublons</span>
-          <span><b>${invalidOwnerChars.length}</b> propriétaires</span>
-          <span><b>${questParticipantIssues.length}</b> quêtes</span>
-          <span><b>${tokenIssues.length}</b> VTT</span>
-        </div>
-        ${healthIssues.length
-          ? `<div class="adm-health-grid">${healthPreview.map(healthCard).join('')}${hiddenHealthCount ? `<div class="adm-action-more">+${hiddenHealthCount} autre${hiddenHealthCount > 1 ? 's' : ''} alerte${hiddenHealthCount > 1 ? 's' : ''}</div>` : ''}</div>`
-          : `<div class="adm-action-empty"><b>Aucune incohérence détectée.</b><span>Comptes, personnages, quêtes et tokens semblent alignés.</span></div>`}
-      </section>`;
-    const pRow = (u) => {
-      const uid = u.id || u.uid || '';
-      const oldUid = relinkSourceFor(u);
-      const initial = ((u.pseudo || '?').trim().charAt(0) || '?').toUpperCase();
-      const date = u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr') : '—';
-      return `
-        <div class="adm-prow">
-          <span class="adm-pav">${_esc(initial)}</span>
-          <span class="adm-pmeta">
-            <span class="adm-pname">${_esc(u.pseudo || '-')}</span>
-            <span class="adm-pmail">${_esc(u.email || '-')}</span>
-          </span>
-          <span class="adm-pdate">${date}</span>
-          ${oldUid ? `<span class="adm-pactions">
-            <button type="button" class="btn-icon adm-relink-btn"
-              data-action="_adminRelinkPlayer"
-              data-old-uid="${_esc(oldUid)}"
-              data-new-uid="${_esc(uid)}"
-              data-name="${_esc(u.pseudo || u.email || uid)}"
-              title="Compte non relié détecté : réassocier automatiquement"
-              aria-label="Réassocier ${_esc(u.pseudo || u.email || uid)} automatiquement">🔗</button>
-          </span>` : ''}
-        </div>`;
-    };
+    // ── File unifiée « À traiter » (une entrée par source, zéro doublon) ──
+    const items = [];
+    relinkItems.forEach(({ user, uid, oldUid }) => items.push({
+      id: `relink:${uid}`, sec: 'comptes', tone: 'warn', title: 'Compte à relier',
+      detail: `${user.pseudo || user.email || uid} · ancien compte à réassocier`,
+      act: 'Relier',
+      attrs: `data-action="_adminRelinkPlayer" data-old-uid="${_esc(oldUid)}" data-new-uid="${_esc(uid)}" data-name="${_esc(user.pseudo || user.email || uid)}"`,
+    }));
+    duplicateEmailGroups.forEach(g => items.push({
+      id: `dup:${g.email}`, sec: 'comptes', tone: 'warn', title: 'Comptes en double',
+      detail: `${g.email} · ${g.uids.length} comptes actifs`,
+      act: 'Fusionner',
+      attrs: `data-action="_adminMergeDuplicate" data-uids="${_esc(g.uids.join(','))}" data-email="${_esc(g.email)}"`,
+    }));
+    playersWithoutChar.forEach(uid => items.push({
+      id: `nochar:${uid}`, sec: 'comptes', tone: 'info', title: 'Joueur sans personnage',
+      detail: `${userLabel(uid)} · aucun personnage créé`,
+      act: 'Créer', attrs: 'data-navigate="characters"',
+    }));
+    invalidOwnerChars.forEach(c => items.push({
+      id: `char:${c.id}`, sec: 'persos', tone: 'danger',
+      title: `${c.nom || 'Personnage'} n’a pas de propriétaire actif`,
+      detail: `Rattaché à ${c.ownerPseudo || userLabel(c.uid)} · invisible pour son joueur`,
+      act: 'Ouvrir la fiche', attrs: `data-action="_goToChar" data-id="${_esc(c.id)}"`,
+    }));
+    pendingSpells.forEach(({ c, s, idx }) => {
+      const pm = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
+      const owner = c.ownerPseudo || userLabel(c.uid);
+      items.push({
+        id: `spell:${c.id}:${idx}`, sec: 'sorts', tone: 'info', title: s.nom || 'Sort sans nom',
+        who: `${c.nom || 'Personnage'}${owner ? ` · ${owner}` : ''}`,
+        act: 'Valider',
+        attrs: `data-action="_adminValidateSpell" data-id="${_esc(c.id)}" data-idx="${idx}"`,
+        secondary: `data-action="_goToChar" data-id="${_esc(c.id)}" data-tab="sorts"`,
+        spell: { cout: `${pm} PM`, portee: s.portee || '—', effet: s.effet || '', runes: (Array.isArray(s.runes) ? s.runes.filter(Boolean) : []) },
+      });
+    });
+    questParticipantIssues.forEach((i, n) => items.push({
+      id: `quest:${n}`, sec: 'quetes', tone: 'warn', title: i.title, detail: i.text,
+      act: 'Réparer', auto: true, attrs: 'data-action="_adminRepairQuestParticipants"',
+    }));
+    tokenIssues.forEach((i, n) => {
+      const danger = /sans personnage/i.test(i.title || '');
+      items.push({
+        id: `token:${n}`, sec: 'vtt', tone: danger ? 'danger' : 'warn', title: i.title, detail: i.text,
+        act: i.repairable ? 'Réparer' : (i.charId ? 'Ouvrir la fiche' : 'Ouvrir la table'),
+        auto: !!i.repairable,
+        attrs: i.repairable ? 'data-action="_adminRepairVttData"' : (i.charId ? `data-action="_goToChar" data-id="${_esc(i.charId)}"` : 'data-navigate="vtt"'),
+      });
+    });
 
-    content.innerHTML = `
-      ${pageHeaderHtml('⚙️ Console MJ', "Réglages du jeu & joueurs de l'aventure")}
-      ${actionCenter}
-      ${dataHealth}
-      <section class="adm-block">
-        <div class="adm-label">⚔️ Personnages &amp; combat</div>
-        ${grid('combat')}
-      </section>
-      <section class="adm-block">
-        <div class="adm-label">🎲 Table &amp; VTT</div>
-        ${grid('table')}
-      </section>
-      <section class="adm-block">
-        <div class="adm-label">👥 Joueurs inscrits <span class="adm-count">${visibleUsers.length}</span></div>
-        <div class="adm-players adm-players--grid">${sortedUsers.map(pRow).join('')}</div>
-      </section>`;
+    // ── Tableau Joueurs ──
+    const charNamesByUid = new Map();
+    (STATE.characters || []).forEach(c => { if (c?.uid && c.nom) { if (!charNamesByUid.has(c.uid)) charNamesByUid.set(c.uid, []); charNamesByUid.get(c.uid).push(c.nom); } });
+    const relinkByUid = new Map(relinkItems.map(x => [x.uid, x]));
+    const dupByEmail = new Map(duplicateEmailGroups.map(g => [g.email, g]));
+    const noCharSet = new Set(playersWithoutChar);
+    const vmPlayers = sortedUsers.map((u, n) => {
+      const uid = u.id || u.uid || '';
+      const email = String(u.email || '').trim();
+      const role = (adv.admins || []).includes(uid) ? 'mj' : 'joueur';
+      let issue = null, issueItem = '', issueLabel = '', issueTone = 'mut', issueAct = '', issueAttrs = '';
+      if (relinkByUid.has(uid)) {
+        const r = relinkByUid.get(uid);
+        issue = 'relink'; issueItem = `relink:${uid}`; issueLabel = 'Compte à relier'; issueTone = 'amb'; issueAct = 'Relier';
+        issueAttrs = `data-action="_adminRelinkPlayer" data-old-uid="${_esc(r.oldUid)}" data-new-uid="${_esc(uid)}" data-name="${_esc(u.pseudo || email || uid)}"`;
+      } else if (email && dupByEmail.has(email.toLowerCase())) {
+        const g = dupByEmail.get(email.toLowerCase());
+        issue = 'dup'; issueItem = `dup:${g.email}`; issueLabel = 'Compte en double'; issueTone = 'amb'; issueAct = 'Fusionner';
+        issueAttrs = `data-action="_adminMergeDuplicate" data-uids="${_esc(g.uids.join(','))}" data-email="${_esc(g.email)}"`;
+      } else if (noCharSet.has(uid)) {
+        issue = 'nochar'; issueItem = `nochar:${uid}`; issueLabel = 'Sans personnage'; issueTone = 'mut';
+      }
+      return {
+        uid, pseudo: u.pseudo || '—', email, role,
+        since: u.createdAt || '',
+        sinceLabel: u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+        chars: charNamesByUid.get(uid) || [],
+        color: _CMJ_PALETTE[n % _CMJ_PALETTE.length],
+        issue, issueItem, issueLabel, issueTone, issueAct, issueAttrs,
+      };
+    });
+
+    // ── Réglages (13 modales, 5 groupes) ──
+    const settingsGroups = [
+      { id: 'fiche', label: 'Fiche de personnage', items: [
+        { t: 'Règles de personnage', s: 'Modificateurs, PV, PM, CA, deck', ic: 'sigma', a: '#5bc0eb', fn: 'openCharacterRulesAdmin', mod: 'characters' },
+        { t: 'Slots d’équipement', s: 'Emplacements visibles sur les fiches', ic: 'bag', a: '#22c38e', fn: 'openEquipmentSlotsAdmin', mod: 'characters' },
+        { t: 'Types d’armure', s: 'Types boutique et bonus de set', ic: 'shield', a: '#7eb0ff', fn: 'openArmorSetsAdmin', mod: 'characters' },
+      ] },
+      { id: 'combat', label: 'Combat', items: [
+        { t: 'Formats d’arme', s: 'Physique ou magique selon le format', ic: 'sword', a: '#ff8b6b', fn: 'openWeaponFormatsAdmin', mod: 'characters' },
+        { t: 'Types de dégâts', s: 'Éléments, résistances, couleurs', ic: 'zap', a: '#f4c430', fn: 'openDamageTypesAdmin', mod: 'characters' },
+        { t: 'Styles de combat', s: 'Bonus selon l’arme équipée', ic: 'swords', a: '#9d8cff', fn: 'openCombatStylesAdmin', mod: 'characters' },
+      ] },
+      { id: 'magie', label: 'Magie', items: [
+        { t: 'Système de sorts', s: 'Forge de runes ou création classique', ic: 'star', a: '#e8b84b', fn: 'openSpellSystemAdmin', mod: 'characters' },
+        { t: 'Matrices de sorts', s: 'Runes, noyaux, combinaisons', ic: 'layers', a: '#bca0ff', fn: 'openSpellMatricesAdmin', mod: 'characters' },
+      ] },
+      { id: 'table', label: 'Table & VTT', items: [
+        { t: 'Compétences de dés', s: 'Jets proposés aux joueurs', ic: 'dice', a: '#4f8cff', fn: '_ouvrirGestionDes', mod: 'histoire' },
+        { t: 'États & conditions', s: 'Effets appliqués aux tokens', ic: 'drop', a: '#f97316', fn: '_vttConditionConfig', mod: 'vtt/vtt' },
+        { t: 'Émotes VTT', s: 'Réactions sur la table', ic: 'smile', a: '#22c38e', fn: '_ouvrirGestionEmotes', mod: 'vtt/vtt' },
+      ] },
+      { id: 'cat', label: 'Catalogues', items: [
+        { t: 'Catégories de hauts-faits', s: 'Galerie, filtres et couleurs', ic: 'trophy', a: '#e8b84b', fn: 'openAchievementCategoriesAdmin', mod: 'achievements', requires: 'achievements' },
+        { t: 'Rangs du bestiaire', s: 'Menaces, filtres et couleurs', ic: 'skull', a: '#ff5a7e', fn: 'openBestiaryRanksAdmin', mod: 'bestiary', requires: 'bestiaire' },
+      ] },
+    ].map(g => ({ ...g, items: g.items.filter(x => !x.requires || isFeatureEnabled(x.requires)) })).filter(g => g.items.length);
+
+    _cmjOpen({ adventure: adv.nom || 'Aventure', items, players: vmPlayers, settings: settingsGroups });
   },
 
   // ─── STATISTIQUES ─────────────────────────────────────────────────────────────
@@ -3761,6 +3938,7 @@ async function _dashPickQuestChar(btn) {
 registerActions({
   // Dashboard
   _goToChar:             (btn) => goToChar(btn.dataset.id, btn.dataset.tab),
+  _adminValidateSpell:   (btn) => _adminValidateSpell(btn.dataset.id, btn.dataset.idx),
   _dashQuickChar:        (btn) => _dashQuickChar(btn.dataset.id),
   _dashToggleQuest:      (btn) => _dashToggleQuest(btn),
   _dashPickQuestChar:    (btn) => _dashPickQuestChar(btn),

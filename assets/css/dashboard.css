@@ -1,5 +1,5 @@
 /* Tableau de bord v3 — transcription de la maquette Claude Design. */
-.db{--r-sm:10px;--r-md:14px;--r-lg:20px;--r-xl:24px;--top-h:52px;--ease:cubic-bezier(.22,1,.36,1);max-width:1180px;margin:0 auto;padding:22px 24px 80px;display:flex;flex-direction:column;gap:20px;container-type:inline-size}
+.db{--r-sm:10px;--r-md:14px;--r-lg:20px;--r-xl:24px;--top-h:52px;--ease:cubic-bezier(.22,1,.36,1);max-width:1320px;margin:0 auto;padding:22px 24px 80px;display:flex;flex-direction:column;gap:20px;container-type:inline-size}
 .db :where(button){font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0;text-align:left;appearance:none}
 .db :where(button:disabled){cursor:default}
 .db-k{display:block;font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;font-weight:700;color:var(--text-dim)}
@@ -14,6 +14,7 @@
 .db-on{display:inline-flex;align-items:center;gap:7px;font-size:.74rem;color:var(--text-soft)}
 .db-on i{width:7px;height:7px;border-radius:50%;background:var(--emerald);box-shadow:0 0 0 3px color-mix(in srgb,var(--emerald) 20%,transparent)}
 .db-grid{display:grid;grid-template-columns:minmax(0,1.62fr) minmax(300px,1fr);gap:20px;align-items:start}
+.db-grid.solo{grid-template-columns:minmax(0,1fr)}
 .db-col{display:flex;flex-direction:column;gap:20px;min-width:0}
 .db-sec{display:flex;flex-direction:column;gap:10px;min-width:0}
 .db-sh{display:flex;align-items:center;gap:10px;min-height:28px}
@@ -69,7 +70,7 @@
 .db-none b{font:600 1.1rem var(--font-display)}
 .db-none p{margin:2px 0 0;font-size:.8rem;color:var(--text-muted)}
 /* characters */
-.db-chars{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.db-chars{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}
 .db-ch{display:flex;flex-direction:column;gap:12px;padding:14px;border-radius:var(--r-lg);background:var(--surface-1);border:1px solid var(--border);transition:border-color .15s,transform .15s var(--ease);width:100%;text-align:left}
 .db-ch:hover{border-color:var(--border-strong);transform:translateY(-1px)}
 .db-ch-h{display:flex;align-items:center;gap:12px;min-width:0}
@@ -102,7 +103,7 @@
 .db-tr>.db-bars{width:210px}
 .db-tr>.db-chip{width:132px;min-width:0;justify-content:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* groups */
-.db-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.db-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
 .db-g{display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:var(--r-lg);background:var(--surface-1);border:1px solid var(--border);min-width:0}
 .db-g.in{border-color:color-mix(in srgb,var(--emerald) 30%,transparent);background:color-mix(in srgb,var(--emerald) 4%,var(--surface-1))}
 .db-g-k{display:flex;align-items:center;gap:8px;font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--text-dim);min-width:0}

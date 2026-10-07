@@ -1680,12 +1680,14 @@ export function getWeaponDegatsParts(c, item = {}, fallbackKey = 'force') {
     : [item.degatsStat || fallbackKey];
   const statMod = statsArr.reduce((sum, key) => sum + getMod(c, key), 0);
   const maitriseBonus = _getMaitriseBonus(c, item);
+  const setDmgBonus = getArmorSetData(c).modifiers.damageBonus || 0;
   const statLabel = statsArr.map(k => _STAT_LABELS[k] || k).join(' + ');
   return {
-    roll:           `${item.degats} ${modStr(statMod + maitriseBonus)}`,
+    roll:           `${item.degats} ${modStr(statMod + maitriseBonus + setDmgBonus)}`,
     statLabel,
     statMod,
     maitriseBonus,
+    setDmgBonus,
   };
 }
 

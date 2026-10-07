@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getArmorSetData, normalizeArmorType } from '../assets/js/shared/equipment-utils.js';
+import { getArmorSetData, normalizeArmorType, getCharFullDamageProfile } from '../assets/js/shared/equipment-utils.js';
 import { LEGACY_EQUIPMENT_SLOTS, setEquipmentSlotsForTests } from '../assets/js/shared/equipment-slots.js';
 import { DEFAULT_ARMOR_SETS, LEGACY_ARMOR_SETS, getArmorTypeOptions, setArmorSetSettingsForTests } from '../assets/js/shared/armor-set-settings.js';
 
@@ -48,6 +48,86 @@ test('armor set : un type mixte ou incomplet ne donne aucun bonus', () => {
   assert.equal(incomplete.isComplete, false);
 });
 
+test('armor set B : un palier partiel s’applique sans set complet, une autre pièce ne casse pas', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS); // 3 emplacements d'armure
+  setArmorSetSettingsForTests([
+    { id: 'lourd', type: 'Lourde', enabled: true, cumulative: true, tiers: [
+      { pieces: 2, effects: [{ kind: 'toucher', value: 2 }] },
+      { pieces: 3, effects: [{ kind: 'dr', value: 2 }] },
+    ] },
+  ]);
+  // 2 pièces Lourde + 1 autre type : le palier 2 est atteint (la pièce d'un
+  // autre type ne casse plus le set), le palier 3 non.
+  const partial = getArmorSetData({ equipement: {
+    'Tête': { nom: 'Casque', typeArmure: 'Lourde' },
+    Torse: { nom: 'Plastron', typeArmure: 'Lourde' },
+    Bottes: { nom: 'Bottes légères', typeArmure: 'Légère' },
+  } });
+  assert.equal(partial.isActive, true);
+  assert.equal(partial.modifiers.toucherBonus, 2);
+  assert.equal(partial.modifiers.damageReduction, 0);
+
+  // 3 pièces Lourde : les deux paliers cumulés s'appliquent.
+  const full = getArmorSetData({ equipement: {
+    'Tête': { nom: 'Casque', typeArmure: 'Lourde' },
+    Torse: { nom: 'Plastron', typeArmure: 'Lourde' },
+    Bottes: { nom: 'Grèves', typeArmure: 'Lourde' },
+  } });
+  assert.equal(full.modifiers.toucherBonus, 2);
+  assert.equal(full.modifiers.damageReduction, 2);
+});
+
+test('armor set B : les nouveaux effets (ca/dmg/move/save/resist) sont agrégés', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  setArmorSetSettingsForTests([
+    { id: 'plaque', type: 'Plaque', enabled: true, cumulative: true, tiers: [{ pieces: 2, effects: [
+      { kind: 'ca', value: 2 },
+      { kind: 'dmg', value: 1 },
+      { kind: 'move', value: 1.5 },
+      { kind: 'save', stat: 'constitution', value: 2 },
+      { kind: 'resist', element: 'feu' },
+    ] }] },
+  ]);
+  const data = getArmorSetData({ equipement: {
+    'Tête': { nom: 'Heaume', typeArmure: 'Plaque' },
+    Torse: { nom: 'Plastron', typeArmure: 'Plaque' },
+  } });
+  assert.equal(data.isActive, true);
+  assert.equal(data.modifiers.caBonus, 2);
+  assert.equal(data.modifiers.damageBonus, 1);
+  assert.equal(data.modifiers.moveDelta, 1.5);
+  assert.equal(data.modifiers.saveBonus.constitution, 2);
+  assert.deepEqual(data.modifiers.resistances, ['feu']);
+});
+
+test('armor set B : une résistance de set entre dans le profil de dégâts', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  setArmorSetSettingsForTests([
+    { id: 'plaque', type: 'Plaque', enabled: true, cumulative: true, tiers: [{ pieces: 2, effects: [{ kind: 'resist', element: 'feu' }] }] },
+  ]);
+  const prof = getCharFullDamageProfile({ equipement: {
+    'Tête': { nom: 'Heaume', typeArmure: 'Plaque' },
+    Torse: { nom: 'Plastron', typeArmure: 'Plaque' },
+  } });
+  assert.ok(prof && prof.resistances.includes('feu'));
+});
+
+test('armor set B : plusieurs sets actifs en même temps s’agrègent', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  setArmorSetSettingsForTests([
+    { id: 'a', type: 'Alpha', enabled: true, cumulative: true, tiers: [{ pieces: 1, effects: [{ kind: 'toucher', value: 1 }] }] },
+    { id: 'b', type: 'Beta', enabled: true, cumulative: true, tiers: [{ pieces: 1, effects: [{ kind: 'pm', value: -1 }] }] },
+  ]);
+  const data = getArmorSetData({ equipement: {
+    'Tête': { nom: 'A', typeArmure: 'Alpha' },
+    Torse: { nom: 'B', typeArmure: 'Beta' },
+  } });
+  assert.equal(data.isActive, true);
+  assert.equal(data.activeSets.length, 2);
+  assert.equal(data.modifiers.toucherBonus, 1);
+  assert.equal(data.modifiers.spellPmDelta, -1);
+});
+
 test('armor set : les types et effets personnalisés sont pilotés par aventure', () => {
   setEquipmentSlotsForTests([
     { id: 'Arme', label: 'Arme', kind: 'weapon', role: 'primaryWeapon' },
@@ -79,6 +159,11 @@ test('armor set : les types et effets personnalisés sont pilotés par aventure'
     spellPmDelta: 1,
     toucherBonus: -1,
     damageReduction: 3,
+    caBonus: 0,
+    damageBonus: 0,
+    moveDelta: 0,
+    saveBonus: {},
+    resistances: [],
     rollImpact: { statModes: {}, skillModes: [] },
   });
 });

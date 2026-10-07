@@ -199,7 +199,7 @@ import {
   _renderMiniSheet, _vttToggleMiniSheet, _vttSelectMiniChar, _msCanEdit, _msCanEditVitals, _msFlushNoteDrafts,
   _vttMsTab, _vttMsToggleCollapsed, _vttMsAttackSlot, _vttMsAddNote, _vttMsToggleNote,
   _vttMsDeleteNote, _vttMsEquip, _vttMsUnequip, _vttMsUnequipAll, _vttMsEquipPicker,
-  _vttMsSlotChange, _vttMsDeleteItem, _vttMsSendPicker, _vttMsConfirmSend,
+  _vttMsSlotChange, _vttMsDeleteItem, _vttMsRecycle, _vttMsSendPicker, _vttMsConfirmSend,
   _vttMsInvSearch, _vttMsInvCat, _vttMsInvClear, _vttMsSortSearch, _vttMsSortCat,
   _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft, _vttMsCraftAsk, _vttMsCraftCancel, _vttForgeOpen,
   _vttMsCraftSearch, _vttMsCraftClear,
@@ -11210,7 +11210,9 @@ async function _vttRollAttack() {
             const d1 = Math.floor(Math.random() * 20) + 1;
             const d2 = rollMode === 'advantage' || rollMode === 'disadvantage' ? Math.floor(Math.random() * 20) + 1 : null;
             const d20 = rollMode === 'advantage' ? Math.max(d1, d2) : rollMode === 'disadvantage' ? Math.min(d1, d2) : d1;
-            const mod = _tokenStatMod(curTgtData, saveStat);
+            // Bonus de sauvegarde accordé par un set d'armure actif (effet « save »).
+            const setSaveBonus = char ? (getArmorSetData(char).modifiers.saveBonus?.[saveStat] || 0) : 0;
+            const mod = _tokenStatMod(curTgtData, saveStat) + setSaveBonus;
             const total = d20 + mod;
             passed = d20 === 20 || (d20 !== 1 && total >= saveDC);
             saveResult = { saveStat, saveDC, d20, d20rolls: d2 == null ? null : [d1, d2], mod, total, rollMode };
@@ -16631,6 +16633,7 @@ export const VTT_ACTIONS = {
   _vttMsCraftSearch,
   _vttMsCraftClear,
   _vttMsDeleteItem,
+  _vttMsRecycle,
   _vttMsDeleteNote,
   _vttMsEquip,
   _vttMsEquipPicker,

@@ -49,6 +49,7 @@ function _merge(stored = {}) {
     ddParPalier:          { ...d.ddParPalier,          ...(stored.ddParPalier          || {}) },
     quantiteParPalier:    { ...d.quantiteParPalier,    ...(stored.quantiteParPalier    || {}) },
     refundFractionOnFail: stored.refundFractionOnFail ?? d.refundFractionOnFail,
+    recycleFraction:      stored.recycleFraction      ?? d.recycleFraction,
     // Recettes : par type d'objet × palier → matériau requis.
     // { '<type>': { '1': { itemId, quantite }, '2': {…}, '3': {…} } }
     recipes:              { ...(stored.recipes || {}) },
@@ -205,6 +206,17 @@ function _renderModal() {
         <p class="sh-admin-section-hint" style="margin-top:6px">0 % = perte totale (défaut, loot généreux).</p>
       </div>
 
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">🔧 Démontage (recyclage)</div>
+        <div class="sh-admin-row-line">
+          <span class="sh-admin-row-lbl">Matériaux récupérés en démontant un objet</span>
+          <input type="number" class="sh-admin-row-input small" value="${Math.round((s.recycleFraction || 0) * 100)}" min="0" max="100" step="5"
+            data-input="_craftRecycle">
+          <span class="sh-admin-row-unit">%</span>
+        </div>
+        <p class="sh-admin-section-hint" style="margin-top:6px">Fraction de la recette du palier rendue. Le démontage débloque aussi les traits de l'objet (fragments réutilisables au Forgeron).</p>
+      </div>
+
     </div>
     <div class="sh-admin-footer">
       <button class="btn btn-outline btn-sm" data-action="_craftStgReset">↻ Restaurer défauts</button>
@@ -255,6 +267,7 @@ registerActions({
   _craftCat:   (el) => _set(el.dataset.field, el.value),
   _craftNum:   (el) => _set(el.dataset.field, Math.max(0, parseInt(el.value, 10) || 0)),
   _craftRefund:(el) => _set('refundFractionOnFail', Math.max(0, Math.min(100, parseInt(el.value, 10) || 0)) / 100),
+  _craftRecycle:(el) => _set('recycleFraction', Math.max(0, Math.min(100, parseInt(el.value, 10) || 0)) / 100),
   _craftRecipeMat: (el) => _setRecipe(el.dataset.type, el.dataset.tier, 'itemId', el.value),
   _craftRecipeQty: (el) => _setRecipe(el.dataset.type, el.dataset.tier, 'quantite', el.value ? Math.max(1, parseInt(el.value, 10) || 0) : null),
 });

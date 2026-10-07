@@ -7,6 +7,16 @@
 // ── Métadonnées des statistiques ──────────────────────────────────────────────
 import { evaluateCharacterFormula, getCharacterRules } from './character-rules.js';
 import { getSecondaryWeaponSlotId } from './equipment-slots.js';
+// Cycle assumé char-stats ↔ equipment-utils : usage UNIQUEMENT à l'exécution
+// (jamais au chargement) et `getArmorSetData` est une déclaration de fonction
+// hoistée → le binding existe même si equipment-utils finit d'évaluer après.
+import { getArmorSetData } from './equipment-utils.js';
+
+// Modificateurs plats accordés par les sets d'armure actifs (effets de palier).
+// Enveloppé : si les réglages de set ne sont pas chargés, on ne casse pas le calcul.
+function _armorSetMods(c) {
+  try { return getArmorSetData(c)?.modifiers || null; } catch { return null; }
+}
 
 export const STAT_META = [
   { key: 'force',        label: 'Force',        color: '#ff6b6b' },
@@ -232,7 +242,7 @@ export function calcCA(c) {
   const dexMod = formulaStats.dexMod;
   const armorDexMod = dexMod;
   const fallback = caBase + dexMod + caEquip + caBonusDerived + bouclierFallback;
-  return evaluateCharacterFormula(rules.formulas.ca, {
+  const ca = evaluateCharacterFormula(rules.formulas.ca, {
     ...formulaStats,
     armorBase: caBase,
     armorDexMod,
@@ -242,6 +252,9 @@ export function calcCA(c) {
     shieldBonus: bouclierFallback,
     level: c?.niveau || 1,
   }, fallback);
+  // Bonus de CA d'un set d'armure actif (effet de palier « ca »), ajouté à plat
+  // pour rester indépendant d'une formule de CA personnalisée par l'aventure.
+  return ca + (_armorSetMods(c)?.caBonus || 0);
 }
 
 /** Vitesse de déplacement (base + bonus items équipés). */
@@ -251,12 +264,14 @@ export function calcVitesse(c) {
   const forceMod = formulaStats.forceMod;
   const bonus = computeEquipDerivedBonus(c?.equipement).vitesseBonus;
   const fallback = 3 + forceMod + bonus;
-  return Math.max(0, evaluateCharacterFormula(rules.formulas.speed, {
+  const speed = evaluateCharacterFormula(rules.formulas.speed, {
     ...formulaStats,
     forceMod,
     equipBonus: bonus,
     level: c?.niveau || 1,
-  }, fallback));
+  }, fallback);
+  // Déplacement accordé par un set d'armure actif (effet de palier « move »).
+  return Math.max(0, speed + (_armorSetMods(c)?.moveDelta || 0));
 }
 
 /** Initiative (mod Dex + bonus items équipés). */
