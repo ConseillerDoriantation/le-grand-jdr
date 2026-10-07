@@ -6,7 +6,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { loadCollection, addToCol, updateInCol, saveDoc, deleteFromCol, getDocData, getCachedCollection } from '../data/firestore.js';
 import { confirmDelete, tryDoc } from '../shared/crud.js';
-import { navigate } from '../core/navigation.js';
+import { navigate, _ensureFeatureCss } from '../core/navigation.js';
 import { openModal, pushModal, popModal, closeModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { STATE } from '../core/state.js';
@@ -20,6 +20,7 @@ import { characterAvatarHtml } from '../shared/portraits.js';
 import { storyParticipantsFromGroups, toggleQuestParticipant, dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { removeQuestAgendaSessions } from '../shared/agenda-sessions.js';
+import { openMissionSheet } from './story-mission-sheet.js';
 import { watchPageCollection } from '../shared/realtime.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
@@ -1944,7 +1945,7 @@ function _renderTimeline(items) {
 }
 
 // ── MODAL DÉTAIL ──────────────────────────────────────────────────────────────
-async function openStoryDetail(id) {
+async function _openStoryDetailLegacy(id) {
   const items = getCachedCollection('story') || await loadCollection('story');
   const item = items.find(i => i.id === id); if (!item) return;
   const st = stCfg(item);
@@ -2228,7 +2229,7 @@ async function openStoryDetail(id) {
 }
 
 // ── MODAL AJOUT / ÉDITION ─────────────────────────────────────────────────────
-async function openStoryModal(item = null) {
+async function _openStoryModalLegacy(item = null) {
   _stCropper?.destroy(); _stCropper = null;
   const acteActif   = STORE.storyActe || 'Acte I';
   const allItems    = await loadCollection('story');
@@ -2521,6 +2522,17 @@ async function openStoryModal(item = null) {
       else hero.style.backgroundImage = '';
     },
   });
+}
+
+// La fiche mission est désormais l'unique point d'entrée en lecture comme en
+// édition. Les deux anciennes implémentations restent temporairement dans ce
+// fichier pour faciliter la comparaison/régression, mais ne sont plus appelées.
+async function openStoryDetail(id) {
+  await _ensureFeatureCss('story');
+  return openMissionSheet(id || null, { onDeleted: () => PAGES.story?.() });
+}
+async function openStoryModal(item = null) {
+  return openStoryDetail(typeof item === 'string' ? item : item?.id || null);
 }
 
 // Toggle visuel d'une card lien (mission → mission). Au niveau module pour être
