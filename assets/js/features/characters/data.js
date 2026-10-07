@@ -2,7 +2,7 @@ import { getDocData, saveDoc, loadCollection, updateInCol } from '../../data/fir
 import { registerActions } from '../../core/actions.js';
 import { openModal, closeModal, closeModalDirect, confirmModal, setModalCloseGuard } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
-import { loadWeaponFormats, saveWeaponFormats, normalizeWeaponTechnique } from '../../shared/weapon-formats.js';
+import { loadWeaponFormats, saveWeaponFormats, normalizeWeaponTechnique, normalizeWeaponFormat } from '../../shared/weapon-formats.js';
 import { loadDamageTypes, saveDamageTypes, damageTypeEmitsLight } from '../../shared/damage-types.js';
 import { CONDITION_DEFAULT_LIBRARY, loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
@@ -13,7 +13,7 @@ import { openEquipmentSlotsAdmin, getPrimaryWeaponSlotId, getSecondaryWeaponSlot
 import { openArmorSetsAdmin } from '../../shared/armor-set-settings.js';
 import { openSpellSystemAdmin } from '../../shared/spell-system.js';
 import { defaultCombatStyles, detectCombatStyle as detectCombatStyleRule, normalizeCombatStyles } from '../../shared/combat-styles.js';
-import { WEAPON_HANDS_OPTIONS, hasWeaponDefaults, missingWeaponFamilies, normalizeWeaponDefaults, resolveWeaponFamily, weaponDefaultsSummary, weaponHandsLabel } from '../../shared/weapon-family.js';
+import { WEAPON_HANDS_OPTIONS, hasWeaponDefaults, missingWeaponFamilies, normalizeWeaponDefaults, resolveWeaponFamily, weaponDefaultsSummary, weaponHandsLabel, normalizeWeaponFamilyKey } from '../../shared/weapon-family.js';
 import { DEFAULT_UNARMED, isWeaponLikeItem, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, resolveEquippedInventoryIndices, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
 export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits };
 
@@ -25,9 +25,6 @@ export let _combatStyles = null; // cache en mémoire
 export let _weaponFormats = null; // cache en mémoire (partagé avec weapon-formats.js)
 let _damageTypes = null; // cache local types de dégâts
 let _techniqueConditions = CONDITION_DEFAULT_LIBRARY;
-let _wfTechniqueFormatIndex = -1;
-let _wfTechniqueDrafts = [];
-let _wfTechniqueDirty = false;
 let _dtTechniqueTypeIndex = -1;
 let _dtTechniqueDrafts = [];
 let _dtTechniqueDirty = false;
@@ -304,11 +301,86 @@ function _backToStylesList() {
 }
 
 // ══════════════════════════════════════════════
-// FORMATS D'ARMES — Admin
+// FORMATS D'ARMES — Admin (modale maître/détail, brouillon unique)
 // ══════════════════════════════════════════════
-// Armes de la boutique (catalogue) : sert à la migration « format de maniement →
-// type d'arme ». Collection session-live : aucune lecture supplémentaire.
+// Armes de la boutique (catalogue) : compteur par type + migration « format de
+// maniement → type d'arme ». Collection session-live : aucune lecture en plus.
 let _wfShopWeapons = [];
+
+// — État : un SEUL brouillon pour tout (nature, défauts, techniques). La bascule
+//   physique/magique, l'ajout, la suppression et les techniques ne sont plus
+//   enregistrés au fil de l'eau (sauf les actions de migration, cf. §migration).
+let _wfSaved = [];       // référence enregistrée (clone normalisé)
+let _wfDraft = [];       // brouillon courant
+let _wfSelId = null;     // id du type sélectionné
+let _wfOpenTech = null;  // id de la technique ouverte (accordéon)
+let _wfAsk = null;       // 'close' | 'del' | null
+let _wfMounted = false;
+
+const _wfCloneList = v => (v || []).map(f => normalizeWeaponFormat({ ...f }));
+const _wfCur = () => _wfDraft.find(f => f.id === _wfSelId) || _wfDraft[0] || null;
+const _wfIsLegacy = f => /^arme\s/i.test(f?.label || '') || f?.legacy === true;
+const _WF_DEGATS_RE = /^\d*d\d+(?:[+-]\d+)?$/i;
+
+// ── Icônes (sprite injecté à l'ouverture) ──
+const _WF_SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="wf-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+<symbol id="wf-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+<symbol id="wf-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+<symbol id="wf-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="wf-dup" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+<symbol id="wf-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+<symbol id="wf-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="wf-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></symbol>
+</defs></svg>`;
+const _wfIc = id => `<svg class="wf-ic"><use href="#wf-${id}"></use></svg>`;
+
+// ── Métadonnées des modificateurs de technique (résumé + tag d'équilibrage) ──
+// `on(t)` : actif = champ ≠ défaut. `good` : avantage (vert) vs contrepartie.
+// `txt(t)` : fragment de résumé. Réutilisé par la simulation (phase C).
+const _WF_STAT_SHORT = { force: 'FOR', dexterite: 'DEX', constitution: 'CON', intelligence: 'INT', sagesse: 'SAG', charisme: 'CHA' };
+const _wfDmgLabel = id => (_damageTypes || []).find(d => d.id === id)?.label || id || '';
+const _wfCondLabel = id => (_techniqueConditions || []).find(c => c.id === id)?.label || id || '';
+const _WF_MOVE_LABEL = { push: 'repousse', pull: 'attire' };
+const _WF_MODS = [
+  { badge: 'TCH', good: true,  on: t => (t.attackModifier || 0) !== 0, txt: t => `toucher ${t.attackModifier > 0 ? '+' : '−'}${Math.abs(t.attackModifier)}` },
+  { badge: 'DÉ',  good: true,  on: t => (t.extraWeaponDice || 0) > 0, txt: t => `+${t.extraWeaponDice} dé d’arme` },
+  { badge: 'FML', good: true,  on: t => !!t.extraDamageFormula, txt: t => `+${t.extraDamageFormula}${t.damageTypeId ? ' ' + _wfDmgLabel(t.damageTypeId) : ''}` },
+  { badge: '+DG', good: true,  on: t => (t.extraDamageFlat || 0) > 0, txt: t => `+${t.extraDamageFlat} dégâts` },
+  { badge: 'MOD', good: true,  on: t => !!t.addWeaponModifier, txt: () => '+ mod d’arme' },
+  { badge: 'CRT', good: true,  on: t => (t.critRangeBonus || 0) > 0, txt: t => `critique ${20 - t.critRangeBonus}–20` },
+  { badge: 'PRC', good: true,  on: t => (t.armorIgnorePct || 0) > 0, txt: t => `ignore ${t.armorIgnorePct}% CA` },
+  { badge: 'PRG', good: true,  on: t => (t.scalingMode || 'none') !== 'none', txt: t => 'progression' },
+  { badge: 'ZON', good: true,  on: t => (t.blastRadius || 0) > 0, txt: t => `zone ${t.blastRadius}` },
+  { badge: 'ÉTT', good: true,  on: t => !!t.conditionId, txt: t => _wfCondLabel(t.conditionId) },
+  { badge: 'DEP', good: true,  on: t => (t.forcedMovement || 'none') !== 'none', txt: t => `${_WF_MOVE_LABEL[t.forcedMovement] || 'déplace'} ${t.forcedMovementDistance || 1}` },
+  { badge: 'CA',  good: false, on: t => (t.defenseBonus || 0) !== 0, txt: t => `CA cible +${t.defenseBonus}` },
+  { badge: 'AV',  good: false, on: t => !!t.requiresAdvantage, txt: () => 'avantage requis' },
+  { badge: '−DG', good: false, on: t => (t.damageMalusFlat || 0) > 0, txt: t => `−${t.damageMalusFlat} dégâts` },
+  { badge: 'RAT', good: false, on: t => (t.missSelfCaMalus || 0) > 0, txt: t => `raté : CA −${t.missSelfCaMalus}` },
+  { badge: 'RAT', good: false, on: t => !!t.missSelfConditionId, txt: t => `raté : ${_wfCondLabel(t.missSelfConditionId)}` },
+  { badge: 'CÔT', good: false, on: t => (t.resourceType || 'none') !== 'none' && (t.resourceCost || 0) > 0, txt: t => `${t.resourceCost} ${({ pm: 'PM', pv: 'PV', or: 'or' })[t.resourceType] || ''}`.trim() },
+  { badge: 'LIM', good: false, on: t => (t.usageScope || 'none') !== 'none', txt: t => `${t.maxUses || 1}/${t.usageScope === 'session' ? 'session' : 'combat'}` },
+  { badge: 'RCH', good: false, on: t => (t.cooldownRounds || 0) > 0, txt: t => `recharge ${t.cooldownRounds} t` },
+];
+function _wfTechActiveMods(t) { return _WF_MODS.filter(m => m.on(t)); }
+function _wfTechSummary(t) {
+  const parts = _wfTechActiveMods(t).map(m => m.txt(t)).filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'Aucun effet';
+}
+function _wfTechFormulaBad(t) {
+  return [t.extraDamageFormula, t.scalingFormula].some(f => f && !_WF_DEGATS_RE.test(String(f).replace(/\s+/g, '')));
+}
+// Tag d'équilibrage : 'ko' (à corriger) · 'warn' (déséquilibré) · 'ok' (sans effet) · ''.
+function _wfTechTag(t) {
+  if (!String(t.label || '').trim() || _wfTechFormulaBad(t)) return { cls: 'ko', txt: 'À corriger' };
+  const on = _wfTechActiveMods(t);
+  if (!on.length) return { cls: 'ok', txt: 'Sans effet' };
+  const gain = on.filter(m => m.good).length, cout = on.length - gain;
+  if (!cout) return { cls: 'warn', txt: 'Sans contrepartie' };
+  if (!gain) return { cls: 'warn', txt: 'Que des contreparties' };
+  return null;
+}
 
 export async function openWeaponFormatsAdmin() {
   let shopItems = [];
@@ -316,17 +388,44 @@ export async function openWeaponFormatsAdmin() {
     loadWeaponFormats(), loadDamageTypes(), loadConditionLibrary(), loadCollection('shop').catch(() => []),
   ]);
   _wfShopWeapons = (shopItems || []).filter(isWeaponLikeItem);
-  _renderWeaponFormatsModal(_weaponFormats);
+  _wfSaved = _wfCloneList(_weaponFormats);
+  _wfDraft = _wfCloneList(_weaponFormats);
+  _wfSelId = _wfDraft[0]?.id || null;
+  _wfOpenTech = _wfCur()?.techniques?.[0]?.id || null;
+  _wfAsk = null;
+  _renderWeaponFormatsModal();
+  _wfMount();
 }
 
-// État de la migration : types à créer, armes à mettre à jour, armes sans type.
-function _wfMigrationState(formats) {
-  const missing = missingWeaponFamilies(formats, _wfShopWeapons);
+// ── Compteur d'armes de la boutique par type (resolveWeaponFamily) ──
+function _wfCount(f) {
+  if (!f || !_wfShopWeapons.length) return 0;
+  return _wfShopWeapons.filter(w => resolveWeaponFamily(_wfDraft, w)?.id === f.id).length;
+}
+
+// ── Validation continue ──
+function _wfTypeErrs(f) {
+  const e = [];
+  if (!String(f.label || '').trim()) e.push('name');
+  else if (_wfDraft.some(o => o !== f && normalizeWeaponFamilyKey(o.label) === normalizeWeaponFamilyKey(f.label))) e.push('dupname');
+  const deg = String(f.defaults?.degats || '').replace(/\s+/g, '');
+  if (deg && !_WF_DEGATS_RE.test(deg)) e.push('degats');
+  if ((f.techniques || []).some(t => !String(t.label || '').trim() || _wfTechFormulaBad(t))) e.push('tech');
+  return e;
+}
+const _wfAllErr = () => _wfDraft.filter(f => _wfTypeErrs(f).length);
+const _wfDirty = () => JSON.stringify(_wfDraft) !== JSON.stringify(_wfSaved);
+
+// ══════════════════════════════════════════════
+// Migration (actions immédiates : brouillon + référence enregistrée)
+// ══════════════════════════════════════════════
+function _wfMigrationState() {
+  const missing = missingWeaponFamilies(_wfDraft, _wfShopWeapons);
   const toUpdate = [];
   const untyped = [];
   for (const item of _wfShopWeapons) {
-    const family = resolveWeaponFamily(formats, item);
-    if (!family || /^arme\s/i.test(family.label)) { untyped.push(item); continue; }
+    const family = resolveWeaponFamily(_wfDraft, item);
+    if (!family || _wfIsLegacy(family)) { untyped.push(item); continue; }
     if (item.format !== family.label || item.formatId !== family.id || item.sousType !== family.label || !item.mains) {
       toUpdate.push({ item, family });
     }
@@ -334,107 +433,45 @@ function _wfMigrationState(formats) {
   return { missing, toUpdate, untyped };
 }
 
-function _wfMigrationPanel(formats) {
+function _wfMigrationHtml() {
   if (!_wfShopWeapons.length) return '';
-  const { missing, toUpdate, untyped } = _wfMigrationState(formats);
-  const legacy = formats.filter(f => /^arme\s/i.test(f.label));
+  const { missing, toUpdate, untyped } = _wfMigrationState();
+  const legacy = _wfDraft.filter(_wfIsLegacy);
   if (!missing.length && !toUpdate.length && !untyped.length && !legacy.length) return '';
-  return `
-    <div class="sh-admin-section wf-migration">
-      <div class="sh-admin-section-title">🔁 Passage aux types d’arme</div>
-      <p class="sh-admin-intro">Les anciens formats de maniement (1M / 2M / distance) sont remplacés par des types d’arme. Le maniement devient un champ de chaque arme.</p>
-      <ol class="wf-migration-steps">
-        <li>${missing.length
-          ? `Créer <b>${missing.length}</b> type${missing.length > 1 ? 's' : ''} depuis les armes existantes : ${missing.map(f => `${_esc(f.label)}${f.isMagic ? ' 🔮' : ''}`).join(', ')}.
-             <button class="btn btn-gold btn-sm" data-action="_importWeaponFamilies">Créer</button>`
-          : '✅ Tous les types saisis sur les armes existent.'}</li>
-        <li>${toUpdate.length
-          ? `Mettre à jour <b>${toUpdate.length}</b> arme${toUpdate.length > 1 ? 's' : ''} de la boutique (type + maniement).
-             <button class="btn btn-gold btn-sm" data-action="_convertShopWeapons">Mettre à jour</button>`
-          : '✅ Les armes de la boutique sont à jour.'}</li>
-        <li>${legacy.length
-          ? `Réattribuer les techniques des anciens formats (${legacy.map(f => _esc(f.label)).join(', ')}) aux bons types, puis supprimer ces formats.`
-          : '✅ Aucun ancien format restant.'}</li>
-      </ol>
-      ${untyped.length ? `<div class="wf-migration-warn">⚠️ ${untyped.length} arme${untyped.length > 1 ? 's' : ''} sans type reconnu, à corriger dans la boutique : ${untyped.slice(0, 12).map(i => _esc(i.nom || '?')).join(', ')}${untyped.length > 12 ? '…' : ''}</div>` : ''}
-    </div>`;
+  const step = (ok, body) => `<div class="wf-mig-s${ok ? ' ok' : ''}"><i>${ok ? '✓' : ''}</i><div>${body}</div></div>`;
+  return `<div class="wf-mig"><b>🔁 Passage aux types d’arme</b>
+    <p>Les anciens formats de maniement sont remplacés par des types d’arme ; le maniement devient un champ de chaque arme.</p>
+    ${step(!missing.length, missing.length
+      ? `Créer <b>${missing.length}</b> type${missing.length > 1 ? 's' : ''} : ${missing.map(f => `${_esc(f.label)}${f.isMagic ? ' 🔮' : ''}`).join(', ')}.<br><button type="button" class="wf-btn gh sm" data-wf-mig="import">Créer</button>`
+      : 'Tous les types saisis sur les armes existent.')}
+    ${step(!toUpdate.length, toUpdate.length
+      ? `Mettre à jour <b>${toUpdate.length}</b> arme${toUpdate.length > 1 ? 's' : ''} (type + maniement).<br><button type="button" class="wf-btn gh sm" data-wf-mig="convert">Mettre à jour</button>`
+      : 'Les armes de la boutique sont à jour.')}
+    ${step(!legacy.length, legacy.length
+      ? `Réattribuer les techniques des anciens formats, puis supprimer : ${legacy.map(f => _esc(f.label)).join(', ')}.`
+      : 'Aucun ancien format restant.')}
+    ${untyped.length ? `<p style="color:var(--amber)">⚠️ ${untyped.length} arme${untyped.length > 1 ? 's' : ''} sans type reconnu : ${untyped.slice(0, 10).map(i => _esc(i.nom || '?')).join(', ')}${untyped.length > 10 ? '…' : ''}</p>` : ''}
+  </div>`;
 }
 
-// ── Valeurs par défaut d'un type d'arme (pré-remplissage boutique) ──
-function _editWeaponFormatDefaults(i) {
-  const format = _weaponFormats?.[i];
-  if (!format) return;
-  const d = normalizeWeaponDefaults(format.defaults);
-  const statOpts = (sel, empty) => `${empty ? `<option value="">${empty}</option>` : ''}${_TECH_STAT_OPTIONS.map(([v, l]) =>
-    `<option value="${v}" ${sel === v ? 'selected' : ''}>${l}</option>`).join('')}`;
-  openModal('', `
-    <div class="sh-admin-modal is-formats">
-      <div class="sh-admin-head">
-        <button class="wf-tech-back" data-action="_backToWeaponFormats" title="Retour aux types d’arme">←</button>
-        <div class="sh-admin-head-ico">📋</div>
-        <div class="sh-admin-head-title">
-          <h2>Défauts · ${_esc(format.label)}</h2>
-          <small>Pré-remplis dans la boutique quand tu choisis ce type ; tout reste modifiable sur l’arme.</small>
-        </div>
-        <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
-      </div>
-      <div class="sh-admin-body">
-        <div class="tech-builder-grid">
-          <label><span>Dégâts</span><input id="wfd-degats" value="${_esc(d.degats)}" maxlength="30" placeholder="1d6"></label>
-          <label><span>Stat de dégâts</span><select id="wfd-stat1">${statOpts(d.degatsStats[0] || '', 'Aucune')}</select></label>
-          <label><span>2e stat (optionnel)</span><select id="wfd-stat2">${statOpts(d.degatsStats[1] || '', 'Aucune')}</select></label>
-          <label><span>Stat de toucher</span><select id="wfd-toucher">${statOpts(d.toucherStat, 'Aucune')}</select></label>
-          <label><span>Portée</span><input id="wfd-portee" value="${_esc(d.portee)}" maxlength="30" placeholder="1, 1m50, 18/54…"></label>
-          <label><span>Maniement</span><select id="wfd-mains"><option value="">Non défini</option>${WEAPON_HANDS_OPTIONS.map(v => `<option value="${v}" ${d.mains === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
-          <label><span>Bonus de CA</span><input type="number" id="wfd-ca" min="-10" max="10" value="${d.caBonus || 0}"></label>
-        </div>
-        <small class="tech-builder-note">Le pré-remplissage ne touche que les champs vides (ou encore remplis par un autre type) : une valeur saisie à la main n’est jamais écrasée.</small>
-      </div>
-      <div class="sh-admin-footer">
-        <button class="btn btn-outline btn-sm" data-action="_backToWeaponFormats">Retour</button>
-        <div class="sh-admin-footer-spacer"></div>
-        <button class="btn btn-gold" data-action="_saveWeaponFormatDefaults" data-idx="${i}">Enregistrer</button>
-      </div>
-    </div>`);
-}
-
-async function _saveWeaponFormatDefaults(i) {
-  const formats = [...(_weaponFormats || [])];
-  if (!formats[i]) return;
-  const val = id => document.getElementById(id)?.value || '';
-  const degats = val('wfd-degats').trim();
-  if (degats && !/^\d*d\d+(?:[+-]\d+)?$/i.test(degats.replace(/\s+/g, ''))) {
-    showNotif('Formule de dégâts invalide (exemple : 1d6).', 'error'); return;
-  }
-  formats[i] = { ...formats[i], defaults: normalizeWeaponDefaults({
-    degats, degatsStats: [val('wfd-stat1'), val('wfd-stat2')].filter(Boolean),
-    toucherStat: val('wfd-toucher'), portee: val('wfd-portee'), mains: val('wfd-mains'), caBonus: val('wfd-ca'),
-  }) };
-  await saveWeaponFormats(formats);
-  _weaponFormats = formats;
-  showNotif(`Défauts de « ${formats[i].label} » enregistrés.`, 'success');
-  _renderWeaponFormatsModal(formats);
-}
-
-async function _importWeaponFamilies() {
-  const formats = [...(_weaponFormats || [])];
-  const missing = missingWeaponFamilies(formats, _wfShopWeapons);
+async function _wfMigImport() {
+  const missing = missingWeaponFamilies(_wfDraft, _wfShopWeapons);
   if (!missing.length) return;
   const stamp = Date.now();
-  missing.forEach((f, i) => formats.push({ id: `type_${stamp}_${i}`, label: f.label, damageType: f.damageType, isMagic: f.isMagic, techniques: [] }));
-  await saveWeaponFormats(formats);
-  _weaponFormats = formats;
+  missing.forEach((f, i) => {
+    const created = normalizeWeaponFormat({ id: `type_${stamp}_${i}`, label: f.label, damageType: f.damageType, isMagic: f.isMagic, techniques: [] });
+    _wfDraft.push(created);
+    _wfSaved.push(_wfCloneList([created])[0]); // enregistré d'office : pas une modif en attente
+  });
+  await saveWeaponFormats(_wfDraft);
+  _weaponFormats = _wfCloneList(_wfDraft);
   showNotif(`${missing.length} type${missing.length > 1 ? 's' : ''} d’arme créé${missing.length > 1 ? 's' : ''}.`, 'success');
-  _renderWeaponFormatsModal(formats);
+  _wfRender();
 }
 
-// Réécrit format/formatId/sousType/mains des armes du catalogue (1 écriture par
-// arme, action MJ ponctuelle). Les copies déjà possédées par les personnages
-// restent reconnues via leur type saisi (resolveWeaponFamily).
-async function _convertShopWeapons() {
-  const { toUpdate } = _wfMigrationState(_weaponFormats || []);
+async function _wfMigConvert() {
+  const { toUpdate } = _wfMigrationState();
   if (!toUpdate.length) return;
-  if (!await confirmModal(`Mettre à jour ${toUpdate.length} arme(s) de la boutique ? Le maniement (1 ou 2 mains) est déduit de l’ancien format.`, { title: 'Types d’arme', danger: false, confirmLabel: 'Mettre à jour' })) return;
   let done = 0;
   for (const { item, family } of toUpdate) {
     const patch = { format: family.label, formatId: family.id, sousType: family.label, mains: item.mains || weaponHandsLabel(item) };
@@ -442,113 +479,269 @@ async function _convertShopWeapons() {
     if (ok) { Object.assign(item, patch); done += 1; }
   }
   showNotif(`${done}/${toUpdate.length} arme(s) mise(s) à jour.`, done === toUpdate.length ? 'success' : 'warning');
-  _renderWeaponFormatsModal(_weaponFormats || []);
+  _wfRender();
 }
+
+// ══════════════════════════════════════════════
+// Rendu
+// ══════════════════════════════════════════════
+function _wfRowSub(f) {
+  if (_wfIsLegacy(f)) return 'Ancien format';
+  const n = (f.techniques || []).length;
+  const deg = f.defaults?.degats || '';
+  return [deg, `${n} technique${n > 1 ? 's' : ''}`].filter(Boolean).join(' · ');
+}
+function _wfListHtml() {
+  const groups = [
+    ['Physiques', _wfDraft.filter(f => !f.isMagic && !_wfIsLegacy(f)), 'var(--gold)'],
+    ['Magiques', _wfDraft.filter(f => f.isMagic && !_wfIsLegacy(f)), 'var(--arcane)'],
+    ['Anciens formats', _wfDraft.filter(_wfIsLegacy), 'var(--amber)'],
+  ];
+  let h = '';
+  groups.forEach(([label, list, color]) => {
+    if (!list.length) return;
+    h += `<span class="wf-lbl">${label}</span>`;
+    h += list.map(f => {
+      const err = _wfTypeErrs(f).length, dirty = JSON.stringify(f) !== JSON.stringify(_wfSaved.find(o => o.id === f.id));
+      const cnt = _wfCount(f);
+      const mark = err ? '<span class="wf-err" title="À corriger"></span>'
+        : dirty ? '<span class="wf-dirty" title="Modifié"></span>'
+          : (cnt ? `<span class="wf-cnt" title="Armes de la boutique">${cnt}</span>` : '');
+      return `<button type="button" class="wf-row${f.id === _wfSelId ? ' on' : ''}${_wfIsLegacy(f) ? ' legacy' : ''}" style="--c:${color}" data-wf-sel="${_esc(f.id)}">
+        <span class="wf-dot"></span>
+        <span style="min-width:0"><span class="wf-nm">${_esc(f.label) || '<i style=\"color:var(--crimson)\">Sans nom</i>'}</span><span class="wf-sub">${_esc(_wfRowSub(f))}</span></span>
+        ${mark}</button>`;
+    }).join('');
+  });
+  h += `<button type="button" class="wf-add" data-wf-add>${_wfIc('plus')}Nouveau type</button>`;
+  h += _wfMigrationHtml();
+  return h;
+}
+
+function _wfStatChips(f) {
+  const sel = f.defaults?.degatsStats || [];
+  return Object.entries(_WF_STAT_SHORT).map(([k, short]) => {
+    const on = sel.includes(k), full = sel.length >= 2 && !on;
+    return `<button type="button" class="wf-chip${on ? ' on' : ''}" ${full ? 'disabled' : ''} data-wf-stat="${k}">${short}</button>`;
+  }).join('');
+}
+function _wfProfileHtml(f) {
+  const d = f.defaults || {};
+  const statOpt = (sel) => `<option value="">Aucune</option>${_TECH_STAT_OPTIONS.map(([v, l]) => `<option value="${v}"${sel === v ? ' selected' : ''}>${l}</option>`).join('')}`;
+  return `<div class="wf-prof">
+    <div class="wf-pf"><span>Dégâts</span><input class="wf-fi${_wfTypeErrs(f).includes('degats') ? ' bad' : ''}" value="${_esc(d.degats || '')}" maxlength="30" placeholder="1d8" data-wf-degats></div>
+    <div class="wf-pf"><span>Carac de dégâts (2 max)</span><div class="wf-chips">${_wfStatChips(f)}</div></div>
+    <div class="wf-pf"><span>Carac de toucher</span><select class="wf-sel sans" data-wf-toucher>${statOpt(d.toucherStat || '')}</select></div>
+    <div class="wf-pf"><span>Maniement</span><div class="wf-seg">${[['', 'Libre'], ...WEAPON_HANDS_OPTIONS.map(v => [v, v])].map(([v, l]) => `<button type="button" class="${(d.mains || '') === v ? 'on' : ''}" data-wf-mains="${v}">${l}</button>`).join('')}</div></div>
+    <div class="wf-pf"><span>Portée</span><input class="wf-fi sans" value="${_esc(d.portee || '')}" maxlength="30" placeholder="1, 18/54…" data-wf-portee></div>
+    <div class="wf-pf"><span>Bonus de CA</span><div class="wf-stp"><button type="button" data-wf-ca="-1">−</button><span>${d.caBonus > 0 ? '+' : ''}${d.caBonus || 0}</span><button type="button" data-wf-ca="1">+</button></div></div>
+  </div>
+  <p class="wf-pline">Sur l’arme : <b>${_esc(weaponDefaultsSummary(d, statShort) || 'aucun pré-remplissage')}</b>. Une valeur saisie à la main n’est jamais écrasée.</p>`;
+}
+
+function _wfTechniquesHtml(f) {
+  const techs = f.techniques || [];
+  let h = '<div class="wf-tqs">';
+  h += techs.length ? techs.map(t => {
+    const open = t.id === _wfOpenTech, tag = _wfTechTag(t);
+    return `<div class="wf-tq${open ? ' open' : ''}${tag?.cls === 'ko' ? ' bad' : ''}">
+      <button type="button" class="wf-tq-h" data-wf-tech="${_esc(t.id)}">
+        <span class="wf-tq-ic">${_esc(t.icon || '🎯')}</span>
+        <span style="min-width:0"><b>${_esc(t.label) || '<i style=\"color:var(--crimson)\">Sans nom</i>'}</b><span class="wf-tq-sum">${_esc(_wfTechSummary(t))}</span></span>
+        ${tag ? `<span class="wf-tag ${tag.cls}">${tag.txt}</span>` : '<span></span>'}
+        ${_wfIc('chev')}
+      </button>
+      ${open ? `<div class="wf-tq-ed">${_techniqueConfigCard(t, techs.indexOf(t), 'weapon')}</div>` : ''}
+    </div>`;
+  }).join('') : '<div class="wf-empty-fx">Aucune technique. Les attaques de ce type restent normales.</div>';
+  h += '</div>';
+  h += `<div class="wf-presets"><span class="wf-lbl">Ajouter</span>
+    ${[['blank', '＋ Libre'], ['weak_spot', '🎯 Point faible'], ['power', '💥 Coup puissant'], ['dagger_sneak', '🗡️ Coup sournois'], ['axe_momentum', '🪓 Élan total'], ['hammer_crush', '🔨 Broyeur'], ['sword_control', '⚔️ Frappe maîtrisée']]
+      .map(([k, l]) => `<button type="button" class="wf-chip" data-wf-addtech="${k}">${l}</button>`).join('')}</div>`;
+  return h;
+}
+
+function _wfMainHtml() {
+  const f = _wfCur();
+  if (!f) return `<div class="wf-empty"><p>Aucun type d’arme.</p><button type="button" class="wf-btn gh" data-wf-add>Nouveau type</button></div>`;
+  const e = _wfTypeErrs(f), i = _wfDraft.indexOf(f), cnt = _wfCount(f);
+  const saved = _wfSaved.find(o => o.id === f.id);
+  const locked = !!saved && cnt > 0; // renommage propagé non livré → verrouillé si utilisé
+  const nat = f.isMagic ? 1 : 0;
+  const natWord = _wfIsLegacy(f) ? 'OLD' : f.isMagic ? 'MAG' : 'PHY';
+  const color = _wfIsLegacy(f) ? 'var(--amber)' : f.isMagic ? 'var(--arcane)' : 'var(--gold)';
+  const st = e.includes('name') ? ['ko', 'Donne un nom au type.']
+    : e.includes('dupname') ? ['ko', 'Un autre type porte déjà ce nom.']
+      : locked ? ['', `${cnt} arme${cnt > 1 ? 's' : ''} · duplique pour créer une variante (le renommage d’un type utilisé viendra plus tard)`]
+        : ['', [cnt ? `${cnt} arme${cnt > 1 ? 's' : ''} de la boutique` : 'Aucune arme', f.isMagic ? 'dégâts selon l’élément de l’arme' : 'dégâts physiques'].join(' · ')];
+
+  let h = `<div class="wf-eh" style="--c:${color}">
+    <div class="wf-nat">${natWord}</div>
+    <div class="wf-t">
+      <input class="wf-name${e.includes('name') || e.includes('dupname') ? ' bad' : ''}" id="wf-name" value="${_esc(f.label)}" placeholder="Ex. Hallebarde" ${locked ? 'readonly title="Renommage verrouillé : type utilisé par des armes"' : ''} data-wf-name>
+      <small class="${st[0]}">${_esc(st[1])}</small>
+    </div>
+    <div class="wf-acts">
+      ${_wfIsLegacy(f) ? '' : `<div class="wf-seg nat-s"><button type="button" class="${nat === 0 ? 'on' : ''}" data-nat="0" data-wf-nat="0">💪 Physique</button><button type="button" class="${nat === 1 ? 'on' : ''}" data-nat="1" data-wf-nat="1">🔮 Magique</button></div>`}
+      <button type="button" class="wf-ib" data-wf-mv="-1" title="Monter" ${i <= 0 ? 'disabled' : ''}>${_wfIc('up')}</button>
+      <button type="button" class="wf-ib" data-wf-mv="1" title="Descendre" ${i >= _wfDraft.length - 1 ? 'disabled' : ''}>${_wfIc('down')}</button>
+      <button type="button" class="wf-ib" data-wf-dup title="Dupliquer">${_wfIc('dup')}</button>
+      <button type="button" class="wf-ib del" data-wf-del title="Supprimer">${_wfIc('trash')}</button>
+    </div>
+  </div>`;
+
+  if (_wfIsLegacy(f)) {
+    const targets = _wfDraft.filter(o => o !== f && !_wfIsLegacy(o));
+    const n = (f.techniques || []).length;
+    h += `<div class="wf-banner">${n
+      ? `<div><b>Ancien format.</b> Ses ${n} technique${n > 1 ? 's' : ''} doivent rejoindre un vrai type.</div>${targets.length ? `<select class="wf-sel sans" id="wf-movetgt">${targets.map(o => `<option value="${_esc(o.id)}">${_esc(o.label)}</option>`).join('')}</select><button type="button" class="wf-btn gh sm" data-wf-movetechs>Déplacer ${n} technique${n > 1 ? 's' : ''}</button>` : ''}`
+      : `<div><b>Ce format est vide.</b></div><button type="button" class="wf-btn gh sm" data-wf-del>Supprimer le format</button>`}</div>`;
+  }
+
+  h += `<div class="wf-sec"><span class="wf-lbl">Profil par défaut</span>${_wfProfileHtml(f)}</div>`;
+  h += `<div class="wf-sec"><span class="wf-lbl">Techniques</span><p class="wf-hint">Le joueur choisit une technique avant le jet ; « Attaque normale » reste disponible.</p>${_wfTechniquesHtml(f)}</div>`;
+  return h;
+}
+
+function _wfFootHtml() {
+  const bad = _wfAllErr(), dirty = _wfDirty();
+  if (_wfAsk === 'close') return `<span class="wf-ask">Abandonner les modifications ?</span><span class="wf-sp"></span><button type="button" class="wf-btn tx" data-wf-keep>Continuer l’édition</button><button type="button" class="wf-btn gh" data-wf-discard>Abandonner</button>`;
+  if (_wfAsk === 'del') {
+    const f = _wfCur(), c = _wfCount(f), n = (f?.techniques || []).length;
+    return `<span class="wf-ask">Supprimer « ${_esc(f?.label) || 'Sans nom'} » ?<small>${[c ? `${c} arme${c > 1 ? 's' : ''} perdront leur type` : '', n ? `${n} technique${n > 1 ? 's' : ''} supprimée${n > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ') || 'Aucune arme concernée.'}</small></span><span class="wf-sp"></span><button type="button" class="wf-btn tx" data-wf-keep>Annuler</button><button type="button" class="wf-btn dg" data-wf-delok>Supprimer</button>`;
+  }
+  const info = bad.length ? `<span class="wf-info ko">${bad.length} type${bad.length > 1 ? 's' : ''} à corriger</span>`
+    : dirty ? `<span class="wf-info"><span class="wf-dot2"></span>Modifications non enregistrées</span>`
+      : '<span class="wf-info">À jour</span>';
+  return `<button type="button" class="wf-btn gh sm" data-wf-dmgtypes>⚡ Types de dégâts…</button>${info}<span class="wf-sp"></span>
+    <button type="button" class="wf-btn tx" data-wf-revert ${dirty ? '' : 'disabled'}>${_wfIc('undo')}Annuler les modifications</button>
+    <button type="button" class="wf-btn pri" data-wf-save ${dirty && !bad.length ? '' : 'disabled'}>Enregistrer</button>`;
+}
+
+function _wfRenderList() { const el = document.getElementById('wf-list'); if (el) el.innerHTML = _wfListHtml(); }
+function _wfRenderMain() { const el = document.getElementById('wf-main'); if (el) el.innerHTML = _wfMainHtml(); }
+function _wfRenderFoot() { const el = document.getElementById('wf-foot'); if (el) el.innerHTML = _wfFootHtml(); }
+function _wfRender() { _wfRenderList(); _wfRenderMain(); _wfRenderFoot(); _wfSyncGuard(); }
+
+function _wfSyncGuard() {
+  setModalCloseGuard(() => {
+    if (_wfAsk) return true;
+    if (_wfDirty()) { _wfAsk = 'close'; _wfRenderFoot(); return true; }
+    return false;
+  });
+}
+
+function _renderWeaponFormatsModal() {
+  openModal('', `${_WF_SPRITE}<div class="wf">
+    <header class="wf-mh"><div><h2>Types d’arme & techniques</h2><small>Un type par famille d’arme. Il pré-remplit la boutique et porte les techniques proposées avant le jet.</small></div><span class="wf-sp"></span><button type="button" class="wf-x" data-wf-close aria-label="Fermer">${_wfIc('x')}</button></header>
+    <div class="wf-body"><nav class="wf-list" id="wf-list"></nav><div class="wf-main" id="wf-main"></div></div>
+    <footer class="wf-mf" id="wf-foot"></footer>
+  </div>`);
+  _wfRenderList(); _wfRenderMain(); _wfRenderFoot();
+  _wfSyncGuard();
+}
+
+// ══════════════════════════════════════════════
+// Contrôleur (écouteurs délégués, montés une fois)
+// ══════════════════════════════════════════════
+function _wfSelectTech(f, id) { _wfOpenTech = (_wfOpenTech === id) ? null : id; }
+
+async function _wfSave() {
+  if (_wfAllErr().length || !_wfDirty()) return;
+  const draft = _wfDraft.map(f => normalizeWeaponFormat({ ...f }));
+  await saveWeaponFormats(draft);
+  _weaponFormats = _wfCloneList(draft);
+  _wfDraft = _wfCloneList(draft);
+  _wfSaved = _wfCloneList(draft);
+  if (!_wfCur()) _wfSelId = _wfDraft[0]?.id || null;
+  showNotif('Types d’arme enregistrés.', 'success');
+  _wfRender();
+}
+
+function _wfMount() {
+  if (_wfMounted) return; _wfMounted = true;
+  document.addEventListener('click', ev => {
+    if (!document.querySelector('.wf')) return;
+    const t = ev.target.closest('[data-wf-sel],[data-wf-add],[data-wf-nat],[data-wf-mv],[data-wf-dup],[data-wf-del],[data-wf-delok],[data-wf-stat],[data-wf-mains],[data-wf-ca],[data-wf-tech],[data-wf-addtech],[data-wf-deltech],[data-wf-mig],[data-wf-movetechs],[data-wf-revert],[data-wf-save],[data-wf-dmgtypes],[data-wf-close],[data-wf-keep],[data-wf-discard]');
+    if (!t) return;
+    const d = t.dataset, f = _wfCur();
+    if (d.wfSel != null) { _wfSelId = d.wfSel; _wfOpenTech = _wfCur()?.techniques?.[0]?.id || null; return _wfRender(); }
+    if ('wfAdd' in d) { const id = `fmt_${Date.now()}`; _wfDraft.push(normalizeWeaponFormat({ id, label: '', isMagic: false, damageType: 'physique', techniques: [] })); _wfSelId = id; _wfOpenTech = null; _wfRender(); document.getElementById('wf-name')?.focus(); return; }
+    if (d.wfNat != null) { if (f && !_wfIsLegacy(f)) { f.isMagic = d.wfNat === '1'; f.damageType = f.isMagic ? '' : 'physique'; } return _wfRender(); }
+    if (d.wfMv) { const i = _wfDraft.indexOf(f), j = i + (+d.wfMv); if (_wfDraft[j]) { [_wfDraft[i], _wfDraft[j]] = [_wfDraft[j], _wfDraft[i]]; _wfRender(); } return; }
+    if ('wfDup' in d) { if (!f) return; const id = `fmt_${Date.now()}`; const copy = normalizeWeaponFormat({ ..._wfCloneList([f])[0], id, label: `${f.label} (copie)` }); copy.techniques = (copy.techniques || []).map((tq, k) => ({ ...tq, id: `tech_${Date.now()}_${k}` })); _wfDraft.splice(_wfDraft.indexOf(f) + 1, 0, copy); _wfSelId = id; return _wfRender(); }
+    if ('wfDel' in d) { _wfAsk = 'del'; return _wfRenderFoot(); }
+    if ('wfDelok' in d) { const i = _wfDraft.indexOf(f); _wfDraft.splice(i, 1); _wfSelId = (_wfDraft[i] || _wfDraft[i - 1])?.id || null; _wfOpenTech = _wfCur()?.techniques?.[0]?.id || null; _wfAsk = null; return _wfRender(); }
+    if (d.wfStat) { if (f) { const arr = f.defaults.degatsStats || (f.defaults.degatsStats = []); const k = d.wfStat, ix = arr.indexOf(k); if (ix >= 0) arr.splice(ix, 1); else if (arr.length < 2) arr.push(k); } return _wfRender(); }
+    if (d.wfMains != null) { if (f) f.defaults.mains = d.wfMains; return _wfRender(); }
+    if (d.wfCa) { if (f) { const v = Math.max(-10, Math.min(10, (f.defaults.caBonus || 0) + (+d.wfCa))); f.defaults.caBonus = v; } return _wfRender(); }
+    if (d.wfTech) { _wfSelectTech(f, d.wfTech); return _wfRenderMain(); }
+    if (d.wfAddtech) { if (f) { const src = _WF_TECHNIQUE_PRESETS[d.wfAddtech] || _WF_TECHNIQUE_PRESETS.blank; const nt = normalizeWeaponTechnique({ ...src, id: `tech_${Date.now()}` }, (f.techniques || []).length); (f.techniques || (f.techniques = [])).push(nt); _wfOpenTech = nt.id; } return _wfRender(); }
+    if (d.wfMig === 'import') return _wfMigImport();
+    if (d.wfMig === 'convert') return _wfMigConvert();
+    if ('wfMovetechs' in d) { if (f) { const tgtId = document.getElementById('wf-movetgt')?.value; const tgt = _wfDraft.find(o => o.id === tgtId); if (tgt) { tgt.techniques = [...(tgt.techniques || []), ...(f.techniques || [])]; f.techniques = []; showNotif('Techniques déplacées.', 'success'); } } return _wfRender(); }
+    if ('wfRevert' in d) { _wfDraft = _wfCloneList(_wfSaved); if (!_wfCur()) _wfSelId = _wfDraft[0]?.id || null; _wfAsk = null; return _wfRender(); }
+    if ('wfSave' in d) return _wfSave();
+    if ('wfDmgtypes' in d) { if (_wfDirty()) { _wfAsk = 'close'; return _wfRenderFoot(); } clearModalGuardAndOpenDamageTypes(); return; }
+    if ('wfClose' in d) { if (_wfDirty()) { _wfAsk = 'close'; _wfRenderFoot(); } else { setModalCloseGuard(null); closeModalDirect(); } return; }
+    if ('wfKeep' in d) { _wfAsk = null; return _wfRenderFoot(); }
+    if ('wfDiscard' in d) { _wfAsk = null; _wfDraft = _wfCloneList(_wfSaved); _wfSelId = _wfDraft[0]?.id || null; setModalCloseGuard(null); closeModalDirect(); return; }
+  });
+  document.addEventListener('input', ev => {
+    if (!document.querySelector('.wf')) return;
+    const f = _wfCur(); if (!f) return;
+    const el = ev.target;
+    if (el.hasAttribute('data-wf-name')) { f.label = el.value; _wfRenderList(); _wfRenderFoot(); const e = _wfTypeErrs(f); el.classList.toggle('bad', e.includes('name') || e.includes('dupname')); }
+    else if (el.hasAttribute('data-wf-degats')) { f.defaults.degats = el.value.replace(/\s+/g, ''); _wfRenderList(); _wfRenderFoot(); el.classList.toggle('bad', _wfTypeErrs(f).includes('degats')); _wfUpdatePline(f); }
+    else if (el.hasAttribute('data-wf-portee')) { f.defaults.portee = el.value; _wfRenderFoot(); _wfUpdatePline(f); }
+  });
+  document.addEventListener('change', ev => {
+    if (!document.querySelector('.wf')) return;
+    const f = _wfCur(); if (!f) return;
+    if (ev.target.hasAttribute('data-wf-toucher')) { f.defaults.toucherStat = ev.target.value; _wfRender(); }
+  });
+  document.addEventListener('keydown', ev => {
+    if (!document.querySelector('.wf')) return;
+    if (ev.key === 'Escape') {
+      if (_wfAsk) { ev.stopPropagation(); ev.preventDefault(); _wfAsk = null; _wfRenderFoot(); return; }
+    }
+  }, true);
+}
+
+function _wfUpdatePline(f) {
+  const el = document.querySelector('.wf .wf-pline b');
+  if (el) el.textContent = weaponDefaultsSummary(f.defaults, statShort) || 'aucun pré-remplissage';
+}
+
+function clearModalGuardAndOpenDamageTypes() { setModalCloseGuard(null); openDamageTypesAdmin(); }
 
 export async function openDamageTypesAdmin() {
   [_damageTypes, _techniqueConditions] = await Promise.all([loadDamageTypes(), loadConditionLibrary()]);
   _renderDamageTypesModal(_damageTypes);
 }
 
-export function _renderWeaponFormatsModal(formats) {
-  const magPill = (isMagic, i) => {
-    const on = !!isMagic;
-    return `<button class="sh-admin-pill-toggle ${on?'on':''}"
-      style="--pt-bg:rgba(180,127,255,.18);--pt-bd:rgba(180,127,255,.45);--pt-c:#c084fc"
-      data-action="_toggleWeaponFormatMagic" data-idx="${i}"
-      title="${on ? 'Magique — clic pour passer en physique' : 'Physique — clic pour passer en magique'}">
-      ${on ? '🔮 Magique' : '💪 Physique'}
-    </button>`;
-  };
-
-  openModal('', `
-  <div class="sh-admin-modal is-formats">
-    <div class="sh-admin-head">
-      <div class="sh-admin-head-ico">⚔️</div>
-      <div class="sh-admin-head-title">
-        <h2>Types d’arme</h2>
-        <small>${formats.length} type${formats.length>1?'s':''} configuré${formats.length>1?'s':''} · boutique, maîtrises, styles de combat et techniques</small>
-      </div>
-      <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
-    </div>
-
-    <div class="sh-admin-body">
-      <p class="sh-admin-intro">
-        Un type par famille d’arme (Épée, Dague, Arc…), qu’elle se manie à une ou deux mains. Bascule chaque type en <em>🔮 Magique</em> ou <em>💪 Physique</em>, puis ajoute des <strong>techniques optionnelles</strong> proposées au joueur au moment de l'attaque.
-      </p>
-      ${_wfMigrationPanel(formats)}
-
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">📋 Types existants</div>
-        <div class="sh-admin-list" id="wf-list">
-          ${formats.length === 0
-            ? '<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun type — ajoute-en un ci-dessous.</div>'
-            : formats.map((f, i) => `
-              <div class="sh-admin-list-item">
-                <span class="sh-admin-list-item-label">${_esc(f.label)}${/^arme\s/i.test(f.label) ? ' <small style="color:var(--text-dim)">(ancien format)</small>' : ''}</span>
-                <button class="wf-tech-open" data-action="_editWeaponFormatTechniques" data-idx="${i}"
-                  title="Configurer les techniques de ce type">
-                  🎯 ${f.techniques?.length || 0} technique${(f.techniques?.length || 0) > 1 ? 's' : ''}
-                </button>
-                <button class="wf-tech-open" data-action="_editWeaponFormatDefaults" data-idx="${i}"
-                  title="${_esc(weaponDefaultsSummary(f.defaults, statShort) || 'Valeurs pré-remplies à la création d’une arme de ce type')}">
-                  📋 ${hasWeaponDefaults(f.defaults) ? 'Défauts ✓' : 'Défauts'}
-                </button>
-                ${magPill(f.isMagic, i)}
-                <button class="sh-admin-del-btn" data-action="_deleteWeaponFormat" data-idx="${i}" title="Supprimer">🗑️</button>
-              </div>`).join('')}
-        </div>
-
-        <div class="sh-admin-add-row">
-          <input type="text" id="wf-new-label" placeholder="Nouveau type (ex : Hallebarde)..."
-            data-enter-click="[data-action=_addWeaponFormat]">
-          <button class="btn btn-gold btn-sm" data-action="_addWeaponFormat">+ Ajouter</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="sh-admin-footer">
-      <button class="btn btn-arcane btn-sm" data-action="openDamageTypesAdmin">⚡ Types de dégâts…</button>
-      <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
-    </div>
-  </div>
-  `);
-  setTimeout(() => document.getElementById('wf-new-label')?.focus(), 60);
+// Champ de technique (carte réutilisée) → écrit dans le brouillon du type ouvert.
+function _wfTechniqueDraftField(el) {
+  const f = _wfCur(); if (!f) return;
+  const technique = (f.techniques || [])[Number(el.dataset.idx)];
+  if (!technique) return;
+  const field = el.dataset.field;
+  technique[field] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (parseInt(el.value, 10) || 0) : el.value;
+  if (el.tagName === 'SELECT' || el.type === 'checkbox') { _wfRenderMain(); _wfRenderFoot(); }
+  else { _wfRenderList(); _wfRenderFoot(); _wfRefreshOpenTechHead(technique); }
 }
-
-async function _toggleWeaponFormatMagic(i) {
-  const formats = [...(_weaponFormats || [])];
-  if (!formats[i]) return;
-  const nowMagic = !formats[i].isMagic;
-  formats[i] = { ...formats[i], isMagic: nowMagic, damageType: nowMagic ? '' : 'physique' };
-  await saveWeaponFormats(formats);
-  _weaponFormats = formats;
-  _renderWeaponFormatsModal(formats);
+function _wfRefreshOpenTechHead(t) {
+  const head = document.querySelector('.wf .wf-tq.open .wf-tq-h');
+  if (!head) return;
+  const nm = head.querySelector('b'); if (nm) nm.textContent = t.label || 'Sans nom';
+  const sum = head.querySelector('.wf-tq-sum'); if (sum) sum.textContent = _wfTechSummary(t);
 }
-
-async function _addWeaponFormat() {
-  const label = document.getElementById('wf-new-label')?.value?.trim();
-  if (!label) { showNotif('Nom requis.', 'error'); return; }
-  const formats = _weaponFormats ? [..._weaponFormats] : [];
-  if (formats.some(f => f.label.toLowerCase() === label.toLowerCase())) {
-    showNotif('Ce type existe déjà.', 'error'); return;
-  }
-  formats.push({ id: `fmt_${Date.now()}`, label, damageType: 'physique', isMagic: false });
-  await saveWeaponFormats(formats);
-  _weaponFormats = formats;
-  showNotif('Type ajouté.', 'success');
-  _renderWeaponFormatsModal(formats);
-}
-
-async function _deleteWeaponFormat(i) {
-  if (!await confirmModal('Supprimer ce type d’arme ?', { title: 'Confirmation de suppression' })) return;
-  const formats = [...(_weaponFormats || [])];
-  formats.splice(i, 1);
-  await saveWeaponFormats(formats);
-  _weaponFormats = formats;
-  showNotif('Type supprimé.', 'success');
-  _renderWeaponFormatsModal(formats);
+function _deleteWeaponFormatTechnique(i) {
+  const f = _wfCur(); if (!f || !f.techniques?.[i]) return;
+  f.techniques.splice(i, 1);
+  _wfOpenTech = null;
+  showNotif('Technique supprimée. Pense à « Annuler les modifications » pour revenir en arrière.', 'info');
+  _wfRender();
 }
 
 const _WF_TECHNIQUE_PRESETS = {
@@ -725,122 +918,6 @@ function _techniqueConfigCard(t, i, kind) {
 }
 
 function _wfTechniqueCard(t, i) { return _techniqueConfigCard(t, i, 'weapon'); }
-
-function _editWeaponFormatTechniques(i) {
-  const format = _weaponFormats?.[i];
-  if (!format) return;
-  _wfTechniqueFormatIndex = i;
-  _wfTechniqueDrafts = (format.techniques || []).map((t, idx) => normalizeWeaponTechnique({ ...t }, idx));
-  _wfTechniqueDirty = false;
-  _renderWeaponFormatTechniquesEditor();
-}
-
-function _installWeaponTechniqueCloseGuard() {
-  setModalCloseGuard(() => {
-    if (!_wfTechniqueDirty) return false;
-    confirmModal('Quitter sans enregistrer les techniques ?', { title: 'Modifications non enregistrées' })
-      .then(ok => {
-        if (!ok) return;
-        _wfTechniqueDirty = false;
-        closeModalDirect();
-      });
-    return true;
-  });
-}
-
-function _renderWeaponFormatTechniquesEditor() {
-  const format = _weaponFormats?.[_wfTechniqueFormatIndex];
-  if (!format) return _renderWeaponFormatsModal(_weaponFormats || []);
-  openModal('', `
-    <div class="sh-admin-modal is-formats wf-tech-editor">
-      <div class="sh-admin-head">
-        <button class="wf-tech-back" data-action="_backToWeaponFormats" title="Retour aux types d’arme">←</button>
-        <div class="sh-admin-head-ico">🎯</div>
-        <div class="sh-admin-head-title">
-          <h2>Techniques · ${_esc(format.label)}</h2>
-          <small>Le joueur choisit une technique avant le jet. « Attaque normale » reste toujours disponible.</small>
-        </div>
-        <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
-      </div>
-      <div class="sh-admin-body">
-        <p class="sh-admin-intro">
-          Chaque technique possède ses propres règles de déclenchement, dégâts, zone, état, déplacement et coût.
-          Les deux premiers blocs restent ouverts ; les réglages avancés se déplient au besoin. Une technique d’arme et une technique élémentaire peuvent être activées ensemble.
-        </p>
-        <div class="wf-tech-list">
-          ${_wfTechniqueDrafts.length
-            ? _wfTechniqueDrafts.map(_wfTechniqueCard).join('')
-            : '<div class="wf-tech-empty"><span>🎯</span><strong>Aucune technique</strong><small>Les attaques de ce type d’arme restent entièrement normales.</small></div>'}
-        </div>
-        <div class="wf-tech-presets">
-          <span>Ajouter :</span>
-          <button data-action="_addWeaponFormatTechnique" data-preset="blank">＋ Libre</button>
-          <button data-action="_addWeaponFormatTechnique" data-preset="weak_spot">🎯 Point faible</button>
-          <button data-action="_addWeaponFormatTechnique" data-preset="power">💥 Coup puissant</button>
-          <button data-action="_addWeaponFormatTechnique" data-preset="dagger_sneak">🗡️ Coup sournois</button>
-          <button data-action="_addWeaponFormatTechnique" data-preset="axe_momentum">🪓 Élan total</button>
-          <button data-action="_addWeaponFormatTechnique" data-preset="hammer_crush">🔨 Broyeur</button>
-          <button data-action="_addWeaponFormatTechnique" data-preset="sword_control">⚔️ Frappe maîtrisée</button>
-        </div>
-      </div>
-      <div class="sh-admin-footer">
-        <button class="btn btn-outline btn-sm" data-action="_backToWeaponFormats">Retour</button>
-        <div class="sh-admin-footer-spacer"></div>
-        <button class="btn btn-gold" data-action="_saveWeaponFormatTechniques">Enregistrer les techniques</button>
-      </div>
-    </div>`);
-  _installWeaponTechniqueCloseGuard();
-}
-
-function _wfTechniqueDraftField(el) {
-  const technique = _wfTechniqueDrafts[Number(el.dataset.idx)];
-  if (!technique) return;
-  const field = el.dataset.field;
-  technique[field] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (parseInt(el.value, 10) || 0) : el.value;
-  _wfTechniqueDirty = true;
-}
-
-function _addWeaponFormatTechnique(preset = 'blank') {
-  const source = _WF_TECHNIQUE_PRESETS[preset] || _WF_TECHNIQUE_PRESETS.blank;
-  _wfTechniqueDrafts.push(normalizeWeaponTechnique({ ...source, id: `tech_${Date.now()}` }, _wfTechniqueDrafts.length));
-  _wfTechniqueDirty = true;
-  _renderWeaponFormatTechniquesEditor();
-}
-
-function _deleteWeaponFormatTechnique(i) {
-  if (!_wfTechniqueDrafts[i]) return;
-  _wfTechniqueDrafts.splice(i, 1);
-  _wfTechniqueDirty = true;
-  _renderWeaponFormatTechniquesEditor();
-}
-
-async function _backToWeaponFormats() {
-  if (_wfTechniqueDirty) {
-    const discard = await confirmModal('Revenir aux formats sans enregistrer les techniques ?', { title: 'Modifications non enregistrées' });
-    if (!discard) return;
-  }
-  _wfTechniqueDirty = false;
-  _renderWeaponFormatsModal(_weaponFormats || []);
-}
-
-async function _saveWeaponFormatTechniques() {
-  const i = _wfTechniqueFormatIndex;
-  if (!_weaponFormats?.[i]) return;
-  const techniques = _wfTechniqueDrafts.map(normalizeWeaponTechnique).filter(t => t.label);
-  const invalidFormula = techniques.find(t =>
-    [t.extraDamageFormula, t.scalingFormula].some(formula => formula && !/^\d*d\d+(?:[+-]\d+)?$/i.test(formula))
-  );
-  if (invalidFormula) {
-    showNotif(`Formule invalide pour « ${invalidFormula.label} » (exemple attendu : 1d6+2).`, 'error');
-    return;
-  }
-  const formats = _weaponFormats.map((format, idx) => idx === i ? { ...format, techniques } : format);
-  await saveWeaponFormats(formats);
-  _weaponFormats = formats;
-  _wfTechniqueDirty = false;
-  showNotif(`${techniques.length} technique${techniques.length > 1 ? 's' : ''} enregistrée${techniques.length > 1 ? 's' : ''}.`, 'success');
-  _renderWeaponFormatsModal(formats);
-}
 
 // ══════════════════════════════════════════════
 // TYPES DE DÉGÂTS — Admin
@@ -1721,25 +1798,14 @@ registerActions({
   _saveCombatStyle:         (btn) => _saveCombatStyle(Number(btn.dataset.idx)),
   _backToStylesList:        ()    => _backToStylesList(),
   _csAddCond:               (btn) => _csAddCond(btn.dataset.container, btn.dataset.sel),
-  _toggleWeaponFormatMagic: (btn) => _toggleWeaponFormatMagic(Number(btn.dataset.idx)),
-  _importWeaponFamilies:    ()    => _importWeaponFamilies(),
-  _editWeaponFormatDefaults:(btn) => _editWeaponFormatDefaults(Number(btn.dataset.idx)),
-  _saveWeaponFormatDefaults:(btn) => _saveWeaponFormatDefaults(Number(btn.dataset.idx)),
-  _convertShopWeapons:      ()    => _convertShopWeapons(),
-  _editWeaponFormatTechniques: (btn) => _editWeaponFormatTechniques(Number(btn.dataset.idx)),
   _wfTechniqueDraftField:   (el)  => _wfTechniqueDraftField(el),
-  _addWeaponFormatTechnique:(btn) => _addWeaponFormatTechnique(btn.dataset.preset),
   _deleteWeaponFormatTechnique: (btn) => _deleteWeaponFormatTechnique(Number(btn.dataset.idx)),
-  _saveWeaponFormatTechniques: () => _saveWeaponFormatTechniques(),
-  _backToWeaponFormats:     ()    => _backToWeaponFormats(),
   _editDamageTypeTechniques: (btn) => _editDamageTypeTechniques(Number(btn.dataset.idx)),
   _dtTechniqueDraftField:    (el)  => _dtTechniqueDraftField(el),
   _addDamageTypeTechnique:   (btn) => _addDamageTypeTechnique(btn.dataset.preset),
   _deleteDamageTypeTechnique:(btn) => _deleteDamageTypeTechnique(Number(btn.dataset.idx)),
   _saveDamageTypeTechniques: ()    => _saveDamageTypeTechniques(),
   _backToDamageTypes:        ()    => _backToDamageTypes(),
-  _addWeaponFormat:         ()    => _addWeaponFormat(),
-  _deleteWeaponFormat:      (btn) => _deleteWeaponFormat(Number(btn.dataset.idx)),
   openCombatStylesAdmin:    ()    => openCombatStylesAdmin(),
   openWeaponFormatsAdmin:   ()    => openWeaponFormatsAdmin(),
   openDamageTypesAdmin:     ()    => openDamageTypesAdmin(),
