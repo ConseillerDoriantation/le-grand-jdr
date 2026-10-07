@@ -22971,6 +22971,9 @@ body .modal:has(.wf) > #modal-body { padding: 0 !important; height: auto !import
 
 .wf {
   --good: #3ddc97; --bad: #ff7a96; --wf-mono: var(--font-mono, ui-monospace, monospace);
+  /* La maquette claude design est calibrée pour une base 13px ; l'app tourne en
+     16–19px (clamp). Sans ce reset, tout hérite plus gros que prévu. */
+  font-size: 13px; line-height: 1.4;
   display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
   height: min(820px, calc(100vh - 48px)); border-radius: 18px; background: var(--surface-1);
   border: 1px solid var(--border-md); box-shadow: 0 24px 64px rgba(0,0,0,.55); overflow: hidden; color: var(--text);

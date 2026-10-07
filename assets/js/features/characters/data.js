@@ -712,7 +712,7 @@ function _wfMainHtml() {
       <small class="${st[0]}">${_esc(st[1])}</small>
     </div>
     <div class="wf-acts">
-      ${_wfIsLegacy(f) ? '' : `<div class="wf-seg nat-s"><button type="button" class="${nat === 0 ? 'on' : ''}" data-nat="0" data-wf-nat="0">💪 Physique</button><button type="button" class="${nat === 1 ? 'on' : ''}" data-nat="1" data-wf-nat="1">🔮 Magique</button></div>`}
+      ${_wfIsLegacy(f) ? '' : `<div class="wf-seg nat-s"><button type="button" class="${nat === 0 ? 'on' : ''}" data-nat="0" data-wf-nat="0">Physique</button><button type="button" class="${nat === 1 ? 'on' : ''}" data-nat="1" data-wf-nat="1">Magique</button></div>`}
       <button type="button" class="wf-ib" data-wf-mv="-1" title="Monter" ${i <= 0 ? 'disabled' : ''}>${_wfIc('up')}</button>
       <button type="button" class="wf-ib" data-wf-mv="1" title="Descendre" ${i >= _wfDraft.length - 1 ? 'disabled' : ''}>${_wfIc('down')}</button>
       <button type="button" class="wf-ib" data-wf-dup title="Dupliquer">${_wfIc('dup')}</button>
