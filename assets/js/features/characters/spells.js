@@ -12,7 +12,7 @@ import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary, conditionSpellRunes } from '../../shared/conditions.js';
 import { loadSpellMatrices, getMatrixSuggestions, getComboConfig, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
-import { getSpellSystemMode, loadSpellSystem, spellRuneCost, spellSetCostDelta } from '../../shared/spell-system.js';
+import { getEnabledSpellResources, getSpellSystemMode, loadSpellSystem, spellRuneCost, spellSetCostDelta } from '../../shared/spell-system.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
@@ -25,6 +25,18 @@ import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 
 // Ressource de coût lisible d'un sort (label court : PM / PV / Or / —).
 const _sortResLabel = (s) => spellCostRes(s).label;
+
+// Le système MJ limite les ressources proposées aux nouveaux sorts. Une
+// ressource désactivée reste néanmoins visible sur un ancien sort qui l'utilise.
+function _sortCostResourceId(spell = {}, idx = -1) {
+  const current = idx >= 0 ? (spell.costResource || 'pm') : '';
+  return current || getEnabledSpellResources()[0] || 'pm';
+}
+
+function _sortCostResourceOptions(current = '') {
+  const enabled = new Set(getEnabledSpellResources(current));
+  return SPELL_COST_RESOURCES.filter(resource => enabled.has(resource.id));
+}
 
 // ── Refonte « lire = régler » : la fiche (colonne de droite) affiche une ligne par
 // effet, calculée par computeSheetLines (pur) + rendue par renderSheetLines. En mode
@@ -3063,6 +3075,7 @@ async function _openClassicSortModal(idx, s, allTypes) {
   const invocationMax = Math.max(1, parseInt(s?.invocation?.max ?? s?.classicInvocationCount) || 1);
   const invocationSelection = normalizeInvocationSelection(s?.invocation);
   const validation = _sortValidationState(s);
+  const selectedCostResource = _sortCostResourceId(s, idx);
   const _modalOpen = _itemEditCtx ? pushModal : openModal;
   _modalOpen('', `
     <div class="sh-admin-modal is-spell is-classic-spell" id="s-classic-form">
@@ -3140,8 +3153,8 @@ async function _openClassicSortModal(idx, s, allTypes) {
             <section class="classic-spell-section">
               <div class="classic-spell-section-head"><span>5</span><div><b>Coût et rythme</b><small>Valeurs directement utilisées dans le VTT.</small></div></div>
               <div class="classic-spell-grid is-compact">
-                <label><span>Coût</span><div class="classic-spell-unit"><input type="number" id="s-classic-pm" class="input-field" min="0" max="99" value="${s?.pmOverride ?? s?.pm ?? 0}"><span id="s-classic-pm-unit">${_esc(spellCostRes(s).label)}</span></div></label>
-                <label><span>Ressource</span><select id="s-classic-cost-resource" class="input-field">${SPELL_COST_RESOURCES.map(r => `<option value="${r.id}" ${(s?.costResource||'pm')===r.id?'selected':''}>${r.icon} ${r.full}</option>`).join('')}</select></label>
+                <label><span>Coût</span><div class="classic-spell-unit"><input type="number" id="s-classic-pm" class="input-field" min="0" max="99" value="${s?.pmOverride ?? s?.pm ?? 0}"><span id="s-classic-pm-unit">${_esc(spellCostRes({ costResource: selectedCostResource }).label)}</span></div></label>
+                <label><span>Ressource</span><select id="s-classic-cost-resource" class="input-field">${_sortCostResourceOptions(selectedCostResource).map(r => `<option value="${r.id}" ${selectedCostResource===r.id?'selected':''}>${r.icon} ${r.full}</option>`).join('')}</select></label>
                 <label><span>Action</span><select id="s-classic-action" class="input-field">${_classicSelectOptions([['action','Action'],['action_bonus','Action Bonus'],['reaction','Réaction']], s?.actionMode || 'action')}</select></label>
                 <label><span>Durée</span><div class="classic-spell-unit"><input type="number" id="s-classic-duration" class="input-field" min="0" max="99" value="${s?.classicDuration ?? s?.dureeBase ?? 0}"><span>tours</span></div></label>
                 <label><span>Recharge</span><div class="classic-spell-unit"><input type="number" id="s-classic-cooldown" class="input-field" min="0" max="99" value="${s?.cooldownTurns ?? 0}"><span>tours</span></div></label>
@@ -3214,6 +3227,7 @@ export async function openSortModal(idx, s) {
   const useClassic = s?.designMode === 'classic'
     || (idx < 0 && getSpellSystemMode() === 'classic');
   if (useClassic) return _openClassicSortModal(idx, s || {}, allTypes);
+  const selectedCostResource = _sortCostResourceId(s || {}, idx);
   // Tous les types de dégâts restent la source globale des noyaux.
   // L'accès joueur aux noyaux magiques est ensuite filtré par personnage (c.elements).
   const RUNES = RUNE_META; // alias local pour compat ascendante
@@ -3724,17 +3738,17 @@ export async function openSortModal(idx, s) {
     <!-- Colonne droite : la fiche (lire = régler) -->
     <aside class="sheet" aria-label="Fiche jouable du sort">
       <div class="cost">
-        <div class="cost-t"><b id="s-pm-display">0</b><s id="s-pm-unit">${_esc(spellCostRes(s).label)}</s><span class="pl" id="s-playline"></span></div>
+        <div class="cost-t"><b id="s-pm-display">0</b><s id="s-pm-unit">${_esc(spellCostRes({ costResource: selectedCostResource }).label)}</s><span class="pl" id="s-playline"></span></div>
         <div class="res" role="group" aria-label="Ressource dépensée par le lanceur">
-          ${SPELL_COST_RESOURCES.map(r => {
-            const on = (s?.costResource || 'pm') === r.id;
+          ${_sortCostResourceOptions(selectedCostResource).map(r => {
+            const on = selectedCostResource === r.id;
             const tip = r.mult ? `${r.full} · ×${r.mult} par rune` : r.full;
             return `<button type="button" class="rs${on ? ' on' : ''}" style="--c:${r.color}"
               data-action="_selectCostRes" data-res="${r.id}" aria-pressed="${on ? 'true' : 'false'}" title="${_esc(tip)}">
               ${r.icon} ${r.id === 'none' ? 'Gratuit' : _esc(r.label)}</button>`;
           }).join('')}
         </div>
-        <input type="hidden" id="s-cost-resource" value="${s?.costResource || 'pm'}">
+        <input type="hidden" id="s-cost-resource" value="${selectedCostResource}">
         <div id="s-pm-breakdown" class="bd"></div>
       </div>
       <div id="s-preview-body" class="lines"></div>
