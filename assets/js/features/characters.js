@@ -1712,6 +1712,11 @@ function renderCharCombatV3(c, canEdit) {
     if (!badges.length) return '';
     return `<span class="cb-item-bonuses">${badges.map(badge => `<i class="badge-chip ${_esc(badge.cls)}">${_esc(badge.lbl)}</i>`).join('')}</span>`;
   };
+  const equipmentTraitChips = values => {
+    const traits = [...new Set((values || []).map(value => String(value || '').trim()).filter(Boolean))];
+    if (!traits.length) return '';
+    return `<span class="cb-item-traits">${traits.map(trait => `<i>${_esc(trait)}</i>`).join('')}</span>`;
+  };
   const weaponCard = data => {
     const { slotDef, item, locked, isDefault, toucher, degats, damageContext: itemDamageContext, traits } = data;
     const key = `weapon:${slotDef.id}`;
@@ -1727,12 +1732,12 @@ function renderCharCombatV3(c, canEdit) {
     const bonusChips = equipmentBonusChips(slotDef.id, item);
     if (!degats) {
       const effect = item.particularite || getItemEffectText(item) || 'Objet de soutien tenu en main.';
-      return `<button type="button" class="cb-w is-focus${selectedClass(key)}" style="--cb-rare:${_esc(rare.color)}" data-action="selectCombatDetail" data-detail="${_esc(key)}">${head}<span class="cb-focus-effect">${_esc(effect)}</span>${bonusChips}<span class="cb-w-meta">${[family(item), ...traits].filter(Boolean).map(_esc).join(' · ')}</span></button>`;
+      return `<button type="button" class="cb-w is-focus${selectedClass(key)}" style="--cb-rare:${_esc(rare.color)}" data-action="selectCombatDetail" data-detail="${_esc(key)}">${head}<span class="cb-focus-effect">${_esc(effect)}</span>${bonusChips}${equipmentTraitChips(traits)}<span class="cb-w-meta">${[family(item)].filter(Boolean).map(_esc).join(' · ')}</span></button>`;
     }
     const type = damageTypes.find(entry => entry.id === itemDamageContext.damageTypeId);
     const damageLabel = type?.label || (itemDamageContext.isMagic ? 'Magique' : 'Physique');
     const damageColor = type?.color || (itemDamageContext.isMagic ? '#bca0ff' : 'var(--text-muted)');
-    return `<button type="button" class="cb-w${selectedClass(key)}" style="--cb-rare:${_esc(rare.color)};--cb-damage:${_esc(damageColor)}" data-action="selectCombatDetail" data-detail="${_esc(key)}">${head}<span class="cb-rolls"><span class="cb-roll"><small>Toucher</small><b>${_esc(toucher?.roll || '—')}</b></span><span class="cb-roll"><small>Dégâts</small><b>${_esc(degats.roll)}</b><em>${_esc(damageLabel)}</em></span></span>${bonusChips}<span class="cb-w-meta">${[item.portee, family(item), ...traits].filter(Boolean).map(_esc).join(' · ')}</span></button>`;
+    return `<button type="button" class="cb-w${selectedClass(key)}" style="--cb-rare:${_esc(rare.color)};--cb-damage:${_esc(damageColor)}" data-action="selectCombatDetail" data-detail="${_esc(key)}">${head}<span class="cb-rolls"><span class="cb-roll"><small>Toucher</small><b>${_esc(toucher?.roll || '—')}</b></span><span class="cb-roll"><small>Dégâts</small><b>${_esc(degats.roll)}</b><em>${_esc(damageLabel)}</em></span></span>${bonusChips}${equipmentTraitChips(traits)}<span class="cb-w-meta">${[item.portee, family(item)].filter(Boolean).map(_esc).join(' · ')}</span></button>`;
   };
 
   const armorSet = (() => { try { return getArmorSetData(c) || {}; } catch { return {}; } })();
@@ -1771,7 +1776,8 @@ function renderCharCombatV3(c, canEdit) {
     const armorType = item.typeArmure ? getArmorTypeMeta(item.typeArmure) : null;
     const ca = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
     const summary = item.typeArmure ? (armorType?.label || item.typeArmure) : 'Équipé';
-    return `<button type="button" class="cb-slot${selectedClass(key)}" style="--cb-rare:${_esc(rare.color)}" data-action="selectCombatDetail" data-detail="${_esc(key)}"><span class="cb-slot-label">${_esc(slotDef.label)}${tracked.has(slotDef.id) && item.typeArmure ? `<i style="--cb-pip:${_esc(armorType?.color || '#7a8fa8')}" title="Compte pour le set"></i>` : ''}</span><b>${_esc(item.nom)}</b><span class="cb-slot-summary">${_esc(summary)}</span>${equipmentBonusChips(slotDef.id, item, ca)}</button>`;
+    const traits = _getTraits(item) || [];
+    return `<button type="button" class="cb-slot${selectedClass(key)}" style="--cb-rare:${_esc(rare.color)}" data-action="selectCombatDetail" data-detail="${_esc(key)}"><span class="cb-slot-label">${_esc(slotDef.label)}${tracked.has(slotDef.id) && item.typeArmure ? `<i style="--cb-pip:${_esc(armorType?.color || '#7a8fa8')}" title="Compte pour le set"></i>` : ''}</span><b>${_esc(item.nom)}</b><span class="cb-slot-summary">${_esc(summary)}</span>${equipmentBonusChips(slotDef.id, item, ca)}${equipmentTraitChips(traits)}</button>`;
   };
 
   const heldFamilies = weapons.filter(entry => entry.item?.nom && !entry.isDefault).map(entry => _norm(family(entry.item)));

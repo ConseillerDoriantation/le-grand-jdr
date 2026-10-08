@@ -54,6 +54,13 @@ test('le style actif et les bonus d’équipement restent immédiatement lisible
   assert.match(css, /\.cs-v3 \.cb-slots\s*\{[^}]*grid-template-columns:\s*repeat\(3,minmax\(0,1fr\)\)/);
 });
 
+test('les traits restent visibles directement sur les slots d armes et de protection', () => {
+  assert.match(sheet, /const equipmentTraitChips = values =>/);
+  assert.match(sheet, /\$\{bonusChips\}\$\{equipmentTraitChips\(traits\)\}/);
+  assert.match(sheet, /equipmentBonusChips\(slotDef\.id, item, ca\)\}\$\{equipmentTraitChips\(traits\)\}/);
+  assert.match(css, /\.cs-v3 \.cb-item-traits i\s*\{[^}]*background:\s*var\(--arcane-dim\)/);
+});
+
 test('les actions Maîtrises et Types sont alignées à droite de leur en-tête', () => {
   assert.match(css, /\.cs-v3 \.cb-zone-head > \.cb-btn\s*\{[^}]*margin-left:\s*auto/);
 });

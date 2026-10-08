@@ -3,7 +3,7 @@ import { registerActions } from '../../core/actions.js';
 import { openModal, closeModal, closeModalDirect, confirmModal, setModalCloseGuard } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { loadWeaponFormats, saveWeaponFormats, normalizeWeaponTechnique, normalizeWeaponFormat } from '../../shared/weapon-formats.js';
-import { loadDamageTypes, saveDamageTypes, damageTypeEmitsLight } from '../../shared/damage-types.js';
+import { loadDamageTypes, saveDamageTypes, damageTypeEmitsLight, normalizeDamageType, DEFAULT_RULES, invalidateDamageTypesCache } from '../../shared/damage-types.js';
 import { CONDITION_DEFAULT_LIBRARY, loadConditionLibrary } from '../../shared/conditions.js';
 import { loadSpellMatrices, saveSpellMatrices, SPELL_SLOTS, SLOT_LABELS, COMBO_IDS, COMBO_DEFAULTS } from '../../shared/spell-matrices.js';
 import { _esc, modStr } from '../../shared/html.js';
@@ -953,11 +953,6 @@ function _wfUpdatePline(f) {
 
 function clearModalGuardAndOpenDamageTypes() { setModalCloseGuard(null); openDamageTypesAdmin(); }
 
-export async function openDamageTypesAdmin() {
-  [_damageTypes, _techniqueConditions] = await Promise.all([loadDamageTypes(), loadConditionLibrary()]);
-  _renderDamageTypesModal(_damageTypes);
-}
-
 // Rafraîchit l'en-tête de la technique ouverte sans recréer son éditeur (focus
 // préservé pendant la frappe) : nom, résumé généré, tag d'équilibrage.
 function _wfRefreshOpenTechHead(t) {
@@ -1146,446 +1141,335 @@ function _techniqueConfigCard(t, i, kind) {
 function _wfTechniqueCard(t, i) { return _techniqueConfigCard(t, i, 'weapon'); }
 
 // ══════════════════════════════════════════════
-// TYPES DE DÉGÂTS — Admin
+// ══════════════════════════════════════════════
+// TYPES DE DÉGÂTS — Admin (modale maître/détail, brouillon unique)
 // ══════════════════════════════════════════════
 
 const MISS_EFFECT_LABELS = { none: 'Aucun', half: 'Moitié', full: 'Complets' };
-
-// Palette d'accès rapide (couvre les types par défaut) — le sélecteur libre reste dispo.
-const DT_SWATCHES = ['#9ca3af', '#f97316', '#4f8cff', '#22c38e', '#b47fff', '#6366f1', '#f9d71c', '#ef4444', '#ec4899', '#14b8a6'];
-
-// Résumé compact des réglages d'un type → évite de déplier pour savoir ce qu'il fait.
-function _dtBadges(t) {
-  const r = t.rules || {}, b = [];
-  if (t.isMagic) b.push('<span class="dt-badge dt-badge--mag" title="Élément magique">🔮</span>');
-  if (t.techniques?.length) b.push(`<span class="dt-badge dt-badge--tech" title="Technique optionnelle">💥 ${t.techniques.length}</span>`);
-  const me = r.missEffect || 'none';
-  if (me !== 'none') {
-    const scope = r.missScope || 'always';
-    const sfx = scope === 'magic' ? ' magie' : scope === 'physical' ? ' phys.' : '';
-    b.push(`<span class="dt-badge" title="Dégâts sur un raté">${me === 'half' ? '½' : '100%'} raté${sfx}</span>`);
-  }
-  if (r.armorPen) b.push(`<span class="dt-badge" title="Pénétration d'armure">PA ${r.armorPen}%</span>`);
-  if (r.dmgBonus) b.push(`<span class="dt-badge" title="Bonus de dégâts">${r.dmgBonus > 0 ? '+' : ''}${r.dmgBonus} dég.</span>`);
-  return b.join('');
-}
-
-function _renderDamageTypesModal(types) {
-  _closeDmgEmoji();   // pas de popover orphelin après un re-render
-  // Ligne COMPACTE (emoji + nom + résumé) ; les réglages se déplient à la demande
-  // (accordéon) → 5 types tiennent à l'écran au lieu d'un long scroll.
-  const mkRow = (t, i) => {
-    const r = t.rules || {};
-    const color = t.color || '#9ca3af';
-    const missOpts = ['none', 'half', 'full'].map(v =>
-      `<option value="${v}"${(r.missEffect || 'none') === v ? ' selected' : ''}>${MISS_EFFECT_LABELS[v]}</option>`
-    ).join('');
-    const scopeOpts = [['always', 'Toute attaque'], ['magic', 'Attaques magiques'], ['physical', 'Attaques physiques']].map(([v, l]) =>
-      `<option value="${v}"${(r.missScope || 'always') === v ? ' selected' : ''}>${l}</option>`
-    ).join('');
-    const swatches = DT_SWATCHES.map(c =>
-      `<button type="button" class="dt-sw${c.toLowerCase() === color.toLowerCase() ? ' is-active' : ''}"
-         style="background:${c}" data-action="_setDmgColor" data-i="${i}" data-color="${c}"
-         title="${c}" aria-label="Couleur ${c}"></button>`).join('');
-    return `
-    <div class="sh-admin-list-item dt-row" data-row="${i}" style="--dt-accent:${_esc(color)}">
-      <div class="dt-head">
-        <span class="dt-grip" title="Glisser pour réordonner" aria-hidden="true">⠿</span>
-        <button type="button" class="dt-emoji-btn" data-action="_openDmgEmoji" data-i="${i}"
-          title="Choisir un emoji">${t.icon ? _esc(t.icon) : '<span class="dt-emoji-ph">＋</span>'}</button>
-        <input type="text" class="dt-name" value="${_esc(t.label)}" placeholder="Nom du type"
-          aria-label="Nom du type"
-          data-change="_saveDmgTypeProp" data-i="${i}" data-prop="label">
-        <span class="dt-badges" data-badges="${i}">${_dtBadges(t)}</span>
-        <button type="button" class="wf-tech-open dt-tech-open" data-action="_editDamageTypeTechniques" data-idx="${i}"
-          title="Configurer les techniques de ce type">💥 ${t.techniques?.length || 0}</button>
-        <button type="button" class="dt-toggle" data-action="_toggleDmgRow" data-i="${i}"
-          title="Régler ce type" aria-label="Régler ce type">▾</button>
-        <button class="sh-admin-del-btn" data-action="_deleteDmgType" data-idx="${i}" title="Supprimer">🗑️</button>
-      </div>
-
-      <div class="dt-body">
-        <div class="dt-colors">
-          <span class="dt-colors-lbl">Couleur</span>
-          ${swatches}
-          <input type="color" class="dt-color-pick" value="${color}"
-            title="Couleur personnalisée" aria-label="Couleur personnalisée"
-            data-change="_setDmgColorPick" data-i="${i}">
-        </div>
-
-        <div class="dt-rules">
-          <div class="dt-rules-grid">
-            <label class="dt-field">
-              <span class="dt-field-lbl">Sur un raté</span>
-              <select class="dt-input" data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.missEffect">${missOpts}</select>
-              <span class="dt-field-help">Défaut : aucun.</span>
-            </label>
-            <label class="dt-field">
-              <span class="dt-field-lbl">…s'applique à</span>
-              <select class="dt-input" data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.missScope">${scopeOpts}</select>
-              <span class="dt-field-help">Si ton système distingue.</span>
-            </label>
-            <label class="dt-field">
-              <span class="dt-field-lbl">Pén. armure</span>
-              <span class="dt-input-wrap">
-                <input type="number" class="dt-input" min="0" max="100" value="${r.armorPen || 0}"
-                  data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.armorPen" data-vtype="num">
-                <span class="dt-unit">%</span>
-              </span>
-              <span class="dt-field-help">CA ignorée.</span>
-            </label>
-            <label class="dt-field">
-              <span class="dt-field-lbl">Bonus dégâts</span>
-              <input type="number" class="dt-input" value="${r.dmgBonus || 0}"
-                data-change="_saveDmgTypeProp" data-i="${i}" data-prop="rules.dmgBonus" data-vtype="num">
-              <span class="dt-field-help">À chaque jet.</span>
-            </label>
-          </div>
-          <label class="dt-magic">
-            <span class="dt-switch">
-              <input type="checkbox" ${t.isMagic ? 'checked' : ''}
-                data-change="_saveDmgTypeProp" data-i="${i}" data-prop="isMagic" data-vtype="bool">
-              <span class="dt-switch-track"><span class="dt-switch-thumb"></span></span>
-            </span>
-            <span class="dt-magic-txt">
-              <b>🔮 Élément magique</b>
-              <small>Réservé aux personnages qui le connaissent · dégâts via maîtrise + stat magique.</small>
-            </span>
-          </label>
-          <label class="dt-magic">
-            <span class="dt-switch">
-              <input type="checkbox" ${damageTypeEmitsLight(t) ? 'checked' : ''}
-                data-change="_saveDmgTypeProp" data-i="${i}" data-prop="emitsLight" data-vtype="bool">
-              <span class="dt-switch-track"><span class="dt-switch-thumb"></span></span>
-            </span>
-            <span class="dt-magic-txt">
-              <b>💡 Émet de la lumière</b>
-              <small>Un sort de cet élément avec Concentration (sans rune d’effet) crée une source de lumière.</small>
-            </span>
-          </label>
-        </div>
-      </div>
-    </div>`;
-  };
-
-  openModal('', `
-  <div class="sh-admin-modal is-formats">
-    <div class="sh-admin-head">
-      <div class="sh-admin-head-ico">⚡</div>
-      <div class="sh-admin-head-title">
-        <h2>Types de dégâts</h2>
-        <small>${types.length} type${types.length>1?'s':''} configuré${types.length>1?'s':''} · règles appliquées automatiquement dans le VTT</small>
-      </div>
-      <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
-    </div>
-
-    <div class="sh-admin-body">
-      <p class="sh-admin-intro">
-        Glisse ⠿ pour réordonner · <strong>▾</strong> pour régler un type (couleur, comportement en combat,
-        nature magique). Les réglages s'appliquent automatiquement dans le VTT.
-      </p>
-
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">📋 Types existants</div>
-        <div class="sh-admin-list">
-          ${types.length === 0
-            ? '<div style="text-align:center;padding:1.5rem;color:var(--text-dim);font-style:italic">Aucun type — ajoute-en un ci-dessous.</div>'
-            : types.map((t, i) => mkRow(t, i)).join('')}
-        </div>
-
-        <div class="sh-admin-add-row">
-          <input type="text" id="dt-new-icon" placeholder="🌊"
-            style="width:50px;text-align:center;flex:0 0 auto">
-          <input type="text" id="dt-new-label" placeholder="Nouveau type (ex: Eau, Foudre…)"
-            data-enter-click="[data-action=_addDmgType]">
-          <button class="btn btn-gold btn-sm" data-action="_addDmgType">+ Ajouter</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="sh-admin-footer">
-      <div class="sh-admin-footer-spacer"></div>
-      <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
-    </div>
-  </div>
-  `);
-  setTimeout(() => document.getElementById('dt-new-label')?.focus(), 60);
-  _initDmgSortable();
-}
-
+// Palette élargie (12) + pastille arc-en-ciel libre à côté.
+const DT_SWATCHES = ['#9ca3af', '#a8a29e', '#cbd5e1', '#7c8ba1', '#f97316', '#f9d71c', '#facc15', '#ef4444', '#84cc16', '#22c55e', '#38bdf8', '#4f8cff', '#6366f1', '#a78bfa', '#b47fff', '#ec4899', '#14b8a6', '#64748b'];
+const DT_EMOJIS = ['🔥','💧','🌊','🌬️','🪨','⛰️','🌱','⚡','❄️','☀️','🌙','🌑','✨','🌟','💥','💢','🔮','🌀','☠️','🧪','🩸','☣️','⚗️','🦠','🧨','🌋','🧊','♨️','🫧','🌩️','🗡️','🏹','🛡️','⚔️','👊','🦷','🐍','👁️','🪄','📖','⭐','💫'];
+// Presets (dt-data) : chacun a au moins une contrepartie.
 const _DT_TECHNIQUE_PRESETS = {
-  blank: {
-    icon: '💥', label: 'Nouvelle technique', description: '', defenseBonus: 0,
-    extraWeaponDice: 0, extraDamageFormula: '', extraDamageFlat: 0,
-    addWeaponModifier: false, blastRadius: 0, onHitEffect: '',
-  },
-  burst: {
-    icon: '💥', label: 'Explosion élémentaire',
-    description: 'Sur une touche, l’élément explose autour de la cible.',
-    defenseBonus: 0, extraWeaponDice: 0, extraDamageFormula: '1d4', extraDamageFlat: 0,
-    addWeaponModifier: true, blastRadius: 1, onHitEffect: '',
-  },
+  blank: { icon: '💥', label: 'Nouvelle technique' },
+  burst: { icon: '💥', label: 'Explosion élémentaire', description: 'Sur une touche, l’élément explose autour de la cible.', extraDamageFormula: '1d4', addWeaponModifier: true, blastRadius: 1, areaShape: 'circle', resourceType: 'pm', resourceCost: 2 },
+  dot: { icon: '🔥', label: 'Brûlure persistante', description: 'La cible continue de souffrir après l’impact.', conditionId: 'burning', conditionDuration: 2, conditionSaveStat: 'constitution', damageMalusFlat: 2 },
+  surge: { icon: '⚡', label: 'Surcharge', description: 'Libère tout l’élément d’un coup, au risque de se découvrir.', extraWeaponDice: 1, missSelfCaMalus: 2 },
+  chill: { icon: '🧊', label: 'Gel mordant', description: 'Ralentit la cible, mais le coup est moins appuyé.', conditionId: 'slowed', conditionDuration: 1, damageMalusFlat: 1, cooldownRounds: 2 },
 };
-
 function _dtTechniqueCard(t, i) { return _techniqueConfigCard(t, i, 'damage'); }
 
-function _editDamageTypeTechniques(i) {
-  const type = _damageTypes?.[i];
-  if (!type) return;
-  _dtTechniqueTypeIndex = i;
-  _dtTechniqueDrafts = (type.techniques || []).map((technique, idx) => normalizeWeaponTechnique({ ...technique }, idx));
-  _dtTechniqueDirty = false;
-  _renderDamageTypeTechniquesEditor();
+// — État : un seul brouillon pour tout (règles + apparence + techniques). —
+let _dtSaved = [], _dtDraft = [], _dtSelId = null, _dtOpenTech = null, _dtAsk = null;
+let _dtReplaceId = 'physique', _dtEmoji = false, _dtMounted = false;
+const _DT_DEGATS_RE = /^\d*d\d+(?:[+-]\d+)?$/i;
+
+const _dtClone = list => (list || []).map(t => normalizeDamageType({ ...t }));
+const _dtCur = () => _dtDraft.find(t => t.id === _dtSelId) || _dtDraft[0] || null;
+const _dtKey = s => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+// ── Icônes (sprite partagé avec .wf) : réutilise #wf-* ──
+const _dtIc = id => `<svg class="wf-ic"><use href="#wf-${id}"></use></svg>`;
+
+const _dtRgb = hex => { const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim()); if (!m) return null; const n = parseInt(m[1], 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+function _dtProximity(t) {
+  const a = _dtRgb(t.color); if (!a) return [];
+  return _dtDraft.filter(o => o !== t && o.color).map(o => { const b = _dtRgb(o.color); return b ? [o, Math.hypot(a[0] - b[0], a[1] - b[1])] : null; })
+    .filter(x => x && x[1] < 32).map(x => x[0].label || 'Sans nom');
+}
+function _dtRuleSummary(t) {
+  const r = t.rules || {}, parts = [];
+  if ((r.missEffect || 'none') !== 'none') {
+    const scope = r.missScope || 'always';
+    parts.push(`${r.missEffect === 'half' ? '½' : 'tous'} sur raté${scope === 'magic' ? ' (magie)' : scope === 'physical' ? ' (phys.)' : ''}`);
+  }
+  if (r.armorPen) parts.push(`${r.armorPen}% armure`);
+  if (r.dmgBonus) parts.push(`${r.dmgBonus > 0 ? '+' : ''}${r.dmgBonus} dégâts`);
+  return parts.join(' · ');
+}
+function _dtRowSub(t) {
+  const rule = _dtRuleSummary(t), n = (t.techniques || []).length;
+  return [rule, n ? `${n} tech.` : ''].filter(Boolean).join(' · ') || 'Aucune règle';
+}
+function _dtTypeErrs(t) {
+  const e = [];
+  if (!String(t.label || '').trim()) e.push('name');
+  else if (_dtDraft.some(o => o !== t && _dtKey(o.label) === _dtKey(t.label))) e.push('dupname');
+  if ((t.techniques || []).some(x => !String(x.label || '').trim() || [x.extraDamageFormula, x.scalingFormula].some(f => f && !_DT_DEGATS_RE.test(String(f).replace(/\s+/g, ''))))) e.push('tech');
+  return e;
+}
+const _dtAllErr = () => _dtDraft.filter(t => _dtTypeErrs(t).length);
+const _dtDirty = () => JSON.stringify(_dtDraft) !== JSON.stringify(_dtSaved);
+// Comptage d'usage : armes (boutique) + sorts (matrices) par id de type.
+function _dtUsage(id) { const u = _dtUsageMap[id] || { w: 0, s: 0 }; return u; }
+let _dtUsageMap = {};
+
+export async function openDamageTypesAdmin() {
+  [_damageTypes, _techniqueConditions] = await Promise.all([loadDamageTypes(), loadConditionLibrary()]);
+  _dtSaved = _dtClone(_damageTypes);
+  _dtDraft = _dtClone(_damageTypes);
+  _dtSelId = _dtDraft[0]?.id || null;
+  _dtOpenTech = _dtCur()?.techniques?.[0]?.id || null;
+  _dtAsk = null; _dtEmoji = false; _dtReplaceId = 'physique';
+  _dtUsageMap = {};
+  _renderDamageTypesModal();
+  _dtMount();
+  // Index d'usage en arrière-plan (ne bloque pas l'ouverture).
+  _dtBuildUsage();
 }
 
-function _installDamageTypeTechniqueCloseGuard() {
-  setModalCloseGuard(() => {
-    if (!_dtTechniqueDirty) return false;
-    confirmModal('Quitter sans enregistrer les techniques ?', { title: 'Modifications non enregistrées' })
-      .then(ok => {
-        if (!ok) return;
-        _dtTechniqueDirty = false;
-        closeModalDirect();
-      });
-    return true;
+async function _dtBuildUsage() {
+  const map = {};
+  try {
+    const { getCachedCollection, loadCollection } = await import('../../data/firestore.js');
+    const shop = getCachedCollection('shop') || await loadCollection('shop').catch(() => []);
+    (shop || []).forEach(it => { const id = it?.damageTypeId; if (id) (map[id] || (map[id] = { w: 0, s: 0 })).w++; });
+  } catch { /* boutique indisponible */ }
+  try {
+    const mats = await loadSpellMatrices().catch(() => null);
+    const bump = id => { if (id) (map[id] || (map[id] = { w: 0, s: 0 })).s++; };
+    const scan = obj => { if (!obj || typeof obj !== 'object') return; if (obj.noyauTypeId) bump(obj.noyauTypeId); if (obj.elementId) bump(obj.elementId); Object.values(obj).forEach(v => { if (v && typeof v === 'object') scan(v); }); };
+    scan(mats);
+  } catch { /* matrices indisponibles */ }
+  _dtUsageMap = map;
+  if (document.querySelector('.dt')) { _dtRenderList(); _dtRenderMain(); }
+}
+
+// ══════════════════════════════════════════════
+// Rendu
+// ══════════════════════════════════════════════
+function _dtListHtml() {
+  const groups = [['Physiques', _dtDraft.filter(t => !t.isMagic)], ['Magiques', _dtDraft.filter(t => t.isMagic)]];
+  let h = '';
+  groups.forEach(([label, list]) => {
+    if (!list.length) return;
+    h += `<span class="wf-lbl">${label}</span>`;
+    h += list.map(t => {
+      const err = _dtTypeErrs(t).length, dirty = JSON.stringify(t) !== JSON.stringify(_dtSaved.find(o => o.id === t.id));
+      const u = _dtUsage(t.id), total = u.w + u.s;
+      const mark = err ? '<span class="wf-err" title="À corriger"></span>'
+        : dirty ? '<span class="wf-dirty" title="Modifié"></span>'
+          : (total ? `<span class="wf-cnt" title="${u.w} arme${u.w > 1 ? 's' : ''} et ${u.s} sort${u.s > 1 ? 's' : ''}">${total}</span>` : '');
+      return `<button type="button" class="wf-row dt-row${t.id === _dtSelId ? ' on' : ''}" style="--c:${_esc(t.color || '#9ca3af')}" data-dt-sel="${_esc(t.id)}">
+        <span class="dt-pastille">${t.icon ? _esc(t.icon) : '·'}</span>
+        <span style="min-width:0"><span class="wf-nm">${_esc(t.label) || '<i style=\"color:var(--crimson)\">Sans nom</i>'}</span><span class="wf-sub">${_esc(_dtRowSub(t))}</span></span>
+        ${mark}</button>`;
+    }).join('');
   });
+  h += `<button type="button" class="wf-add" data-dt-add>${_dtIc('plus')}Nouveau type</button>`;
+  return h;
 }
 
-function _renderDamageTypeTechniquesEditor() {
-  const type = _damageTypes?.[_dtTechniqueTypeIndex];
-  if (!type) return _renderDamageTypesModal(_damageTypes || []);
-  openModal('', `
-    <div class="sh-admin-modal is-formats wf-tech-editor">
-      <div class="sh-admin-head">
-        <button class="wf-tech-back" data-action="_backToDamageTypes" title="Retour aux types de dégâts">←</button>
-        <div class="sh-admin-head-ico">${_esc(type.icon || '💥')}</div>
-        <div class="sh-admin-head-title">
-          <h2>Techniques · ${_esc(type.label)}</h2>
-          <small>Le joueur choisit de les activer avant son jet. L’attaque normale reste toujours disponible.</small>
-        </div>
-        <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
-      </div>
-      <div class="sh-admin-body">
-        <p class="sh-admin-intro">
-          Cette technique dispose exactement des mêmes possibilités qu’une technique d’arme : déclencheur, précision, dégâts, zone, états, déplacement, coût et recharge.
-          Elle peut être cumulée avec une technique de l’arme équipée ; une même cible ne reçoit chaque technique qu’une fois par activation.
-        </p>
-        <div class="wf-tech-list">
-          ${_dtTechniqueDrafts.length
-            ? _dtTechniqueDrafts.map(_dtTechniqueCard).join('')
-            : '<div class="wf-tech-empty"><span>💥</span><strong>Aucune technique</strong><small>Ce type de dégâts conserve son comportement normal.</small></div>'}
-        </div>
-        <div class="wf-tech-presets">
-          <span>Ajouter :</span>
-          <button data-action="_addDamageTypeTechnique" data-preset="blank">＋ Libre</button>
-          <button data-action="_addDamageTypeTechnique" data-preset="burst">💥 Explosion 1d4 + mod</button>
-        </div>
-      </div>
-      <div class="sh-admin-footer">
-        <button class="btn btn-outline btn-sm" data-action="_backToDamageTypes">Retour</button>
-        <div class="sh-admin-footer-spacer"></div>
-        <button class="btn btn-gold" data-action="_saveDamageTypeTechniques">Enregistrer les techniques</button>
-      </div>
-    </div>`);
-  _installDamageTypeTechniqueCloseGuard();
+function _dtApparenceHtml(t) {
+  const color = t.color || '#9ca3af';
+  const isPreset = DT_SWATCHES.some(c => c.toLowerCase() === color.toLowerCase());
+  const prox = _dtProximity(t);
+  const sw = DT_SWATCHES.map(c => `<button type="button" class="dt-color${c.toLowerCase() === color.toLowerCase() ? ' on' : ''}" style="--c:${c}" data-dt-color="${c}" aria-label="${c}"></button>`).join('');
+  return `<div class="wf-sec"><span class="wf-lbl">Apparence</span>
+    <div class="dt-colors">${sw}<label class="dt-rainbow${isPreset ? '' : ' on'}" title="Couleur libre"><input type="color" value="${_esc(color)}" data-dt-colorpick><span style="--c:${_esc(color)}"></span></label></div>
+    <div class="dt-preview"><span class="dt-chip" style="--c:${_esc(color)}">${t.icon ? _esc(t.icon) + ' ' : ''}${_esc(t.label) || 'Type'}</span><span class="dt-journal"><b style="color:${_esc(color)}">7</b> dégâts · ${_esc((t.label || 'type').toLowerCase())}</span></div>
+    ${prox.length ? `<p class="dt-prox">Couleur très proche de ${_esc(prox.join(', '))} : difficile à distinguer en jeu.</p>` : ''}
+  </div>`;
 }
 
+function _dtRulesHtml(t) {
+  const r = t.rules || {};
+  const me = r.missEffect || 'none', scope = r.missScope || 'always';
+  const rl = (lbl, help, ctl, indent) => `<div class="dt-rl${indent ? ' dt-rl--sub' : ''}"><div class="dt-rl-t"><b>${lbl}</b><small>${help}</small></div><div class="dt-rl-c">${ctl}</div></div>`;
+  let h = `<div class="wf-sec"><span class="wf-lbl">Règles de combat</span><div class="dt-rules">`;
+  h += rl('Dégâts sur un raté', 'L’échec critique n’inflige jamais de dégâts', _dtSeg('rules.missEffect', me, [['none', 'Aucun'], ['half', 'Moitié'], ['full', 'Complets']]));
+  if (me !== 'none') h += rl('↳ Pour les attaques', 'Si ton système distingue magie et physique', _dtSeg('rules.missScope', scope, [['always', 'Toutes'], ['magic', 'Magiques'], ['physical', 'Physiques']]), true);
+  h += rl('Pénétration d’armure', 'Part de la CA de la cible ignorée au toucher', _dtStp('rules.armorPen', r.armorPen || 0, { min: 0, max: 100, step: 5, suf: '%' }));
+  h += rl('Bonus de dégâts', 'Ajouté à chaque jet, critique compris', _dtStp('rules.dmgBonus', r.dmgBonus || 0, { min: -10, max: 10, pre: (r.dmgBonus || 0) > 0 ? '+' : '' }));
+  h += rl('Émet de la lumière', 'Une source lumineuse de cet élément', `<button type="button" class="wf-sw${damageTypeEmitsLight(t) ? ' on' : ''}" data-dt-light role="switch" aria-checked="${damageTypeEmitsLight(t)}"></button>`);
+  h += `</div>`;
+  const sum = _dtRuleSummary(t);
+  h += `<p class="wf-pline">En jeu : <b>${_esc(sum || 'aucune règle')}</b>${sum ? '' : ' · se comporte comme un type neutre, à la D&D'}.</p>`;
+  if (me === 'full') h += `<p class="dt-prox" style="color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,transparent)">Tous les dégâts passent sur un raté : la CA ne protège plus que de l’échec critique.</p>`;
+  h += `</div>`;
+  return h;
+}
+
+function _dtTechniquesHtml(t) {
+  const techs = t.techniques || [];
+  let h = `<div class="wf-sec"><span class="wf-lbl">Techniques</span><p class="wf-hint">Cumulables avec la technique de l’arme · une fois par cible et par activation.</p><div class="wf-tqs">`;
+  h += techs.length ? techs.map(x => {
+    const open = x.id === _dtOpenTech, tag = _wfTechTag(x);
+    return `<div class="wf-tq${open ? ' open' : ''}${tag?.cls === 'ko' ? ' bad' : ''}">
+      <button type="button" class="wf-tq-h" data-dt-tech="${_esc(x.id)}">
+        <span class="wf-tq-ic">${_esc(x.icon || '💥')}</span>
+        <span style="min-width:0"><b>${_esc(x.label) || '<i style=\"color:var(--crimson)\">Sans nom</i>'}</b><span class="wf-tq-sum">${_esc(_wfTechSummary(x))}</span></span>
+        ${tag ? `<span class="wf-tag ${tag.cls}">${tag.txt}</span>` : '<span></span>'}
+        ${_dtIc('chev')}
+      </button>
+      ${open ? `<div class="wf-tq-ed">${_techniqueConfigCard(x, techs.indexOf(x), 'damage')}</div>` : ''}
+    </div>`;
+  }).join('') : '<div class="wf-empty-fx">Aucune technique : ce type garde son comportement normal.</div>';
+  h += `</div><div class="wf-presets"><span class="wf-lbl">Ajouter</span>${[['blank', '＋ Libre'], ['burst', '💥 Explosion'], ['dot', '🔥 Brûlure'], ['surge', '⚡ Surcharge'], ['chill', '🧊 Gel']].map(([k, l]) => `<button type="button" class="wf-chip" data-dt-addtech="${k}">${l}</button>`).join('')}</div></div>`;
+  return h;
+}
+
+function _dtMainHtml() {
+  const t = _dtCur();
+  if (!t) return `<div class="wf-empty"><p>Aucun type de dégâts.</p><button type="button" class="wf-btn gh" data-dt-add>Nouveau type</button></div>`;
+  const e = _dtTypeErrs(t), i = _dtDraft.indexOf(t), u = _dtUsage(t.id);
+  const isPhys = t.id === 'physique';
+  const color = t.color || '#9ca3af';
+  const st = e.includes('name') ? ['ko', 'Nom vide.']
+    : e.includes('dupname') ? ['ko', 'Nom déjà pris.']
+      : ['', `${(u.w + u.s) ? `Utilisé par ${u.w} arme${u.w > 1 ? 's' : ''} et ${u.s} sort${u.s > 1 ? 's' : ''}` : 'Pas encore utilisé'}${isPhys ? ' · type de repli quand rien n’est précisé' : ''}`];
+  let h = `<div class="wf-eh" style="--c:${_esc(color)}">
+    <div class="dt-emoji-wrap"><button type="button" class="dt-emoji-btn" data-dt-emoji aria-label="Icône">${t.icon ? _esc(t.icon) : '<span class="dt-emoji-ph">+</span>'}</button>${_dtEmoji ? _dtEmojiPopHtml(t) : ''}</div>
+    <div class="wf-t"><input class="wf-name${e.includes('name') || e.includes('dupname') ? ' bad' : ''}" id="dt-name" value="${_esc(t.label)}" placeholder="Ex. Feu, Acide, Psychique" data-dt-name><small class="${st[0]}">${_esc(st[1])}</small></div>
+    <div class="wf-acts">
+      <div class="wf-seg nat-s"><button type="button" class="${t.isMagic ? '' : 'on'}" data-nat="0" data-dt-nat="0">Physique</button><button type="button" class="${t.isMagic ? 'on' : ''}" data-nat="1" data-dt-nat="1">Magique</button></div>
+      <button type="button" class="wf-ib" data-dt-mv="-1" title="Monter" ${i <= 0 ? 'disabled' : ''}>${_dtIc('up')}</button>
+      <button type="button" class="wf-ib" data-dt-mv="1" title="Descendre" ${i >= _dtDraft.length - 1 ? 'disabled' : ''}>${_dtIc('down')}</button>
+      <button type="button" class="wf-ib" data-dt-dup title="Dupliquer">${_dtIc('dup')}</button>
+      <button type="button" class="wf-ib del" data-dt-del title="Supprimer" ${isPhys ? 'disabled title="Le type de repli ne peut pas être supprimé"' : ''}>${_dtIc('trash')}</button>
+    </div>
+  </div>`;
+  if (t.isMagic) h += `<p class="wf-hint">Réservé aux personnages qui le connaissent · dégâts via maîtrise + carac magique.</p>`;
+  h += _dtApparenceHtml(t);
+  h += _dtRulesHtml(t);
+  h += _dtTechniquesHtml(t);
+  return h;
+}
+
+function _dtEmojiPopHtml(t) {
+  return `<div class="dt-emoji-pop"><div class="dt-emoji-grid">${DT_EMOJIS.map(e => `<button type="button" class="${t.icon === e ? 'on' : ''}" data-dt-pick="${e}">${e}</button>`).join('')}</div>
+    <div class="dt-emoji-foot"><input class="wf-fi sans" id="dt-emoji-in" placeholder="Colle ton emoji…" maxlength="8"><button type="button" class="wf-btn tx" data-dt-pick="">Aucun</button></div></div>`;
+}
+
+function _dtFootHtml() {
+  const bad = _dtAllErr(), dirty = _dtDirty();
+  if (_dtAsk === 'close') return `<span class="wf-ask">Abandonner les modifications ?</span><span class="wf-sp"></span><button type="button" class="wf-btn tx" data-dt-keep>Continuer l’édition</button><button type="button" class="wf-btn gh" data-dt-discard>Abandonner</button>`;
+  if (_dtAsk === 'del') {
+    const t = _dtCur(), u = _dtUsage(t.id), used = u.w + u.s, n = (t?.techniques || []).length;
+    const others = _dtDraft.filter(o => o !== t);
+    const replSel = used ? `<select class="wf-sel sans" id="dt-replace">${others.map(o => `<option value="${_esc(o.id)}"${o.id === _dtReplaceId ? ' selected' : ''}>${_esc(o.label)}</option>`).join('')}</select>` : '';
+    return `<span class="wf-ask">Supprimer « ${_esc(t?.label) || 'Sans nom'} » ?<small>${[used ? `${u.w} arme${u.w > 1 ? 's' : ''} et ${u.s} sort${u.s > 1 ? 's' : ''} basculeront vers le type choisi` : 'Aucun usage', n ? `${n} technique${n > 1 ? 's' : ''} supprimée${n > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ')}</small></span>${replSel}<span class="wf-sp"></span><button type="button" class="wf-btn tx" data-dt-keep>Annuler</button><button type="button" class="wf-btn dg" data-dt-delok>Supprimer</button>`;
+  }
+  const info = bad.length ? `<span class="wf-info ko">${bad.length} type${bad.length > 1 ? 's' : ''} à corriger</span>`
+    : dirty ? `<span class="wf-info"><span class="wf-dot2"></span>Modifications non enregistrées</span>`
+      : '<span class="wf-info">À jour</span>';
+  return `<button type="button" class="wf-btn gh sm" data-dt-weapons>⚔️ Types d’arme…</button>${info}<span class="wf-sp"></span>
+    <button type="button" class="wf-btn tx" data-dt-revert ${dirty ? '' : 'disabled'}>${_dtIc('undo')}Annuler les modifications</button>
+    <button type="button" class="wf-btn pri" data-dt-save ${dirty && !bad.length ? '' : 'disabled'}>Enregistrer</button>`;
+}
+
+function _dtRenderList() { const el = document.getElementById('dt-list'); if (el) el.innerHTML = _dtListHtml(); }
+function _dtRenderMain() { const el = document.getElementById('dt-main'); if (el) el.innerHTML = _dtMainHtml(); }
+function _dtRenderFoot() { const el = document.getElementById('dt-foot'); if (el) el.innerHTML = _dtFootHtml(); }
+function _dtRender() { _dtRenderList(); _dtRenderMain(); _dtRenderFoot(); _dtSyncGuard(); }
+function _dtSyncGuard() { setModalCloseGuard(() => { if (_dtAsk) return true; if (_dtDirty()) { _dtAsk = 'close'; _dtRenderFoot(); return true; } return false; }); }
+
+function _renderDamageTypesModal() {
+  openModal('', `${_WF_SPRITE}<div class="dt">
+    <header class="wf-mh"><div><h2>Types de dégâts</h2><small>Chaque type porte sa couleur, ses règles de combat et des techniques optionnelles, appliquées dans le VTT.</small></div><span class="wf-sp"></span><button type="button" class="wf-x" data-dt-close aria-label="Fermer">${_dtIc('x')}</button></header>
+    <div class="wf-body wf-body--2"><nav class="wf-list" id="dt-list"></nav><div class="wf-main" id="dt-main"></div></div>
+    <footer class="wf-mf" id="dt-foot"></footer>
+  </div>`);
+  _dtRenderList(); _dtRenderMain(); _dtRenderFoot();
+  _dtSyncGuard();
+}
+
+// ── Contrôles (réutilisent les primitives .wf-*) ──
+function _dtStp(field, val, o = {}) {
+  const { step = 1, min = 0, max = 99, pre = '', suf = '' } = o;
+  const a = `data-dt-step="${field}" data-step="${step}" data-min="${min}" data-max="${max}"`;
+  return `<div class="wf-stp"><button type="button" ${a} data-dir="-1">−</button><span>${pre}${val}${suf}</span><button type="button" ${a} data-dir="1">+</button></div>`;
+}
+function _dtSeg(field, val, opts) { return `<div class="wf-seg">${opts.map(([v, l]) => `<button type="button" class="${val === v ? 'on' : ''}" data-dt-set="${field}:${v}">${_esc(l)}</button>`).join('')}</div>`; }
+
+function _dtSetPath(t, path, value) {
+  if (path.startsWith('rules.')) { t.rules = t.rules || {}; t.rules[path.slice(6)] = value; }
+  else t[path] = value;
+}
+
+async function _dtSave() {
+  if (_dtAllErr().length || !_dtDirty()) return;
+  const draft = _dtDraft.map(t => normalizeDamageType({ ...t }));
+  await saveDamageTypes(draft);
+  invalidateDamageTypesCache();
+  _damageTypes = _dtClone(draft);
+  _dtDraft = _dtClone(draft);
+  _dtSaved = _dtClone(draft);
+  if (!_dtCur()) _dtSelId = _dtDraft[0]?.id || null;
+  showNotif('Types de dégâts enregistrés.', 'success');
+  _dtRender();
+}
+
+function _dtMount() {
+  if (_dtMounted) return; _dtMounted = true;
+  document.addEventListener('click', ev => {
+    if (!document.querySelector('.dt')) return;
+    // Fermer la palette d'emoji sur un clic extérieur.
+    if (_dtEmoji && !ev.target.closest('.dt-emoji-wrap')) { _dtEmoji = false; _dtRenderMain(); }
+    const t = ev.target.closest('[data-dt-sel],[data-dt-add],[data-dt-nat],[data-dt-mv],[data-dt-dup],[data-dt-del],[data-dt-delok],[data-dt-color],[data-dt-light],[data-dt-set],[data-dt-step],[data-dt-tech],[data-dt-addtech],[data-dt-emoji],[data-dt-pick],[data-dt-weapons],[data-dt-revert],[data-dt-save],[data-dt-close],[data-dt-keep],[data-dt-discard]');
+    if (!t) return;
+    const d = t.dataset, cur = _dtCur();
+    if (d.dtSel != null) { _dtSelId = d.dtSel; _dtOpenTech = _dtCur()?.techniques?.[0]?.id || null; _dtEmoji = false; return _dtRender(); }
+    if ('dtAdd' in d) { const id = `dt_${Date.now()}`; _dtDraft.push(normalizeDamageType({ id, label: '', icon: '', color: '#9ca3af', isMagic: false, rules: { ...DEFAULT_RULES, missScope: 'always' }, techniques: [] })); _dtSelId = id; _dtOpenTech = null; _dtEmoji = false; _dtRender(); document.getElementById('dt-name')?.focus(); return; }
+    if (d.dtNat != null) { if (cur) cur.isMagic = d.dtNat === '1'; return _dtRender(); }
+    if (d.dtMv) { const i = _dtDraft.indexOf(cur), j = i + (+d.dtMv); if (_dtDraft[j]) { [_dtDraft[i], _dtDraft[j]] = [_dtDraft[j], _dtDraft[i]]; _dtRender(); } return; }
+    if ('dtDup' in d) { if (!cur) return; const id = `dt_${Date.now()}`; const copy = normalizeDamageType({ ..._dtClone([cur])[0], id, label: `${cur.label} (copie)` }); copy.techniques = (copy.techniques || []).map((tq, k) => ({ ...tq, id: `dtt_${Date.now()}_${k}` })); _dtDraft.splice(_dtDraft.indexOf(cur) + 1, 0, copy); _dtSelId = id; return _dtRender(); }
+    if ('dtDel' in d) { if (cur?.id === 'physique') return; _dtReplaceId = _dtDraft.find(o => o !== cur && o.id === 'physique')?.id || _dtDraft.find(o => o !== cur)?.id || 'physique'; _dtAsk = 'del'; return _dtRenderFoot(); }
+    if ('dtDelok' in d) { const i = _dtDraft.indexOf(cur); _dtDraft.splice(i, 1); _dtSelId = (_dtDraft[i] || _dtDraft[i - 1])?.id || null; _dtOpenTech = _dtCur()?.techniques?.[0]?.id || null; _dtAsk = null; return _dtRender(); }
+    if (d.dtColor) { if (cur) cur.color = d.dtColor; return _dtRender(); }
+    if ('dtLight' in d) { if (cur) cur.emitsLight = !damageTypeEmitsLight(cur); return _dtRender(); }
+    if (d.dtSet) { const [path, val] = d.dtSet.split(':'); if (cur) { _dtSetPath(cur, path, val); } return _dtRender(); }
+    if (d.dtStep) { const path = d.dtStep; if (cur) { const base = path.startsWith('rules.') ? (cur.rules?.[path.slice(6)] || 0) : (cur[path] || 0); let v = (parseInt(base, 10) || 0) + (+d.dir) * (+d.step || 1); v = Math.max(+d.min, Math.min(+d.max, v)); _dtSetPath(cur, path, v); } return _dtRender(); }
+    if (d.dtTech) { _dtOpenTech = (_dtOpenTech === d.dtTech) ? null : d.dtTech; return _dtRenderMain(); }
+    if (d.dtAddtech) { if (cur) { const src = _DT_TECHNIQUE_PRESETS[d.dtAddtech] || _DT_TECHNIQUE_PRESETS.blank; const nt = normalizeWeaponTechnique({ ...src, id: `dtt_${Date.now()}` }, (cur.techniques || []).length); (cur.techniques || (cur.techniques = [])).push(nt); _dtOpenTech = nt.id; } return _dtRender(); }
+    if ('dtEmoji' in d) { _dtEmoji = !_dtEmoji; return _dtRenderMain(); }
+    if ('dtPick' in d) { if (cur) cur.icon = d.dtPick || ''; _dtEmoji = false; return _dtRender(); }
+    if ('dtWeapons' in d) { if (_dtDirty()) { _dtAsk = 'close'; return _dtRenderFoot(); } setModalCloseGuard(null); openWeaponFormatsAdmin(); return; }
+    if ('dtRevert' in d) { _dtDraft = _dtClone(_dtSaved); if (!_dtCur()) _dtSelId = _dtDraft[0]?.id || null; _dtAsk = null; return _dtRender(); }
+    if ('dtSave' in d) return _dtSave();
+    if ('dtClose' in d) { if (_dtDirty()) { _dtAsk = 'close'; _dtRenderFoot(); } else { setModalCloseGuard(null); closeModalDirect(); } return; }
+    if ('dtKeep' in d) { _dtAsk = null; return _dtRenderFoot(); }
+    if ('dtDiscard' in d) { _dtAsk = null; _dtDraft = _dtClone(_dtSaved); _dtSelId = _dtDraft[0]?.id || null; setModalCloseGuard(null); closeModalDirect(); return; }
+  });
+  document.addEventListener('input', ev => {
+    if (!document.querySelector('.dt')) return;
+    const cur = _dtCur(); if (!cur) return;
+    const el = ev.target;
+    if (el.hasAttribute('data-dt-name')) { cur.label = el.value; _dtRenderList(); _dtRenderFoot(); const e = _dtTypeErrs(cur); el.classList.toggle('bad', e.includes('name') || e.includes('dupname')); }
+    else if (el.hasAttribute('data-dt-colorpick')) { cur.color = el.value; _dtRenderList(); const eh = document.querySelector('.dt .wf-eh'); if (eh) eh.style.setProperty('--c', cur.color); const pv = document.querySelector('.dt .dt-chip'); if (pv) pv.style.setProperty('--c', cur.color); }
+    else if (el.id === 'dt-emoji-in') { const first = Array.from(el.value.trim())[0] || ''; if (first) { cur.icon = first; _dtEmoji = false; _dtRender(); } }
+  });
+  document.addEventListener('change', ev => {
+    if (!document.querySelector('.dt')) return;
+    const cur = _dtCur(); if (!cur) return;
+    if (ev.target.hasAttribute('data-dt-colorpick')) { cur.color = ev.target.value; _dtRender(); }
+    else if (ev.target.hasAttribute('data-dt-replace')) { _dtReplaceId = ev.target.value; }
+  });
+  document.addEventListener('keydown', ev => {
+    if (!document.querySelector('.dt')) return;
+    if (ev.key === 'Escape') {
+      if (_dtEmoji) { ev.stopPropagation(); _dtEmoji = false; _dtRenderMain(); return; }
+      if (_dtAsk) { ev.stopPropagation(); ev.preventDefault(); _dtAsk = null; _dtRenderFoot(); return; }
+    }
+  }, true);
+}
+
+// Champ de technique (carte réutilisée) → brouillon du type ouvert.
 function _dtTechniqueDraftField(el) {
-  const technique = _dtTechniqueDrafts[Number(el.dataset.idx)];
+  const cur = _dtCur(); if (!cur) return;
+  const technique = (cur.techniques || [])[Number(el.dataset.idx)];
   if (!technique) return;
   const field = el.dataset.field;
   technique[field] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (parseInt(el.value, 10) || 0) : el.value;
-  _dtTechniqueDirty = true;
+  if (el.tagName === 'SELECT' || el.type === 'checkbox') { _dtRenderMain(); _dtRenderFoot(); }
+  else { _dtRenderList(); _dtRenderFoot(); const card = document.querySelector('.dt .wf-tq.open'); if (card) { const nm = card.querySelector('.wf-tq-h b'); if (nm) nm.textContent = technique.label || 'Sans nom'; const sum = card.querySelector('.wf-tq-sum'); if (sum) sum.textContent = _wfTechSummary(technique); } }
 }
-
-function _addDamageTypeTechnique(preset = 'blank') {
-  const source = _DT_TECHNIQUE_PRESETS[preset] || _DT_TECHNIQUE_PRESETS.blank;
-  const type = _damageTypes?.[_dtTechniqueTypeIndex];
-  const label = preset === 'burst' && type?.id === 'feu' ? 'Explosion ardente' : source.label;
-  _dtTechniqueDrafts.push(normalizeWeaponTechnique({ ...source, label, id: `dtype_tech_${Date.now()}` }, _dtTechniqueDrafts.length));
-  _dtTechniqueDirty = true;
-  _renderDamageTypeTechniquesEditor();
-}
-
 function _deleteDamageTypeTechnique(i) {
-  if (!_dtTechniqueDrafts[i]) return;
-  _dtTechniqueDrafts.splice(i, 1);
-  _dtTechniqueDirty = true;
-  _renderDamageTypeTechniquesEditor();
-}
-
-async function _backToDamageTypes() {
-  if (_dtTechniqueDirty) {
-    const discard = await confirmModal('Revenir aux types sans enregistrer les techniques ?', { title: 'Modifications non enregistrées' });
-    if (!discard) return;
-  }
-  _dtTechniqueDirty = false;
-  _renderDamageTypesModal(_damageTypes || []);
-}
-
-async function _saveDamageTypeTechniques() {
-  const i = _dtTechniqueTypeIndex;
-  if (!_damageTypes?.[i]) return;
-  const techniques = _dtTechniqueDrafts.map(normalizeWeaponTechnique).filter(technique => technique.label);
-  const invalidFormula = techniques.find(technique =>
-    [technique.extraDamageFormula, technique.scalingFormula].some(formula => formula && !/^\d*d\d+(?:[+-]\d+)?$/i.test(formula))
-  );
-  if (invalidFormula) {
-    showNotif(`Formule invalide pour « ${invalidFormula.label} » (exemple attendu : 1d4+2).`, 'error');
-    return;
-  }
-  const types = _damageTypes.map((type, idx) => idx === i ? { ...type, techniques } : type);
-  await saveDamageTypes(types);
-  _damageTypes = types;
-  _dtTechniqueDirty = false;
-  showNotif(`${techniques.length} technique${techniques.length > 1 ? 's' : ''} enregistrée${techniques.length > 1 ? 's' : ''}.`, 'success');
-  _renderDamageTypesModal(types);
-}
-
-// ── Réordonnancement par glisser-déposer (Sortable, poignée ⠿) ──────────────
-async function _initDmgSortable() {
-  const list = document.querySelector('.sh-admin-modal.is-formats .sh-admin-list');
-  if (!list || list.dataset.sortable) return;
-  list.dataset.sortable = '1';
-  const { default: Sortable } = await import('../../vendor/sortable.esm.js');
-  new Sortable(list, {
-    animation: 160, handle: '.dt-grip',
-    ghostClass: 'sortable-ghost', chosenClass: 'sortable-chosen',
-    onEnd: async (evt) => {
-      if (evt.oldIndex === evt.newIndex) return;
-      const types = [...(_damageTypes || [])];
-      const [moved] = types.splice(evt.oldIndex, 1);
-      types.splice(evt.newIndex, 0, moved);
-      await saveDamageTypes(types);
-      _damageTypes = types;
-      _renderDamageTypesModal(types);
-    },
-  });
-}
-
-// ── Emoji : sélection dans une palette + collage du sien (borné à 1 emoji) ──
-const DT_EMOJIS = ['🔥','💧','🌊','🌬️','🪨','⛰️','🌱','⚡','❄️','☀️','🌙','🌑','✨','🌟','💥','💢','🔮','🌀','☠️','🧪','🩸','☣️','⚗️','🦠','🧨','🌋','🧊','♨️','🫧','🌩️','🗡️','🏹','🛡️','⚔️','👊','🦷','🐍','👁️','🪄','📖','⭐','💫'];
-
-// Premier « emoji » (grappheme) d'une chaîne collée → force 1 seul symbole.
-function _firstEmoji(str) {
-  const s = String(str || '').trim();
-  if (!s) return '';
-  try {
-    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-    return [...seg.segment(s)][0]?.segment || '';
-  } catch { return [...s][0] || ''; }
-}
-
-let _dmgEmojiOutside = null;
-function _closeDmgEmoji() {
-  document.getElementById('dt-emoji-pop')?.remove();
-  if (_dmgEmojiOutside) { document.removeEventListener('mousedown', _dmgEmojiOutside, true); _dmgEmojiOutside = null; }
-}
-function _openDmgEmoji(i, btn) {
-  const already = document.getElementById('dt-emoji-pop');
-  _closeDmgEmoji();
-  if (already && already.dataset.i === String(i)) return;   // re-clic = fermer
-  const pop = document.createElement('div');
-  pop.id = 'dt-emoji-pop'; pop.className = 'dt-emoji-pop'; pop.dataset.i = String(i);
-  pop.innerHTML = `
-    <div class="dt-emoji-paste">
-      <input type="text" id="dt-emoji-inp" placeholder="Colle ton emoji…" aria-label="Coller un emoji">
-      <button type="button" class="dt-emoji-none" data-action="_pickDmgEmoji" data-i="${i}" data-emo="">Aucun</button>
-    </div>
-    <div class="dt-emoji-grid">${DT_EMOJIS.map(e =>
-      `<button type="button" class="dt-emoji-opt" data-action="_pickDmgEmoji" data-i="${i}" data-emo="${e}">${e}</button>`).join('')}</div>`;
-  document.body.appendChild(pop);
-  const r = btn.getBoundingClientRect();
-  const w = pop.offsetWidth || 260, h = pop.offsetHeight || 240;
-  pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
-  pop.style.top = (r.bottom + h + 8 > window.innerHeight) ? `${Math.max(8, r.top - h - 6)}px` : `${r.bottom + 6}px`;
-  const inp = pop.querySelector('#dt-emoji-inp');
-  // Collage / saisie : on ne garde que le 1er emoji.
-  inp.addEventListener('input', () => { const e = _firstEmoji(inp.value); if (e && e !== inp.value) inp.value = e; });
-  inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); const e = _firstEmoji(inp.value); if (e) _pickDmgEmoji(i, e); } });
-  setTimeout(() => inp.focus(), 30);
-  _dmgEmojiOutside = (e) => { if (!pop.contains(e.target) && e.target !== btn) _closeDmgEmoji(); };
-  requestAnimationFrame(() => document.addEventListener('mousedown', _dmgEmojiOutside, true));
-}
-async function _pickDmgEmoji(i, emo) {
-  const clean = emo ? _firstEmoji(emo) : '';
-  await _saveDmgTypeProp(i, 'icon', clean);
-  const btn = document.querySelector(`.dt-emoji-btn[data-i="${i}"]`);
-  if (btn) btn.innerHTML = clean ? _esc(clean) : '<span class="dt-emoji-ph">＋</span>';
-  _closeDmgEmoji();
-}
-
-async function _saveDmgTypeProp(i, path, value) {
-  const types = [...(_damageTypes || [])];
-  if (!types[i]) return;
-  if (path.startsWith('rules.')) {
-    const key = path.slice(6);
-    types[i] = { ...types[i], rules: { ...types[i].rules, [key]: value } };
-  } else {
-    types[i] = { ...types[i], [path]: value };
-  }
-  await saveDamageTypes(types);
-  _damageTypes = types;
-  // Le résumé de la ligne suit sans re-render (donc sans perte de focus).
-  const bd = document.querySelector(`[data-badges="${i}"]`);
-  if (bd) bd.innerHTML = _dtBadges(types[i]);
-}
-
-// Accordéon : un seul type déplié à la fois → la liste reste courte.
-function _toggleDmgRow(i) {
-  const row = document.querySelector(`.dt-row[data-row="${i}"]`);
-  if (!row) return;
-  const willOpen = !row.classList.contains('is-open');
-  document.querySelectorAll('.dt-row.is-open').forEach(r => r.classList.remove('is-open'));
-  if (willOpen) row.classList.add('is-open');
-}
-
-// Applique une couleur (pastille rapide ou sélecteur libre) : sauvegarde puis MAJ
-// live de la ligne — pas de re-render, donc aucun champ ne perd le focus.
-async function _setDmgColor(i, color) {
-  if (!color) return;
-  await _saveDmgTypeProp(i, 'color', color);
-  const row = document.querySelector(`.dt-row[data-row="${i}"]`);
-  if (!row) return;
-  row.style.setProperty('--dt-accent', color);
-  row.querySelectorAll('.dt-sw').forEach(b =>
-    b.classList.toggle('is-active', (b.dataset.color || '').toLowerCase() === color.toLowerCase()));
-  const pick = row.querySelector('.dt-color-pick');
-  if (pick && pick.value !== color) pick.value = color;
-}
-
-async function _addDmgType() {
-  const label = document.getElementById('dt-new-label')?.value?.trim();
-  const icon  = document.getElementById('dt-new-icon')?.value?.trim() || '';
-  if (!label) { showNotif('Nom requis.', 'error'); return; }
-  const types = [...(_damageTypes || [])];
-  if (types.some(t => t.label.toLowerCase() === label.toLowerCase())) {
-    showNotif('Ce type existe déjà.', 'error'); return;
-  }
-  types.push({
-    id:      `dt_${Date.now()}`,
-    label,
-    icon,
-    color:   '#9ca3af',
-    // Défaut NEUTRE (D&D-first) : pas de règle maison imposée. Le MJ active
-    // ensuite « magique » et/ou un effet de raté s'il le souhaite.
-    isMagic: false,
-    rules:   { missEffect: 'none', missScope: 'always', armorPen: 0, dmgBonus: 0 },
-  });
-  await saveDamageTypes(types);
-  _damageTypes = types;
-  showNotif('Type ajouté.', 'success');
-  _renderDamageTypesModal(types);
-}
-
-async function _deleteDmgType(i) {
-  if (!await confirmModal('Supprimer ce type ?', { title: 'Confirmation' })) return;
-  const types = [...(_damageTypes || [])];
-  types.splice(i, 1);
-  await saveDamageTypes(types);
-  _damageTypes = types;
-  showNotif('Type supprimé.', 'success');
-  _renderDamageTypesModal(types);
+  const cur = _dtCur(); if (!cur || !cur.techniques?.[i]) return;
+  cur.techniques.splice(i, 1);
+  _dtOpenTech = null;
+  showNotif('Technique supprimée. « Annuler les modifications » pour revenir.', 'info');
+  _dtRender();
 }
 
 
@@ -2005,11 +1889,6 @@ export function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
 }
 
 registerActions({
-  _saveDmgTypeProp: (el) => {
-    const t = el.dataset.vtype;
-    const v = t === 'bool' ? el.checked : t === 'num' ? +el.value : el.value;
-    _saveDmgTypeProp(Number(el.dataset.i), el.dataset.prop, v);
-  },
   _setSpellMatrixCAMod:        (el) => _setSpellMatrixCAMod(el.dataset.tid, el.value),
   _setSpellMatrixRedStep:      (el) => _setSpellMatrixRedStep(el.dataset.tid, el.value),
   _setSpellMatrixCANote:       (el) => _setSpellMatrixCANote(el.dataset.tid, el.value),
@@ -2024,12 +1903,8 @@ registerActions({
   _saveCombatStyle:         (btn) => _saveCombatStyle(Number(btn.dataset.idx)),
   _backToStylesList:        ()    => _backToStylesList(),
   _csAddCond:               (btn) => _csAddCond(btn.dataset.container, btn.dataset.sel),
-  _editDamageTypeTechniques: (btn) => _editDamageTypeTechniques(Number(btn.dataset.idx)),
   _dtTechniqueDraftField:    (el)  => _dtTechniqueDraftField(el),
-  _addDamageTypeTechnique:   (btn) => _addDamageTypeTechnique(btn.dataset.preset),
   _deleteDamageTypeTechnique:(btn) => _deleteDamageTypeTechnique(Number(btn.dataset.idx)),
-  _saveDamageTypeTechniques: ()    => _saveDamageTypeTechniques(),
-  _backToDamageTypes:        ()    => _backToDamageTypes(),
   openCombatStylesAdmin:    ()    => openCombatStylesAdmin(),
   openWeaponFormatsAdmin:   ()    => openWeaponFormatsAdmin(),
   openDamageTypesAdmin:     ()    => openDamageTypesAdmin(),
@@ -2038,13 +1913,6 @@ registerActions({
   openEquipmentSlotsAdmin:  ()    => openEquipmentSlotsAdmin(),
   openArmorSetsAdmin:       ()    => openArmorSetsAdmin(),
   openSpellSystemAdmin:     ()    => openSpellSystemAdmin(),
-  _addDmgType:              ()    => _addDmgType(),
-  _deleteDmgType:           (btn) => _deleteDmgType(Number(btn.dataset.idx)),
-  _setDmgColor:             (btn) => _setDmgColor(Number(btn.dataset.i), btn.dataset.color),
-  _setDmgColorPick:         (el)  => _setDmgColor(Number(el.dataset.i), el.value),
-  _openDmgEmoji:            (btn) => _openDmgEmoji(Number(btn.dataset.i), btn),
-  _pickDmgEmoji:            (btn) => _pickDmgEmoji(Number(btn.dataset.i), btn.dataset.emo),
-  _toggleDmgRow:            (btn) => _toggleDmgRow(Number(btn.dataset.i)),
   _switchSpellMatrixTab:    (btn) => _switchSpellMatrixTab(btn.dataset.tab),
   _saveSpellMatrices:       ()    => _saveSpellMatrices(),
 });

@@ -8,7 +8,7 @@
 import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { confirmDelete, tryDoc } from '../shared/crud.js';
-import { loadCollection, deleteFromCol, getDocData, saveDoc } from '../data/firestore.js';
+import { loadCollection, deleteFromCol, getDocData, saveDoc, batchUpdateInCol } from '../data/firestore.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -23,6 +23,8 @@ import { characterAvatarHtml, characterPortraitContent } from '../shared/portrai
 import { lsJson } from '../shared/local-storage.js';
 import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
+import { openCatalogAdmin } from '../shared/catalog-admin.js';
+import { catalogReplacementFor } from '../shared/catalog-admin-utils.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 const DEFAULT_ACH_CATS = [
@@ -2312,76 +2314,64 @@ function _achOpenLightbox(itemId) {
   document.body.appendChild(overlay);
 }
 
-let _achCatDraft = [];
+let _achCatalogUsage = [];
 
-function _renderAchievementCategoriesAdmin() {
-  const rows = _achCatDraft.map((cat, index) => `
-    <article class="ach-cat-admin-card" style="--cat-color:${_esc(cat.color || '#7eb0ff')};--cat-glow:${_esc(cat.glow || 'rgba(126,176,255,.18)')}" data-index="${index}">
-      <div class="ach-cat-admin-preview">
-        <input class="ach-cat-admin-emoji" value="${_esc(cat.emoji || '')}" data-input="_achCatField" data-index="${index}" data-field="emoji" placeholder="🏆" maxlength="4" aria-label="Icône">
-        <div class="ach-cat-admin-name">
-          <strong>${_esc(cat.label || 'Catégorie')}</strong>
-          <small>Filtre, badge et fiche de haut-fait</small>
-        </div>
-      </div>
+async function _loadAchievementCategoryUsage(categories, defaultId) {
+  const [publicItems, secretItems] = await Promise.all([
+    loadCollection('achievements'),
+    loadCollection('achievements_secret').catch(() => []),
+  ]);
+  STORE.publicItems = publicItems || [];
+  STORE.secretItems = secretItems || [];
+  STORE.items = _composeItems();
+  _achCatalogUsage = [
+    ...STORE.publicItems.map(item => ({ item, col: 'achievements', effectiveId: item.categorie || defaultId })),
+    ...STORE.secretItems.map(item => ({ item, col: 'achievements_secret', effectiveId: item.categorie || defaultId })),
+  ];
+  const counts = Object.fromEntries(categories.map(category => [category.id, 0]));
+  _achCatalogUsage.forEach(({ effectiveId }) => { if (effectiveId in counts) counts[effectiveId] += 1; });
+  return counts;
+}
 
-      <label class="ach-cat-admin-field">
-        <span>Nom affiché</span>
-        <input class="input-field" value="${_esc(cat.label || '')}" data-input="_achCatField" data-index="${index}" data-field="label" placeholder="Ex. Épique">
-      </label>
-
-      <div class="ach-cat-admin-color">
-        <label class="ach-cat-color-picker">
-          <span>Couleur</span>
-          <input type="color" value="${_esc(cat.color || '#7eb0ff')}" data-change="_achCatField" data-index="${index}" data-field="color">
-        </label>
-        <div class="ach-cat-swatches" aria-label="Couleurs rapides">
-          ${ACH_CAT_PALETTE.map(color => `
-            <button type="button" class="ach-cat-swatch${(cat.color || '').toLowerCase() === color.toLowerCase() ? ' is-active' : ''}"
-              style="--sw:${color}" data-action="_achCatColor" data-index="${index}" data-color="${color}" aria-label="Couleur ${color}"></button>`).join('')}
-        </div>
-      </div>
-
-      <div class="ach-cat-admin-actions">
-        <button type="button" class="btn btn-outline btn-sm" data-action="_achCatMove" data-index="${index}" data-dir="-1" title="Monter" ${index === 0 ? 'disabled' : ''}>↑</button>
-        <button type="button" class="btn btn-outline btn-sm" data-action="_achCatMove" data-index="${index}" data-dir="1" title="Descendre" ${index === _achCatDraft.length - 1 ? 'disabled' : ''}>↓</button>
-        <button type="button" class="btn btn-outline btn-sm is-danger" data-action="_achCatDelete" data-index="${index}" title="Supprimer">×</button>
-      </div>
-    </article>`).join('');
-
-  openModal('', `
-    <div class="sh-admin-modal is-ach-categories">
-      <div class="sh-admin-head">
-        <div class="sh-admin-head-ico">🏆</div>
-        <div class="sh-admin-head-title">
-          <h2>Catégories de hauts-faits</h2>
-          <small>Ces catégories alimentent la galerie, les filtres et la création de hauts-faits pour cette aventure.</small>
-        </div>
-        <button class="sh-admin-close" data-action="_achCatClose" aria-label="Fermer">×</button>
-      </div>
-      <div class="sh-admin-body ach-cat-admin-body">
-        <div class="ach-cat-admin-guide">
-          <div><b>Ordre des filtres</b><small>Le premier rang devient la catégorie par défaut des nouveaux hauts-faits.</small></div>
-          <div><b>Identité visuelle</b><small>L'icône et la couleur sont reprises dans les cartes, compteurs et modales.</small></div>
-        </div>
-        <div class="ach-cat-admin-list">
-        ${rows || '<div class="eqs-admin-empty">Aucune catégorie. Ajoute au moins une catégorie pour classer les hauts-faits.</div>'}
-        </div>
-        <button class="ach-cat-admin-add" data-action="_achCatAdd">+ Ajouter une catégorie</button>
-      </div>
-      <div class="sh-admin-footer">
-        <button class="btn btn-outline btn-sm" data-action="_achCatClose">Annuler</button>
-        <button class="btn btn-gold btn-sm" data-action="_achCatSave">Enregistrer</button>
-      </div>
-    </div>`);
+async function _reassignAchievementCategories(changes) {
+  const affected = _achCatalogUsage
+    .map(entry => ({ entry, to: catalogReplacementFor(entry.effectiveId, changes) }))
+    .filter(change => change.to);
+  const updates = affected.map(({ entry, to }) => ({ col: entry.col, id: entry.item.id, data: { categorie: to } }));
+  for (let index = 0; index < updates.length; index += 450) await batchUpdateInCol(updates.slice(index, index + 450));
+  affected.forEach(({ entry, to }) => {
+    entry.item.categorie = to;
+    entry.effectiveId = to;
+  });
+  STORE.items = _composeItems();
+  STORE.filter = catalogReplacementFor(STORE.filter, changes) || STORE.filter;
 }
 
 export async function openAchievementCategoriesAdmin() {
   if (!STATE.isAdmin) return;
-  await _ensureFeatureCss('shop');
   await _loadAchievementCategories();
-  _achCatDraft = ACH_CATS.map(c => ({ ...c }));
-  _renderAchievementCategoriesAdmin();
+  return openCatalogAdmin({
+    kind: 'achievements', icon: '🏆', accent: '#e8b84b',
+    title: 'Catégories de hauts-faits',
+    sub: 'Galerie, filtres et création des hauts-faits de cette aventure.',
+    noun: ['catégorie', 'catégories'], fem: true,
+    item: ['haut-fait', 'hauts-faits'], itemFem: false, all: 'Tous',
+    emoji: true, plural: false, idPrefix: 'categorie_',
+    defaultNote: 'La première catégorie est proposée par défaut à la création d’un haut-fait.',
+    palette: ACH_CAT_PALETTE,
+    emojis: ['⚔️','🎭','📖','🏆','👑','💀','🐉','🗺️','🍺','💰','🎲','🔥','❤️','🧙','🏰','⭐','🗡️','🛡️','🌙','🎉','😂','🤝','🧩','📜'],
+    load: () => ACH_CATS,
+    count: _loadAchievementCategoryUsage,
+    setColor: (category, color) => { category.glow = `${color}29`; category.line = `${color}59`; },
+    save: _saveAchievementCategories,
+    reassign: _reassignAchievementCategories,
+    sample: () => {
+      const item = STORE.items[0] || {};
+      return { title: item.titre || item.title || 'Le pont de Khazad-Bur', subtitle: item.description || 'Un exploit digne de rester dans les mémoires.', meta: item.date || 'Chronique de l’aventure' };
+    },
+    afterSave: async () => { if (document.getElementById('ach-content')) await _achRenderContentPreserveViewport({ force: true }); },
+    onError: notifySaveError,
+  });
 }
 // Ouverture de la lightbox depuis un autre module (ex. fiche mission de la Trame).
 // Charge les hauts-faits si nécessaire (collection session-live → 0 lecture en plus).
@@ -2508,53 +2498,4 @@ registerActions({
   _achEditFromLightbox:  (btn) => _achEditFromLightbox(btn.dataset.id),
   _achDeleteFromLightbox:(btn) => _achDeleteFromLightbox(btn.dataset.id),
   _achOpenMission:       (btn) => _achOpenMission(btn.dataset.id),
-  _achCatClose:          ()    => closeModal(),
-  _achCatField:          (el)  => {
-    const cat = _achCatDraft[Number(el.dataset.index)];
-    if (!cat) return;
-    cat[el.dataset.field] = el.value;
-    if (el.dataset.field === 'color') {
-      cat.glow = `${el.value}29`;
-      cat.line = `${el.value}59`;
-    }
-  },
-  _achCatColor:          (btn) => {
-    const cat = _achCatDraft[Number(btn.dataset.index)];
-    if (!cat) return;
-    cat.color = btn.dataset.color || cat.color;
-    cat.glow = `${cat.color}29`;
-    cat.line = `${cat.color}59`;
-    _renderAchievementCategoriesAdmin();
-  },
-  _achCatMove:           (btn) => {
-    const from = Number(btn.dataset.index);
-    const to = from + Number(btn.dataset.dir);
-    if (!_achCatDraft[from] || to < 0 || to >= _achCatDraft.length) return;
-    [_achCatDraft[from], _achCatDraft[to]] = [_achCatDraft[to], _achCatDraft[from]];
-    _renderAchievementCategoriesAdmin();
-  },
-  _achCatDelete:         (btn) => {
-    const index = Number(btn.dataset.index);
-    if (!_achCatDraft[index]) return;
-    _achCatDraft.splice(index, 1);
-    _renderAchievementCategoriesAdmin();
-  },
-  _achCatAdd:            ()    => {
-    _achCatDraft.push(_normalizeAchCategory({ id: `categorie_${Date.now()}`, label: 'Nouvelle catégorie', emoji: '🏆', color: '#7eb0ff' }, _achCatDraft.length));
-    _renderAchievementCategoriesAdmin();
-  },
-  _achCatSave:           async () => {
-    if (!_achCatDraft.some(c => String(c.label || '').trim())) {
-      showNotif('Ajoute au moins une catégorie.', 'error');
-      return;
-    }
-    try {
-      await _saveAchievementCategories(_achCatDraft);
-      showNotif('Catégories de hauts-faits enregistrées.', 'success');
-      closeModal();
-      _achRenderContentPreserveViewport();
-    } catch (error) {
-      notifySaveError(error);
-    }
-  },
 });
