@@ -103,11 +103,22 @@ export async function setVitalCurrent(stat, newValRaw, charId) {
   await _queueVitalSave(stat, c.id, newVal, true);
 }
 
+// Utilise la même source que le rendu de la fiche : les PV du VTT (`hp`) sont
+// prioritaires sur l'ancien champ `pvActuel`. Sans cela, ouvrir la saisie après
+// des dégâts pouvait proposer le maximum au lieu de la valeur réellement affichée.
+function _currentVitalValue(c, stat, maxVal) {
+  const raw = stat === 'pvActuel'
+    ? (c.hp ?? c.pvActuel)
+    : (c.pmActuel ?? c.pm);
+  const value = Number(raw ?? maxVal);
+  return Number.isFinite(value) ? value : maxVal;
+}
+
 export function adjustStat(stat, delta, charId) {
   const c = getCharacterById(charId);
   if (!c) return;
   const maxVal = stat === 'pvActuel' ? calcPVMax(c) : calcPMMax(c);
-  const cur = Number(c[stat] ?? maxVal);
+  const cur = _currentVitalValue(c, stat, maxVal);
   if (!Number.isFinite(cur) || !Number.isFinite(delta)) return;
   const next = Math.max(0, Math.min(maxVal, cur + delta));
   if (next === cur) return;
@@ -127,7 +138,7 @@ export function editVitalCurrent(stat, el, charId) {
   const maxVal = stat === 'pvActuel' ? calcPVMax(c) : calcPMMax(c);
   const input = document.createElement('input');
   input.type = 'number';
-  input.value = c[stat] ?? maxVal;
+  input.value = _currentVitalValue(c, stat, maxVal);
   input.min = 0; input.max = maxVal;
   input.className = 'cs-inline-input cs-inline-num vital-inline-input';
   let done = false;

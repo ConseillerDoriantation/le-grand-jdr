@@ -8,6 +8,7 @@ const exportSource = readFileSync(new URL('../assets/js/features/characters/expo
 const exportCss = readFileSync(new URL('../assets/css/print.css', import.meta.url), 'utf8');
 const lightboxSource = readFileSync(new URL('../assets/js/shared/image-lightbox.js', import.meta.url), 'utf8');
 const photoSource = readFileSync(new URL('../assets/js/features/character-photo.js', import.meta.url), 'utf8');
+const formsSource = readFileSync(new URL('../assets/js/features/characters/forms.js', import.meta.url), 'utf8');
 const sidebar = source.slice(source.indexOf('function _buildSidebarHtml'), source.indexOf('function _buildBuildSwitcherHtml'));
 
 test('le bloc identité utilise le portrait rond, l’anneau XP et les surfaces compactes', () => {
@@ -61,6 +62,12 @@ test('PV PM et chiffres clés suivent l’ordre visuel de la maquette', () => {
   assert.match(sidebar, /data-calc="ca"[^]*<b>\$\{calcCA\(c\)\}<\/b><span>CA<\/span>/);
   assert.match(sidebar, /data-calc="or"[^]*class="or-card-amount"[^]*<span>Or<\/span>/);
   assert.doesNotMatch(sidebar, /🛡 CA|➤ Vitesse|✦ Deck|● Bourse/);
+});
+
+test('la saisie des PV actuels reprend la valeur synchronisée avec le VTT', () => {
+  assert.match(formsSource, /stat === 'pvActuel'[\s\S]*?\(c\.hp \?\? c\.pvActuel\)/);
+  assert.match(formsSource, /const cur = _currentVitalValue\(c, stat, maxVal\)/);
+  assert.match(formsSource, /input\.value = _currentVitalValue\(c, stat, maxVal\)/);
 });
 
 test('la hiérarchie d’identité et le calcul compact suivent la maquette', () => {

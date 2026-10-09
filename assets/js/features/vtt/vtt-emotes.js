@@ -16,14 +16,11 @@ import { db, doc, getDoc, addDoc, setDoc, serverTimestamp } from '../../config/f
 import { computeEquipSkillBonus } from '../../shared/char-stats.js';
 import { getArmorSetData } from '../../shared/equipment-utils.js';
 import { combineArmorRollMode, getArmorSetRollModeFor } from '../../shared/armor-set-settings.js';
-import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
-import { uploadPng } from '../../shared/image-upload.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
 import { bumpSkill, bumpEmote } from '../../shared/stats.js';
 import { _logGmCol, _reactionRef } from './vtt-refs.js';
 import { _STAT_KEY } from './vtt-constants.js';
-import { openModal, closeModalDirect, confirmModal, promptModal } from '../../shared/modal.js';
-import { listGithubFolder, GH_IMAGE_EXTS, slugFromFile, fileKey } from '../../shared/github-folder.js';
+import { sanitizeEmoteName, createEmoteLookup, resolveEmoteNames } from '../../shared/emote-admin.js';
 import { resolveControlledTokenId } from './vtt-token-control.js';
 import { _live } from './vtt-effective.js';
 import { _vttPublishOptimisticLog } from './vtt-chat.js';
@@ -254,28 +251,34 @@ export async function _vttRollSkill(skillName, stat) {
 }
 
 export async function _saveEmotes(list) {
-  _emotes = list;
-  try { await saveDoc('world', 'vtt_emotes', { emotes: list }); }
-  catch(e) { showNotif('Erreur sauvegarde émotes : ' + e.message, 'error'); }
+  try {
+    await saveDoc('world', 'vtt_emotes', { emotes: list });
+    _emotes = list;
+    return true;
+  } catch(e) {
+    showNotif('Erreur sauvegarde émotes : ' + e.message, 'error');
+    return false;
+  }
 }
 
 // Convertit les balises :nom: en <img> dans un texte déjà échappé
 export function _applyEmotes(escaped) {
-  for (const em of _emotes) {
-    const key = `:${_esc(em.name)}:`;
-    const img = `<img class="vtt-emote-inline" src="${em.url}" alt="${key}" title="${key}">`;
+  for (const [name, em] of createEmoteLookup(_emotes)) {
+    const key = `:${_esc(name)}:`;
+    const img = `<img class="vtt-emote-inline" src="${_esc(em.url)}" alt="${key}" title="${key}">`;
     escaped = escaped.split(key).join(img);
   }
   return escaped;
 }
 
 // Favoris (« Roue ») + récents — stockés en localStorage (clés inchangées).
-export const _getFavs = () => lsJson.get('vtt-emote-favs', []);
+export const _getFavs = () => resolveEmoteNames(lsJson.get('vtt-emote-favs', []), _emotes);
 export const _setFavs = v => lsJson.set('vtt-emote-favs', v);
-export const _getRecents = () => lsJson.get('vtt-emote-recents', []);
+export const _getRecents = () => resolveEmoteNames(lsJson.get('vtt-emote-recents', []), _emotes);
 export function _pushRecent(name) {
-  const r = _getRecents().filter(n => n !== name);
-  r.unshift(name);
+  const canonical = createEmoteLookup(_emotes).get(sanitizeEmoteName(name))?.name || sanitizeEmoteName(name);
+  const r = _getRecents().filter(n => n !== canonical);
+  r.unshift(canonical);
   lsJson.set('vtt-emote-recents', r.slice(0, 12));   // portée 8 → 12
 }
 
@@ -362,7 +365,7 @@ function _emoteTiles(list, favs) {
 
 function _emoteListFor() {
   const q = _emoteQuery.trim();
-  if (q) return _emotes.filter(e => _searchIncludes(e.name, q));
+  if (q) return _emotes.filter(e => _searchIncludes(e.name, q) || (e.aliases || []).some(alias => _searchIncludes(alias, q)));
   const byName = new Map(_emotes.map(e => [e.name, e]));
   if (_emoteTab === 'fav') return _getFavs().map(n => byName.get(n)).filter(Boolean);
   if (_emoteTab === 'rec') return _getRecents().map(n => byName.get(n)).filter(Boolean);
@@ -733,223 +736,10 @@ function _emoteCloseWheel(go) {
 
 export async function _ouvrirGestionEmotes() {
   await _loadEmotes();
-  const { default: Sortable } = await import('../../vendor/sortable.esm.js');
-
-  // ── Helper upload Cloudinary (avec sous-dossier optionnel pour grouper) ──
-  const _getEmoteAlbum = () => localStorage.getItem('vtt-emote-folder') || localStorage.getItem('vtt-imgbb-emote-album') || '';
-  const _setEmoteAlbum = v => v ? localStorage.setItem('vtt-emote-folder', v) : localStorage.removeItem('vtt-emote-folder');
-
-  const _uploadEmote = async (file) => {
-    if (CLOUDINARY_ENABLED) {
-      if (!hasCloudinaryConfig()) {
-        openCloudinaryConfigModal();
-        if (!hasCloudinaryConfig()) throw new Error('Configuration Cloudinary requise (bouton 🔑)');
-      }
-      const sub = _getEmoteAlbum().trim();
-      const folder = sub ? `emotes/${sub}` : 'emotes';
-      const up = await uploadCloudinary(file, { folder, tags: ['emote'] });
-      return up.url;
-    }
-    // Mode gratuit : émote = petite image → base64 PNG (transparence conservée),
-    // stockée directement dans le doc des émotes (pas d'hébergeur externe).
-    return await uploadPng(file, { max: 200 });
-  };
-
-  // ── Rendu de la grille de cartes ─────────────────────────────────
-  const _cardsHtml = (list) => list.length
-    ? `<div id="emote-cards-grid" class="vtt-emote-cards">${
-        list.map((em, i) => `
-          <div class="vtt-emote-card" data-i="${i}">
-            <span class="vtt-emote-card-drag" title="Déplacer">⠿</span>
-            <img src="${em.url}" alt="${_esc(em.name)}">
-            <span class="vtt-emote-card-name" title=":${_esc(em.name)}:">:${_esc(em.name)}:</span>
-            <div class="vtt-emote-card-actions">
-              <button class="vtt-ec-btn vtt-ec-edit" data-vtt-fn="_vttEditEmote" data-vtt-args="${i}" title="Modifier">✏</button>
-              <button class="vtt-ec-btn vtt-ec-del"  data-vtt-fn="_vttDeleteEmote" data-vtt-args="${i}" title="Supprimer">✕</button>
-            </div>
-          </div>`).join('')
-      }</div>`
-    : '<div style="color:var(--text-dim);font-size:.8rem;padding:.5rem 0">Aucune émote pour l\'instant.</div>';
-
-  const _inpStyle = 'width:100%;box-sizing:border-box;background:var(--bg-elevated);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:.8rem;padding:.3rem .5rem';
-
-  openModal('😄 Gestion des Émotes', `
-    <div style="display:flex;flex-direction:column;gap:.85rem;padding:.3rem 0">
-      <div style="font-size:.72rem;color:var(--text-muted)">Maintenez ⠿ pour réordonner par glisser-déposer. Cliquez ✏ pour modifier.</div>
-      <div id="emote-manage-list">${_cardsHtml(_emotes)}</div>
-      <div id="emote-edit-zone"></div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:0">
-      <div style="display:flex;align-items:center;gap:.6rem">
-        <label style="font-size:.75rem;color:var(--text-muted);white-space:nowrap">📁 Dossier</label>
-        <input type="text" id="emote-album-id" placeholder="nom du sous-dossier Cloudinary (optionnel)" value="${_getEmoteAlbum()}" style="${_inpStyle};flex:1"
-          data-vtt-fn="_vttSetEmoteAlbum" data-vtt-on="input" data-vtt-args="$value">
-      </div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:0">
-      <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
-        <button class="btn btn-outline btn-sm" data-vtt-fn="_vttImportEmotesGithub">📥 Importer un dossier GitHub</button>
-        <span style="font-size:.72rem;color:var(--text-muted)">Toutes les images d'un dossier du repo, sans doublon</span>
-      </div>
-      <hr style="border:none;border-top:1px solid var(--border);margin:0">
-      <div style="font-weight:600;font-size:.85rem">➕ Ajouter une émote</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.6rem">
-        <div class="form-group" style="margin:0">
-          <label style="font-size:.75rem;color:var(--text-muted)">Nom (ex: <code>rire</code>)</label>
-          <input type="text" id="emote-add-name" placeholder="nomemote" style="${_inpStyle}">
-        </div>
-        <div class="form-group" style="margin:0">
-          <label style="font-size:.75rem;color:var(--text-muted)">Fichier <span style="opacity:.6">(ou URL ci-dessous)</span></label>
-          <input type="file" id="emote-add-file" accept="image/*" style="font-size:.78rem;margin-top:.25rem">
-        </div>
-      </div>
-      <div class="form-group" style="margin:0">
-        <label style="font-size:.75rem;color:var(--text-muted)">URL directe <span style="opacity:.6">(si déjà hébergée ailleurs)</span></label>
-        <input type="text" id="emote-add-url" placeholder="https://…" style="${_inpStyle}">
-      </div>
-      <div style="display:flex;align-items:center;gap:.7rem">
-        <button class="btn btn-primary" style="flex:1" data-vtt-fn="_vttAddEmote">➕ Ajouter l'émote</button>
-        <span id="emote-add-status" style="font-size:.78rem;color:var(--text-dim);flex:1;min-height:1rem"></span>
-      </div>
-    </div>`);
-
-  // ── SortableJS ───────────────────────────────────────────────────
-  const _initSort = () => {
-    const grid = document.getElementById('emote-cards-grid'); if (!grid) return;
-    new Sortable(grid, {
-      animation: 180, handle: '.vtt-emote-card-drag',
-      ghostClass: 'sortable-ghost', chosenClass: 'sortable-chosen',
-      onEnd: async (evt) => {
-        if (evt.oldIndex === evt.newIndex) return;
-        const list = [..._emotes];
-        const [moved] = list.splice(evt.oldIndex, 1);
-        list.splice(evt.newIndex, 0, moved);
-        await _saveEmotes(list);
-        showNotif('Ordre sauvegardé', 'success');
-      },
-    });
-  };
-  _initSort();
-
-  // ── Rafraîchit la grille ─────────────────────────────────────────
-  const _refresh = (clearEdit = true) => {
-    const el = document.getElementById('emote-manage-list'); if (!el) return;
-    el.innerHTML = _cardsHtml(_emotes); _initSort();
-    if (clearEdit) { const ez = document.getElementById('emote-edit-zone'); if (ez) ez.innerHTML = ''; }
-  };
-
-  // ── Supprimer ────────────────────────────────────────────────────
-  VTT_ACTIONS._vttDeleteEmote = async (i) => {
-    if (!await confirmModal(`Supprimer :${_emotes[i]?.name}: ?`)) return;
-    const list = [..._emotes]; list.splice(i, 1);
-    await _saveEmotes(list); _refresh();
-    showNotif('Émote supprimée', 'success');
-  };
-
-  // ── Ouvrir le panneau d'édition (horizontal, sous la grille) ─────
-  VTT_ACTIONS._vttEditEmote = (i) => {
-    const em = _emotes[i]; if (!em) return;
-    // Mettre en évidence la carte sélectionnée
-    document.querySelectorAll('.vtt-emote-card').forEach(c => c.classList.remove('is-editing'));
-    document.querySelector(`.vtt-emote-card[data-i="${i}"]`)?.classList.add('is-editing');
-    // Remplir la zone d'édition
-    const ez = document.getElementById('emote-edit-zone'); if (!ez) return;
-    ez.innerHTML = `
-      <div class="vtt-ec-panel">
-        <img class="vtt-ec-panel-preview" id="ec-preview-${i}" src="${em.url}" alt="${_esc(em.name)}">
-        <div class="vtt-ec-panel-fields">
-          <div class="vtt-ec-panel-title">✏ Modifier <span style="font-family:monospace">:${_esc(em.name)}:</span></div>
-          <div class="vtt-ec-panel-row">
-            <label>Nouveau nom</label>
-            <input type="text" id="ec-name-${i}" value="${_esc(em.name)}" autocomplete="off"
-              data-vtt-fn="_vttSaveEmote" data-vtt-on="keydown-enter" data-vtt-args="${i}">
-          </div>
-          <div class="vtt-ec-panel-row">
-            <label>Nouvelle image <span style="opacity:.6">(optionnel)</span></label>
-            <input type="file" id="ec-file-${i}" accept="image/*"
-              data-vtt-fn="_vttPreviewEmoteFile" data-vtt-on="change" data-vtt-args="$this|ec-preview-${i}">
-          </div>
-          <div class="vtt-ec-panel-btns">
-            <button class="vtt-ec-save"   data-vtt-fn="_vttSaveEmote" data-vtt-args="${i}">✓ Enregistrer</button>
-            <button class="vtt-ec-cancel" data-vtt-fn="_vttCancelEmoteEdit">✕ Annuler</button>
-          </div>
-        </div>
-      </div>`;
-    document.getElementById(`ec-name-${i}`)?.focus();
-  };
-
-  // ── Sauvegarder l'édition ────────────────────────────────────────
-  VTT_ACTIONS._vttSaveEmote = window._vttSaveEmote = async (i) => {
-    const nameEl = document.getElementById(`ec-name-${i}`);
-    const fileEl = document.getElementById(`ec-file-${i}`);
-    const newName = nameEl?.value.trim().replace(/\s+/g, '_').toLowerCase();
-    if (!newName) { showNotif('Nom requis', 'error'); return; }
-    const list = [..._emotes];
-    const em = { ...list[i], name: newName };
-    if (fileEl?.files?.[0]) {
-      showNotif('Upload en cours…', 'info');
-      try { em.url = await _uploadEmote(fileEl.files[0]); }
-      catch(e) { showNotif('⚠ ' + e.message, 'error'); return; }
-    }
-    list[i] = em;
-    await _saveEmotes(list); _refresh();
-    showNotif(`✓ :${newName}: mis à jour`, 'success');
-  };
-
-  // ── Importer un dossier GitHub (toutes les images, sans doublon) ──
-  VTT_ACTIONS._vttImportEmotesGithub = async () => {
-    const KEY = 'vtt-emote-gh-folder';
-    const def = localStorage.getItem(KEY) || 'images/emotes';
-    const path = (await promptModal('Dossier du repo à importer (ex : images/emotes) :',
-      { title: 'Importer des émotes', default: def, placeholder: 'images/emotes' }))?.trim();
-    if (!path) return;
-    localStorage.setItem(KEY, path);
-    const statusEl = document.getElementById('emote-add-status');
-    if (statusEl) statusEl.textContent = '⏳ Lecture du dossier…';
-    let files;
-    try { files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS }); }
-    catch (e) { if (statusEl) statusEl.textContent = '⚠ ' + e.message; showNotif(e.message, 'error'); return; }
-    if (!files.length) { if (statusEl) statusEl.textContent = 'Aucune image dans ce dossier'; return; }
-    // Dédoublonnage : par nom de fichier (robuste au chemin) ET par nom (:tag:).
-    const urls  = new Set(_emotes.map(e => fileKey(e.url)));
-    const names = new Set(_emotes.map(e => e.name));
-    const add = [];
-    for (const f of files) {
-      const name = slugFromFile(f.name);
-      const k = fileKey(f.url);
-      if (!name || urls.has(k) || names.has(name)) continue;
-      urls.add(k); names.add(name);
-      add.push({ id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, name, url: f.url });
-    }
-    if (!add.length) { if (statusEl) statusEl.textContent = 'Toutes ces émotes sont déjà présentes'; return; }
-    await _saveEmotes([..._emotes, ...add]);
-    _refresh();
-    if (statusEl) statusEl.textContent = `✓ ${add.length} émote(s) importée(s)`;
-    showNotif(`✅ ${add.length} émote(s) importée(s)`, 'success');
-  };
-
-  // ── Ajouter ──────────────────────────────────────────────────────
-  VTT_ACTIONS._vttAddEmote = async () => {
-    const nameEl   = document.getElementById('emote-add-name');
-    const fileEl   = document.getElementById('emote-add-file');
-    const urlEl    = document.getElementById('emote-add-url');
-    const statusEl = document.getElementById('emote-add-status');
-    const name = nameEl?.value.trim().replace(/\s+/g, '_').toLowerCase();
-    const file = fileEl?.files?.[0];
-    const directUrl = urlEl?.value.trim();
-    if (!name) { if (statusEl) statusEl.textContent = '⚠ Nom requis'; return; }
-    if (!file && !directUrl) { if (statusEl) statusEl.textContent = '⚠ Fichier ou URL requis'; return; }
-    let url;
-    if (file) {
-      if (statusEl) statusEl.textContent = '⏳ Upload…';
-      try { url = await _uploadEmote(file); }
-      catch(e) { if (statusEl) statusEl.textContent = '⚠ ' + e.message; return; }
-    } else {
-      url = directUrl;
-    }
-    await _saveEmotes([..._emotes, { id: Date.now().toString(), name, url }]);
-    if (statusEl) statusEl.textContent = `✓ :${name}: ajoutée !`;
-    if (nameEl) nameEl.value = '';
-    if (fileEl) fileEl.value = '';
-    if (urlEl)  urlEl.value  = '';
-    _refresh();
-  };
+  const { openEmoteAdminModal } = await import('./vtt-emote-admin.js');
+  await openEmoteAdminModal({
+    emotes: _emotes,
+    save: _saveEmotes,
+    onSaved: _renderEmotePickerIfOpen,
+  });
 }

@@ -12,6 +12,7 @@
 //   (le src devenait « <a href= » → 404). Les tests verrouillent cet ordre.
 // ══════════════════════════════════════════════════════════════════════════════
 import { _esc } from '../../shared/html.js';
+import { createEmoteLookup } from '../../shared/emote-admin.js';
 
 /** URLs http(s) → liens cliquables. À appliquer sur du texte échappé uniquement. */
 export function linkify(html) {
@@ -27,9 +28,9 @@ export function linkify(html) {
 export function applyEmotes(escaped, emotes = []) {
   let out = String(escaped ?? '');
   if (!emotes || !emotes.length) return out;
-  for (const em of emotes) {
-    if (!em || !em.name || !em.url) continue;
-    const key = `:${em.name}:`;
+  for (const [name, em] of createEmoteLookup(emotes)) {
+    if (!em?.url) continue;
+    const key = `:${name}:`;
     if (out.indexOf(key) === -1) continue;
     out = out.split(key).join(
       `<img class="chat-emote-inline" data-emote="${_esc(key)}" src="${_esc(em.url)}" alt="${_esc(key)}" title="${_esc(key)}">`);
