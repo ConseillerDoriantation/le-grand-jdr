@@ -1074,6 +1074,28 @@ export async function batchUpdateInCol(updates = []) {
   }
 }
 
+// Enregistre plusieurs documents avec merge dans un même commit. Contrairement
+// à batchUpdateInCol, la cible peut ne pas encore exister (documents de réglage
+// initialisés au premier enregistrement, par exemple world/dice_skills).
+export async function batchSaveInCol(updates = []) {
+  if (!Array.isArray(updates) || !updates.length) return;
+  const resolved = updates.map(({ col, id, data }) => ({
+    path: _colPath(col),
+    id,
+    data,
+  }));
+  try {
+    const batch = writeBatch(db);
+    resolved.forEach(({ path, id, data }) => batch.set(doc(db, path, id), data, { merge: true }));
+    await batch.commit();
+    resolved.forEach(({ path, id, data }) => _cachePatchSave(path, id, data));
+  } catch (e) {
+    const targets = resolved.map(({ path, id }) => `${path}/${id}`).join(', ');
+    _handleFirestoreError(e, `batchSaveInCol(${targets})`);
+    throw e;
+  }
+}
+
 export async function deleteFromCol(col, id) {
   const path = _colPath(col);
   try {

@@ -23,6 +23,7 @@ import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { getRouteSub } from '../shared/route.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
+import { resolveAvatarUrl } from '../shared/avatar.js';
 import { canControlCharacter, getControlledCharacters } from '../shared/character-state.js';
 import { dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey } from '../shared/bastion-wall.js';
@@ -900,7 +901,10 @@ function _cmjRenderPlayers() {
   const hb = (id, l) => `<button type="button" data-cmj-psort="${id}" class="${k === id ? 'on' : ''}">${_esc(l)}${k === id ? ' ↓' : ''}</button>`;
   const prow = p => {
     const live = p.issue && vm.items.some(i => i.id === p.issueItem);
-    return `<div class="cmj-pr"><div class="cmj-pl"><span class="cmj-av" style="--c:${p.color}">${_esc((p.pseudo[0] || '?').toUpperCase())}</span><div><b>${_esc(p.pseudo)}</b><small>${_esc(p.email || '')}</small></div></div>
+    const avatar = p.avatar
+      ? `<img src="${_esc(p.avatar)}" alt="" loading="lazy" decoding="async">`
+      : _esc((p.pseudo[0] || '?').toUpperCase());
+    return `<div class="cmj-pr"><div class="cmj-pl"><span class="cmj-av" style="--c:${p.color}">${avatar}</span><div><b>${_esc(p.pseudo)}</b><small>${_esc(p.email || '')}</small></div></div>
       <span class="cmj-rl">${p.role === 'mj' ? '<span class="cmj-pill blu">MJ</span>' : '<span class="cmj-dt">Joueur</span>'}</span>
       <div class="cmj-chars">${p.chars.length ? p.chars.map(c => `<span>${_esc(c)}</span>`).join('') : `<em>${p.role === 'mj' ? '—' : 'Aucun'}</em>`}</div>
       <span class="cmj-dt">${_esc(p.sinceLabel || '—')}</span>
@@ -3675,6 +3679,11 @@ const PAGES = {
       const uid = u.id || u.uid || '';
       const email = String(u.email || '').trim();
       const role = (adv.admins || []).includes(uid) ? 'mj' : 'joueur';
+      const memberProfileRaw = profiles[uid];
+      const memberProfile = typeof memberProfileRaw === 'string' ? {} : (memberProfileRaw || {});
+      const avatarRaw = u.avatarIcon || memberProfile.avatarIcon
+        || (uid === STATE.user?.uid ? STATE.profile?.avatarIcon : '')
+        || u.photoURL || u.photo || u.avatar || memberProfile.photoURL || memberProfile.photo || memberProfile.avatar || '';
       let issue = null, issueItem = '', issueLabel = '', issueTone = 'mut', issueAct = '', issueAttrs = '';
       if (relinkByUid.has(uid)) {
         const r = relinkByUid.get(uid);
@@ -3689,6 +3698,7 @@ const PAGES = {
       }
       return {
         uid, pseudo: u.pseudo || '—', email, role,
+        avatar: avatarRaw ? resolveAvatarUrl(avatarRaw) : '',
         since: u.createdAt || '',
         sinceLabel: u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
         chars: charNamesByUid.get(uid) || [],

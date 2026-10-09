@@ -116,7 +116,8 @@
 .cmj-pr.hd span { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }
 .cmj-pr:not(.hd):hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
 .cmj-pl { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.cmj-av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-display); font-weight: 600; font-size: 13px; color: #fff; flex: none; background: radial-gradient(circle at 34% 28%, color-mix(in srgb, var(--c) 60%, var(--surface-3)), color-mix(in srgb, var(--c) 20%, var(--surface-1))); border: 1.5px solid var(--c); }
+.cmj-av { width: 32px; height: 32px; overflow: hidden; border-radius: 50%; display: grid; place-items: center; font-family: var(--font-display); font-weight: 600; font-size: 13px; color: #fff; flex: none; background: radial-gradient(circle at 34% 28%, color-mix(in srgb, var(--c) 60%, var(--surface-3)), color-mix(in srgb, var(--c) 20%, var(--surface-1))); border: 1.5px solid var(--c); }
+.cmj-av img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .cmj-pl div { min-width: 0; }
 .cmj-pl b { display: block; font-size: 13px; font-weight: 600; }
 .cmj-pl small { display: block; font-size: 11.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

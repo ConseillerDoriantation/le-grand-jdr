@@ -15,6 +15,8 @@ import { openSpellSystemAdmin } from '../../shared/spell-system.js';
 import { defaultCombatStyles, detectCombatStyle as detectCombatStyleRule, normalizeCombatStyles } from '../../shared/combat-styles.js';
 import { WEAPON_HANDS_OPTIONS, hasWeaponDefaults, missingWeaponFamilies, normalizeWeaponDefaults, resolveWeaponFamily, weaponDefaultsSummary, weaponHandsLabel, normalizeWeaponFamilyKey } from '../../shared/weapon-family.js';
 import { simulate as _wfSimulate, simBreakEven as _wfBreakEven } from '../../shared/weapon-sim.js';
+import { makeTechniqueEditor } from '../../shared/technique-editor.js';
+import { simulateDamageType as _dtSimulate, dtBreakEven as _dtBreakEven, DT_AFFINITIES as _DT_AFFINITIES, dtAffinityMult as _dtAffMult } from '../../shared/damage-sim.js';
 import { DEFAULT_UNARMED, isWeaponLikeItem, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, resolveEquippedInventoryIndices, _getBaseTraits, _getAddedTraits, _getTraits } from '../../shared/equipment-utils.js';
 export { DEFAULT_UNARMED, getMainWeapon, normalizeArmorType, getArmorTypeMeta, getArmorSetChipText, getArmorSetData, syncEquipmentAfterInventoryMutation, _getBaseTraits, _getAddedTraits, _getTraits };
 
@@ -346,176 +348,27 @@ const _wfIc = id => `<svg class="wf-ic"><use href="#wf-${id}"></use></svg>`;
 const _WF_STAT_SHORT = { force: 'FOR', dexterite: 'DEX', constitution: 'CON', intelligence: 'INT', sagesse: 'SAG', charisme: 'CHA' };
 const _wfDmgLabel = id => (_damageTypes || []).find(d => d.id === id)?.label || id || '';
 const _wfCondLabel = id => (_techniqueConditions || []).find(c => c.id === id)?.label || id || '';
-const _WF_MOVE_LABEL = { push: 'repousse', pull: 'attire' };
 const _wfDmgOpts = () => (_damageTypes || []).map(d => [d.id, `${d.icon ? d.icon + ' ' : ''}${d.label}`]);
 const _wfCondOpts = () => (_techniqueConditions || []).map(c => [c.id, `${c.icon ? c.icon + ' ' : ''}${c.label}`]);
-// Registre des modificateurs : un modificateur est « actif » quand son/ses champ(s)
-// ≠ défaut. `add`/`clear` posent/réinitialisent ces champs (les champs non exposés,
-// ex. onHitEffect, criticalMode, areaOrigin…, sont conservés tels quels à l'enreg.).
-const _WF_MODS = [
-  { k: 'tch', grp: 'Précision', badge: 'TCH', name: 'Toucher', help: 'Bonus/malus au jet d’attaque', good: true,
-    on: t => (t.attackModifier || 0) !== 0, txt: t => `toucher ${t.attackModifier > 0 ? '+' : '−'}${Math.abs(t.attackModifier)}`,
-    add: t => { t.attackModifier = 2; }, clear: t => { t.attackModifier = 0; },
-    ctl: t => _wfStp('attackModifier', t.attackModifier || 0, { min: -10, max: 10, zero: true, pre: t.attackModifier > 0 ? '+' : '' }) },
-  { k: 'ca', grp: 'Précision', badge: 'CA', name: 'CA de la cible', help: 'Plus dure à toucher (contrepartie)', good: false,
-    on: t => (t.defenseBonus || 0) !== 0, txt: t => `CA cible +${t.defenseBonus}`,
-    add: t => { t.defenseBonus = 2; }, clear: t => { t.defenseBonus = 0; },
-    ctl: t => _wfStp('defenseBonus', t.defenseBonus || 0, { min: 1, max: 10, pre: '+' }) },
-  { k: 'av', grp: 'Précision', badge: 'AV', name: 'Avec avantage seulement', help: 'Sinon l’attaque reste normale', good: false,
-    on: t => !!t.requiresAdvantage, txt: () => 'avantage requis',
-    add: t => { t.requiresAdvantage = true; }, clear: t => { t.requiresAdvantage = false; }, ctl: () => '' },
-  { k: 'de', grp: 'Dégâts', badge: 'DÉ', name: 'Dés d’arme', help: 'Dés d’arme supplémentaires', good: true,
-    on: t => (t.extraWeaponDice || 0) > 0, txt: t => `+${t.extraWeaponDice} dé d’arme`,
-    add: t => { t.extraWeaponDice = 1; }, clear: t => { t.extraWeaponDice = 0; },
-    ctl: t => _wfStp('extraWeaponDice', t.extraWeaponDice || 0, { min: 1, max: 6, pre: '+' }) },
-  { k: 'fml', grp: 'Dégâts', badge: 'FML', name: 'Dégâts bonus', help: 'Formule + type propre', good: true,
-    on: t => !!t.extraDamageFormula, txt: t => `+${t.extraDamageFormula}${t.damageTypeId ? ' ' + _wfDmgLabel(t.damageTypeId) : ''}`,
-    add: t => { t.extraDamageFormula = '1d6'; }, clear: t => { t.extraDamageFormula = ''; t.damageTypeId = ''; },
-    ctl: t => _wfTxtF('extraDamageFormula', t.extraDamageFormula, '1d6', true) + _wfSelF('damageTypeId', t.damageTypeId || '', _wfDmgOpts(), 'Même type') },
-  { k: 'dg', grp: 'Dégâts', badge: '+DG', name: 'Dégâts fixes', help: 'Dégâts plats ajoutés', good: true,
-    on: t => (t.extraDamageFlat || 0) > 0, txt: t => `+${t.extraDamageFlat} dégâts`,
-    add: t => { t.extraDamageFlat = 2; }, clear: t => { t.extraDamageFlat = 0; },
-    ctl: t => _wfStp('extraDamageFlat', t.extraDamageFlat || 0, { min: 1, max: 99, pre: '+' }) },
-  { k: 'mod', grp: 'Dégâts', badge: 'MOD', name: 'Modificateur d’arme', help: 'Ajoute le mod de carac de l’arme', good: true,
-    on: t => !!t.addWeaponModifier, txt: () => '+ mod d’arme',
-    add: t => { t.addWeaponModifier = true; }, clear: t => { t.addWeaponModifier = false; }, ctl: () => '' },
-  { k: 'crt', grp: 'Dégâts', badge: 'CRT', name: 'Critique élargi', help: 'Abaisse le seuil, bonus doublé possible', good: true,
-    on: t => (t.critRangeBonus || 0) > 0, txt: t => `critique ${20 - t.critRangeBonus}–20`,
-    add: t => { t.critRangeBonus = 1; }, clear: t => { t.critRangeBonus = 0; t.criticalMode = 'normal'; },
-    ctl: t => _wfStp('critRangeBonus', t.critRangeBonus || 0, { min: 1, max: 5, disp: v => `${20 - v}–20` }) + _wfSegF('criticalMode', t.criticalMode || 'normal', [['normal', 'Normal'], ['double', 'Doublé']]) },
-  { k: 'prc', grp: 'Dégâts', badge: 'PRC', name: 'Armure ignorée', help: 'Pourcentage de CA ignoré', good: true,
-    on: t => (t.armorIgnorePct || 0) > 0, txt: t => `ignore ${t.armorIgnorePct}% CA`,
-    add: t => { t.armorIgnorePct = 20; }, clear: t => { t.armorIgnorePct = 0; },
-    ctl: t => _wfStp('armorIgnorePct', t.armorIgnorePct || 0, { min: 10, max: 100, step: 10, suf: '%' }) },
-  { k: 'prg', grp: 'Dégâts', badge: 'PRG', name: 'Progression', help: 'Monte avec niveau/maîtrise/carac', good: true,
-    on: t => (t.scalingMode || 'none') !== 'none', txt: () => 'progression',
-    add: t => { t.scalingMode = 'level'; t.scalingEvery = 4; t.scalingFormula = '1d4'; },
-    clear: t => { t.scalingMode = 'none'; t.scalingEvery = 1; t.scalingFormula = ''; t.scalingStat = 'force'; },
-    ctl: t => _wfSelF('scalingMode', t.scalingMode || 'level', [['level', 'Niveau'], ['mastery', 'Maîtrise'], ['stat', 'Carac']]) + _wfTxtF('scalingFormula', t.scalingFormula, '1d4', true) + '<span class="wf-ctl-x">/</span>' + _wfStp('scalingEvery', t.scalingEvery || 1, { min: 1, max: 20 }) + (t.scalingMode === 'stat' ? _wfSelF('scalingStat', t.scalingStat || 'force', _TECH_STAT_OPTIONS) : '') },
-  { k: 'zon', grp: 'Effets', badge: 'ZON', name: 'Zone', help: 'Forme, rayon, cibles, origine', good: true,
-    on: t => (t.blastRadius || 0) > 0, txt: t => `zone ${t.blastRadius}`,
-    add: t => { t.blastRadius = 1; t.areaShape = 'circle'; },
-    clear: t => { t.blastRadius = 0; t.areaShape = 'square'; t.areaOrigin = 'target'; t.areaTargets = 'all'; t.includeCaster = false; },
-    ctl: t => _wfSelF('areaShape', t.areaShape || 'circle', [['square', 'Carré'], ['circle', 'Cercle'], ['line', 'Ligne'], ['cone', 'Cône']]) + _wfStp('blastRadius', t.blastRadius || 0, { min: 1, max: 30 }) + _wfSelF('areaTargets', t.areaTargets || 'all', [['all', 'Tout le monde'], ['enemies', 'Ennemis'], ['allies', 'Alliés']]) + _wfSelF('areaOrigin', t.areaOrigin || 'target', [['target', 'Sur la cible'], ['caster', 'Sur le lanceur']]) + _wfTogF('includeCaster', !!t.includeCaster, 'Lanceur affecté') },
-  { k: 'ett', grp: 'Effets', badge: 'ÉTT', name: 'État infligé', help: 'État, durée et jet de sauvegarde', good: true,
-    on: t => !!t.conditionId, txt: t => _wfCondLabel(t.conditionId),
-    add: t => { t.conditionId = 'prone'; }, clear: t => { t.conditionId = ''; t.conditionDuration = 0; t.conditionSaveStat = ''; t.conditionSaveDC = 0; },
-    ctl: t => _wfSelF('conditionId', t.conditionId || '', _wfCondOpts(), 'Aucun') + _wfStp('conditionDuration', t.conditionDuration || 0, { min: 0, max: 100, disp: v => v ? `${v} t` : 'défaut' }) + _wfSelF('conditionSaveStat', t.conditionSaveStat || '', _TECH_STAT_OPTIONS, 'Aucun JS') + (t.conditionSaveStat ? _wfStp('conditionSaveDC', t.conditionSaveDC || 0, { min: 0, max: 40, disp: v => v ? `DD ${v}` : 'DD déf.' }) : '') },
-  { k: 'dep', grp: 'Effets', badge: 'DEP', name: 'Déplacement forcé', help: 'Pousser ou attirer la cible', good: true,
-    on: t => (t.forcedMovement || 'none') !== 'none', txt: t => `${_WF_MOVE_LABEL[t.forcedMovement] || 'déplace'} ${t.forcedMovementDistance || 1}`,
-    add: t => { t.forcedMovement = 'push'; t.forcedMovementDistance = 1; }, clear: t => { t.forcedMovement = 'none'; t.forcedMovementDistance = 0; },
-    ctl: t => _wfSegF('forcedMovement', t.forcedMovement || 'push', [['push', 'Pousser'], ['pull', 'Attirer']]) + _wfStp('forcedMovementDistance', t.forcedMovementDistance || 1, { min: 1, max: 6 }) },
-  { k: 'txt', grp: 'Effets', badge: 'TXT', name: 'Effet narratif', help: 'Texte affiché dans le résultat', good: true,
-    on: t => !!t.onHitEffect, txt: t => `« ${t.onHitEffect} »`,
-    add: t => { t.onHitEffect = 'La cible lâche son arme'; }, clear: t => { t.onHitEffect = ''; },
-    ctl: t => `<input class="wf-fi sans wf-fi-wide" value="${_esc(t.onHitEffect || '')}" maxlength="160" placeholder="Ex. La cible lâche son arme" data-wf-fxt="onHitEffect">` },
-  { k: 'mdg', grp: 'Contreparties', badge: '−DG', name: 'Malus de dégâts', help: 'Dégâts retirés', good: false,
-    on: t => (t.damageMalusFlat || 0) > 0, txt: t => `−${t.damageMalusFlat} dégâts`,
-    add: t => { t.damageMalusFlat = 2; }, clear: t => { t.damageMalusFlat = 0; },
-    ctl: t => _wfStp('damageMalusFlat', t.damageMalusFlat || 0, { min: 1, max: 99, pre: '−' }) },
-  { k: 'ratca', grp: 'Contreparties', badge: 'RAT', name: 'Raté : CA réduite', help: 'Jusqu’à la fin du round', good: false,
-    on: t => (t.missSelfCaMalus || 0) > 0, txt: t => `raté : CA −${t.missSelfCaMalus}`,
-    add: t => { t.missSelfCaMalus = 2; }, clear: t => { t.missSelfCaMalus = 0; },
-    ctl: t => _wfStp('missSelfCaMalus', t.missSelfCaMalus || 0, { min: 1, max: 10, pre: '−' }) },
-  { k: 'ratet', grp: 'Contreparties', badge: 'RAT', name: 'Raté : état sur soi', help: 'État subi en cas d’échec', good: false,
-    on: t => !!t.missSelfConditionId, txt: t => `raté : ${_wfCondLabel(t.missSelfConditionId)}`,
-    add: t => { t.missSelfConditionId = 'exposed'; }, clear: t => { t.missSelfConditionId = ''; },
-    ctl: t => _wfSelF('missSelfConditionId', t.missSelfConditionId || '', _wfCondOpts(), 'Aucun') },
-  { k: 'cot', grp: 'Contreparties', badge: 'CÔT', name: 'Coût en ressource', help: 'PM, PV ou or', good: false,
-    on: t => (t.resourceType || 'none') !== 'none' && (t.resourceCost || 0) > 0, txt: t => `${t.resourceCost} ${({ pm: 'PM', pv: 'PV', or: 'or' })[t.resourceType] || ''}`.trim(),
-    add: t => { t.resourceType = 'pm'; t.resourceCost = 2; }, clear: t => { t.resourceType = 'none'; t.resourceCost = 0; },
-    ctl: t => _wfSelF('resourceType', t.resourceType || 'pm', [['pm', 'PM'], ['pv', 'PV'], ['or', 'Or']]) + _wfStp('resourceCost', t.resourceCost || 0, { min: 1, max: 99 }) },
-  { k: 'lim', grp: 'Contreparties', badge: 'LIM', name: 'Utilisations limitées', help: 'Par combat ou session', good: false,
-    on: t => (t.usageScope || 'none') !== 'none', txt: t => `${t.maxUses || 1}/${t.usageScope === 'session' ? 'session' : 'combat'}`,
-    add: t => { t.usageScope = 'combat'; t.maxUses = 1; }, clear: t => { t.usageScope = 'none'; t.maxUses = 0; },
-    ctl: t => _wfSelF('usageScope', t.usageScope || 'combat', [['combat', 'Par combat'], ['session', 'Par session']]) + _wfStp('maxUses', t.maxUses || 1, { min: 1, max: 9 }) },
-  { k: 'rch', grp: 'Contreparties', badge: 'RCH', name: 'Recharge', help: 'Tours avant réutilisation', good: false,
-    on: t => (t.cooldownRounds || 0) > 0, txt: t => `recharge ${t.cooldownRounds} t`,
-    add: t => { t.cooldownRounds = 2; }, clear: t => { t.cooldownRounds = 0; },
-    ctl: t => _wfStp('cooldownRounds', t.cooldownRounds || 0, { min: 1, max: 10, suf: ' t' }) },
-];
-const _WF_GROUPS = ['Précision', 'Dégâts', 'Effets', 'Contreparties'];
-// Contrôles réutilisés par les lignes de modificateur (adressés par champ sur la technique ouverte).
-function _wfStp(field, val, o = {}) {
-  const { step = 1, min = 0, max = 99, pre = '', suf = '', zero = false, disp } = o;
-  const show = disp ? disp(val) : `${pre}${val}${suf}`;
-  const a = `data-wf-step="${field}" data-step="${step}" data-min="${min}" data-max="${max}" data-zero="${zero ? 1 : 0}"`;
-  return `<div class="wf-stp"><button type="button" ${a} data-dir="-1">−</button><span>${_esc(show)}</span><button type="button" ${a} data-dir="1">+</button></div>`;
-}
-function _wfSegF(field, val, opts) { return `<div class="wf-seg">${opts.map(([v, l]) => `<button type="button" class="${val === v ? 'on' : ''}" data-wf-fxset="${field}:${v}">${_esc(l)}</button>`).join('')}</div>`; }
-function _wfSelF(field, val, opts, empty) { return `<select class="wf-sel sans" data-wf-fx="${field}">${empty != null ? `<option value="">${_esc(empty)}</option>` : ''}${opts.map(([v, l]) => `<option value="${_esc(v)}"${val === v ? ' selected' : ''}>${_esc(l)}</option>`).join('')}</select>`; }
-function _wfTxtF(field, val, ph, mono) { return `<input class="wf-fi${mono ? '' : ' sans'} wf-fi-sm" value="${_esc(val || '')}" placeholder="${_esc(ph || '')}" maxlength="30" data-wf-fxt="${field}">`; }
-function _wfTogF(field, on, label) { return `<label class="wf-mini"><button type="button" class="wf-sw${on ? ' on' : ''}" data-wf-fxtog="${field}" role="switch" aria-checked="${on}"></button>${_esc(label)}</label>`; }
-function _wfTechActiveMods(t) { return _WF_MODS.filter(m => m.on(t)); }
-function _wfTechSummary(t) {
-  const parts = _wfTechActiveMods(t).map(m => m.txt(t)).filter(Boolean);
-  return parts.length ? parts.join(' · ') : 'Aucun effet';
-}
-function _wfTechFormulaBad(t) {
-  return [t.extraDamageFormula, t.scalingFormula].some(f => f && !_WF_DEGATS_RE.test(String(f).replace(/\s+/g, '')));
-}
-// Tag d'équilibrage : 'ko' (à corriger) · 'warn' (déséquilibré) · 'ok' (sans effet) · ''.
-function _wfTechTag(t) {
-  if (!String(t.label || '').trim() || _wfTechFormulaBad(t)) return { cls: 'ko', txt: 'À corriger' };
-  const on = _wfTechActiveMods(t);
-  if (!on.length) return { cls: 'ok', txt: 'Sans effet' };
-  const gain = on.filter(m => m.good).length, cout = on.length - gain;
-  if (!cout) return { cls: 'warn', txt: 'Sans contrepartie' };
-  if (!gain) return { cls: 'warn', txt: 'Que des contreparties' };
-  return null;
-}
-
-// Éditeur ouvert d'une technique : en-tête (icône/nom/déclencheur), description,
-// blocs de modificateurs groupés, menu d'ajout, pied (si raté / sorts / dup / suppr).
-function _wfTechEditorHtml(f, t) {
-  const active = _wfTechActiveMods(t);
-  const hasAreaEffect = (t.blastRadius || 0) > 0 || !!t.conditionId || (t.forcedMovement || 'none') !== 'none';
-  const showMiss = (t.trigger || 'hit') === 'hit' && hasAreaEffect;
-  const tag = _wfTechTag(t);
-  let h = `<div class="wf-tq-ed">
-    <div class="wf-tq-top">
-      <input class="wf-tq-emo" value="${_esc(t.icon || '🎯')}" maxlength="8" data-wf-fxt="icon" aria-label="Icône">
-      <input class="wf-tq-name${String(t.label || '').trim() ? '' : ' bad'}" value="${_esc(t.label || '')}" maxlength="60" placeholder="Nom de la technique" data-wf-fxt="label">
-      <div class="wf-seg">${[['hit', 'Sur touche'], ['crit', 'Sur critique'], ['miss', 'Sur raté'], ['always', 'Toujours']].map(([v, l]) => `<button type="button" class="${(t.trigger || 'hit') === v ? 'on' : ''}" data-wf-trig="${v}">${l}</button>`).join('')}</div>
-    </div>
-    <input class="wf-tq-desc" value="${_esc(t.description || '')}" maxlength="240" placeholder="Phrase affichée au joueur au moment de choisir" data-wf-fxt="description">
-    <div class="wf-mods">`;
-  if (!active.length) h += `<div class="wf-empty-fx">Aucun modificateur. « Ajouter un modificateur » pour commencer.</div>`;
-  _WF_GROUPS.forEach(g => {
-    const rows = active.filter(m => m.grp === g);
-    if (!rows.length) return;
-    h += `<div class="wf-mg">${g}</div>`;
-    h += rows.map(m => `<div class="wf-e"><span class="wf-badge ${m.good ? 'good' : 'bad'}">${m.badge}</span><span class="wf-k">${_esc(m.name)}<small>${_esc(m.help)}</small></span><span class="wf-ctl">${m.ctl(t)}</span><button type="button" class="wf-rm" data-wf-fxrm="${m.k}" title="Retirer">${_wfIc('x')}</button></div>`).join('');
-  });
-  h += `</div>
-    <div class="wf-tq-f">
-      <div class="wf-addtq"><button type="button" class="wf-addfx" data-wf-fxmenu>${_wfIc('plus')}Ajouter un modificateur</button>${_wfFxMenu ? _wfFxMenuHtml(t) : ''}</div>
-      <span class="wf-sp"></span>
-      ${showMiss ? `<label class="wf-mini">Si raté ${_wfSelF('missEffectMode', t.missEffectMode || 'none', [['none', 'aucun effet'], ['half', 'effets + ½ dégâts'], ['full', 'effets + dégâts']])}</label>` : ''}
-      ${_wfTogF('allowWithAbilities', t.allowWithAbilities !== false, 'Sorts & compétences')}
-      <button type="button" class="wf-ib" data-wf-duptech title="Dupliquer">${_wfIc('dup')}</button>
-      <button type="button" class="wf-ib del" data-wf-deltech title="Supprimer">${_wfIc('trash')}</button>
-    </div>`;
-  if (tag?.cls === 'warn') h += `<div class="wf-warnl">${tag.txt === 'Sans contrepartie' ? 'Que des gains : ajoute un coût ou un risque pour équilibrer.' : 'Que des contreparties : ajoute un gain, sinon la technique n’a aucun intérêt.'}</div>`;
-  h += `</div>`;
-  return h;
-}
-
-function _wfFxMenuHtml(t) {
-  return `<div class="wf-fxm">${_WF_GROUPS.map(g => {
-    const items = _WF_MODS.filter(m => m.grp === g);
-    return `<h4>${g}</h4>${items.map(m => `<button type="button" data-wf-fxadd="${m.k}" ${m.on(t) ? 'disabled' : ''}><span class="wf-badge ${m.good ? 'good' : 'bad'}">${m.badge}</span><span><b>${_esc(m.name)}</b><small>${_esc(m.help)}</small></span></button>`).join('')}`;
-  }).join('')}</div>`;
-}
-
-function _wfAddTechMenuHtml() {
-  const presets = [['blank', 'Technique libre'], ['weak_spot', 'Point faible'], ['power', 'Coup puissant'], ['dagger_sneak', 'Coup sournois'], ['axe_momentum', 'Élan total'], ['hammer_crush', 'Broyeur'], ['sword_control', 'Frappe maîtrisée']];
-  return `<div class="wf-fxm pre">${presets.map(([k, l]) => {
-    const src = _WF_TECHNIQUE_PRESETS[k] || {};
-    const sum = k === 'blank' ? 'Part de zéro' : _wfTechSummary(normalizeWeaponTechnique({ ...src, id: 'tmp' }));
-    return `<button type="button" data-wf-addtech="${k}"><span class="wf-tq-ic">${_esc(src.icon || '⚔️')}</span><span><b>${_esc(src.label || l)}</b><small>${_esc(sum)}</small></span></button>`;
-  }).join('')}</div>`;
-}
+// ── Éditeur de techniques factorisé (shared/technique-editor.js), partagé par
+//    la modale des types d'arme et celle des types de dégâts. Une seule table de
+//    modificateurs, une seule carte. Les contrôleurs hôtes dispatchent data-wf-*.
+const _TE = makeTechniqueEditor({
+  esc: _esc, icon: _wfIc,
+  statOptions: () => _TECH_STAT_OPTIONS,
+  damageTypeOptions: _wfDmgOpts, conditionOptions: _wfCondOpts,
+  damageLabel: _wfDmgLabel, conditionLabel: _wfCondLabel, degatsRe: _WF_DEGATS_RE,
+});
+const _WF_MODS = _TE.MODS;
+const _WF_GROUPS = _TE.GROUPS;
+function _wfTechActiveMods(t) { return _TE.activeMods(t); }
+function _wfTechSummary(t) { return _TE.summary(t); }
+function _wfTechFormulaBad(t) { return _TE.isInvalid(t); }
+function _wfTechTag(t) { return _TE.balance(t); }
+function _wfTechEditorHtml(f, t) { return _TE.editorHtml(t, { menuOpen: _wfFxMenu }); }
+function _wfFxMenuHtml(t) { return _TE.fxMenuHtml(t); }
+const _WF_PRESET_ORDER = [['blank', 'Technique libre'], ['weak_spot', 'Point faible'], ['power', 'Coup puissant'], ['dagger_sneak', 'Coup sournois'], ['axe_momentum', 'Élan total'], ['hammer_crush', 'Broyeur'], ['sword_control', 'Frappe maîtrisée']];
+function _wfAddTechMenuHtml() { return _TE.presetMenuHtml(_WF_TECHNIQUE_PRESETS, normalizeWeaponTechnique, _WF_PRESET_ORDER); }
 
 export async function openWeaponFormatsAdmin() {
   let shopItems = [];
@@ -1160,7 +1013,11 @@ const _DT_TECHNIQUE_PRESETS = {
 function _dtTechniqueCard(t, i) { return _techniqueConfigCard(t, i, 'damage'); }
 
 // — État : un seul brouillon pour tout (règles + apparence + techniques). —
-let _dtSaved = [], _dtDraft = [], _dtSelId = null, _dtOpenTech = null, _dtAsk = null;
+let _dtSaved = [], _dtDraft = [], _dtSelId = null, _dtOpenTech = null, _dtAsk = null, _dtFxMenu = false;
+let _dtSim = { atk: 5, ca: 14, dice: '1d8', mod: 3, adv: false, magic: false }; // hypothèses (non persisté)
+let _dtSimAff = 'normal', _dtSimNormal = false; // cible (affinité) · aperçu « Attaque normale »
+let _dtBestiary = {}, _dtBestiaryTarget = null; // index typeId → {abs,imm,res,fai} (noms) · cellule active
+let _dtPendingReassign = []; // suppressions avec bascule, appliquées à l'enregistrement
 let _dtReplaceId = 'physique', _dtEmoji = false, _dtMounted = false;
 const _DT_DEGATS_RE = /^\d*d\d+(?:[+-]\d+)?$/i;
 
@@ -1210,12 +1067,14 @@ export async function openDamageTypesAdmin() {
   _dtDraft = _dtClone(_damageTypes);
   _dtSelId = _dtDraft[0]?.id || null;
   _dtOpenTech = _dtCur()?.techniques?.[0]?.id || null;
-  _dtAsk = null; _dtEmoji = false; _dtReplaceId = 'physique';
-  _dtUsageMap = {};
+  _dtAsk = null; _dtEmoji = false; _dtReplaceId = 'physique'; _dtFxMenu = false;
+  _dtSim = { atk: 5, ca: 14, dice: '1d8', mod: 3, adv: false, magic: false }; _dtSimAff = 'normal'; _dtSimNormal = false; _dtBestiaryTarget = null;
+  _dtUsageMap = {}; _dtBestiary = {}; _dtPendingReassign = [];
   _renderDamageTypesModal();
   _dtMount();
-  // Index d'usage en arrière-plan (ne bloque pas l'ouverture).
+  // Index d'usage + affinités du bestiaire en arrière-plan (ne bloquent pas l'ouverture).
   _dtBuildUsage();
+  _dtBuildBestiary();
 }
 
 async function _dtBuildUsage() {
@@ -1302,7 +1161,7 @@ function _dtTechniquesHtml(t) {
         ${tag ? `<span class="wf-tag ${tag.cls}">${tag.txt}</span>` : '<span></span>'}
         ${_dtIc('chev')}
       </button>
-      ${open ? `<div class="wf-tq-ed">${_techniqueConfigCard(x, techs.indexOf(x), 'damage')}</div>` : ''}
+      ${open ? _TE.editorHtml(x, { menuOpen: _dtFxMenu }) : ''}
     </div>`;
   }).join('') : '<div class="wf-empty-fx">Aucune technique : ce type garde son comportement normal.</div>';
   h += `</div><div class="wf-presets"><span class="wf-lbl">Ajouter</span>${[['blank', '＋ Libre'], ['burst', '💥 Explosion'], ['dot', '🔥 Brûlure'], ['surge', '⚡ Surcharge'], ['chill', '🧊 Gel']].map(([k, l]) => `<button type="button" class="wf-chip" data-dt-addtech="${k}">${l}</button>`).join('')}</div></div>`;
@@ -1333,12 +1192,130 @@ function _dtMainHtml() {
   h += _dtApparenceHtml(t);
   h += _dtRulesHtml(t);
   h += _dtTechniquesHtml(t);
+  h += _dtBestiaryHtml(t);
   return h;
 }
 
 function _dtEmojiPopHtml(t) {
   return `<div class="dt-emoji-pop"><div class="dt-emoji-grid">${DT_EMOJIS.map(e => `<button type="button" class="${t.icon === e ? 'on' : ''}" data-dt-pick="${e}">${e}</button>`).join('')}</div>
     <div class="dt-emoji-foot"><input class="wf-fi sans" id="dt-emoji-in" placeholder="Colle ton emoji…" maxlength="8"><button type="button" class="wf-btn tx" data-dt-pick="">Aucun</button></div></div>`;
+}
+
+// ── Créatures du bestiaire : index typeId → {abs,imm,res,fai} (noms) ──
+async function _dtBuildBestiary() {
+  const idx = {};
+  try {
+    const { getCachedCollection, loadCollection } = await import('../../data/firestore.js');
+    const beasts = getCachedCollection('bestiary') || await loadCollection('bestiary').catch(() => []);
+    const push = (id, key, name) => { if (!id) return; (idx[id] || (idx[id] = { abs: [], imm: [], res: [], fai: [] }))[key].push(name); };
+    (beasts || []).forEach(b => {
+      const nm = b.nom || b.name || '?';
+      (b.absorptions || []).forEach(id => push(id, 'abs', nm));
+      (b.immunites || []).forEach(id => push(id, 'imm', nm));
+      (b.resistances || []).forEach(id => push(id, 'res', nm));
+      (b.faiblesses || []).forEach(id => push(id, 'fai', nm));
+    });
+  } catch { /* bestiaire indisponible */ }
+  _dtBestiary = idx;
+  if (document.querySelector('.dt')) { _dtRenderMain(); _dtRenderSim(); }
+}
+const _DT_BEST_AFF = { abs: 'abs', imm: 'imm', res: 'res', fai: 'weak' };
+function _dtBestiaryHtml(t) {
+  const idx = _dtBestiary[t.id] || { abs: [], imm: [], res: [], fai: [] };
+  const cell = (key, label, color, names) => `<button type="button" class="dt-best-cell${_dtBestiaryTarget === key ? ' on' : ''}" style="--c:${color}" data-dt-best="${key}"><span class="dt-best-h"><b>${names.length}</b> ${label}</span><span class="dt-best-n">${names.length ? _esc(names.slice(0, 4).join(', ')) + (names.length > 4 ? '…' : '') : 'Aucune'}</span></button>`;
+  return `<div class="wf-sec"><span class="wf-lbl">Créatures du bestiaire</span><div class="dt-best">
+    ${cell('abs', 'absorbent', '#b47fff', idx.abs)}${cell('imm', 'immunisées', '#94a3b8', idx.imm)}${cell('res', 'résistantes', '#4f8cff', idx.res)}${cell('fai', 'faibles', '#f59e0b', idx.fai)}
+  </div><p class="wf-hint">Clique une cellule pour simuler contre ce profil (données en lecture seule).</p></div>`;
+}
+
+// ── Simulation (colonne droite) ──
+function _dtSimStp(field, val, { min, max, pre = '' } = {}) {
+  return `<div class="wf-stp"><button type="button" data-dt-sim="${field}" data-dir="-1" data-min="${min}" data-max="${max}">−</button><span>${pre}${val}</span><button type="button" data-dt-sim="${field}" data-dir="1" data-min="${min}" data-max="${max}">+</button></div>`;
+}
+function _dtActiveRules(rules) {
+  const r = rules || {}, out = [];
+  if ((r.missEffect || 'none') !== 'none') out.push(['miss', { missEffect: r.missEffect, missScope: r.missScope }]);
+  if (r.armorPen) out.push(['armorPen', { armorPen: r.armorPen }]);
+  if (r.dmgBonus) out.push(['dmgBonus', { dmgBonus: r.dmgBonus }]);
+  return out;
+}
+const _DT_RULE_LABEL = { miss: 'dégâts sur raté', armorPen: 'pénétration d’armure', dmgBonus: 'bonus de dégâts' };
+function _dtSimHtml() {
+  const cur = _dtCur();
+  if (!cur) return '<div class="wf-empty"><p>Sélectionne un type pour simuler.</p></div>';
+  const techs = cur.techniques || [];
+  const tech = _dtSimNormal ? null : (techs.find(x => x.id === _dtOpenTech) || techs[0] || null);
+  const rules = cur.rules || {};
+  const restrictive = (rules.missEffect || 'none') !== 'none' && (rules.missScope === 'magic' || rules.missScope === 'physical');
+  const P = { ..._dtSim, aff: _dtAffMult(_dtSimAff) };
+  const simN = _dtSimulate(null, null, P);
+  const simT = _dtSimulate(rules, null, P);
+  const simK = tech ? _dtSimulate(rules, tech, P) : null;
+
+  let h = `<h2>Simulation</h2><p>Une attaque fictive de ce type. Rien n'est enregistré.</p>`;
+  h += `<div class="wf-hyp">
+    <span>Dés de l'attaque</span><input class="wf-fi wf-fi-sm" value="${_esc(_dtSim.dice)}" maxlength="12" data-dt-simdice>
+    <span>Bonus d'attaque</span>${_dtSimStp('atk', _dtSim.atk, { min: -5, max: 20, pre: _dtSim.atk > 0 ? '+' : '' })}
+    <span>CA de la cible</span>${_dtSimStp('ca', _dtSim.ca, { min: 5, max: 30 })}
+    <span>Mod. de carac</span>${_dtSimStp('mod', _dtSim.mod, { min: -3, max: 12, pre: _dtSim.mod > 0 ? '+' : '' })}
+    <span>Avantage</span><label class="wf-mini" style="justify-content:flex-end"><button type="button" class="wf-sw${_dtSim.adv ? ' on' : ''}" data-dt-simadv role="switch" aria-checked="${_dtSim.adv}"></button></label>
+    ${restrictive ? `<span>Attaque magique</span><label class="wf-mini" style="justify-content:flex-end"><button type="button" class="wf-sw${_dtSim.magic ? ' on' : ''}" data-dt-simmagic role="switch" aria-checked="${_dtSim.magic}"></button></label>` : ''}
+  </div>`;
+  // Cible (affinité)
+  h += `<div class="wf-sec"><span class="wf-lbl">Cible</span><div class="wf-seg" style="flex-wrap:wrap">${_DT_AFFINITIES.map(a => `<button type="button" class="${_dtSimAff === a.key ? 'on' : ''}" data-dt-aff="${a.key}">${_esc(a.label)}</button>`).join('')}</div></div>`;
+
+  const fmtPct = _wfPct, fmtN = v => v.toFixed(1);
+  // Tableau de comparaison
+  h += `<div class="wf-cmp" style="grid-template-columns:minmax(0,1fr) ${simK ? 'repeat(3,52px)' : 'repeat(2,64px)'}">
+    <div class="hd">Par attaque</div><div class="hd">Neutre</div>${simK ? `<div class="hd">Type</div><div class="hd">${_esc(cur.label) || 'Tech.'}</div>` : `<div class="hd">${_esc(cur.label) || 'Type'}</div>`}
+    ${_dtCmpRow('Toucher', [simN.hitPct, simT.hitPct, simK?.hitPct], fmtPct, simK)}
+    ${_dtCmpRow('Critique', [simN.critPct, simT.critPct, simK?.critPct], fmtPct, simK)}
+    ${_dtCmpRow('Dégâts/touche', [simN.dmgHit, simT.dmgHit, simK?.dmgHit], fmtN, simK)}
+    ${_dtCmpTot([simN.expected, simT.expected, simK?.expected], simK)}
+  </div>`;
+
+  if (simK) {
+    const diff = simK.expected - simT.expected;
+    const be = _dtBreakEven(rules, null, rules, tech, P);
+    const unq = []; if ((tech.blastRadius || 0) > 0) unq.push('zone'); if (tech.conditionId) unq.push('état'); if ((tech.forcedMovement || 'none') !== 'none') unq.push('déplacement'); if ((tech.scalingMode || 'none') !== 'none') unq.push('progression');
+    const cost = []; if ((tech.resourceType || 'none') !== 'none' && tech.resourceCost) cost.push(`${tech.resourceCost} ${({ pm: 'PM', pv: 'PV', or: 'or' })[tech.resourceType] || ''}`); if ((tech.usageScope || 'none') !== 'none') cost.push(`${tech.maxUses || 1}/${tech.usageScope === 'session' ? 'session' : 'combat'}`); if (tech.cooldownRounds) cost.push(`recharge ${tech.cooldownRounds} t`);
+    h += `<div class="wf-verd ${diff > 0.05 ? 'good' : diff < -0.05 ? 'bad' : ''}"><b>${_wfSg1(diff)} dégât attendu vs l'attaque normale du type</b><span>contre CA ${_dtSim.ca}${be != null ? ` · rentable à partir de CA ${be}` : ''}</span>${(tech.requiresAdvantage && !_dtSim.adv) ? '<span class="risk">Nécessite l\'avantage : inactive ici.</span>' : ''}${(tech.missSelfCaMalus || 0) > 0 ? `<span class="risk">Raté dans ${_wfPct(1 - simK.hitPct)} des cas → CA −${tech.missSelfCaMalus}.</span>` : ''}${cost.length ? `<span>Coût : ${cost.join(' · ')}.</span>` : ''}${unq.length ? `<span>Non chiffré : ${unq.join(', ')}.</span>` : ''}</div>`;
+    h += _dtCurveHtml(ca => _dtSimulate(rules, tech, { ...P, ca }).expected - _dtSimulate(rules, null, { ...P, ca }).expected);
+  } else {
+    const diff = simT.expected - simN.expected;
+    h += `<div class="wf-verd ${diff > 0.05 ? 'good' : diff < -0.05 ? 'bad' : ''}"><b>${_wfSg1(diff)} dégât attendu vs un type neutre</b><span>contre CA ${_dtSim.ca}${_dtSimAff !== 'normal' ? ` · cible ${_esc((_DT_AFFINITIES.find(a => a.key === _dtSimAff) || {}).label || '')}` : ''}</span></div>`;
+    const active = _dtActiveRules(rules);
+    if (active.length >= 2) {
+      h += `<div class="wf-sec"><span class="wf-lbl">Décomposition par règle</span><div class="wf-res">${active.map(([k, partial]) => { const d = _dtSimulate(partial, null, P).expected - simN.expected; return `<div class="wf-ln"><span>${_DT_RULE_LABEL[k]}</span><b class="${d > 0 ? 'up' : d < 0 ? 'dn' : ''}">${_wfSg1(d)}</b></div>`; }).join('')}</div><span class="wf-none">Indicatif : pénétration et raté interagissent.</span></div>`;
+    }
+    h += _dtCurveHtml(ca => _dtSimulate(rules, null, { ...P, ca }).expected - _dtSimulate(null, null, { ...P, ca }).expected);
+  }
+
+  if (techs.length) {
+    h += `<div class="wf-sec"><span class="wf-lbl">Côté joueur</span><div class="wf-pick"><button type="button" class="wf-po${_dtSimNormal ? ' on' : ''}" data-dt-pick-sim="normal"><i></i><span class="wf-e2">⚔️</span><span style="min-width:0"><b>Attaque normale</b><small>du type</small></span></button>`;
+    h += techs.map(x => { const dis = x.requiresAdvantage && !_dtSim.adv; const sel = !_dtSimNormal && x.id === tech?.id; return `<button type="button" class="wf-po${sel ? ' on' : ''}${dis ? ' dis' : ''}" data-dt-pick-sim="${_esc(x.id)}"><i></i><span class="wf-e2">${_esc(x.icon || '💥')}</span><span style="min-width:0"><b>${_esc(x.label) || 'Sans nom'}</b><small>${_esc(dis ? 'Nécessite l\'avantage' : (x.description || _wfTechSummary(x)))}</small></span></button>`; }).join('');
+    h += `</div><span class="wf-none">S'ajoute au choix de technique de l'arme équipée.</span></div>`;
+  }
+  return h;
+}
+function _dtCmpRow(label, vals, fmt, hasK) {
+  const [a, b, k] = vals;
+  const cls = (x, y) => x > y ? 'up' : x < y ? 'dn' : '';
+  if (hasK) return `<span>${label}</span><b>${fmt(a)}</b><b class="${cls(b, a)}">${fmt(b)}</b><b class="${cls(k, b)}">${fmt(k)}</b>`;
+  return `<span>${label}</span><b>${fmt(a)}</b><b class="${cls(b, a)}">${fmt(b)}</b>`;
+}
+function _dtCmpTot(vals, hasK) {
+  const [a, b, k] = vals, f = v => v.toFixed(1);
+  const cls = (x, y) => x > y ? 'up' : x < y ? 'dn' : '';
+  if (hasK) return `<div class="tot">Attendu</div><b class="tot">${f(a)}</b><b class="tot ${cls(b, a)}">${f(b)}</b><b class="tot ${cls(k, b)}">${f(k)}</b>`;
+  return `<div class="tot">Attendu</div><b class="tot">${f(a)}</b><b class="tot ${cls(b, a)}">${f(b)}</b>`;
+}
+function _dtCurveHtml(fn) {
+  const diffs = []; for (let ca = 8; ca <= 24; ca++) diffs.push({ ca, d: fn(ca) });
+  const maxAbs = Math.max(0.1, ...diffs.map(x => Math.abs(x.d)));
+  return `<div class="wf-sec"><span class="wf-lbl">Écart attendu selon la CA</span>
+    <div class="wf-curve">${diffs.map(x => `<button type="button" class="wf-cv ${x.d >= 0 ? 'p' : 'n'}${x.ca === _dtSim.ca ? ' cur' : ''}" data-dt-curve="${x.ca}" title="CA ${x.ca} : ${_wfSg1(x.d)}"><i style="height:${Math.round(Math.abs(x.d) / maxAbs * 46)}%"></i></button>`).join('')}</div>
+    <div class="wf-cax"><span>CA 8</span><span>16</span><span>24</span></div></div>`;
 }
 
 function _dtFootHtml() {
@@ -1360,17 +1337,18 @@ function _dtFootHtml() {
 
 function _dtRenderList() { const el = document.getElementById('dt-list'); if (el) el.innerHTML = _dtListHtml(); }
 function _dtRenderMain() { const el = document.getElementById('dt-main'); if (el) el.innerHTML = _dtMainHtml(); }
+function _dtRenderSim() { const el = document.getElementById('dt-sim'); if (el) el.innerHTML = _dtSimHtml(); }
 function _dtRenderFoot() { const el = document.getElementById('dt-foot'); if (el) el.innerHTML = _dtFootHtml(); }
-function _dtRender() { _dtRenderList(); _dtRenderMain(); _dtRenderFoot(); _dtSyncGuard(); }
+function _dtRender() { _dtRenderList(); _dtRenderMain(); _dtRenderSim(); _dtRenderFoot(); _dtSyncGuard(); }
 function _dtSyncGuard() { setModalCloseGuard(() => { if (_dtAsk) return true; if (_dtDirty()) { _dtAsk = 'close'; _dtRenderFoot(); return true; } return false; }); }
 
 function _renderDamageTypesModal() {
   openModal('', `${_WF_SPRITE}<div class="dt">
     <header class="wf-mh"><div><h2>Types de dégâts</h2><small>Chaque type porte sa couleur, ses règles de combat et des techniques optionnelles, appliquées dans le VTT.</small></div><span class="wf-sp"></span><button type="button" class="wf-x" data-dt-close aria-label="Fermer">${_dtIc('x')}</button></header>
-    <div class="wf-body wf-body--2"><nav class="wf-list" id="dt-list"></nav><div class="wf-main" id="dt-main"></div></div>
+    <div class="wf-body"><nav class="wf-list" id="dt-list"></nav><div class="wf-main" id="dt-main"></div><aside class="wf-sim" id="dt-sim"></aside></div>
     <footer class="wf-mf" id="dt-foot"></footer>
   </div>`);
-  _dtRenderList(); _dtRenderMain(); _dtRenderFoot();
+  _dtRenderList(); _dtRenderMain(); _dtRenderSim(); _dtRenderFoot();
   _dtSyncGuard();
 }
 
@@ -1390,14 +1368,44 @@ function _dtSetPath(t, path, value) {
 async function _dtSave() {
   if (_dtAllErr().length || !_dtDirty()) return;
   const draft = _dtDraft.map(t => normalizeDamageType({ ...t }));
+  // Bascule des usages des types supprimés vers le type choisi (chaînes résolues).
+  const remap = {};
+  _dtPendingReassign.forEach(({ from, to }) => { remap[from] = to; });
+  const resolve = id => { let v = id, g = 0; while (remap[v] && g++ < 20) v = remap[v]; return v; };
+  let reassigned = 0;
+  if (Object.keys(remap).length) {
+    try {
+      const { getCachedCollection, loadCollection, updateInCol } = await import('../../data/firestore.js');
+      const shop = getCachedCollection('shop') || await loadCollection('shop').catch(() => []);
+      for (const it of (shop || [])) {
+        if (it?.damageTypeId && remap[it.damageTypeId]) {
+          const to = resolve(it.damageTypeId);
+          // eslint-disable-next-line no-await-in-loop
+          await updateInCol('shop', it.id, { damageTypeId: to }).then(() => { reassigned++; it.damageTypeId = to; }, () => {});
+        }
+      }
+    } catch { /* boutique indisponible : les ids orphelins retombent sur « physique » */ }
+    // Sorts : matrices (noyauTypeId / elementId) — best effort.
+    try {
+      const mats = await loadSpellMatrices().catch(() => null);
+      if (mats) {
+        let touched = false;
+        const walk = obj => { if (!obj || typeof obj !== 'object') return; for (const k of ['noyauTypeId', 'elementId']) { if (obj[k] && remap[obj[k]]) { obj[k] = resolve(obj[k]); touched = true; } } Object.values(obj).forEach(v => { if (v && typeof v === 'object') walk(v); }); };
+        walk(mats);
+        if (touched) await saveSpellMatrices(mats).catch(() => {});
+      }
+    } catch { /* matrices indisponibles */ }
+  }
   await saveDamageTypes(draft);
   invalidateDamageTypesCache();
   _damageTypes = _dtClone(draft);
   _dtDraft = _dtClone(draft);
   _dtSaved = _dtClone(draft);
+  _dtPendingReassign = [];
   if (!_dtCur()) _dtSelId = _dtDraft[0]?.id || null;
-  showNotif('Types de dégâts enregistrés.', 'success');
+  showNotif(reassigned ? `Types enregistrés · ${reassigned} arme${reassigned > 1 ? 's' : ''} rebasculée${reassigned > 1 ? 's' : ''}.` : 'Types de dégâts enregistrés.', 'success');
   _dtRender();
+  _dtBuildUsage();
 }
 
 function _dtMount() {
@@ -1406,30 +1414,45 @@ function _dtMount() {
     if (!document.querySelector('.dt')) return;
     // Fermer la palette d'emoji sur un clic extérieur.
     if (_dtEmoji && !ev.target.closest('.dt-emoji-wrap')) { _dtEmoji = false; _dtRenderMain(); }
-    const t = ev.target.closest('[data-dt-sel],[data-dt-add],[data-dt-nat],[data-dt-mv],[data-dt-dup],[data-dt-del],[data-dt-delok],[data-dt-color],[data-dt-light],[data-dt-set],[data-dt-step],[data-dt-tech],[data-dt-addtech],[data-dt-emoji],[data-dt-pick],[data-dt-weapons],[data-dt-revert],[data-dt-save],[data-dt-close],[data-dt-keep],[data-dt-discard]');
-    if (!t) return;
+    const t = ev.target.closest('[data-dt-sel],[data-dt-add],[data-dt-nat],[data-dt-mv],[data-dt-dup],[data-dt-del],[data-dt-delok],[data-dt-color],[data-dt-light],[data-dt-set],[data-dt-step],[data-dt-tech],[data-dt-addtech],[data-dt-emoji],[data-dt-pick],[data-dt-weapons],[data-dt-revert],[data-dt-save],[data-dt-close],[data-dt-keep],[data-dt-discard],[data-dt-sim],[data-dt-simadv],[data-dt-simmagic],[data-dt-aff],[data-dt-curve],[data-dt-best],[data-dt-pick-sim],[data-wf-step],[data-wf-fxadd],[data-wf-fxrm],[data-wf-fxset],[data-wf-fxtog],[data-wf-trig],[data-wf-fxmenu],[data-wf-duptech],[data-wf-deltech]');
+    if (!t) { if (_dtFxMenu) { _dtFxMenu = false; _dtRenderMain(); } return; }
     const d = t.dataset, cur = _dtCur();
-    if (d.dtSel != null) { _dtSelId = d.dtSel; _dtOpenTech = _dtCur()?.techniques?.[0]?.id || null; _dtEmoji = false; return _dtRender(); }
+    const _dtOt = () => (cur?.techniques || []).find(x => x.id === _dtOpenTech);
+    // ── Simulation (colonne droite) : ne touche pas au brouillon ──
+    if (d.dtSim) { const v = (parseInt(_dtSim[d.dtSim], 10) || 0) + (+d.dir); _dtSim[d.dtSim] = Math.max(+d.min, Math.min(+d.max, v)); return _dtRenderSim(); }
+    if ('dtSimadv' in d) { _dtSim.adv = !_dtSim.adv; return _dtRenderSim(); }
+    if ('dtSimmagic' in d) { _dtSim.magic = !_dtSim.magic; return _dtRenderSim(); }
+    if (d.dtAff) { _dtSimAff = d.dtAff; _dtBestiaryTarget = null; _dtRenderMain(); return _dtRenderSim(); }
+    if (d.dtCurve) { _dtSim.ca = parseInt(d.dtCurve, 10) || _dtSim.ca; return _dtRenderSim(); }
+    if (d.dtBest) { if (_dtBestiaryTarget === d.dtBest) { _dtBestiaryTarget = null; _dtSimAff = 'normal'; } else { _dtBestiaryTarget = d.dtBest; _dtSimAff = _DT_BEST_AFF[d.dtBest] || 'normal'; } _dtRenderMain(); return _dtRenderSim(); }
+    if (d.dtPickSim) { if (d.dtPickSim === 'normal') { _dtSimNormal = true; } else { _dtSimNormal = false; _dtOpenTech = d.dtPickSim; } _dtRenderMain(); return _dtRenderSim(); }
+    // ── Éditeur de technique partagé (data-wf-*) ──
+    if ('wfFxmenu' in d) { _dtFxMenu = !_dtFxMenu; return _dtRenderMain(); }
+    if (d.wfTrig || d.wfFxadd || d.wfFxrm || d.wfFxset || d.wfFxtog || d.wfStep) { _dtFxMenu = false; if (_TE.applyClick(d, _dtOt())) return _dtRender(); return _dtRenderMain(); }
+    if ('wfDuptech' in d) { const o = _dtOt(); if (cur && o) { const copy = { ...JSON.parse(JSON.stringify(o)), id: `dtt_${Date.now()}`, label: `${o.label} (copie)` }; cur.techniques.splice(cur.techniques.indexOf(o) + 1, 0, copy); _dtOpenTech = copy.id; } _dtFxMenu = false; return _dtRender(); }
+    if ('wfDeltech' in d) { const o = _dtOt(); if (cur && o) { cur.techniques.splice(cur.techniques.indexOf(o), 1); _dtOpenTech = null; showNotif('Technique supprimée. « Annuler les modifications » pour revenir.', 'info'); } _dtFxMenu = false; return _dtRender(); }
+    _dtFxMenu = false;
+    if (d.dtSel != null) { _dtSelId = d.dtSel; _dtOpenTech = _dtCur()?.techniques?.[0]?.id || null; _dtEmoji = false; _dtSimNormal = false; _dtBestiaryTarget = null; _dtSimAff = 'normal'; return _dtRender(); }
     if ('dtAdd' in d) { const id = `dt_${Date.now()}`; _dtDraft.push(normalizeDamageType({ id, label: '', icon: '', color: '#9ca3af', isMagic: false, rules: { ...DEFAULT_RULES, missScope: 'always' }, techniques: [] })); _dtSelId = id; _dtOpenTech = null; _dtEmoji = false; _dtRender(); document.getElementById('dt-name')?.focus(); return; }
     if (d.dtNat != null) { if (cur) cur.isMagic = d.dtNat === '1'; return _dtRender(); }
     if (d.dtMv) { const i = _dtDraft.indexOf(cur), j = i + (+d.dtMv); if (_dtDraft[j]) { [_dtDraft[i], _dtDraft[j]] = [_dtDraft[j], _dtDraft[i]]; _dtRender(); } return; }
     if ('dtDup' in d) { if (!cur) return; const id = `dt_${Date.now()}`; const copy = normalizeDamageType({ ..._dtClone([cur])[0], id, label: `${cur.label} (copie)` }); copy.techniques = (copy.techniques || []).map((tq, k) => ({ ...tq, id: `dtt_${Date.now()}_${k}` })); _dtDraft.splice(_dtDraft.indexOf(cur) + 1, 0, copy); _dtSelId = id; return _dtRender(); }
     if ('dtDel' in d) { if (cur?.id === 'physique') return; _dtReplaceId = _dtDraft.find(o => o !== cur && o.id === 'physique')?.id || _dtDraft.find(o => o !== cur)?.id || 'physique'; _dtAsk = 'del'; return _dtRenderFoot(); }
-    if ('dtDelok' in d) { const i = _dtDraft.indexOf(cur); _dtDraft.splice(i, 1); _dtSelId = (_dtDraft[i] || _dtDraft[i - 1])?.id || null; _dtOpenTech = _dtCur()?.techniques?.[0]?.id || null; _dtAsk = null; return _dtRender(); }
+    if ('dtDelok' in d) { if (cur) { const u = _dtUsage(cur.id); if ((u.w + u.s) > 0 && _dtReplaceId && _dtReplaceId !== cur.id) _dtPendingReassign.push({ from: cur.id, to: _dtReplaceId }); } const i = _dtDraft.indexOf(cur); _dtDraft.splice(i, 1); _dtSelId = (_dtDraft[i] || _dtDraft[i - 1])?.id || null; _dtOpenTech = _dtCur()?.techniques?.[0]?.id || null; _dtBestiaryTarget = null; _dtSimAff = 'normal'; _dtAsk = null; return _dtRender(); }
     if (d.dtColor) { if (cur) cur.color = d.dtColor; return _dtRender(); }
     if ('dtLight' in d) { if (cur) cur.emitsLight = !damageTypeEmitsLight(cur); return _dtRender(); }
     if (d.dtSet) { const [path, val] = d.dtSet.split(':'); if (cur) { _dtSetPath(cur, path, val); } return _dtRender(); }
     if (d.dtStep) { const path = d.dtStep; if (cur) { const base = path.startsWith('rules.') ? (cur.rules?.[path.slice(6)] || 0) : (cur[path] || 0); let v = (parseInt(base, 10) || 0) + (+d.dir) * (+d.step || 1); v = Math.max(+d.min, Math.min(+d.max, v)); _dtSetPath(cur, path, v); } return _dtRender(); }
-    if (d.dtTech) { _dtOpenTech = (_dtOpenTech === d.dtTech) ? null : d.dtTech; return _dtRenderMain(); }
+    if (d.dtTech) { _dtOpenTech = (_dtOpenTech === d.dtTech) ? null : d.dtTech; _dtSimNormal = false; _dtRenderMain(); return _dtRenderSim(); }
     if (d.dtAddtech) { if (cur) { const src = _DT_TECHNIQUE_PRESETS[d.dtAddtech] || _DT_TECHNIQUE_PRESETS.blank; const nt = normalizeWeaponTechnique({ ...src, id: `dtt_${Date.now()}` }, (cur.techniques || []).length); (cur.techniques || (cur.techniques = [])).push(nt); _dtOpenTech = nt.id; } return _dtRender(); }
     if ('dtEmoji' in d) { _dtEmoji = !_dtEmoji; return _dtRenderMain(); }
     if ('dtPick' in d) { if (cur) cur.icon = d.dtPick || ''; _dtEmoji = false; return _dtRender(); }
     if ('dtWeapons' in d) { if (_dtDirty()) { _dtAsk = 'close'; return _dtRenderFoot(); } setModalCloseGuard(null); openWeaponFormatsAdmin(); return; }
-    if ('dtRevert' in d) { _dtDraft = _dtClone(_dtSaved); if (!_dtCur()) _dtSelId = _dtDraft[0]?.id || null; _dtAsk = null; return _dtRender(); }
+    if ('dtRevert' in d) { _dtDraft = _dtClone(_dtSaved); _dtPendingReassign = []; if (!_dtCur()) _dtSelId = _dtDraft[0]?.id || null; _dtAsk = null; return _dtRender(); }
     if ('dtSave' in d) return _dtSave();
     if ('dtClose' in d) { if (_dtDirty()) { _dtAsk = 'close'; _dtRenderFoot(); } else { setModalCloseGuard(null); closeModalDirect(); } return; }
     if ('dtKeep' in d) { _dtAsk = null; return _dtRenderFoot(); }
-    if ('dtDiscard' in d) { _dtAsk = null; _dtDraft = _dtClone(_dtSaved); _dtSelId = _dtDraft[0]?.id || null; setModalCloseGuard(null); closeModalDirect(); return; }
+    if ('dtDiscard' in d) { _dtAsk = null; _dtDraft = _dtClone(_dtSaved); _dtPendingReassign = []; _dtSelId = _dtDraft[0]?.id || null; setModalCloseGuard(null); closeModalDirect(); return; }
   });
   document.addEventListener('input', ev => {
     if (!document.querySelector('.dt')) return;
@@ -1438,12 +1461,19 @@ function _dtMount() {
     if (el.hasAttribute('data-dt-name')) { cur.label = el.value; _dtRenderList(); _dtRenderFoot(); const e = _dtTypeErrs(cur); el.classList.toggle('bad', e.includes('name') || e.includes('dupname')); }
     else if (el.hasAttribute('data-dt-colorpick')) { cur.color = el.value; _dtRenderList(); const eh = document.querySelector('.dt .wf-eh'); if (eh) eh.style.setProperty('--c', cur.color); const pv = document.querySelector('.dt .dt-chip'); if (pv) pv.style.setProperty('--c', cur.color); }
     else if (el.id === 'dt-emoji-in') { const first = Array.from(el.value.trim())[0] || ''; if (first) { cur.icon = first; _dtEmoji = false; _dtRender(); } }
+    else if (el.hasAttribute('data-dt-simdice')) { _dtSim.dice = el.value; _dtRenderSim(); }
+    else if (el.hasAttribute('data-wf-fxt')) {
+      const o = (cur.techniques || []).find(x => x.id === _dtOpenTech);
+      const field = _TE.applyField(el.dataset, o, el.value);
+      if (field) { if (field === 'label') el.classList.toggle('bad', !String(el.value).trim()); _dtRenderList(); _dtRenderFoot(); const card = document.querySelector('.dt .wf-tq.open'); if (card && o) { const nm = card.querySelector('.wf-tq-h b'); if (nm) nm.textContent = o.label || 'Sans nom'; const sum = card.querySelector('.wf-tq-sum'); if (sum) sum.textContent = _wfTechSummary(o); } }
+    }
   });
   document.addEventListener('change', ev => {
     if (!document.querySelector('.dt')) return;
     const cur = _dtCur(); if (!cur) return;
     if (ev.target.hasAttribute('data-dt-colorpick')) { cur.color = ev.target.value; _dtRender(); }
     else if (ev.target.hasAttribute('data-dt-replace')) { _dtReplaceId = ev.target.value; }
+    else if (ev.target.hasAttribute('data-wf-fx')) { const o = (cur.techniques || []).find(x => x.id === _dtOpenTech); if (_TE.applyField(ev.target.dataset, o, ev.target.value)) { _dtRenderMain(); _dtRenderList(); _dtRenderFoot(); } }
   });
   document.addEventListener('keydown', ev => {
     if (!document.querySelector('.dt')) return;
@@ -1452,24 +1482,6 @@ function _dtMount() {
       if (_dtAsk) { ev.stopPropagation(); ev.preventDefault(); _dtAsk = null; _dtRenderFoot(); return; }
     }
   }, true);
-}
-
-// Champ de technique (carte réutilisée) → brouillon du type ouvert.
-function _dtTechniqueDraftField(el) {
-  const cur = _dtCur(); if (!cur) return;
-  const technique = (cur.techniques || [])[Number(el.dataset.idx)];
-  if (!technique) return;
-  const field = el.dataset.field;
-  technique[field] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? (parseInt(el.value, 10) || 0) : el.value;
-  if (el.tagName === 'SELECT' || el.type === 'checkbox') { _dtRenderMain(); _dtRenderFoot(); }
-  else { _dtRenderList(); _dtRenderFoot(); const card = document.querySelector('.dt .wf-tq.open'); if (card) { const nm = card.querySelector('.wf-tq-h b'); if (nm) nm.textContent = technique.label || 'Sans nom'; const sum = card.querySelector('.wf-tq-sum'); if (sum) sum.textContent = _wfTechSummary(technique); } }
-}
-function _deleteDamageTypeTechnique(i) {
-  const cur = _dtCur(); if (!cur || !cur.techniques?.[i]) return;
-  cur.techniques.splice(i, 1);
-  _dtOpenTech = null;
-  showNotif('Technique supprimée. « Annuler les modifications » pour revenir.', 'info');
-  _dtRender();
 }
 
 
@@ -1903,8 +1915,6 @@ registerActions({
   _saveCombatStyle:         (btn) => _saveCombatStyle(Number(btn.dataset.idx)),
   _backToStylesList:        ()    => _backToStylesList(),
   _csAddCond:               (btn) => _csAddCond(btn.dataset.container, btn.dataset.sel),
-  _dtTechniqueDraftField:    (el)  => _dtTechniqueDraftField(el),
-  _deleteDamageTypeTechnique:(btn) => _deleteDamageTypeTechnique(Number(btn.dataset.idx)),
   openCombatStylesAdmin:    ()    => openCombatStylesAdmin(),
   openWeaponFormatsAdmin:   ()    => openWeaponFormatsAdmin(),
   openDamageTypesAdmin:     ()    => openDamageTypesAdmin(),
