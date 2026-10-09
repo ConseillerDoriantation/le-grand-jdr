@@ -5,8 +5,8 @@
 // Admin uniquement — chaque mission a son histoire attachée
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { getDocData, saveDoc, loadCollection } from '../data/firestore.js';
-import { confirmModal } from '../shared/modal.js';
+import { getDocData, saveDoc, loadCollection, batchSaveInCol } from '../data/firestore.js';
+import { openModal, closeModalDirect, setModalCloseGuard } from '../shared/modal.js';
 import { STATE } from '../core/state.js';
 import { _esc, _norm, loadingHtml } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
@@ -14,6 +14,18 @@ import { showNotif } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
 import { lsJson } from '../shared/local-storage.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../shared/dice-skills.js';
+import {
+  DICE_SKILL_STATS,
+  buildDiceSkillMigrations,
+  characteristicForSkillName,
+  diceSkillKey,
+  migrateSkillBonusesInEquipment,
+  migrateSkillBonusesInItem,
+  migrateSkillBonusesInItems,
+  migrateSkillMap,
+  sortDiceSkills,
+  suggestDiceSkillStat,
+} from '../shared/dice-skills-admin.js';
 import {
   bindRichTextEditorControls,
   countRichTextWords,
@@ -65,13 +77,6 @@ async function _loadDiceSkills() {
   return _diceSkillsCache;
 }
 
-async function _saveDiceSkills(skills) {
-  _diceSkillsCache = skills;
-  lsJson.set(DICE_SKILLS_STORAGE_KEY, skills);
-  try { await saveDoc('world', 'dice_skills', { skills }); }
-  catch { showNotif('Erreur — compétences de dés non sauvegardées.', 'error'); }
-}
-
 // ── État du module ────────────────────────────────────────────────────────────
 let _missionId    = null;
 let _missionTitre = '';
@@ -99,9 +104,10 @@ let _bracketQuery = '';
 let _bracketEnd   = 0;   // offset de fin sauvegardé avant que le focus quitte l'éditeur
 let _diceSel      = null; // { name, stat } de la compétence sélectionnée (step 2)
 
-// Drag & drop gestion des compétences
-let _desDragIdx   = null;
-let _desDragOverEl = null;
+// Brouillon de la modale de gestion des compétences
+let _desAdmin = null;
+let _desAdminAbort = null;
+let _desAdminUid = 0;
 
 // ── Entrée principale ─────────────────────────────────────────────────────────
 async function renderHistoire() {
@@ -727,142 +733,454 @@ async function _switchHistMission(id, titre, acte) {
 }
 
 // ── Gestion des compétences ───────────────────────────────────────────────────
-function _ouvrirGestionDes() {
-  document.getElementById('hist-des-modal')?.remove();
-  _closePicker();
+const _desClone = value => JSON.parse(JSON.stringify(value));
+const _desPlural = (count, singular, plural = `${singular}s`) => `${count} ${count > 1 ? plural : singular}`;
+const _desNextId = () => `dice-skill-${++_desAdminUid}`;
+
+function _desSavedName(skill) {
+  return _desAdmin?.saved.find(saved => saved.id === skill.id)?.name ?? null;
+}
+
+function _desErrors(skill) {
+  if (!String(skill?.name || '').trim()) return 'Nom requis';
+  const key = diceSkillKey(skill.name);
+  if (_desAdmin.draft.some(other => other !== skill && diceSkillKey(other.name) === key)) return 'Doublon';
+  return '';
+}
+
+function _desDirty() {
+  return !!_desAdmin && JSON.stringify(_desAdmin.draft) !== JSON.stringify(_desAdmin.saved);
+}
+
+function _desChangeCount() {
+  if (!_desAdmin) return 0;
+  return _desAdmin.draft.filter(skill => {
+    const old = _desAdmin.saved.find(saved => saved.id === skill.id);
+    return !old || old.name !== skill.name || old.stat !== skill.stat;
+  }).length + _desAdmin.saved.filter(old => !_desAdmin.draft.some(skill => skill.id === old.id)).length;
+}
+
+function _desSnapshot() {
+  if (!_desAdmin) return;
+  _desAdmin.history.push(JSON.stringify(_desAdmin.draft));
+  if (_desAdmin.history.length > 80) _desAdmin.history.shift();
+}
+
+function _desMutate(mutator) {
+  _desSnapshot();
+  mutator();
   _renderGestionDes();
 }
 
-// Template d'une ligne de compétence (drag + stat buttons + delete)
-function _renderDesRow(s, i) {
-  const STATS = ['', 'FOR', 'DEX', 'CON', 'INT', 'SAG', 'CHA'];
-  const statBtns = STATS.map(st => {
-    const col    = STAT_COLORS[st] || 'var(--text-dim)';
-    const active = st === s.stat;
-    return `<button class="hist-des-stat-btn${active ? ' active' : ''}"
-      ${active ? `style="background:${col}20;color:${col};border-color:${col}60"` : ''}
-      data-action="_gestionDesEditStat" data-i="${i}" data-st="${_esc(st)}"
-    >${st || '—'}</button>`;
-  }).join('');
+function _desAddStat() {
+  return _desAdmin.addStat ?? suggestDiceSkillStat(_desAdmin.addName) ?? '';
+}
 
-  return `<div class="hist-des-row" draggable="true" data-des-idx="${i}">
-    <span class="hist-des-drag-handle" title="Glisser pour réordonner">⠿</span>
-    <span class="hist-des-name">${s.name}</span>
-    <div class="hist-des-stats">${statBtns}</div>
-    <button class="hist-des-del" data-action="_gestionDesDel" data-i="${i}" title="Supprimer">✕</button>
+function _desStatSelector(current, attributes) {
+  return `<div class="dsa-stat-selector" role="radiogroup">${DICE_SKILL_STATS.map(stat => `
+    <button type="button" role="radio" aria-checked="${current === stat.key}" class="${current === stat.key ? 'is-active' : ''}"
+      style="--dsa-stat:${stat.color}" ${attributes}="${stat.key}" title="${stat.label}">${stat.key || '—'}</button>`).join('')}</div>`;
+}
+
+function _desUsageFor(skill) {
+  const originalName = _desSavedName(skill) ?? skill?.name ?? '';
+  const key = diceSkillKey(originalName);
+  const characters = new Set();
+  const items = new Set();
+  const inspectItem = item => {
+    if (!item?.skillBonuses || !Object.keys(item.skillBonuses).some(name => diceSkillKey(name) === key)) return;
+    items.add(item.nom || item.name || 'Objet sans nom');
+  };
+  (_desAdmin?.characters || []).forEach(character => {
+    if (character?.competences && Object.keys(character.competences).some(name => diceSkillKey(name) === key)) {
+      characters.add(character.nom || character.name || 'Personnage sans nom');
+    }
+    (character?.inventaire || []).forEach(inspectItem);
+    Object.values(character?.equipement || {}).forEach(inspectItem);
+    (character?.builds || []).forEach(build => Object.values(build?.equipement || {}).forEach(inspectItem));
+  });
+  (_desAdmin?.shop || []).forEach(inspectItem);
+  return { characters: [...characters], items: [...items] };
+}
+
+function _desIsUsed(skill) {
+  const usage = _desUsageFor(skill);
+  return usage.characters.length + usage.items.length > 0;
+}
+
+function _desTags(skill) {
+  const tags = [];
+  const error = _desErrors(skill);
+  const original = _desSavedName(skill);
+  const characteristic = characteristicForSkillName(skill.name);
+  if (error) tags.push(`<span class="dsa-tag is-error">${error}</span>`);
+  if (original == null) tags.push('<span class="dsa-tag is-new">Nouvelle</span>');
+  if (original != null && original !== String(skill.name).trim()) {
+    tags.push(`<span class="dsa-tag is-renamed" title="Ancien nom : ${_esc(original)}. Les fiches et objets suivront à l’enregistrement.">Renommée · suivi auto</span>`);
+  }
+  if (characteristic && characteristic !== skill.stat) {
+    tags.push(`<button type="button" class="dsa-tag is-warning" data-action="_desFixStat" data-id="${skill.id}" data-stat="${characteristic}">Lier à ${characteristic}</button>`);
+  }
+  return tags.join('');
+}
+
+function _desVisibleSkills() {
+  const query = diceSkillKey(_desAdmin.addName);
+  return _desAdmin.draft.filter(skill =>
+    (_desAdmin.filter === 'all' || skill.stat === _desAdmin.filter)
+    && (!query || diceSkillKey(skill.name).includes(query)));
+}
+
+function _desMissingDefaults() {
+  const names = new Set(_desAdmin.draft.map(skill => diceSkillKey(skill.name)));
+  return DICE_SKILLS_DEFAULT.filter(skill => !names.has(diceSkillKey(skill.name)));
+}
+
+function _desSortMenuHtml() {
+  const missing = _desMissingDefaults();
+  return `<div class="dsa-sort-menu">
+    <button type="button" data-action="_desSort" data-mode="az"><b>Ordre alphabétique</b><small>A → Z, accents compris</small></button>
+    <button type="button" data-action="_desSort" data-mode="stat"><b>Par caractéristique</b><small>FOR, DEX, CON… puis Libre</small></button>
+    <button type="button" data-action="_desSort" data-mode="pure"><b>Caractéristiques pures d’abord</b><small>Force, Dextérité… puis les compétences</small></button>
+    <hr>
+    <button type="button" data-action="_desFillDefaults" ${missing.length ? '' : 'disabled'}><b>Compléter avec les jets par défaut</b><small>${missing.length ? `Ajoute ${_esc(missing.map(skill => skill.name).join(', '))}` : 'Rien ne manque'}</small></button>
+    <button type="button" data-action="_desAskDefaults"><b>Revenir à la liste par défaut</b><small>Remplace toute la liste (annulable)</small></button>
   </div>`;
 }
 
+function _renderDesAddControls() {
+  const host = document.getElementById('dsa-add-controls');
+  if (!host || !_desAdmin) return;
+  const name = _desAdmin.addName.trim();
+  const duplicate = name && _desAdmin.draft.some(skill => diceSkillKey(skill.name) === diceSkillKey(name));
+  const suggested = _desAdmin.addStat == null && suggestDiceSkillStat(name) != null;
+  host.innerHTML = `
+    <span class="dsa-add-hint${duplicate ? ' is-warning' : ''}">${duplicate ? 'Existe déjà' : suggested ? 'Carac. suggérée' : name ? '' : 'Entrée pour ajouter'}</span>
+    ${_desStatSelector(_desAddStat(), 'data-action="_desSelectAddStat" data-stat')}
+    <button type="button" class="dsa-btn is-primary is-small" data-action="_gestionDesAdd" ${!name || duplicate ? 'disabled' : ''}>Ajouter</button>`;
+}
+
+function _renderDesFilters() {
+  const host = document.getElementById('dsa-filters');
+  if (!host || !_desAdmin) return;
+  const count = stat => _desAdmin.draft.filter(skill => skill.stat === stat).length;
+  host.innerHTML = `
+    <button type="button" class="dsa-filter${_desAdmin.filter === 'all' ? ' is-active' : ''}" data-action="_desFilter" data-stat="all">Toutes <b>${_desAdmin.draft.length}</b></button>
+    ${DICE_SKILL_STATS.map(stat => {
+      const total = count(stat.key);
+      return `<button type="button" class="dsa-filter${_desAdmin.filter === stat.key ? ' is-active' : ''}${stat.key && total <= 1 ? ' is-low' : ''}" style="--dsa-stat:${stat.color}" data-action="_desFilter" data-stat="${stat.key}"><i></i>${stat.key || 'Libre'} <b>${total}</b></button>`;
+    }).join('')}
+    <span class="dsa-spacer"></span>
+    <div class="dsa-sort-wrap"><button type="button" class="dsa-btn is-ghost is-small" data-action="_desToggleSort" aria-expanded="${_desAdmin.menu}"><span>⇅</span> Trier et compléter</button>${_desAdmin.menu ? _desSortMenuHtml() : ''}</div>`;
+}
+
+function _renderDesList() {
+  const host = document.getElementById('dsa-list');
+  if (!host || !_desAdmin) return;
+  const visible = _desVisibleSkills();
+  const locked = _desAdmin.filter !== 'all' || !!diceSkillKey(_desAdmin.addName);
+  const count = stat => _desAdmin.draft.filter(skill => skill.stat === stat).length;
+  const low = DICE_SKILL_STATS.filter(stat => stat.key && count(stat.key) <= 1).map(stat => {
+    const entries = _desAdmin.draft.filter(skill => skill.stat === stat.key);
+    return entries.length ? `<b>${stat.key}</b> n’a qu’un jet (${_esc(entries[0].name)})` : `<b>${stat.key}</b> n’a aucun jet`;
+  });
+  let html = !locked && low.length
+    ? `<p class="dsa-note">${low.join(' · ')} : les personnages qui misent sur cette caractéristique auront peu d’occasions de briller.</p>`
+    : '';
+  html += visible.map(skill => `<div class="dsa-row${skill.id === _desAdmin.fresh ? ' is-fresh' : ''}" draggable="${!locked}" data-des-row="${skill.id}">
+    <span class="dsa-handle" title="${locked ? 'Retirez le filtre pour réordonner' : 'Glisser pour réordonner'}">⠿</span>
+    <input class="dsa-name${_desErrors(skill) ? ' is-invalid' : ''}" value="${_esc(skill.name)}" maxlength="40" data-input="_desNameInput" data-id="${skill.id}" aria-label="Nom de la compétence">
+    <span class="dsa-tags" data-des-tags="${skill.id}">${_desTags(skill)}</span>
+    ${_desStatSelector(skill.stat, `data-action="_gestionDesEditStat" data-id="${skill.id}" data-stat`)}
+    <button type="button" class="dsa-remove" data-action="_gestionDesDel" data-id="${skill.id}" title="Supprimer" aria-label="Supprimer ${_esc(skill.name)}">×</button>
+  </div>`).join('');
+  if (!visible.length) {
+    const name = _desAdmin.addName.trim();
+    html = name
+      ? `<div class="dsa-empty"><p>Aucune compétence « ${_esc(name)} ».</p><button type="button" class="dsa-btn is-ghost is-small" data-action="_gestionDesAdd">Ajouter « ${_esc(name)} » en ${_desAddStat() || 'Libre'}</button></div>`
+      : `<div class="dsa-empty"><p>Aucun jet${_desAdmin.filter === 'all' ? '' : ` en ${_desAdmin.filter || 'Libre'}`}.</p></div>`;
+  }
+  host.classList.toggle('is-locked', locked);
+  host.innerHTML = html;
+  _desAdmin.fresh = null;
+}
+
+function _desRenames() {
+  return _desAdmin.draft.filter(skill => {
+    const original = _desSavedName(skill);
+    return original != null && original !== String(skill.name).trim() && !_desErrors(skill);
+  });
+}
+
+function _renderDesFooter() {
+  const host = document.getElementById('dsa-footer');
+  if (!host || !_desAdmin) return;
+  const ask = _desAdmin.ask;
+  if (ask?.type === 'delete') {
+    const skill = _desAdmin.draft.find(entry => entry.id === ask.id);
+    const usage = _desUsageFor(skill);
+    const details = [
+      usage.characters.length ? `${_desPlural(usage.characters.length, 'personnage')} ${usage.characters.length > 1 ? 'perdent' : 'perd'} sa formation (${_esc(usage.characters.join(', '))})` : '',
+      usage.items.length ? `${_desPlural(usage.items.length, 'objet')} ${usage.items.length > 1 ? 'perdent' : 'perd'} son bonus (${_esc(usage.items.join(', '))})` : '',
+    ].filter(Boolean).join(' · ');
+    host.innerHTML = `<div class="dsa-footer-status"><div class="dsa-question">Supprimer « ${_esc(skill?.name || '')} » ?<small>${details}.</small></div></div><div class="dsa-footer-actions"><button class="dsa-btn is-text" data-action="_desCancelAsk">Annuler</button><button class="dsa-btn is-danger" data-action="_desConfirmAsk">Supprimer</button></div>`;
+    return;
+  }
+  if (ask?.type === 'defaults') {
+    host.innerHTML = `<div class="dsa-footer-status"><div class="dsa-question">Remplacer toute la liste par les ${DICE_SKILLS_DEFAULT.length} jets par défaut ?<small>Les ajouts disparaîtront du brouillon. Rien n’est écrit avant d’enregistrer.</small></div></div><div class="dsa-footer-actions"><button class="dsa-btn is-text" data-action="_desCancelAsk">Annuler</button><button class="dsa-btn is-primary" data-action="_desConfirmAsk">Remplacer</button></div>`;
+    return;
+  }
+  const errors = _desAdmin.draft.filter(_desErrors);
+  const changes = _desChangeCount();
+  if (ask?.type === 'close') {
+    host.innerHTML = `<div class="dsa-footer-status"><div class="dsa-question">${_desPlural(changes, 'modification non enregistrée', 'modifications non enregistrées')}<small>Elles seront perdues si vous fermez maintenant.</small></div></div><div class="dsa-footer-actions"><button class="dsa-btn is-text" data-action="_desCancelAsk">Continuer</button><button class="dsa-btn is-ghost" data-action="_desDiscardClose">Quitter sans enregistrer</button><button class="dsa-btn is-primary" data-action="_desSave" data-close-after="true" ${errors.length ? 'disabled' : ''}>Enregistrer et fermer</button></div>`;
+    return;
+  }
+  const renames = _desRenames();
+  const info = errors.length
+    ? `<span class="dsa-info is-error">${_desPlural(errors.length, 'nom à corriger')}</span>`
+    : changes
+      ? `<span class="dsa-info"><i></i>${_desPlural(changes, 'modification')}${renames.length ? ` · ${renames.map(skill => `${_esc(_desSavedName(skill))} → ${_esc(skill.name.trim())}`).join(', ')} : fiches et objets suivront` : ''}</span>`
+      : '<span class="dsa-info">Tout est enregistré</span>';
+  host.innerHTML = `<div class="dsa-footer-status">${info}</div><div class="dsa-footer-actions"><button class="dsa-btn is-text" data-action="_desUndo" ${_desAdmin.history.length ? '' : 'disabled'} title="Ctrl+Z">↶ Annuler</button>${changes ? '<button class="dsa-btn is-text" data-action="_desResetDraft">Tout rétablir</button>' : ''}<button class="dsa-btn is-ghost" data-action="_histDesDismiss">Fermer</button><button class="dsa-btn is-primary" data-action="_desSave" ${!changes || errors.length ? 'disabled' : ''}>Enregistrer</button></div>`;
+}
+
 function _renderGestionDes() {
-  const skills  = _getDiceSkills();
-  const STATS   = ['', 'FOR', 'DEX', 'CON', 'INT', 'SAG', 'CHA'];
-  const statOpts = STATS.map(st => `<option value="${st}">${st || '—'}</option>`).join('');
-
-  const modal = document.createElement('div');
-  modal.id = 'hist-des-modal';
-  modal.innerHTML = `
-    <div class="hist-des-backdrop" data-action="_histDesDismiss"></div>
-    <div class="hist-des-panel">
-      <div class="hist-des-header">
-        <span>🎲 Compétences &amp; caractéristiques</span>
-        <div style="display:flex;gap:6px">
-          <button class="hist-des-btn" data-action="_resetDiceSkills" title="Rétablir les compétences par défaut">↺ Réinitialiser</button>
-          <button class="hist-des-btn hist-des-btn--close" data-action="_histDesDismiss">✕</button>
-        </div>
-      </div>
-      <div class="hist-des-body">
-        <div class="hist-des-list" id="hist-des-list">${skills.map(_renderDesRow).join('')}</div>
-        <div class="hist-des-add">
-          <input id="hist-des-new-name" class="hist-des-input" placeholder="Nouvelle compétence…" />
-          <select id="hist-des-new-stat" class="hist-des-new-stat-sel">${statOpts}</select>
-          <button class="hist-des-btn hist-des-btn--add" data-action="_gestionDesAdd">+ Ajouter</button>
-        </div>
-      </div>
-    </div>`;
-
-  document.body.appendChild(modal);
-  const list = document.getElementById('hist-des-list');
-  if (list) _bindDesListDrag(list);
-  setTimeout(() => modal.classList.add('hist-des-visible'), 10);
+  if (!_desAdmin || !document.getElementById('dsa-shell')) return;
+  _renderDesAddControls();
+  _renderDesFilters();
+  _renderDesList();
+  _renderDesFooter();
 }
 
-function _refreshGestionDesList() {
-  const list = document.getElementById('hist-des-list');
-  if (!list) return;
-  list.innerHTML = _getDiceSkills().map(_renderDesRow).join('');
+function _desToast(message, undoable = false) {
+  const toast = document.getElementById('dsa-toast');
+  if (!toast) return;
+  toast.innerHTML = `<span>${_esc(message)}</span>${undoable ? '<button type="button" data-action="_desUndo">Annuler</button>' : ''}`;
+  toast.classList.add('is-visible');
+  clearTimeout(_desAdmin.toastTimer);
+  _desAdmin.toastTimer = setTimeout(() => toast.classList.remove('is-visible'), undoable ? 4200 : 2200);
 }
 
-function _gestionDesEditStat(idx, stat) {
-  const skills = _getDiceSkills();
-  if (!skills[idx]) return;
-  skills[idx].stat = stat;
-  _saveDiceSkills(skills);
-  _refreshGestionDesList();
+function _desCloseGuard() {
+  if (!_desDirty()) return false;
+  _desAdmin.ask = { type: 'close' };
+  _renderDesFooter();
+  return true;
 }
 
-// Drag & drop
-function _bindDesListDrag(list) {
-  list.addEventListener('dragstart', (e) => {
-    const row = e.target.closest('[data-des-idx]');
-    if (row) _desDragIdx = +row.dataset.desIdx;
-  });
-  list.addEventListener('dragenter', (e) => {
-    e.preventDefault();
-    const row = e.target.closest('[data-des-idx]');
-    if (!row) return;
-    if (_desDragOverEl) _desDragOverEl.classList.remove('hist-des-drag-over');
-    _desDragOverEl = row;
-    row.classList.add('hist-des-drag-over');
-  });
-  list.addEventListener('dragover', (e) => e.preventDefault());
-  list.addEventListener('dragleave', (e) => {
-    const row = e.target.closest('[data-des-idx]');
-    if (!row) return;
-    if (!row.contains(e.relatedTarget)) {
-      row.classList.remove('hist-des-drag-over');
-      if (_desDragOverEl === row) _desDragOverEl = null;
+function _desCleanup() {
+  if (_desAdmin?.toastTimer) clearTimeout(_desAdmin.toastTimer);
+  _desAdminAbort?.abort();
+  _desAdminAbort = null;
+  _desAdmin = null;
+  setModalCloseGuard(null);
+}
+
+function _bindDesAdminDom() {
+  _desAdminAbort?.abort();
+  _desAdminAbort = new AbortController();
+  const signal = _desAdminAbort.signal;
+  const list = document.getElementById('dsa-list');
+  let dragId = null;
+  list?.addEventListener('dragstart', event => {
+    const row = event.target.closest('[data-des-row]');
+    if (!row || row.draggable === false || event.target.matches('input') || _desAdmin.filter !== 'all' || diceSkillKey(_desAdmin.addName)) {
+      event.preventDefault();
+      return;
     }
-  });
-  list.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const row = e.target.closest('[data-des-idx]');
-    const targetIdx = row ? +row.dataset.desIdx : null;
-    if (_desDragOverEl) { _desDragOverEl.classList.remove('hist-des-drag-over'); _desDragOverEl = null; }
-    if (_desDragIdx === null || targetIdx === null || _desDragIdx === targetIdx) { _desDragIdx = null; return; }
-    const skills = _getDiceSkills();
-    const [item] = skills.splice(_desDragIdx, 1);
-    skills.splice(targetIdx, 0, item);
-    _saveDiceSkills(skills);
-    _desDragIdx = null;
-    _refreshGestionDesList();
-  });
+    dragId = row.dataset.desRow;
+    row.classList.add('is-dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', dragId);
+  }, { signal });
+  list?.addEventListener('dragover', event => {
+    if (!dragId) return;
+    event.preventDefault();
+    const row = event.target.closest('[data-des-row]');
+    list.querySelectorAll('.is-over').forEach(item => item.classList.remove('is-over'));
+    if (row && row.dataset.desRow !== dragId) row.classList.add('is-over');
+  }, { signal });
+  list?.addEventListener('drop', event => {
+    event.preventDefault();
+    const target = event.target.closest('[data-des-row]');
+    const id = dragId;
+    dragId = null;
+    if (!target || target.dataset.desRow === id) { _renderDesList(); return; }
+    _desMutate(() => {
+      const from = _desAdmin.draft.findIndex(skill => skill.id === id);
+      const [skill] = _desAdmin.draft.splice(from, 1);
+      const to = _desAdmin.draft.findIndex(entry => entry.id === target.dataset.desRow);
+      _desAdmin.draft.splice(to, 0, skill);
+    });
+  }, { signal });
+  list?.addEventListener('dragend', () => {
+    dragId = null;
+    list.querySelectorAll('.is-dragging,.is-over').forEach(item => item.classList.remove('is-dragging', 'is-over'));
+  }, { signal });
+  document.getElementById('dsa-shell')?.addEventListener('focusin', event => {
+    if (event.target.matches('[data-input="_desNameInput"]') && !_desAdmin.typing) {
+      _desSnapshot();
+      _desAdmin.typing = true;
+    }
+  }, { signal });
+  document.getElementById('dsa-shell')?.addEventListener('focusout', event => {
+    if (event.target.matches('[data-input="_desNameInput"]')) _desAdmin.typing = false;
+  }, { signal });
+  document.getElementById('dsa-shell')?.addEventListener('keydown', event => {
+    if (event.target.id === 'dsa-add-input' && event.key === 'Enter') { event.preventDefault(); _gestionDesAdd(); }
+    else if (event.target.id === 'dsa-add-input' && event.key === 'Escape' && _desAdmin.addName) {
+      event.preventDefault(); event.stopPropagation();
+      _desAdmin.addName = ''; _desAdmin.addStat = null; event.target.value = ''; _renderGestionDes();
+    } else if (event.target.matches('[data-input="_desNameInput"]') && event.key === 'Enter') event.target.blur();
+    else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.target.matches('input')) {
+      event.preventDefault(); _desUndo();
+    } else if (event.key === 'Escape' && (_desAdmin.menu || _desAdmin.ask)) {
+      event.preventDefault(); event.stopPropagation();
+      _desAdmin.menu = false; _desAdmin.ask = null; _renderDesFilters(); _renderDesFooter();
+    }
+  }, { signal });
+  document.addEventListener('click', event => {
+    if (_desAdmin?.menu && !event.target.closest('.dsa-sort-wrap')) {
+      _desAdmin.menu = false;
+      _renderDesFilters();
+    }
+  }, { signal });
+  document.addEventListener('app:modal-closed', _desCleanup, { signal, once: true });
 }
 
-function _gestionDesDel(idx) {
-  const skills = _getDiceSkills();
-  skills.splice(idx, 1);
-  _saveDiceSkills(skills);
-  _refreshGestionDesList();
-};
+async function _ouvrirGestionDes() {
+  _closePicker();
+  const skills = (await _loadDiceSkills()).map(skill => ({ id: _desNextId(), name: skill.name, stat: skill.stat || '' }));
+  const [characters, shop] = await Promise.all([
+    loadCollection('characters').catch(() => STATE.characters || []),
+    loadCollection('shop').catch(() => []),
+  ]);
+  _desAdmin = {
+    saved: _desClone(skills), draft: _desClone(skills), history: [], filter: 'all',
+    menu: false, ask: null, addName: '', addStat: null, fresh: null,
+    typing: false, toastTimer: null, characters, shop,
+  };
+  openModal('', `<section class="dsa-shell" id="dsa-shell">
+    <header class="dsa-header"><div><h2>Compétences de dés</h2><p>Les jets disponibles en aventure et la caractéristique qui les modifie. Leur ordre est repris sur la fiche et dans le lanceur.</p></div><button type="button" class="dsa-close" data-action="_histDesDismiss" aria-label="Fermer">×</button></header>
+    <div class="dsa-tools"><div class="dsa-add"><span class="dsa-add-icon">＋</span><input id="dsa-add-input" data-input="_desAddInput" placeholder="Ajouter ou rechercher une compétence…" autocomplete="off"><span id="dsa-add-controls" class="dsa-add-controls"></span></div><div class="dsa-filters" id="dsa-filters"></div></div>
+    <div class="dsa-list" id="dsa-list" aria-label="Compétences"></div>
+    <footer class="dsa-footer" id="dsa-footer"></footer>
+    <div class="dsa-toast" id="dsa-toast" role="status" aria-live="polite"></div>
+  </section>`);
+  setModalCloseGuard(_desCloseGuard);
+  _renderGestionDes();
+  _bindDesAdminDom();
+}
+
+function _gestionDesEditStat(button) {
+  const skill = _desAdmin?.draft.find(entry => entry.id === button.dataset.id);
+  if (!skill || skill.stat === button.dataset.stat) return;
+  _desMutate(() => { skill.stat = button.dataset.stat; });
+}
+
+function _gestionDesDel(id) {
+  const skill = _desAdmin?.draft.find(entry => entry.id === id);
+  if (!skill) return;
+  if (_desIsUsed(skill)) {
+    _desAdmin.ask = { type: 'delete', id };
+    _renderDesFooter();
+    return;
+  }
+  _desMutate(() => { _desAdmin.draft = _desAdmin.draft.filter(entry => entry.id !== id); });
+  _desToast(`« ${skill.name || 'Sans nom'} » supprimée`, true);
+}
 
 function _gestionDesAdd() {
-  const nameInput = document.getElementById('hist-des-new-name');
-  const statInput = document.getElementById('hist-des-new-stat');
-  const name = nameInput?.value.trim();
-  if (!name) { nameInput?.focus(); return; }
-  const skills = _getDiceSkills();
-  skills.push({ name, stat: statInput?.value || '' });
-  _saveDiceSkills(skills);
-  if (nameInput) nameInput.value = '';
-  if (statInput) statInput.value = '';
-  _refreshGestionDesList();
-  nameInput?.focus();
-};
+  if (!_desAdmin) return;
+  const name = _desAdmin.addName.trim();
+  if (!name || _desAdmin.draft.some(skill => diceSkillKey(skill.name) === diceSkillKey(name))) return;
+  const skill = { id: _desNextId(), name, stat: _desAddStat() };
+  _desMutate(() => {
+    _desAdmin.draft.push(skill);
+    _desAdmin.fresh = skill.id;
+    if (_desAdmin.filter !== 'all' && _desAdmin.filter !== skill.stat) _desAdmin.filter = 'all';
+    _desAdmin.addName = '';
+    _desAdmin.addStat = null;
+  });
+  document.getElementById('dsa-list')?.scrollTo({ top: 99999, behavior: 'smooth' });
+  document.getElementById('dsa-add-input')?.focus();
+}
 
-async function _resetDiceSkills() {
-  if (!await confirmModal('Rétablir la liste par défaut ?<br><span style="opacity:.75;font-size:.85em">Les modifications seront perdues.</span>', { title: 'Compétences de dés', confirmLabel: 'Rétablir' })) return;
-  _saveDiceSkills(DICE_SKILLS_DEFAULT);
-  _refreshGestionDesList();
+function _desUndo() {
+  if (!_desAdmin?.history.length) return;
+  _desAdmin.draft = JSON.parse(_desAdmin.history.pop());
+  _desAdmin.ask = null;
+  _renderGestionDes();
+  _desToast('Modification annulée');
+}
+
+function _desMigrateCharacter(character, migrations) {
+  const patch = {};
+  const training = migrateSkillMap(character.competences, migrations);
+  if (training.changed) patch.competences = training.value;
+  const inventory = migrateSkillBonusesInItems(character.inventaire, migrations);
+  if (inventory.changed) patch.inventaire = inventory.value;
+  const equipment = migrateSkillBonusesInEquipment(character.equipement, migrations);
+  if (equipment.changed) patch.equipement = equipment.value;
+  if (Array.isArray(character.builds)) {
+    let buildsChanged = false;
+    const builds = character.builds.map(build => {
+      const migrated = migrateSkillBonusesInEquipment(build?.equipement, migrations);
+      if (!migrated.changed) return build;
+      buildsChanged = true;
+      return { ...build, equipement: migrated.value };
+    });
+    if (buildsChanged) patch.builds = builds;
+  }
+  return patch;
+}
+
+async function _desSave(closeAfter = false) {
+  if (!_desAdmin || _desAdmin.draft.some(_desErrors)) return false;
+  const persisted = _desAdmin.draft.map(skill => ({ name: skill.name.trim(), stat: skill.stat || '' }));
+  const migrations = buildDiceSkillMigrations(_desAdmin.saved, _desAdmin.draft);
+  const writes = [{ col: 'world', id: 'dice_skills', data: { skills: persisted } }];
+  const characterPatches = [];
+  _desAdmin.characters.forEach(character => {
+    const patch = _desMigrateCharacter(character, migrations);
+    if (Object.keys(patch).length) {
+      characterPatches.push({ character, patch });
+      writes.push({ col: 'characters', id: character.id, data: patch });
+    }
+  });
+  const shopPatches = [];
+  _desAdmin.shop.forEach(item => {
+    const migrated = migrateSkillBonusesInItem(item, migrations);
+    if (migrated.changed) {
+      const patch = { skillBonuses: migrated.value.skillBonuses };
+      shopPatches.push({ item, patch });
+      writes.push({ col: 'shop', id: item.id, data: patch });
+    }
+  });
+  if (writes.length > 500) {
+    showNotif('Trop de documents à migrer en un seul enregistrement.', 'error');
+    return false;
+  }
+  try {
+    await batchSaveInCol(writes);
+  } catch {
+    showNotif('Erreur — compétences de dés non sauvegardées.', 'error');
+    return false;
+  }
+  characterPatches.forEach(({ character, patch }) => Object.assign(character, patch));
+  shopPatches.forEach(({ item, patch }) => Object.assign(item, patch));
+  _diceSkillsCache = persisted;
+  lsJson.set(DICE_SKILLS_STORAGE_KEY, persisted);
+  _desAdmin.saved = _desClone(_desAdmin.draft.map(skill => ({ ...skill, name: skill.name.trim() })));
+  _desAdmin.draft = _desClone(_desAdmin.saved);
+  _desAdmin.history = [];
+  _desAdmin.ask = null;
+  document.dispatchEvent(new CustomEvent('dice-skills-updated', { detail: { skills: persisted } }));
+  showNotif(migrations.length ? 'Compétences enregistrées · références mises à jour.' : 'Compétences enregistrées.', 'success');
+  if (closeAfter) closeModalDirect();
+  else _renderGestionDes();
+  return true;
 }
 
 // ── Handout joueur ────────────────────────────────────────────────────────────
@@ -976,11 +1294,62 @@ registerActions({
   _toggleHistSidebar:   () => _toggleHistSidebar(),
   _histScrollToScene:   (btn, e) => { e.preventDefault(); document.getElementById(`hist-scene-${btn.dataset.sceneId}`)?.scrollIntoView({behavior:'smooth',block:'center'}); },
   _switchHistMission:   (btn) => _switchHistMission(btn.dataset.id, btn.dataset.titre, btn.dataset.acte),
-  _gestionDesEditStat:  (btn) => _gestionDesEditStat(Number(btn.dataset.i), btn.dataset.st),
-  _gestionDesDel:       (btn) => _gestionDesDel(Number(btn.dataset.i)),
-  _histDesDismiss:      ()    => document.getElementById('hist-des-modal')?.remove(),
-  _resetDiceSkills:     ()    => _resetDiceSkills(),
+  _gestionDesEditStat:  (btn) => _gestionDesEditStat(btn),
+  _gestionDesDel:       (btn) => _gestionDesDel(btn.dataset.id),
+  _histDesDismiss:      () => closeModalDirect(),
   _gestionDesAdd:       ()    => _gestionDesAdd(),
+  _desSelectAddStat:    (btn) => { if (_desAdmin) { _desAdmin.addStat = btn.dataset.stat; _renderDesAddControls(); document.getElementById('dsa-add-input')?.focus(); } },
+  _desAddInput:         (input) => { if (_desAdmin) { _desAdmin.addName = input.value; if (!input.value) _desAdmin.addStat = null; _renderDesAddControls(); _renderDesList(); } },
+  _desNameInput:        (input) => {
+    const skill = _desAdmin?.draft.find(entry => entry.id === input.dataset.id);
+    if (!skill) return;
+    skill.name = input.value;
+    _desAdmin.draft.forEach(entry => {
+      const field = document.querySelector(`.dsa-name[data-id="${entry.id}"]`);
+      const tags = document.querySelector(`[data-des-tags="${entry.id}"]`);
+      field?.classList.toggle('is-invalid', !!_desErrors(entry));
+      if (tags) tags.innerHTML = _desTags(entry);
+    });
+    _renderDesAddControls();
+    _renderDesFooter();
+  },
+  _desFilter:           (btn) => { if (_desAdmin) { _desAdmin.filter = btn.dataset.stat; _renderGestionDes(); } },
+  _desToggleSort:       () => { if (_desAdmin) { _desAdmin.menu = !_desAdmin.menu; _renderDesFilters(); } },
+  _desSort:             (btn) => { if (_desAdmin) _desMutate(() => { _desAdmin.draft = sortDiceSkills(_desAdmin.draft, btn.dataset.mode); _desAdmin.menu = false; }); },
+  _desFillDefaults:     () => {
+    if (!_desAdmin) return;
+    const missing = _desMissingDefaults();
+    if (!missing.length) return;
+    _desMutate(() => { _desAdmin.draft.push(...missing.map(skill => ({ id: _desNextId(), ...skill }))); _desAdmin.menu = false; });
+    _desToast(`${_desPlural(missing.length, 'jet ajouté', 'jets ajoutés')}`, true);
+  },
+  _desAskDefaults:      () => { if (_desAdmin) { _desAdmin.menu = false; _desAdmin.ask = { type: 'defaults' }; _renderDesFilters(); _renderDesFooter(); } },
+  _desFixStat:          (btn) => {
+    const skill = _desAdmin?.draft.find(entry => entry.id === btn.dataset.id);
+    if (skill) _desMutate(() => { skill.stat = btn.dataset.stat; });
+  },
+  _desCancelAsk:        () => { if (_desAdmin) { _desAdmin.ask = null; _renderDesFooter(); } },
+  _desConfirmAsk:       () => {
+    const ask = _desAdmin?.ask;
+    if (!ask) return;
+    if (ask.type === 'delete') {
+      const skill = _desAdmin.draft.find(entry => entry.id === ask.id);
+      _desMutate(() => { _desAdmin.draft = _desAdmin.draft.filter(entry => entry.id !== ask.id); _desAdmin.ask = null; });
+      _desToast(`« ${skill?.name || 'Sans nom'} » supprimée`, true);
+    } else if (ask.type === 'defaults') {
+      _desMutate(() => {
+        const ids = new Map(_desAdmin.draft.map(skill => [diceSkillKey(skill.name), skill.id]));
+        _desAdmin.draft = DICE_SKILLS_DEFAULT.map(skill => ({ id: ids.get(diceSkillKey(skill.name)) || _desNextId(), ...skill }));
+        _desAdmin.filter = 'all';
+        _desAdmin.ask = null;
+      });
+      _desToast('Liste par défaut rétablie', true);
+    }
+  },
+  _desUndo:             () => _desUndo(),
+  _desResetDraft:       () => { if (_desAdmin) { _desSnapshot(); _desAdmin.draft = _desClone(_desAdmin.saved); _desAdmin.ask = null; _renderGestionDes(); _desToast('Modifications annulées', true); } },
+  _desDiscardClose:     () => { if (_desAdmin) { _desAdmin.draft = _desClone(_desAdmin.saved); closeModalDirect(); } },
+  _desSave:             (btn) => _desSave(btn.dataset.closeAfter === 'true'),
   _histHandoutDismiss:  ()    => document.getElementById('hist-handout-modal')?.remove(),
   _histHandoutCopy:     ()    => _histHandoutCopy(),
 });
