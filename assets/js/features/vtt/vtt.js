@@ -113,8 +113,7 @@ import { _markCharsReady, _markNpcsReady, _markToksReady, _resetAutoSync, _chars
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu, _tokenEntityKey } from './vtt-utils.js';
 import { sceneGridSizeForImages } from './vtt-scene-utils.js';
 import {
-  _vttConditionConfig, _vttConditionConfigSelect, _vttConditionConfigSave, _vttConditionConfigReset,
-  _vttConditionConfigAddNew, _vttConditionConfigDelete, _vttCcTriSet, _vttCcFlagToggle,
+  _vttConditionConfig, _vttConditionConfigDo, _vttConditionConfigInput,
 } from './vtt-conditions-config.js';
 import {
   _vttConditionAdd, _vttConditionApply, _vttConditionRemove, _vttConditionSave,
@@ -333,7 +332,6 @@ function _vttMoveTokenAndReset(sel, tid) {
   _vttMoveTokenToPage(tid, input.value);
   input.value = '';
 }
-// [_vttCcTriSet/_vttCcFlagToggle (toggles du modal états) → vtt-conditions-config.js]
 // [_vttLibMoveToAndClose → vtt-maplib.js]
 // [plcolor musique → vtt-music.js]
 // No-op pour les wrappers qui servaient juste à event.stopPropagation() (closest() suffit)
@@ -16468,8 +16466,6 @@ export const VTT_ACTIONS = {
   _vttBstDed,
   _vttBstNotes,
   _vttCancelAtk,
-  _vttCcFlagToggle,
-  _vttCcTriSet,
   _vttCleanGhostMembers,
   _vttClearAnnots,
   _vttClearAoptSearch,
@@ -16480,11 +16476,8 @@ export const VTT_ACTIONS = {
   _vttConditionAdd,
   _vttConditionApply,
   _vttConditionConfig,
-  _vttConditionConfigAddNew,
-  _vttConditionConfigDelete,
-  _vttConditionConfigReset,
-  _vttConditionConfigSave,
-  _vttConditionConfigSelect,
+  _vttConditionConfigDo,
+  _vttConditionConfigInput,
   _vttConditionEdit,
   _vttConditionEditSave,
   _vttConditionGlossary,
