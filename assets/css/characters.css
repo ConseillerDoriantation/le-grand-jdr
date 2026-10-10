@@ -23447,6 +23447,12 @@ body .modal:has(.cs) > #modal-body { padding: 0 !important; height: auto !import
 .cs-desc { width: 100%; min-height: 64px; resize: vertical; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--border-md); background: var(--surface-2); outline: none; color: var(--text); font: inherit; font-size: 12.5px; }
 .cs-desc:focus { border-color: var(--border-bright); box-shadow: 0 0 0 3px var(--gold-glow); }
 .cs-row.on { box-shadow: inset 2px 0 0 var(--c); }
+.cs-mask-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+.cs-masked .wf-nm { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--text-muted); }
+.wf-banner.cs-info { border-color: color-mix(in srgb, var(--gold) 35%, transparent); background: color-mix(in srgb, var(--gold) 6%, transparent); }
+.cs-auto { margin-top: auto; padding: 11px 12px; border-radius: 12px; border: 1px dashed var(--border-md); background: var(--surface-sunken); display: flex; flex-direction: column; gap: 6px; }
+.cs-auto b { font-size: 12px; } .cs-auto p { font-size: 11px; color: var(--text-muted); text-wrap: pretty; } .cs-auto .wf-btn { align-self: flex-start; }
+.cs-gaps { font-size: 11px; color: var(--text-dim); padding: 6px 10px; text-align: center; }
 
 .dt-pastille { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; font-size: 13px; background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); }
 .dt-emoji-wrap { position: relative; flex: none; }

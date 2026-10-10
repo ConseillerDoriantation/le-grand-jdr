@@ -12,7 +12,7 @@ import { openCharacterRulesAdmin } from '../../shared/character-rules.js';
 import { openEquipmentSlotsAdmin, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { openArmorSetsAdmin } from '../../shared/armor-set-settings.js';
 import { openSpellSystemAdmin } from '../../shared/spell-system.js';
-import { defaultCombatStyles, detectCombatStyle as detectCombatStyleRule, normalizeCombatStyles, normalizeCombatStyle } from '../../shared/combat-styles.js';
+import { defaultCombatStyles, detectCombatStyle as detectCombatStyleRule, normalizeCombatStyles, normalizeCombatStyle, explainCombatStyle, combatStyleCoverage, autoOrderCombatStyles, LEGACY_FORMAT_MAP, splitStyleLabel, joinStyleLabel } from '../../shared/combat-styles.js';
 import { WEAPON_HANDS_OPTIONS, hasWeaponDefaults, missingWeaponFamilies, normalizeWeaponDefaults, resolveWeaponFamily, weaponDefaultsSummary, weaponHandsLabel, normalizeWeaponFamilyKey } from '../../shared/weapon-family.js';
 import { simulate as _wfSimulate, simBreakEven as _wfBreakEven } from '../../shared/weapon-sim.js';
 import { makeTechniqueEditor } from '../../shared/technique-editor.js';
@@ -67,8 +67,12 @@ export async function openCombatStylesAdmin() {
   _csSaved = _csClone(_combatStyles);
   _csSelId = _csDraft[0]?.id || null;
   _csAsk = null; _csEmoji = false; _csUndo = [];
+  _csChars = []; _csCharWins = {};
+  _csRefresh();
   _csRenderModal();
   _csMount();
+  // Personnages de la table (pour les compteurs et la bascule à la suppression).
+  loadCollection('characters').then(list => { _csChars = Array.isArray(list) ? list : []; if (document.querySelector('.cs')) { _csRefresh(); _csRenderList(); _csRenderMain(); } }).catch(() => {});
 }
 
 // — État —
@@ -79,16 +83,24 @@ const _csClone = list => normalizeCombatStyles((list || []).map(s => JSON.parse(
 const _csCur = () => _csDraft.find(s => s.id === _csSelId) || _csDraft[0] || null;
 const _csKey = s => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const _csIc = id => `<svg class="wf-ic"><use href="#wf-${id}"></use></svg>`;
-const _CS_SEG = (typeof Intl !== 'undefined' && Intl.Segmenter) ? new Intl.Segmenter('fr', { granularity: 'grapheme' }) : null;
-// label stocké = "🪄 Baguette" : séparer le 1er graphème s'il est un emoji.
-function _csSplit(label) {
-  const raw = String(label || '').trim();
-  const first = _CS_SEG ? [..._CS_SEG.segment(raw)][0]?.segment || '' : (Array.from(raw)[0] || '');
-  if (first && /\p{Extended_Pictographic}/u.test(first)) return { icon: first, name: raw.slice(first.length).trim() };
-  return { icon: '', name: raw };
-}
-const _csJoin = (icon, name) => [icon, name].filter(Boolean).join(' ').trim();
+const _csSplit = splitStyleLabel;
+const _csJoin = joinStyleLabel;
 const _csIsLegacy = v => /^arme\s/i.test(v || '');
+// Couverture + styles actifs par personnage, recalculés à chaque rendu complet.
+let _csChars = [], _csCov = { matches: {}, wins: {}, capturedBy: {}, gaps: 0 }, _csCharWins = {};
+function _csRefresh() {
+  _csCov = combatStyleCoverage(_csDraft, _weaponFormats || []);
+  _csCharWins = {};
+  _csChars.forEach(c => { const st = detectCombatStyle(c, _csDraft); if (st?.id) (_csCharWins[st.id] || (_csCharWins[st.id] = [])).push(c.nom || c.name || '?'); });
+}
+const _csCharsOf = id => _csCharWins[id] || [];
+const _csCatchAll = s => !(s.condPrincipale || []).length && !(s.condSecondaire || []).length && !(s.condMains === '1' || s.condMains === '2') && !(s.condSousTypeS || []).length;
+const _csTypeLabels = () => _csTypes.map(t => t.label);
+// Valeurs de condition non reconnues (ni vide, ni *, ni type existant).
+function _csUnknownConds(s) {
+  const known = new Set(['', '*', ..._csTypeLabels()]);
+  return [...(s.condPrincipale || []).map(v => ['condPrincipale', v]), ...(s.condSecondaire || []).map(v => ['condSecondaire', v])].filter(([, v]) => !known.has(v));
+}
 
 // Types d'arme réels (hors anciens formats), depuis les formats de la boutique.
 function _csTypeList() {
@@ -124,14 +136,25 @@ function _csListHtml() {
   let h = '';
   h += _csDraft.map((s, i) => {
     const err = _csErrs(s).length, dirty = JSON.stringify(s) !== JSON.stringify(_csSaved.find(o => o.id === s.id));
+    const masked = (_csCov.matches[s.id] || 0) > 0 && (_csCov.wins[s.id] || 0) === 0;
+    const nChars = _csCharsOf(s.id).length;
     const sp = _csSplit(s.label);
-    const mark = err ? '<span class="wf-err" title="À corriger"></span>' : dirty ? '<span class="wf-dirty" title="Modifié"></span>' : '';
-    return `<button type="button" class="wf-row cs-row${s.id === _csSelId ? ' on' : ''}" style="--c:${_esc(s.couleur || '#4f8cff')}" draggable="true" data-cs-sel="${_esc(s.id)}" data-cs-idx="${i}">
+    const mark = err ? '<span class="wf-err" title="À corriger"></span>'
+      : masked ? '<span class="cs-mask-dot" title="Jamais retenu (masqué)"></span>'
+        : dirty ? '<span class="wf-dirty" title="Modifié"></span>'
+          : (nChars ? `<span class="wf-cnt" title="${_esc(_csCharsOf(s.id).join(', '))}">${nChars}</span>` : '');
+    return `<button type="button" class="wf-row cs-row${s.id === _csSelId ? ' on' : ''}${masked ? ' cs-masked' : ''}" style="--c:${_esc(s.couleur || '#4f8cff')}" draggable="true" data-cs-sel="${_esc(s.id)}" data-cs-idx="${i}">
       <span class="cs-prio">${i + 1}</span><span class="cs-pastille">${_esc(sp.icon) || '·'}</span>
       <span style="min-width:0"><span class="wf-nm">${_esc(sp.name) || '<i style=\"color:var(--crimson)\">Sans nom</i>'}</span><span class="wf-sub">${_esc(_csRowSub(s))}</span></span>
       ${mark}</button>`;
   }).join('');
   h += `<button type="button" class="wf-add" data-cs-add>${_csIc('plus')}Nouveau style</button>`;
+  // Ordre automatique (proposé si l'ordre courant diffère).
+  const auto = autoOrderCombatStyles(_csDraft, _weaponFormats || []);
+  if (auto.map(s => s.id).join('|') !== _csDraft.map(s => s.id).join('|')) {
+    h += `<div class="cs-auto"><b>Ordre automatique</b><p>Trier du plus spécifique au plus général (attrape-tout en dernier).</p><button type="button" class="wf-btn gh sm" data-cs-autoorder>Réordonner</button></div>`;
+  }
+  if (_csCov.gaps > 0) h += `<p class="cs-gaps">${_csCov.gaps} combinaison${_csCov.gaps > 1 ? 's' : ''} d'armes sans style.</p>`;
   return h;
 }
 
@@ -173,6 +196,7 @@ function _csEditorHtml() {
     </div>
   </div>`;
   h += `<div class="wf-sec"><span class="wf-lbl">Couleur</span><div class="dt-colors">${_CS_COLORS.map(c => `<button type="button" class="dt-color${c.toLowerCase() === color.toLowerCase() ? ' on' : ''}" style="--c:${c}" data-cs-color="${c}" aria-label="${c}"></button>`).join('')}<label class="dt-rainbow${isPreset ? '' : ' on'}" title="Couleur libre"><input type="color" value="${_esc(color)}" data-cs-colorpick><span style="--c:${_esc(color)}"></span></label></div></div>`;
+  h += _csAlertsHtml(s);
   // Déclencheur
   h += `<div class="wf-sec"><span class="wf-lbl">Déclencheur</span><div class="cs-hands">${_csHandCard(s, 'condPrincipale', 'Main principale')}${_csHandCard(s, 'condSecondaire', 'Main secondaire')}</div><p class="wf-pline">Retenu quand : <b>${_esc(_csRowSub(s))}</b>. Liste vide = indifférent · plusieurs valeurs = OU.</p></div>`;
   // Règles automatiques
@@ -193,6 +217,26 @@ function _csStp(field, val, min, max) {
   const a = `data-cs-step="${field}" data-min="${min}" data-max="${max}"`;
   return `<div class="wf-stp"><button type="button" ${a} data-dir="-1">−</button><span>${val} c</span><button type="button" ${a} data-dir="1">+</button></div>`;
 }
+// Bannières d'alerte (calculées sur le brouillon à chaque rendu).
+function _csAlertsHtml(s) {
+  const id = s.id, out = [];
+  const unknown = _csUnknownConds(s);
+  if (unknown.length) {
+    const convertible = unknown.some(([, v]) => LEGACY_FORMAT_MAP[v]);
+    out.push(`<div class="wf-banner"><div><b>Condition non reconnue :</b> ${unknown.map(([, v]) => _esc(v)).join(', ')}. Ni une arme vide, ni « toute arme », ni un type existant.</div>${convertible ? '<button type="button" class="wf-btn gh sm" data-cs-convert>Convertir en types</button>' : ''}</div>`);
+  }
+  const matches = _csCov.matches[id] || 0, wins = _csCov.wins[id] || 0;
+  if (matches > 0 && wins === 0) {
+    const capt = Object.keys(_csCov.capturedBy[id] || {}).map(cid => _csSplit(_csDraft.find(o => o.id === cid)?.label || '').name).filter(Boolean);
+    out.push(`<div class="wf-banner"><div><b>Jamais retenu.</b> Capté avant par : ${_esc(capt.join(', ') || 'un style plus haut')}.</div><button type="button" class="wf-btn gh sm" data-cs-hoist>Placer au-dessus</button></div>`);
+  } else if (matches === 0 && !_csCharsOf(id).length) {
+    out.push(`<div class="wf-banner"><div><b>Jamais déclenché.</b> Aucune combinaison d'armes possible ne correspond, et aucun personnage ne l'utilise.</div></div>`);
+  }
+  if (_csCatchAll(s) && _csDraft.indexOf(s) !== _csDraft.length - 1) {
+    out.push(`<div class="wf-banner cs-info"><div><b>Style attrape-tout</b> (aucune condition) : il masque les styles placés en dessous. Mets-le en dernier.</div><button type="button" class="wf-btn gh sm" data-cs-tolast>Mettre en dernier</button></div>`);
+  }
+  return out.join('');
+}
 function _csEmojiPopHtml(cur) {
   return `<div class="dt-emoji-pop"><div class="dt-emoji-grid">${_CS_EMOJIS.map(e => `<button type="button" class="${cur === e ? 'on' : ''}" data-cs-pick="${e}">${e}</button>`).join('')}</div><div class="dt-emoji-foot"><input class="wf-fi sans" id="cs-emoji-in" placeholder="Colle ton emoji…" maxlength="8"><button type="button" class="wf-btn tx" data-cs-pick="">Aucun</button></div></div>`;
 }
@@ -201,7 +245,14 @@ const _CS_EMOJIS = ['⚔️', '🗡️', '🏹', '🛡️', '🤜', '🤛', '�
 function _csFootHtml() {
   const bad = _csAllErr(), dirty = _csDirty();
   if (_csAsk === 'close') return `<span class="wf-ask">Fermer sans enregistrer ?</span><span class="wf-sp"></span><button type="button" class="wf-btn tx" data-cs-keep>Continuer l'édition</button><button type="button" class="wf-btn gh" data-cs-discard>Quitter sans enregistrer</button><button type="button" class="wf-btn pri" data-cs-saveclose ${bad.length ? 'disabled' : ''}>Enregistrer et fermer</button>`;
-  if (_csAsk === 'del') { const s = _csCur(); return `<span class="wf-ask">Supprimer « ${_esc(_csSplit(s?.label).name) || 'Sans nom'} » ?<small>Les personnages concernés basculeront vers le style suivant qui correspond.</small></span><span class="wf-sp"></span><button type="button" class="wf-btn tx" data-cs-keep>Annuler</button><button type="button" class="wf-btn dg" data-cs-delok>Supprimer</button>`; }
+  if (_csAsk === 'del') {
+    const s = _csCur();
+    const without = _csDraft.filter(o => o !== s);
+    const affected = _csChars.filter(c => detectCombatStyle(c, _csDraft)?.id === s?.id)
+      .map(c => { const next = detectCombatStyle(c, without); return `${_esc(c.nom || c.name || '?')} → ${_esc(_csSplit(next?.label || '').name || 'aucun style')}`; });
+    const detail = affected.length ? affected.slice(0, 6).join(' · ') + (affected.length > 6 ? '…' : '') : 'Aucun personnage ne l\'utilise.';
+    return `<span class="wf-ask">Supprimer « ${_esc(_csSplit(s?.label).name) || 'Sans nom'} » ?<small>${detail}</small></span><span class="wf-sp"></span><button type="button" class="wf-btn tx" data-cs-keep>Annuler</button><button type="button" class="wf-btn dg" data-cs-delok>Supprimer</button>`;
+  }
   const info = bad.length ? `<span class="wf-info ko">${bad.length} style${bad.length > 1 ? 's' : ''} à corriger</span>` : dirty ? `<span class="wf-info"><span class="wf-dot2"></span>Modifications non enregistrées</span>` : '<span class="wf-info">À jour</span>';
   return `${info}<span class="wf-sp"></span><button type="button" class="wf-btn tx" data-cs-undo ${_csUndo.length ? '' : 'disabled'}>${_csIc('undo')}Annuler</button><button type="button" class="wf-btn tx" data-cs-revert ${dirty ? '' : 'disabled'}>Tout rétablir</button><button type="button" class="wf-btn pri" data-cs-save ${dirty && !bad.length ? '' : 'disabled'}>Enregistrer</button>`;
 }
@@ -209,7 +260,7 @@ function _csFootHtml() {
 function _csRenderList() { const el = document.getElementById('cs-list'); if (el) el.innerHTML = _csListHtml(); }
 function _csRenderMain() { const el = document.getElementById('cs-main'); if (el) el.innerHTML = _csEditorHtml(); }
 function _csRenderFoot() { const el = document.getElementById('cs-foot'); if (el) el.innerHTML = _csFootHtml(); }
-function _csRender() { _csRenderList(); _csRenderMain(); _csRenderFoot(); _csSyncGuard(); }
+function _csRender() { _csRefresh(); _csRenderList(); _csRenderMain(); _csRenderFoot(); _csSyncGuard(); }
 function _csSyncGuard() { setModalCloseGuard(() => { if (_csAsk) return true; if (_csDirty()) { _csAsk = 'close'; _csRenderFoot(); return true; } return false; }); }
 
 function _csRenderModal() {
@@ -240,7 +291,7 @@ function _csMount() {
   document.addEventListener('click', ev => {
     if (!document.querySelector('.cs')) return;
     if (_csEmoji && !ev.target.closest('.cs-emoji-wrap')) { _csEmoji = false; _csRenderMain(); }
-    const t = ev.target.closest('[data-cs-sel],[data-cs-add],[data-cs-mv],[data-cs-dup],[data-cs-del],[data-cs-delok],[data-cs-color],[data-cs-cond],[data-cs-mains],[data-cs-rule],[data-cs-step],[data-cs-emoji],[data-cs-pick],[data-cs-undo],[data-cs-revert],[data-cs-save],[data-cs-saveclose],[data-cs-close],[data-cs-keep],[data-cs-discard]');
+    const t = ev.target.closest('[data-cs-sel],[data-cs-add],[data-cs-mv],[data-cs-dup],[data-cs-del],[data-cs-delok],[data-cs-color],[data-cs-cond],[data-cs-mains],[data-cs-rule],[data-cs-step],[data-cs-emoji],[data-cs-pick],[data-cs-convert],[data-cs-hoist],[data-cs-tolast],[data-cs-autoorder],[data-cs-undo],[data-cs-revert],[data-cs-save],[data-cs-saveclose],[data-cs-close],[data-cs-keep],[data-cs-discard]');
     if (!t) return;
     const d = t.dataset, s = _csCur();
     if (d.csSel != null) { _csSelId = d.csSel; _csEmoji = false; return _csRender(); }
@@ -250,6 +301,10 @@ function _csMount() {
     if ('csDel' in d) { _csAsk = 'del'; return _csRenderFoot(); }
     if ('csDelok' in d) { _csPush(); const i = _csDraft.indexOf(s); _csDraft.splice(i, 1); _csSelId = (_csDraft[i] || _csDraft[i - 1])?.id || null; _csAsk = null; return _csRender(); }
     if (d.csColor) { _csPush(); if (s) s.couleur = d.csColor; return _csRender(); }
+    if ('csConvert' in d) { _csPush(); if (s) ['condPrincipale', 'condSecondaire'].forEach(which => { const out = []; (s[which] || []).forEach(v => { if (LEGACY_FORMAT_MAP[v]) LEGACY_FORMAT_MAP[v].filter(l => _csTypeLabels().includes(l)).forEach(l => { if (!out.includes(l)) out.push(l); }); else if (!out.includes(v)) out.push(v); }); s[which] = out; }); return _csRender(); }
+    if ('csHoist' in d) { _csPush(); if (s) { const capt = new Set(Object.keys(_csCov.capturedBy[s.id] || {})); _csDraft = _csDraft.filter(o => o !== s); let ins = _csDraft.findIndex(o => capt.has(o.id)); if (ins < 0) ins = 0; _csDraft.splice(ins, 0, s); } return _csRender(); }
+    if ('csTolast' in d) { _csPush(); if (s) { _csDraft = _csDraft.filter(o => o !== s); _csDraft.push(s); } return _csRender(); }
+    if ('csAutoorder' in d) { _csPush(); _csDraft = autoOrderCombatStyles(_csDraft, _weaponFormats || []); return _csRender(); }
     if (d.csCond) { _csPush(); const [which, val] = d.csCond.split(':'); if (s) _csToggleCond(s, which, val); return _csRender(); }
     if (d.csMains != null) { _csPush(); if (s) s.condMains = d.csMains; return _csRender(); }
     if (d.csRule) { _csPush(); const [k, v] = d.csRule.split(':'); if (s) { s.rules = s.rules || {}; s.rules[k] = v; } return _csRender(); }
