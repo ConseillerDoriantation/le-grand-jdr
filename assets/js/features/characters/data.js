@@ -12,7 +12,7 @@ import { openCharacterRulesAdmin } from '../../shared/character-rules.js';
 import { openEquipmentSlotsAdmin, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId } from '../../shared/equipment-slots.js';
 import { openArmorSetsAdmin } from '../../shared/armor-set-settings.js';
 import { openSpellSystemAdmin } from '../../shared/spell-system.js';
-import { defaultCombatStyles, detectCombatStyle as detectCombatStyleRule, normalizeCombatStyles } from '../../shared/combat-styles.js';
+import { defaultCombatStyles, detectCombatStyle as detectCombatStyleRule, normalizeCombatStyles, normalizeCombatStyle } from '../../shared/combat-styles.js';
 import { WEAPON_HANDS_OPTIONS, hasWeaponDefaults, missingWeaponFamilies, normalizeWeaponDefaults, resolveWeaponFamily, weaponDefaultsSummary, weaponHandsLabel, normalizeWeaponFamilyKey } from '../../shared/weapon-family.js';
 import { simulate as _wfSimulate, simBreakEven as _wfBreakEven } from '../../shared/weapon-sim.js';
 import { makeTechniqueEditor } from '../../shared/technique-editor.js';
@@ -57,250 +57,248 @@ export function detectCombatStyle(c, styles) {
 }
 
 // Admin : ouvrir la gestion des styles de combat
+// Admin : styles de combat — modale maître/détail, brouillon unique (.cs)
 export async function openCombatStylesAdmin() {
   try {
-    const styles = await loadCombatStyles();
-    _renderCombatStylesModal(styles);
-  } catch (e) { notifySaveError(e); }
+    await loadCombatStyles();
+  } catch (e) { notifySaveError(e); return; }
+  _csTypes = _csTypeList();
+  _csDraft = _csClone(_combatStyles);
+  _csSaved = _csClone(_combatStyles);
+  _csSelId = _csDraft[0]?.id || null;
+  _csAsk = null; _csEmoji = false; _csUndo = [];
+  _csRenderModal();
+  _csMount();
 }
 
-export function _renderCombatStylesModal(styles) {
-  const normalized = normalizeCombatStyles(styles);
-  const rulePills = style => {
-    const rules = style.rules;
-    const pills = [];
-    if (rules.opportunityAttack === 'allow') pills.push('<span class="cs-rule-pill reaction">↪ Opportunité autorisée</span>');
-    if (rules.opportunityAttack === 'forbid') pills.push('<span class="cs-rule-pill muted">⊘ Sans opportunité</span>');
-    if (rules.contactAttackMode !== 'none') {
-      const label = rules.contactAttackMode === 'advantage' ? 'Avantage' : 'Désavantage';
-      const scope = rules.contactAttackScope === 'all' ? 'toutes actions ciblées' : 'attaques et soins à distance';
-      pills.push(`<span class="cs-rule-pill ${rules.contactAttackMode === 'advantage' ? 'positive' : 'warning'}">${rules.contactAttackMode === 'advantage' ? '↗' : '↘'} ${label} au contact · ${scope} · ${rules.contactDistance}c</span>`);
-    }
-    return pills.join('') || '<span class="cs-rule-pill muted">Règles héritées</span>';
+// — État —
+let _csDraft = [], _csSaved = [], _csSelId = null, _csAsk = null, _csEmoji = false, _csMounted = false;
+let _csUndo = [], _csTypes = [];
+const _CS_COLORS = ['#4f8cff', '#38bdf8', '#22c38e', '#14b8a6', '#b47fff', '#ec4899', '#ff6b6b', '#f59e0b', '#e8b84b', '#facc15', '#a78bfa', '#6366f1', '#9ca3af'];
+const _csClone = list => normalizeCombatStyles((list || []).map(s => JSON.parse(JSON.stringify(s))));
+const _csCur = () => _csDraft.find(s => s.id === _csSelId) || _csDraft[0] || null;
+const _csKey = s => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const _csIc = id => `<svg class="wf-ic"><use href="#wf-${id}"></use></svg>`;
+const _CS_SEG = (typeof Intl !== 'undefined' && Intl.Segmenter) ? new Intl.Segmenter('fr', { granularity: 'grapheme' }) : null;
+// label stocké = "🪄 Baguette" : séparer le 1er graphème s'il est un emoji.
+function _csSplit(label) {
+  const raw = String(label || '').trim();
+  const first = _CS_SEG ? [..._CS_SEG.segment(raw)][0]?.segment || '' : (Array.from(raw)[0] || '');
+  if (first && /\p{Extended_Pictographic}/u.test(first)) return { icon: first, name: raw.slice(first.length).trim() };
+  return { icon: '', name: raw };
+}
+const _csJoin = (icon, name) => [icon, name].filter(Boolean).join(' ').trim();
+const _csIsLegacy = v => /^arme\s/i.test(v || '');
+
+// Types d'arme réels (hors anciens formats), depuis les formats de la boutique.
+function _csTypeList() {
+  return (_weaponFormats || []).filter(f => !_csIsLegacy(f.label) && f.label).map(f => ({ label: f.label, magic: !!f.isMagic, mains: f.defaults?.mains || '' }));
+}
+// Libellés de condition « anciens formats » présents dans un style (non éditables sauf retrait).
+function _csLegacyOf(arr) { return (arr || []).filter(v => v && v !== '*' && _csIsLegacy(v)); }
+
+// — Undo (80 pas) : snapshot avant mutation / au focusin d'un champ texte —
+function _csPush() { _csUndo.push(JSON.stringify(_csDraft)); if (_csUndo.length > 80) _csUndo.shift(); }
+function _csPopUndo() { if (!_csUndo.length) return; _csDraft = _csClone(JSON.parse(_csUndo.pop())); if (!_csCur()) _csSelId = _csDraft[0]?.id || null; _csRender(); }
+
+// — Validation / état —
+function _csErrs(s) {
+  const e = [];
+  if (!_csSplit(s.label).name) e.push('name');
+  else if (_csDraft.some(o => o !== s && _csKey(_csSplit(o.label).name) === _csKey(_csSplit(s.label).name))) e.push('dupname');
+  return e;
+}
+const _csAllErr = () => _csDraft.filter(s => _csErrs(s).length);
+const _csDirty = () => JSON.stringify(_csDraft) !== JSON.stringify(_csSaved);
+
+// Résumé « main + sec » pour la liste.
+function _csCondLabel(arr) {
+  const a = arr || [];
+  if (!a.length) return 'indifférent';
+  return a.map(v => v === '' ? '∅' : v === '*' ? 'toute arme' : v).join(' / ');
+}
+function _csRowSub(s) { return `${_csCondLabel(s.condPrincipale)} + ${_csCondLabel(s.condSecondaire)}${s.condMains === '1' ? ' · 1 main' : s.condMains === '2' ? ' · 2 mains' : ''}`; }
+
+// ══ Rendu ══
+function _csListHtml() {
+  let h = '';
+  h += _csDraft.map((s, i) => {
+    const err = _csErrs(s).length, dirty = JSON.stringify(s) !== JSON.stringify(_csSaved.find(o => o.id === s.id));
+    const sp = _csSplit(s.label);
+    const mark = err ? '<span class="wf-err" title="À corriger"></span>' : dirty ? '<span class="wf-dirty" title="Modifié"></span>' : '';
+    return `<button type="button" class="wf-row cs-row${s.id === _csSelId ? ' on' : ''}" style="--c:${_esc(s.couleur || '#4f8cff')}" draggable="true" data-cs-sel="${_esc(s.id)}" data-cs-idx="${i}">
+      <span class="cs-prio">${i + 1}</span><span class="cs-pastille">${_esc(sp.icon) || '·'}</span>
+      <span style="min-width:0"><span class="wf-nm">${_esc(sp.name) || '<i style=\"color:var(--crimson)\">Sans nom</i>'}</span><span class="wf-sub">${_esc(_csRowSub(s))}</span></span>
+      ${mark}</button>`;
+  }).join('');
+  h += `<button type="button" class="wf-add" data-cs-add>${_csIc('plus')}Nouveau style</button>`;
+  return h;
+}
+
+// Carte de pastilles pour une main (condPrincipale / condSecondaire).
+function _csHandCard(s, which, title) {
+  const arr = s[which] || [];
+  const hasAny = arr.includes('*');
+  const pill = (val, label, cls, extra = '') => {
+    const on = arr.includes(val);
+    const incl = hasAny && cls === 'type' && !on; // inclus via « toute arme »
+    return `<button type="button" class="cs-pill ${cls}${on ? ' on' : ''}${incl ? ' incl' : ''}" data-cs-cond="${which}:${_esc(val)}" ${extra}>${label}</button>`;
   };
-
-  openModal('', `
-    <div class="sh-admin-modal is-combat-styles">
-      <div class="sh-admin-head">
-        <div class="sh-admin-head-ico">⚔️</div>
-        <div class="sh-admin-head-title">
-          <h2>Styles de combat</h2>
-          <small>Détection par équipement · règles automatiquement appliquées dans le VTT</small>
-        </div>
-        <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
-      </div>
-      <div class="sh-admin-body">
-        <p class="sh-admin-intro">Le premier style correspondant à l’équipement actif est utilisé. La description sert au contexte ; les règles ci-dessous pilotent réellement le combat.</p>
-        <div class="cs-style-list" id="cs-styles-list">
-          ${normalized.map((s, i) => `
-            <article class="cs-style-admin-card" style="--style-c:${s.couleur || '#4f8cff'}">
-              <div class="cs-style-admin-main">
-                <div class="cs-style-admin-title">${_esc(s.label || `Style ${i + 1}`)}</div>
-                <div class="cs-style-admin-rules">${rulePills(s)}</div>
-                ${s.description ? `<p>${_esc(s.description)}</p>` : ''}
-                <div class="cs-style-admin-match">
-                  <span><b>Principale</b>${_esc((s.condPrincipale || []).filter(Boolean).join(', ') || ((s.condPrincipale || []).length ? 'aucune arme' : 'toute arme'))}${s.condMains ? ` · ${s.condMains === '2' ? '2 mains' : '1 main'}` : ''}</span>
-                  <span><b>Secondaire</b>${_esc((s.condSecondaire || []).filter(Boolean).join(', ') || 'aucune arme')}</span>
-                </div>
-              </div>
-              <div class="cs-style-admin-actions">
-                <button class="btn-icon" data-action="_editCombatStyle" data-idx="${i}" title="Modifier">✏️</button>
-                <button class="btn-icon danger" data-action="_deleteCombatStyle" data-idx="${i}" title="Supprimer">🗑️</button>
-              </div>
-            </article>`).join('')}
-        </div>
-      </div>
-      <div class="sh-admin-footer">
-        <button class="btn btn-gold" data-action="_addCombatStyle">＋ Nouveau style</button>
-        <span class="sh-admin-footer-spacer"></span>
-        <button class="btn btn-outline btn-sm" data-action="close-modal">Fermer</button>
-      </div>
-    </div>`);
+  let h = `<div class="cs-hand"><div class="cs-hand-h">${title}</div><div class="cs-pills">`;
+  h += pill('', '∅ Rien', 'empty');
+  h += pill('*', '✱ Toute arme', 'any');
+  h += _csTypes.map(t => pill(t.label, `${_esc(t.label)}${t.magic ? ' <b class="cs-mag">MAG</b>' : ''}`, 'type')).join('');
+  h += _csLegacyOf(arr).map(v => `<button type="button" class="cs-pill legacy on" data-cs-cond="${which}:${_esc(v)}" title="Ancien format — clic pour retirer">${_esc(v)} ✕</button>`).join('');
+  h += `</div>`;
+  if (which === 'condPrincipale') h += `<div class="cs-maniement"><span class="wf-lbl">Maniement</span><div class="wf-seg">${[['', 'Indifférent'], ['1', '1 main'], ['2', '2 mains']].map(([v, l]) => `<button type="button" class="${(s.condMains || '') === v ? 'on' : ''}" data-cs-mains="${v}">${l}</button>`).join('')}</div></div>`;
+  h += `</div>`;
+  return h;
 }
 
-function _addCombatStyle() {
-  _openStyleEditor(-1, {
-    label:'', condPrincipale:[], condSecondaire:[], description:'', couleur:'#4f8cff',
-    rules: { opportunityAttack:'inherit', contactAttackMode:'none', contactAttackScope:'ranged', contactDistance:1 },
-  });
-}
-function _editCombatStyle(i) {
-  _openStyleEditor(i, _combatStyles[i] || {});
-}
-async function _deleteCombatStyle(i) {
-  if (!await confirmModal('Supprimer ce style ?')) return;
-  _combatStyles.splice(i, 1);
-  await saveDoc('world', 'combat_styles', { styles: _combatStyles });
-  showNotif('Style supprimé.', 'success');
-  _renderCombatStylesModal(_combatStyles);
-}
-
-export function _getFormatsOpt() {
-  return [
-    { v:'', l:'(aucune arme)' },
-    { v:'*', l:'(toute arme)' },
-    ...(_weaponFormats || []).map(f => ({ v: f.label, l: f.label })),
-  ];
-}
-
-export function _openStyleEditor(idx, s) {
-  const style = normalizeCombatStyles([s])[0];
-  const rules = style.rules;
-  openModal('', `
-    <div class="sh-admin-modal is-combat-styles is-editor">
-      <div class="sh-admin-head">
-        <div class="sh-admin-head-ico">${idx >= 0 ? '✏️' : '＋'}</div>
-        <div class="sh-admin-head-title">
-          <h2>${idx >= 0 ? 'Modifier le style' : 'Nouveau style'}</h2>
-          <small>Associe un équipement à des règles lisibles et exécutables</small>
-        </div>
-        <button class="sh-admin-close" data-action="close-modal" title="Fermer">✕</button>
-      </div>
-      <div class="sh-admin-body cs-style-editor">
-        <section class="cs-style-editor-section identity">
-          <div class="cs-style-editor-heading"><span>1</span><div><b>Identité</b><small>Nom et repère visuel sur la fiche.</small></div></div>
-          <div class="cs-style-identity-grid">
-            <label class="cs-style-field"><span>Nom du style</span><input class="input-field" id="cs-style-label" value="${_esc(style.label || '')}" placeholder="🏹 Tir à distance"></label>
-            <label class="cs-style-field color"><span>Couleur</span><input type="color" id="cs-style-color" value="${_esc(style.couleur || '#4f8cff')}"></label>
-          </div>
-        </section>
-
-        <section class="cs-style-editor-section">
-          <div class="cs-style-editor-heading"><span>2</span><div><b>Équipement déclencheur</b><small>Types d’arme par main ; plusieurs choix dans une main signifient « ou ». Aucun choix = n’importe quelle arme.</small></div></div>
-          <div class="cs-style-hands-grid">
-            <div class="cs-style-hand">
-              <label>Main principale</label>
-              <div id="cs-cond-p" class="cs-style-conditions">
-        ${(s.condPrincipale?.length ? s.condPrincipale : ['*']).map((v,fi) => `
-                <div class="cs-style-condition-row">
-          <select class="input-field cs-cond-p-sel">
-            ${_getFormatsOpt().map(o=>`<option value="${_esc(o.v)}" ${v===o.v?'selected':''}>${_esc(o.l)}</option>`).join('')}
-          </select>
-                  <button type="button" data-action="_removeParent" title="Retirer">✕</button>
-        </div>`).join('')}
-      </div>
-      <button type="button" data-action="_csAddCond" data-container="cs-cond-p" data-sel="cs-cond-p-sel"
-                class="cs-style-add-condition">＋ Ajouter un type</button>
-              <label class="cs-style-field" style="margin-top:.5rem"><span>Maniement de l’arme principale</span>
-                <select class="input-field" id="cs-style-hands">
-                  <option value="" ${!style.condMains ? 'selected' : ''}>Indifférent</option>
-                  <option value="1" ${String(style.condMains) === '1' ? 'selected' : ''}>À une main</option>
-                  <option value="2" ${String(style.condMains) === '2' ? 'selected' : ''}>À deux mains</option>
-                </select>
-              </label>
-            </div>
-            <div class="cs-style-hand">
-              <label>Main secondaire</label>
-              <div id="cs-cond-s" class="cs-style-conditions">
-        ${(s.condSecondaire?.length ? s.condSecondaire : ['']).map((v,fi) => `
-                <div class="cs-style-condition-row">
-          <select class="input-field cs-cond-s-sel">
-            ${_getFormatsOpt().map(o=>`<option value="${_esc(o.v)}" ${v===o.v?'selected':''}>${_esc(o.l)}</option>`).join('')}
-          </select>
-                  <button type="button" data-action="_removeParent" title="Retirer">✕</button>
-        </div>`).join('')}
-      </div>
-      <button type="button" data-action="_csAddCond" data-container="cs-cond-s" data-sel="cs-cond-s-sel"
-                class="cs-style-add-condition">＋ Ajouter un type</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="cs-style-editor-section">
-          <div class="cs-style-editor-heading"><span>3</span><div><b>Règles actives</b><small>Ces choix ne sont pas seulement descriptifs : le VTT les utilise.</small></div></div>
-          <div class="cs-style-rules-grid">
-            <label class="cs-style-field">
-              <span>Attaque d’opportunité</span>
-              <select class="input-field" id="cs-style-opportunity">
-                <option value="inherit" ${rules.opportunityAttack==='inherit'?'selected':''}>Aucune règle particulière</option>
-                <option value="allow" ${rules.opportunityAttack==='allow'?'selected':''}>Autorisée à la sortie de portée</option>
-                <option value="forbid" ${rules.opportunityAttack==='forbid'?'selected':''}>Interdite avec ce style</option>
-              </select>
-              <small>La réaction est disponible lorsqu’une cible quitte la portée d’attaque.</small>
-            </label>
-            <label class="cs-style-field">
-              <span>Ennemi au contact</span>
-              <select class="input-field" id="cs-style-contact-mode">
-                <option value="none" ${rules.contactAttackMode==='none'?'selected':''}>Aucun modificateur</option>
-                <option value="disadvantage" ${rules.contactAttackMode==='disadvantage'?'selected':''}>Désavantage automatique</option>
-                <option value="advantage" ${rules.contactAttackMode==='advantage'?'selected':''}>Avantage automatique</option>
-              </select>
-              <small>Se combine naturellement aux avantages et désavantages des états.</small>
-            </label>
-            <label class="cs-style-field">
-              <span>Actions concernées</span>
-              <select class="input-field" id="cs-style-contact-scope">
-                <option value="ranged" ${rules.contactAttackScope==='ranged'?'selected':''}>Attaques et soins à distance</option>
-                <option value="all" ${rules.contactAttackScope==='all'?'selected':''}>Toutes les actions ciblées</option>
-              </select>
-            </label>
-            <label class="cs-style-field compact">
-              <span>Distance de contact</span>
-              <div class="cs-style-distance"><input class="input-field" type="number" id="cs-style-contact-distance" min="1" max="12" value="${rules.contactDistance}"><em>cases</em></div>
-            </label>
-          </div>
-          <div class="cs-style-rule-info"><span>✦</span><div><b>Dégâts en cas d’échec</b><small>Cette règle vient du type de dégâts de l’arme : un type magique configuré à « moitié » inflige ½ dégâts sur un échec de CA, et toujours 0 sur un échec critique.</small></div></div>
-        </section>
-
-        <section class="cs-style-editor-section">
-          <div class="cs-style-editor-heading"><span>4</span><div><b>Effets complémentaires</b><small>Pour les règles qui ne sont pas encore automatisées.</small></div></div>
-          <label class="cs-style-field"><span>Description</span><textarea class="input-field" id="cs-style-desc" rows="3" placeholder="Ex. : peut parer et gagner +1 CA lorsqu’il est en garde.">${_esc(style.description || '')}</textarea></label>
-        </section>
-      </div>
-      <div class="sh-admin-footer">
-        <button class="btn btn-outline btn-sm" data-action="_backToStylesList">← Liste</button>
-        <span class="sh-admin-footer-spacer"></span>
-        <button class="btn btn-gold" data-action="_saveCombatStyle" data-idx="${idx}">Enregistrer le style</button>
-      </div>
+function _csEditorHtml() {
+  const s = _csCur();
+  if (!s) return `<div class="wf-empty"><p>Aucun style de combat.</p><button type="button" class="wf-btn gh" data-cs-add>Nouveau style</button></div>`;
+  const e = _csErrs(s), i = _csDraft.indexOf(s), sp = _csSplit(s.label), color = s.couleur || '#4f8cff';
+  const isPreset = _CS_COLORS.some(c => c.toLowerCase() === color.toLowerCase());
+  const st = e.includes('name') ? ['ko', 'Donne un nom au style.'] : e.includes('dupname') ? ['ko', 'Un autre style porte déjà ce nom.'] : ['', `Priorité ${i + 1} sur ${_csDraft.length} · le premier style correspondant gagne`];
+  const r = s.rules || {};
+  let h = `<div class="wf-eh" style="--c:${_esc(color)}">
+    <div class="cs-emoji-wrap"><button type="button" class="dt-emoji-btn" data-cs-emoji aria-label="Icône">${sp.icon ? _esc(sp.icon) : '<span class="dt-emoji-ph">+</span>'}</button>${_csEmoji ? _csEmojiPopHtml(sp.icon) : ''}</div>
+    <div class="wf-t"><input class="wf-name${e.length ? ' bad' : ''}" id="cs-name" value="${_esc(sp.name)}" placeholder="Ex. Duelliste, Main libre" data-cs-name><small class="${st[0]}">${_esc(st[1])}</small></div>
+    <div class="wf-acts">
+      <button type="button" class="wf-ib" data-cs-mv="-1" title="Monter (priorité)" ${i <= 0 ? 'disabled' : ''}>${_csIc('up')}</button>
+      <button type="button" class="wf-ib" data-cs-mv="1" title="Descendre" ${i >= _csDraft.length - 1 ? 'disabled' : ''}>${_csIc('down')}</button>
+      <button type="button" class="wf-ib" data-cs-dup title="Dupliquer">${_csIc('dup')}</button>
+      <button type="button" class="wf-ib del" data-cs-del title="Supprimer">${_csIc('trash')}</button>
     </div>
-  `);
+  </div>`;
+  h += `<div class="wf-sec"><span class="wf-lbl">Couleur</span><div class="dt-colors">${_CS_COLORS.map(c => `<button type="button" class="dt-color${c.toLowerCase() === color.toLowerCase() ? ' on' : ''}" style="--c:${c}" data-cs-color="${c}" aria-label="${c}"></button>`).join('')}<label class="dt-rainbow${isPreset ? '' : ' on'}" title="Couleur libre"><input type="color" value="${_esc(color)}" data-cs-colorpick><span style="--c:${_esc(color)}"></span></label></div></div>`;
+  // Déclencheur
+  h += `<div class="wf-sec"><span class="wf-lbl">Déclencheur</span><div class="cs-hands">${_csHandCard(s, 'condPrincipale', 'Main principale')}${_csHandCard(s, 'condSecondaire', 'Main secondaire')}</div><p class="wf-pline">Retenu quand : <b>${_esc(_csRowSub(s))}</b>. Liste vide = indifférent · plusieurs valeurs = OU.</p></div>`;
+  // Règles automatiques
+  h += `<div class="wf-sec"><span class="wf-lbl">Règles automatiques</span><div class="dt-rules">`;
+  h += `<div class="dt-rl"><div class="dt-rl-t"><b>Attaque d'opportunité</b><small>Quand une cible quitte la portée</small></div><div class="dt-rl-c"><div class="wf-seg">${[['inherit', 'Règle normale'], ['allow', 'Autorisée'], ['forbid', 'Interdite']].map(([v, l]) => `<button type="button" class="${(r.opportunityAttack || 'inherit') === v ? 'on' : ''}" data-cs-rule="opportunityAttack:${v}">${l}</button>`).join('')}</div></div></div>`;
+  h += `<div class="dt-rl"><div class="dt-rl-t"><b>Ennemi au contact</b><small>Avantage ou désavantage à proximité</small></div><div class="dt-rl-c"><div class="wf-seg">${[['none', 'Aucun'], ['advantage', 'Avantage'], ['disadvantage', 'Désavantage']].map(([v, l]) => `<button type="button" class="${(r.contactAttackMode || 'none') === v ? 'on' : ''}" data-cs-rule="contactAttackMode:${v}">${l}</button>`).join('')}</div></div></div>`;
+  if ((r.contactAttackMode || 'none') !== 'none') {
+    h += `<div class="dt-rl dt-rl--sub"><div class="dt-rl-t"><b>↳ Actions concernées</b><small>Portée de la règle</small></div><div class="dt-rl-c"><div class="wf-seg">${[['ranged', 'Tirs et soins à distance'], ['all', 'Toutes']].map(([v, l]) => `<button type="button" class="${(r.contactAttackScope || 'ranged') === v ? 'on' : ''}" data-cs-rule="contactAttackScope:${v}">${l}</button>`).join('')}</div></div></div>`;
+    h += `<div class="dt-rl dt-rl--sub"><div class="dt-rl-t"><b>↳ Distance de contact</b><small>Cases</small></div><div class="dt-rl-c">${_csStp('contactDistance', r.contactDistance || 1, 1, 12)}</div></div>`;
+  }
+  h += `</div></div>`;
+  // Texte joueurs
+  const descLen = (s.description || '').length;
+  h += `<div class="wf-sec"><span class="wf-lbl">Texte pour les joueurs</span><textarea class="cs-desc" maxlength="280" placeholder="Phrase affichée dans la bande « Style de combat actif »" data-cs-desc>${_esc(s.description || '')}</textarea><span class="wf-none" id="cs-desc-count">${descLen}/280</span></div>`;
+  return h;
+}
+function _csStp(field, val, min, max) {
+  const a = `data-cs-step="${field}" data-min="${min}" data-max="${max}"`;
+  return `<div class="wf-stp"><button type="button" ${a} data-dir="-1">−</button><span>${val} c</span><button type="button" ${a} data-dir="1">+</button></div>`;
+}
+function _csEmojiPopHtml(cur) {
+  return `<div class="dt-emoji-pop"><div class="dt-emoji-grid">${_CS_EMOJIS.map(e => `<button type="button" class="${cur === e ? 'on' : ''}" data-cs-pick="${e}">${e}</button>`).join('')}</div><div class="dt-emoji-foot"><input class="wf-fi sans" id="cs-emoji-in" placeholder="Colle ton emoji…" maxlength="8"><button type="button" class="wf-btn tx" data-cs-pick="">Aucun</button></div></div>`;
+}
+const _CS_EMOJIS = ['⚔️', '🗡️', '🏹', '🛡️', '🤜', '🤛', '🤺', '🪄', '🔮', '🪓', '🔨', '🔱', '🎯', '💥', '🌀', '✨', '🔥', '❄️', '⚡', '🩸', '🦾', '🐉', '👑', '🎭'];
+
+function _csFootHtml() {
+  const bad = _csAllErr(), dirty = _csDirty();
+  if (_csAsk === 'close') return `<span class="wf-ask">Fermer sans enregistrer ?</span><span class="wf-sp"></span><button type="button" class="wf-btn tx" data-cs-keep>Continuer l'édition</button><button type="button" class="wf-btn gh" data-cs-discard>Quitter sans enregistrer</button><button type="button" class="wf-btn pri" data-cs-saveclose ${bad.length ? 'disabled' : ''}>Enregistrer et fermer</button>`;
+  if (_csAsk === 'del') { const s = _csCur(); return `<span class="wf-ask">Supprimer « ${_esc(_csSplit(s?.label).name) || 'Sans nom'} » ?<small>Les personnages concernés basculeront vers le style suivant qui correspond.</small></span><span class="wf-sp"></span><button type="button" class="wf-btn tx" data-cs-keep>Annuler</button><button type="button" class="wf-btn dg" data-cs-delok>Supprimer</button>`; }
+  const info = bad.length ? `<span class="wf-info ko">${bad.length} style${bad.length > 1 ? 's' : ''} à corriger</span>` : dirty ? `<span class="wf-info"><span class="wf-dot2"></span>Modifications non enregistrées</span>` : '<span class="wf-info">À jour</span>';
+  return `${info}<span class="wf-sp"></span><button type="button" class="wf-btn tx" data-cs-undo ${_csUndo.length ? '' : 'disabled'}>${_csIc('undo')}Annuler</button><button type="button" class="wf-btn tx" data-cs-revert ${dirty ? '' : 'disabled'}>Tout rétablir</button><button type="button" class="wf-btn pri" data-cs-save ${dirty && !bad.length ? '' : 'disabled'}>Enregistrer</button>`;
 }
 
-function _csAddCond(containerId, selClass) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  const div = document.createElement('div');
-  div.className = 'cs-style-condition-row';
-  div.innerHTML = `
-    <select class="input-field ${selClass}">
-      ${_getFormatsOpt().map(o=>`<option value="${_esc(o.v)}">${_esc(o.l)}</option>`).join('')}
-    </select>
-    <button type="button" data-action="_removeParent" title="Retirer">✕</button>`;
-  container.appendChild(div);
+function _csRenderList() { const el = document.getElementById('cs-list'); if (el) el.innerHTML = _csListHtml(); }
+function _csRenderMain() { const el = document.getElementById('cs-main'); if (el) el.innerHTML = _csEditorHtml(); }
+function _csRenderFoot() { const el = document.getElementById('cs-foot'); if (el) el.innerHTML = _csFootHtml(); }
+function _csRender() { _csRenderList(); _csRenderMain(); _csRenderFoot(); _csSyncGuard(); }
+function _csSyncGuard() { setModalCloseGuard(() => { if (_csAsk) return true; if (_csDirty()) { _csAsk = 'close'; _csRenderFoot(); return true; } return false; }); }
+
+function _csRenderModal() {
+  openModal('', `${_WF_SPRITE}<div class="cs">
+    <header class="wf-mh"><div><h2>Styles de combat</h2><small>Détection par équipement · le premier style correspondant gagne · règles appliquées dans le VTT.</small></div><span class="wf-sp"></span><button type="button" class="wf-x" data-cs-close aria-label="Fermer">${_csIc('x')}</button></header>
+    <div class="wf-body"><nav class="wf-list" id="cs-list"></nav><div class="wf-main" id="cs-main"></div></div>
+    <footer class="wf-mf" id="cs-foot"></footer>
+  </div>`);
+  _csRenderList(); _csRenderMain(); _csRenderFoot();
+  _csSyncGuard();
 }
 
-async function _saveCombatStyle(idx) {
-  const label = document.getElementById('cs-style-label')?.value?.trim();
-  if (!label) { showNotif('Nom requis.', 'error'); return; }
-  const condP = [...document.querySelectorAll('.cs-cond-p-sel')].map(s=>s.value);
-  const condS = [...document.querySelectorAll('.cs-cond-s-sel')].map(s=>s.value);
-  const style = {
-    id: idx >= 0 ? (_combatStyles[idx]?.id || `style_${Date.now()}`) : `style_${Date.now()}`,
-    label,
-    condPrincipale: condP,
-    condSecondaire: condS,
-    condMains: document.getElementById('cs-style-hands')?.value || '',
-    description: document.getElementById('cs-style-desc')?.value?.trim() || '',
-    couleur: document.getElementById('cs-style-color')?.value || '#4f8cff',
-    condSousTypeS: idx >= 0 ? (_combatStyles[idx]?.condSousTypeS || []) : [],
-    rules: {
-      opportunityAttack: document.getElementById('cs-style-opportunity')?.value || 'inherit',
-      opportunityTrigger: 'leave-reach',
-      contactAttackMode: document.getElementById('cs-style-contact-mode')?.value || 'none',
-      contactAttackScope: document.getElementById('cs-style-contact-scope')?.value || 'ranged',
-      contactDistance: Math.max(1, Math.min(12, parseInt(document.getElementById('cs-style-contact-distance')?.value, 10) || 1)),
-    },
-  };
-  if (!_combatStyles) _combatStyles = [];
-  if (idx >= 0) _combatStyles[idx] = style;
-  else _combatStyles.push(style);
-  await saveDoc('world', 'combat_styles', { styles: _combatStyles });
-  showNotif('Style enregistré !', 'success');
-  _renderCombatStylesModal(_combatStyles);
+async function _csSave(close) {
+  if (_csAllErr().length) return;
+  const styles = _csDraft.map(s => normalizeCombatStyle({ ...s }));
+  try { await saveDoc('world', 'combat_styles', { styles }); }
+  catch (e) { notifySaveError(e); return; }
+  _combatStyles = normalizeCombatStyles(styles);
+  _csDraft = _csClone(styles); _csSaved = _csClone(styles); _csUndo = [];
+  if (!_csCur()) _csSelId = _csDraft[0]?.id || null;
+  showNotif('Styles de combat enregistrés.', 'success');
+  if (close) { setModalCloseGuard(null); closeModalDirect(); return; }
+  _csRender();
 }
 
-function _backToStylesList() {
-  _renderCombatStylesModal(_combatStyles || []);
+function _csMount() {
+  if (_csMounted) return; _csMounted = true;
+  document.addEventListener('click', ev => {
+    if (!document.querySelector('.cs')) return;
+    if (_csEmoji && !ev.target.closest('.cs-emoji-wrap')) { _csEmoji = false; _csRenderMain(); }
+    const t = ev.target.closest('[data-cs-sel],[data-cs-add],[data-cs-mv],[data-cs-dup],[data-cs-del],[data-cs-delok],[data-cs-color],[data-cs-cond],[data-cs-mains],[data-cs-rule],[data-cs-step],[data-cs-emoji],[data-cs-pick],[data-cs-undo],[data-cs-revert],[data-cs-save],[data-cs-saveclose],[data-cs-close],[data-cs-keep],[data-cs-discard]');
+    if (!t) return;
+    const d = t.dataset, s = _csCur();
+    if (d.csSel != null) { _csSelId = d.csSel; _csEmoji = false; return _csRender(); }
+    if ('csAdd' in d) { _csPush(); const id = `style_${Date.now()}`; const color = _CS_COLORS.find(c => !_csDraft.some(o => (o.couleur || '').toLowerCase() === c.toLowerCase())) || _CS_COLORS[0]; _csDraft.push(normalizeCombatStyle({ id, label: '', couleur: color, condPrincipale: ['*'], condSecondaire: [''], condMains: '', condSousTypeS: [], description: '', rules: {} })); _csSelId = id; _csRender(); showNotif('Style ajouté en dernier — remonte-le pour lui donner la priorité.', 'info'); document.getElementById('cs-name')?.focus(); return; }
+    if (d.csMv) { _csPush(); const i = _csDraft.indexOf(s), j = i + (+d.csMv); if (_csDraft[j]) { [_csDraft[i], _csDraft[j]] = [_csDraft[j], _csDraft[i]]; } return _csRender(); }
+    if ('csDup' in d) { if (!s) return; _csPush(); const id = `style_${Date.now()}`; const sp = _csSplit(s.label); const copy = normalizeCombatStyle({ ...JSON.parse(JSON.stringify(s)), id, label: _csJoin(sp.icon, `${sp.name} (copie)`) }); _csDraft.splice(_csDraft.indexOf(s) + 1, 0, copy); _csSelId = id; return _csRender(); }
+    if ('csDel' in d) { _csAsk = 'del'; return _csRenderFoot(); }
+    if ('csDelok' in d) { _csPush(); const i = _csDraft.indexOf(s); _csDraft.splice(i, 1); _csSelId = (_csDraft[i] || _csDraft[i - 1])?.id || null; _csAsk = null; return _csRender(); }
+    if (d.csColor) { _csPush(); if (s) s.couleur = d.csColor; return _csRender(); }
+    if (d.csCond) { _csPush(); const [which, val] = d.csCond.split(':'); if (s) _csToggleCond(s, which, val); return _csRender(); }
+    if (d.csMains != null) { _csPush(); if (s) s.condMains = d.csMains; return _csRender(); }
+    if (d.csRule) { _csPush(); const [k, v] = d.csRule.split(':'); if (s) { s.rules = s.rules || {}; s.rules[k] = v; } return _csRender(); }
+    if (d.csStep) { _csPush(); const f = d.csStep; if (s) { s.rules = s.rules || {}; let v = (parseInt(s.rules[f], 10) || 0) + (+d.dir); s.rules[f] = Math.max(+d.min, Math.min(+d.max, v)); } return _csRender(); }
+    if ('csEmoji' in d) { _csEmoji = !_csEmoji; return _csRenderMain(); }
+    if ('csPick' in d) { _csPush(); if (s) { const sp = _csSplit(s.label); s.label = _csJoin(d.csPick, sp.name); } _csEmoji = false; return _csRender(); }
+    if ('csUndo' in d) { return _csPopUndo(); }
+    if ('csRevert' in d) { _csDraft = _csClone(_csSaved); _csUndo = []; if (!_csCur()) _csSelId = _csDraft[0]?.id || null; _csAsk = null; return _csRender(); }
+    if ('csSave' in d) return _csSave(false);
+    if ('csSaveclose' in d) return _csSave(true);
+    if ('csClose' in d) { if (_csDirty()) { _csAsk = 'close'; _csRenderFoot(); } else { setModalCloseGuard(null); closeModalDirect(); } return; }
+    if ('csKeep' in d) { _csAsk = null; return _csRenderFoot(); }
+    if ('csDiscard' in d) { _csAsk = null; _csDraft = _csClone(_csSaved); setModalCloseGuard(null); closeModalDirect(); return; }
+  });
+  // Un seul pas d'annulation par session de saisie (snapshot au focus).
+  document.addEventListener('focusin', ev => { if (!document.querySelector('.cs')) return; if (ev.target.matches('#cs-name, .cs-desc, #cs-emoji-in')) _csPush(); });
+  document.addEventListener('input', ev => {
+    if (!document.querySelector('.cs')) return;
+    const s = _csCur(); if (!s) return; const el = ev.target;
+    if (el.hasAttribute('data-cs-name')) { const sp = _csSplit(s.label); s.label = _csJoin(sp.icon, el.value); _csRenderList(); _csRenderFoot(); el.classList.toggle('bad', _csErrs(s).length > 0); }
+    else if (el.hasAttribute('data-cs-desc')) { s.description = el.value; const c = document.getElementById('cs-desc-count'); if (c) c.textContent = `${el.value.length}/280`; _csRenderFoot(); }
+    else if (el.hasAttribute('data-cs-colorpick')) { s.couleur = el.value; _csRenderList(); const eh = document.querySelector('.cs .wf-eh'); if (eh) eh.style.setProperty('--c', s.couleur); }
+    else if (el.id === 'cs-emoji-in') { const first = Array.from(el.value.trim())[0] || ''; if (first) { const sp = _csSplit(s.label); s.label = _csJoin(first, sp.name); _csEmoji = false; _csRender(); } }
+  });
+  document.addEventListener('change', ev => { if (!document.querySelector('.cs')) return; const s = _csCur(); if (s && ev.target.hasAttribute('data-cs-colorpick')) { s.couleur = ev.target.value; _csRender(); } });
+  document.addEventListener('keydown', ev => {
+    if (!document.querySelector('.cs')) return;
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'z' || ev.key === 'Z') && !ev.target.matches('input, textarea')) { ev.preventDefault(); _csPopUndo(); return; }
+    if (ev.key === 'Escape') { if (_csEmoji) { ev.stopPropagation(); _csEmoji = false; _csRenderMain(); return; } if (_csAsk) { ev.stopPropagation(); ev.preventDefault(); _csAsk = null; _csRenderFoot(); return; } }
+  }, true);
+}
+
+// Bascule d'une condition de main. '*' retire les types (garde '' et anciens) ;
+// un type retire '*' ; '' se bascule seul ; un ancien format se retire.
+function _csToggleCond(s, which, val) {
+  const arr = s[which] || (s[which] = []);
+  const has = arr.includes(val);
+  if (val === '*') {
+    if (has) s[which] = arr.filter(v => v !== '*');
+    else s[which] = [...arr.filter(v => v === '' || _csIsLegacy(v)), '*'];
+  } else if (val === '') {
+    s[which] = has ? arr.filter(v => v !== '') : [...arr, ''];
+  } else if (_csIsLegacy(val)) {
+    s[which] = arr.filter(v => v !== val); // retrait
+  } else {
+    const noAny = arr.filter(v => v !== '*');
+    s[which] = has ? noAny.filter(v => v !== val) : [...noAny, val];
+  }
+  // Tableau vide = indifférent (sémantique du moteur), c'est permis.
 }
 
 // ══════════════════════════════════════════════
@@ -1909,12 +1907,6 @@ registerActions({
   _setSpellMatrixArm:          (el) => _setSpellMatrixArm(el.dataset.tid, el.dataset.arm, el.value),
   _setSpellMatrixEffect:       (el) => _setSpellMatrixEffect(el.dataset.catKey, el.dataset.tid, el.dataset.slot, el.value),
   _removeParent:            (btn) => btn.parentElement?.remove(),
-  _editCombatStyle:         (btn) => _editCombatStyle(Number(btn.dataset.idx)),
-  _deleteCombatStyle:       (btn) => _deleteCombatStyle(Number(btn.dataset.idx)),
-  _addCombatStyle:          ()    => _addCombatStyle(),
-  _saveCombatStyle:         (btn) => _saveCombatStyle(Number(btn.dataset.idx)),
-  _backToStylesList:        ()    => _backToStylesList(),
-  _csAddCond:               (btn) => _csAddCond(btn.dataset.container, btn.dataset.sel),
   openCombatStylesAdmin:    ()    => openCombatStylesAdmin(),
   openWeaponFormatsAdmin:   ()    => openWeaponFormatsAdmin(),
   openDamageTypesAdmin:     ()    => openDamageTypesAdmin(),
