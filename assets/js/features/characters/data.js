@@ -199,7 +199,9 @@ function _csEditorHtml() {
   h += `<div class="wf-sec"><span class="wf-lbl">Couleur</span><div class="dt-colors">${_CS_COLORS.map(c => `<button type="button" class="dt-color${c.toLowerCase() === color.toLowerCase() ? ' on' : ''}" style="--c:${c}" data-cs-color="${c}" aria-label="${c}"></button>`).join('')}<label class="dt-rainbow${isPreset ? '' : ' on'}" title="Couleur libre"><input type="color" value="${_esc(color)}" data-cs-colorpick><span style="--c:${_esc(color)}"></span></label></div></div>`;
   h += _csAlertsHtml(s);
   // Déclencheur
-  h += `<div class="wf-sec"><span class="wf-lbl">Déclencheur</span><div class="cs-hands">${_csHandCard(s, 'condPrincipale', 'Main principale')}${_csHandCard(s, 'condSecondaire', 'Main secondaire')}</div><p class="wf-pline">Retenu quand : <b>${_esc(_csRowSub(s))}</b>. Liste vide = indifférent · plusieurs valeurs = OU.</p></div>`;
+  const wins = _csCov.wins[s.id] || 0, matched = _csCov.matches[s.id] || 0, nm = _csCharsOf(s.id);
+  const stat = `Retenu pour <b>${wins}</b> combinaison${wins > 1 ? 's' : ''}${matched - wins > 0 ? ` · ${matched - wins} prise${matched - wins > 1 ? 's' : ''} par un autre` : ''} · personnages : ${nm.length ? _esc(nm.join(', ')) : 'aucun'}`;
+  h += `<div class="wf-sec"><span class="wf-lbl">Déclencheur</span><div class="cs-hands">${_csHandCard(s, 'condPrincipale', 'Main principale')}${_csHandCard(s, 'condSecondaire', 'Main secondaire')}</div><p class="wf-pline">Retenu quand : <b>${_esc(_csRowSub(s))}</b>. Liste vide = indifférent · plusieurs valeurs = OU.</p><p class="wf-pline">${stat}.</p></div>`;
   // Règles automatiques
   h += `<div class="wf-sec"><span class="wf-lbl">Règles automatiques</span><div class="dt-rules">`;
   h += `<div class="dt-rl"><div class="dt-rl-t"><b>Attaque d'opportunité</b><small>Quand une cible quitte la portée</small></div><div class="dt-rl-c"><div class="wf-seg">${[['inherit', 'Règle normale'], ['allow', 'Autorisée'], ['forbid', 'Interdite']].map(([v, l]) => `<button type="button" class="${(r.opportunityAttack || 'inherit') === v ? 'on' : ''}" data-cs-rule="opportunityAttack:${v}">${l}</button>`).join('')}</div></div></div>`;
@@ -319,6 +321,8 @@ async function _csSave(close) {
   try { await saveDoc('world', 'combat_styles', { styles }); }
   catch (e) { notifySaveError(e); return; }
   _combatStyles = normalizeCombatStyles(styles);
+  // Rafraîchir la copie du VTT si une session est ouverte (lecture via VS.combatStyles).
+  try { const vs = await import('../vtt/vtt-state.js'); if (vs?.VS) vs.VS.combatStyles = normalizeCombatStyles(styles); } catch { /* VTT non chargé */ }
   _csDraft = _csClone(styles); _csSaved = _csClone(styles); _csUndo = [];
   if (!_csCur()) _csSelId = _csDraft[0]?.id || null;
   showNotif('Styles de combat enregistrés.', 'success');
@@ -382,7 +386,13 @@ function _csMount() {
     if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'z' || ev.key === 'Z') && !ev.target.matches('input, textarea')) { ev.preventDefault(); _csPopUndo(); return; }
     if (ev.key === 'Escape') { if (_csEmoji) { ev.stopPropagation(); _csEmoji = false; _csRenderMain(); return; } if (_csAsk) { ev.stopPropagation(); ev.preventDefault(); _csAsk = null; _csRenderFoot(); return; } }
   }, true);
+  // Réordonnancement par glisser-déposer (priorité).
+  document.addEventListener('dragstart', ev => { if (!document.querySelector('.cs')) return; const row = ev.target.closest('.cs-row'); if (!row) return; _csDragIdx = +row.dataset.csIdx; try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(_csDragIdx)); } catch { /* */ } row.classList.add('cs-dragging'); });
+  document.addEventListener('dragover', ev => { if (!document.querySelector('.cs') || _csDragIdx == null) return; const row = ev.target.closest('.cs-row'); if (row) { ev.preventDefault(); document.querySelectorAll('.cs-row.cs-drop').forEach(r => r.classList.remove('cs-drop')); if (+row.dataset.csIdx !== _csDragIdx) row.classList.add('cs-drop'); } });
+  document.addEventListener('drop', ev => { if (!document.querySelector('.cs') || _csDragIdx == null) return; const row = ev.target.closest('.cs-row'); if (row) { ev.preventDefault(); const to = +row.dataset.csIdx; if (to !== _csDragIdx) { _csPush(); const [moved] = _csDraft.splice(_csDragIdx, 1); _csDraft.splice(to, 0, moved); _csRender(); } } _csDragIdx = null; });
+  document.addEventListener('dragend', () => { _csDragIdx = null; document.querySelectorAll('.cs-dragging, .cs-drop').forEach(r => r.classList.remove('cs-dragging', 'cs-drop')); });
 }
+let _csDragIdx = null;
 
 // Bascule d'une condition de main. '*' retire les types (garde '' et anciens) ;
 // un type retire '*' ; '' se bascule seul ; un ancien format se retire.

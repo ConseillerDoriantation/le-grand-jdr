@@ -10806,102 +10806,6 @@ body .modal:has(.cs-build-modal) {
   .cs-v3 .cstyle-rule { flex: 1 1 150px; }
 }
 
-/* Gestion structurée des styles de combat. */
-body .modal:has(.sh-admin-modal.is-combat-styles) {
-  max-width: min(860px, 96vw) !important;
-}
-.sh-admin-modal.is-combat-styles {
-  --admin-tint: rgba(79,140,255,.12);
-  --admin-glow: rgba(79,140,255,.42);
-  --admin-bd: rgba(79,140,255,.34);
-  --admin-accent: #7eb0ff;
-}
-.cs-style-list { display: grid; gap: 8px; }
-.cs-style-admin-card {
-  position: relative;
-  display: flex; align-items: flex-start; gap: 12px;
-  padding: 11px 12px 11px 15px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--style-c) 26%, var(--border));
-  border-radius: 12px;
-  background: linear-gradient(105deg, color-mix(in srgb, var(--style-c) 7%, transparent), transparent 48%), rgba(0,0,0,.16);
-}
-.cs-style-admin-card::before {
-  content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--style-c);
-}
-.cs-style-admin-main { display: grid; gap: 7px; flex: 1; min-width: 0; }
-.cs-style-admin-title { color: var(--text); font-family: var(--font-display, 'Cinzel', serif); font-size: .86rem; font-weight: 700; }
-.cs-style-admin-main > p { margin: 0; color: var(--text-muted); font-size: .7rem; line-height: 1.4; }
-.cs-style-admin-rules { display: flex; flex-wrap: wrap; gap: 5px; }
-.cs-rule-pill {
-  display: inline-flex; align-items: center; padding: 3px 7px;
-  border: 1px solid color-mix(in srgb, var(--rule-c, var(--text-muted)) 36%, transparent);
-  border-radius: 999px; background: color-mix(in srgb, var(--rule-c, var(--text-muted)) 9%, transparent);
-  color: var(--rule-c, var(--text-muted)); font-size: .6rem; font-weight: 700;
-}
-.cs-rule-pill.reaction { --rule-c:#6aa1ff; }
-.cs-rule-pill.warning { --rule-c:#fbbf24; }
-.cs-rule-pill.positive { --rule-c:#34d399; }
-.cs-rule-pill.muted { --rule-c:var(--text-muted); }
-.cs-style-admin-match { display: flex; flex-wrap: wrap; gap: 6px; }
-.cs-style-admin-match > span {
-  display: inline-flex; gap: 5px; padding: 4px 7px; min-width: 0;
-  border-radius: 7px; background: rgba(255,255,255,.025);
-  color: var(--text-dim); font-size: .59rem;
-}
-.cs-style-admin-match b { color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; }
-.cs-style-admin-actions { display: flex; gap: 4px; flex-shrink: 0; }
-.cs-style-admin-actions .btn-icon.danger { color: #ff7d96; }
-.cs-style-editor { gap: 10px !important; }
-.cs-style-editor-section {
-  display: grid; gap: 10px; padding: 12px;
-  border: 1px solid var(--border); border-radius: 12px;
-  background: rgba(255,255,255,.02);
-}
-.cs-style-editor-heading { display: flex; align-items: center; gap: 9px; }
-.cs-style-editor-heading > span {
-  display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px;
-  border-radius: 8px; background: rgba(79,140,255,.13); color: #7eb0ff; font-size: .68rem; font-weight: 800;
-}
-.cs-style-editor-heading > div { display: grid; gap: 1px; }
-.cs-style-editor-heading b { color: var(--text); font-size: .76rem; }
-.cs-style-editor-heading small { color: var(--text-dim); font-size: .62rem; }
-.cs-style-identity-grid { display: grid; grid-template-columns: minmax(0, 1fr) 78px; gap: 9px; }
-.cs-style-field { display: grid; gap: 5px; min-width: 0; }
-.cs-style-field > span,
-.cs-style-hand > label { color: var(--text-muted); font-size: .63rem; font-weight: 700; }
-.cs-style-field > small { color: var(--text-dim); font-size: .58rem; line-height: 1.35; }
-.cs-style-field.color input {
-  width: 100%; height: 38px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); cursor: pointer;
-}
-.cs-style-hands-grid,
-.cs-style-rules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
-.cs-style-hand { display: grid; align-content: start; gap: 6px; padding: 9px; border: 1px solid var(--border); border-radius: 10px; background: rgba(0,0,0,.15); }
-.cs-style-conditions { display: grid; gap: 5px; }
-.cs-style-condition-row { display: grid; grid-template-columns: minmax(0,1fr) 30px; gap: 5px; }
-.cs-style-condition-row > button,
-.cs-style-add-condition {
-  border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,.025); color: var(--text-muted); cursor: pointer;
-}
-.cs-style-condition-row > button:hover { color: #ff7d96; border-color: rgba(255,125,150,.38); }
-.cs-style-add-condition { padding: 6px 8px; color: #7eb0ff; font-size: .61rem; }
-.cs-style-add-condition:hover { border-color: rgba(79,140,255,.4); background: rgba(79,140,255,.08); }
-.cs-style-distance { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 7px; }
-.cs-style-distance em { color: var(--text-dim); font-size: .62rem; font-style: normal; }
-.cs-style-rule-info {
-  display: flex; align-items: flex-start; gap: 9px; padding: 9px 10px;
-  border: 1px solid rgba(180,127,255,.22); border-radius: 10px; background: rgba(180,127,255,.06);
-}
-.cs-style-rule-info > span { color: #c4a7ff; }
-.cs-style-rule-info > div { display: grid; gap: 2px; }
-.cs-style-rule-info b { color: #c4a7ff; font-size: .66rem; }
-.cs-style-rule-info small { color: var(--text-muted); font-size: .6rem; line-height: 1.4; }
-@media (max-width: 650px) {
-  .cs-style-hands-grid,
-  .cs-style-rules-grid { grid-template-columns: 1fr; }
-  .cs-style-admin-card { align-items: stretch; }
-  .cs-style-admin-actions { flex-direction: column; }
-}
 /* Colonne "Maîtrises d'armes" (jumelée à la carte Éléments dans combat-footer). */
 .cs-v3 .cmeta-col {
   padding: 12px 14px; border-radius: 18px;
@@ -23476,6 +23380,7 @@ body .modal:has(.cs) > #modal-body { padding: 0 !important; height: auto !import
 .cs-desc { width: 100%; min-height: 64px; resize: vertical; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--border-md); background: var(--surface-2); outline: none; color: var(--text); font: inherit; font-size: 12.5px; }
 .cs-desc:focus { border-color: var(--border-bright); box-shadow: 0 0 0 3px var(--gold-glow); }
 .cs-row.on { box-shadow: inset 2px 0 0 var(--c); }
+.cs-row[draggable] { cursor: grab; } .cs-row.cs-dragging { opacity: .45; } .cs-row.cs-drop { box-shadow: inset 0 2px 0 var(--gold); }
 .cs-mask-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
 .cs-masked .wf-nm { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--amber) 70%, transparent); color: var(--text-muted); }
 .wf-banner.cs-info { border-color: color-mix(in srgb, var(--gold) 35%, transparent); background: color-mix(in srgb, var(--gold) 6%, transparent); }
