@@ -1,11 +1,8 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // PLAYERS.JS — Roster de campagne
 //
-// Présentation narrative des personnages de l'aventure. Deux vues :
-//  • Sommaire (galerie immersive) : cards riches avec portrait, niveau, vitaux
-//    autorisés, joueur, traits, filtrables par recherche/tag/joueur.
-//  • Fiche (présentation détaillée) : hero immersif + 2 colonnes (narratif
-//    + sidebar stats/équipement/compétences/hauts-faits).
+// Registre maître/détail des personnages de l'aventure, complété par une
+// galerie groupée par joueur et une carte des relations d'aventure.
 //
 // Admin : drag pour réordonner, toggle visibilité, modal de création/édition
 // avec illustration cropable et confidentialité des infos de jeu.
@@ -104,6 +101,9 @@ function _ppIcon(name, className = 'pp-icon') {
     coin: '<circle cx="12" cy="12" r="8"></circle><path d="M12 8v8"></path><path d="M9.5 10.5c0-1.2 1.1-2 2.5-2 1.3 0 2.5.7 2.5 2 0 1.2-1 1.6-2.5 2s-2.5.8-2.5 2c0 1.3 1.2 2 2.5 2 1.4 0 2.5-.8 2.5-2"></path>',
     user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
     users: '<path d="M16 21a6 6 0 0 0-12 0"></path><circle cx="10" cy="8" r="4"></circle><path d="M22 21a5 5 0 0 0-5-5"></path><path d="M17 4a4 4 0 0 1 0 8"></path>',
+    list: '<path d="M9 6h11"></path><path d="M9 12h11"></path><path d="M9 18h11"></path><path d="M4 6h.01"></path><path d="M4 12h.01"></path><path d="M4 18h.01"></path>',
+    external: '<path d="M14 4h6v6"></path><path d="M20 4 10 14"></path><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path>',
+    star: '<path d="m12 3 2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7Z"></path>',
   };
   return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.user}</svg>`;
 }
@@ -121,10 +121,11 @@ const STORE = {
   filterSearch:  '',
   filterJoueur:  '',
   sortBy:        'ordre',   // 'ordre' (custom MJ) | 'nom' | 'niveau' | 'joueur' | 'classe'
-  viewMode:      'gallery', // 'gallery' | 'relations'
-  relSelected:   null,      // Set<charId> | null (null = tous visibles)
-  relPositions:  {},        // charId → {x,y} (positions custom après drag, en coords SVG)
-  relPickerOpen: false,
+  viewMode:      'register', // 'register' | 'gallery' | 'relations'
+  detailTab:     'presentation',
+  grouped:       true,
+  mobileDetail:  false,
+  relMode:       'ego',     // 'ego' | 'matrix'
   chroniqueExpanded: {},
   partenairesExpanded: {},
   presentations: [],
@@ -138,24 +139,50 @@ const STORE = {
 // Chaque quête-groupe = un tableau de charIds (ses participants). Deux PJ sont
 // partenaires s'ils figurent dans le MÊME groupe (même quête).
 function _allGroupMemberLists() {
+  const plannedMissionIds = new Set((STORE.story || [])
+    .filter(mission => _missionStatus(mission)[0] === 'planned')
+    .map(mission => mission.id));
   return (STORE.quests || [])
+    .filter(q => !plannedMissionIds.has(q.missionId))
     .map(q => [...new Set((q.participants || []).map(p => p.charId).filter(Boolean))])
     .filter(list => list.length > 1);
 }
-// charIds présents dans au moins un groupe rattaché à une mission donnée.
-function _missionGroupCharIds(missionId) {
-  const s = new Set();
-  (STORE.quests || []).forEach(q => {
-    if (q.missionId !== missionId) return;
-    (q.participants || []).forEach(p => p.charId && s.add(p.charId));
-  });
-  return s;
+// Groupes encore existants auxquels le personnage appartient pour une mission.
+// La liste `story.participants` est un historique cumulatif : elle peut encore
+// contenir les membres d'un groupe supprimé. Elle ne doit donc jamais servir à
+// reconstruire la chronique ni ses compagnons.
+function _missionGroupsForChar(missionId, currentCharId) {
+  if (!missionId || !currentCharId) return [];
+  return (STORE.quests || [])
+    .filter(q => q.missionId === missionId)
+    .map(q => [...new Set((q.participants || []).map(p => p.charId).filter(Boolean))])
+    .filter(members => members.includes(currentCharId));
+}
+
+function _missionGroupMemberIds(missionId, currentCharId) {
+  return new Set(_missionGroupsForChar(missionId, currentCharId).flat());
 }
 
 // localStorage : ordre fallback hors-ligne (admin réordonne)
 const _LS_KEY = 'pp-ordre';
+const _VIEW_LS_KEY = 'pp-view-state-v2';
 const _getLocalOrdre = () => lsJson.get(_LS_KEY, null);
 const _setLocalOrdre = ids => lsJson.set(_LS_KEY, ids);
+const _savedView = lsJson.get(_VIEW_LS_KEY, {}) || {};
+if (['register', 'gallery', 'relations'].includes(_savedView.viewMode)) STORE.viewMode = _savedView.viewMode;
+if (['presentation', 'chronicle', 'companions', 'gallery'].includes(_savedView.detailTab)) STORE.detailTab = _savedView.detailTab;
+if (['ego', 'matrix'].includes(_savedView.relMode)) STORE.relMode = _savedView.relMode;
+STORE.activeId = String(_savedView.activeId || '');
+STORE.grouped = _savedView.grouped !== false;
+function _saveViewState() {
+  lsJson.set(_VIEW_LS_KEY, {
+    viewMode: STORE.viewMode,
+    detailTab: STORE.detailTab,
+    relMode: STORE.relMode,
+    activeId: STORE.activeId,
+    grouped: STORE.grouped,
+  });
+}
 const _chroniqueCollator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
 
 function _chroniqueDateValue(value) {
@@ -217,6 +244,7 @@ function _buildRecord(char = null, pres = null) {
     presentationId: pres?.id || '',
     charId:         pres?.charId || char?.id || '',
     nom, classe, race, joueur,
+    ownerUid:       char?.uid || pres?.uid || '',
     level:          char?.niveau || 1,
     subtitle:       [classe, race].filter(Boolean).join(' · '),
     titles:         char?.titres || [],
@@ -330,9 +358,24 @@ function _applyFilters(items) {
     if (joueur && it.joueur !== joueur) return false;
     return true;
   });
-  // Tri secondaire (en plus du tri par ordre MJ par défaut)
+  if (STORE.grouped) {
+    filtered.sort((a, b) => {
+      const byPlayer = (a.joueur || 'Sans joueur').localeCompare(b.joueur || 'Sans joueur', 'fr', { sensitivity: 'base' });
+      if (byPlayer) return byPlayer;
+      const byMain = Number(Boolean(b.char?.isDefault)) - Number(Boolean(a.char?.isDefault));
+      if (byMain) return byMain;
+      return (Number(b.level) || 0) - (Number(a.level) || 0)
+        || a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
+    });
+    return filtered;
+  }
+
+  // Hors regroupement, le tri alphabétique est le comportement normal. Le tri
+  // manuel reste disponible pour le MJ afin de conserver le drag historique.
   const sortBy = STORE.sortBy;
-  if (sortBy && sortBy !== 'ordre') {
+  if (!sortBy || sortBy === 'nom') {
+    filtered.sort((a, b) => a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }));
+  } else if (sortBy !== 'ordre') {
     const cmp = {
       nom:     (a, b) => a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }),
       niveau:  (a, b) => (b.level || 0) - (a.level || 0) || a.nom.localeCompare(b.nom, 'fr'),
@@ -348,11 +391,10 @@ function _applyFilters(items) {
 function _computeRecentMissions(currentCharId, limit = 5) {
   if (!currentCharId || !STORE.story.length) return [];
   const all = STORE.story
-    .filter(ev => {
-      // Inclut si participant direct OU membre d'un groupe (quête liée à la mission)
-      if ((ev.participants || []).some(p => p.id === currentCharId)) return true;
-      return _missionGroupCharIds(ev.id).has(currentCharId);
-    })
+    // Une mission n'appartient à la chronique que si un groupe encore existant
+    // contient réellement le personnage. Cela écarte les anciennes affectations
+    // conservées dans `story.participants` après suppression d'un groupe.
+    .filter(ev => _missionGroupsForChar(ev.id, currentCharId).length > 0)
     .sort(_compareMissionsChronoDesc);
   return Number.isFinite(limit) ? all.slice(0, limit) : all;
 }
@@ -578,243 +620,92 @@ function _computeRelationEdges(items) {
   return { byCharId, pairCount };
 }
 
-const REL_W = 1000, REL_H = 1000;
-const REL_NODE_R = 36;
+const REL_EGO_W = 720;
+const REL_EGO_H = 640;
+
+function _relationClipId(item, suffix = '') {
+  return `pp-rel-${String(item.charId || item.id || item.nom).replace(/[^a-z0-9_-]/gi, '-')}-${suffix}`;
+}
+
+function _relationPortraitSvg(item, x, y, radius, suffix) {
+  const clipId = _relationClipId(item, suffix);
+  const photo = item.char?.photo || item.imageUrl || item.portraitUrl || '';
+  const initials = _esc(item.initials || _initials(item.nom || '?'));
+  return `<defs><clipPath id="${clipId}"><circle cx="${x}" cy="${y}" r="${radius - 2}"/></clipPath></defs>
+    <circle cx="${x}" cy="${y}" r="${radius}" fill="color-mix(in srgb, ${_accentColor(item.nom)} 24%, var(--pp-surface-2))" stroke="${_accentColor(item.nom)}" stroke-width="2"/>
+    ${photo
+      ? `<image href="${_esc(photo)}" x="${x - radius}" y="${y - radius}" width="${radius * 2}" height="${radius * 2}" clip-path="url(#${clipId})" preserveAspectRatio="xMidYMid slice"/>`
+      : `<text x="${x}" y="${y}" dy=".35em" class="pp-rel-node-initials">${initials}</text>`}`;
+}
+
+function _renderRelationEgo(active, items = STORE.items) {
+  if (!active) return `<div class="pp-roster-empty">Aucun personnage.</div>`;
+  const cx = REL_EGO_W / 2;
+  const cy = REL_EGO_H / 2 - 6;
+  const partners = _computeTopAdventurers(active.charId, items, 99);
+  const maxCount = Math.max(1, ...partners.map(partner => partner.count));
+  const tiers = [[], [], []];
+  partners.forEach(partner => tiers[partner.count >= 3 ? 0 : partner.count === 2 ? 1 : 2].push(partner));
+  const radii = [120, 200, 278];
+  const labels = ['3+ aventures', '2 aventures', '1 aventure'];
+  let rings = '';
+  let edges = '';
+  let nodes = '';
+
+  tiers.forEach((tier, tierIndex) => {
+    const label = `${labels[tierIndex]}${tier.length ? ` · ${tier.length}` : ''}`;
+    const labelWidth = label.length * 6.6 + 16;
+    const radius = radii[tierIndex];
+    rings += `<circle cx="${cx}" cy="${cy}" r="${radius}" class="pp-rel-ego-ring"/>
+      <rect x="${(cx - labelWidth / 2).toFixed(1)}" y="${cy - radius - 10}" width="${labelWidth.toFixed(1)}" height="20" rx="10" class="pp-rel-ego-ring-pill"/>
+      <text x="${cx}" y="${cy - radius}" dy=".35em" class="pp-rel-ego-ring-label">${label}</text>`;
+    tier.forEach((partner, index) => {
+      const gap = 0.26;
+      const angle = -Math.PI / 2 + gap + (index + 0.5) * (2 * Math.PI - 2 * gap) / tier.length;
+      const x = Number((cx + radius * Math.cos(angle)).toFixed(1));
+      const y = Number((cy + radius * Math.sin(angle)).toFixed(1));
+      const other = partner.item;
+      const accent = _accentColor(other.nom);
+      edges += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="${accent}" stroke-width="${(1 + 3 * partner.count / maxCount).toFixed(1)}" opacity="${(0.25 + 0.5 * partner.count / maxCount).toFixed(2)}"/>`;
+      nodes += `<g class="pp-rel-node" data-pp-action="selectItem" data-id="${_esc(other.id)}" tabindex="0" role="button" aria-label="Recentrer sur ${_esc(other.nom)}">
+        <title>${_esc(other.nom)} · ${partner.count} aventure${partner.count !== 1 ? 's' : ''} ensemble</title>
+        ${_relationPortraitSvg(other, x, y, 22, `partner-${tierIndex}-${index}`)}
+        <text x="${x}" y="${y + 36}" class="pp-rel-label">${_esc(other.nom.split(' ')[0])}</text>
+      </g>`;
+    });
+  });
+
+  const center = `<g class="pp-rel-node is-selected" aria-label="${_esc(active.nom)}">
+    ${_relationPortraitSvg(active, cx, cy, 40, 'center')}
+  </g>`;
+  return `<svg viewBox="0 0 ${REL_EGO_W} ${REL_EGO_H}" class="pp-relations-svg pp-relations-svg--ego" preserveAspectRatio="xMidYMid meet">${rings}${edges}${nodes}${center}</svg>
+    ${partners.length ? '' : `<p class="pp-relations-hint">${_esc(active.nom)} n’a encore partagé aucun groupe.</p>`}`;
+}
+
+function _renderRelationMatrix(items) {
+  if (!items.length) return `<div class="pp-roster-empty">Aucun personnage.</div>`;
+  const { pairCount } = _computeRelationEdges(items);
+  const maxCount = Math.max(1, ...pairCount.values());
+  const selectedId = STORE.activeId;
+  const headers = `<div class="pp-rel-matrix-cell pp-rel-matrix-head"></div>${items.map(item => `<div class="pp-rel-matrix-cell pp-rel-matrix-head ${item.id === selectedId ? 'is-selected' : ''}" title="${_esc(item.nom)}">${_portrait(item, 'pp-rel-matrix-portrait')}</div>`).join('')}`;
+  const rows = items.map(row => {
+    const rowLabel = `<button type="button" class="pp-rel-matrix-label ${row.id === selectedId ? 'is-selected' : ''}" data-pp-action="selectItem" data-id="${_esc(row.id)}">${_portrait(row, 'pp-rel-matrix-portrait')}<span>${_esc(row.nom)}</span></button>`;
+    const cells = items.map(column => {
+      if (column.id === row.id) return `<div class="pp-rel-matrix-cell is-self"></div>`;
+      const key = [row.charId, column.charId].sort().join('|');
+      const count = pairCount.get(key) || 0;
+      const highlighted = row.id === selectedId || column.id === selectedId;
+      return `<button type="button" class="pp-rel-matrix-cell ${highlighted ? 'is-highlighted' : ''}" data-pp-action="selectItem" data-id="${_esc(column.id)}" style="--rel-strength:${Math.round(count / maxCount * 85)}%" title="${_esc(row.nom)} ↔ ${_esc(column.nom)} · ${count} aventure${count !== 1 ? 's' : ''}">${count || ''}</button>`;
+    }).join('');
+    return rowLabel + cells;
+  }).join('');
+  return `<div class="pp-rel-matrix-wrap"><div class="pp-rel-matrix" style="grid-template-columns:170px repeat(${items.length},24px)">${headers}${rows}</div></div>
+    <p class="pp-relations-hint">Chaque case indique le nombre d’aventures partagées dans le même groupe.</p>`;
+}
 
 function _renderRelationsView(items) {
-  const allPJ = items.filter(i => i.charId);
-  if (!allPJ.length) {
-    return `<div class="pp-empty"><div class="pp-empty-icon">🕸️</div>
-      <p class="pp-empty-title">Pas encore de PJ lié à une fiche.</p></div>`;
-  }
-
-  // Sélection : si `relSelected` est null, tous les PJ sont visibles
-  const selected = STORE.relSelected;
-  const visible = selected ? allPJ.filter(p => selected.has(p.charId)) : allPJ;
-  const nodes = visible.length ? visible : allPJ;   // fallback : jamais vide
-
-  const { pairCount } = _computeRelationEdges(nodes);
-
-  // Layout : positions stockées en priorité, sinon cercle
-  const cx = REL_W / 2, cy = REL_H / 2;
-  const R = Math.min(REL_W, REL_H) * 0.36;
-  const n = nodes.length;
-  const positioned = nodes.map((it, i) => {
-    const stored = STORE.relPositions[it.charId];
-    if (stored) {
-      return { it, x: stored.x, y: stored.y, col: _accentColor(it.nom) };
-    }
-    const a = (-Math.PI / 2) + (i * 2 * Math.PI / n);
-    return { it, x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), col: _accentColor(it.nom) };
-  });
-  const posByCharId = new Map(positioned.map(p => [p.it.charId, p]));
-
-  const maxCount = Math.max(1, ...pairCount.values());
-  const edges = [...pairCount.entries()].map(([k, count]) => {
-    const [a, b] = k.split('|');
-    const pa = posByCharId.get(a); const pb = posByCharId.get(b);
-    if (!pa || !pb) return null;
-    return { pa, pb, count, strength: count / maxCount, a, b };
-  }).filter(Boolean);
-
-  // Defs : un clipPath par node pour clipper l'image en cercle
-  const defsSvg = `<defs>
-    ${positioned.map(p => `<clipPath id="pp-rel-clip-${_esc(p.it.charId)}">
-      <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${REL_NODE_R}"/>
-    </clipPath>`).join('')}
-  </defs>`;
-
-  const edgesSvg = edges.map(e => {
-    const w = 1 + 5 * e.strength;
-    const op = 0.18 + 0.6 * e.strength;
-    return `<line data-edge="${_esc(e.a)}|${_esc(e.b)}"
-                  x1="${e.pa.x.toFixed(1)}" y1="${e.pa.y.toFixed(1)}"
-                  x2="${e.pb.x.toFixed(1)}" y2="${e.pb.y.toFixed(1)}"
-                  stroke="var(--gold)" stroke-width="${w.toFixed(2)}" opacity="${op.toFixed(2)}"
-                  class="pp-rel-edge"><title>${_esc(e.pa.it.nom)} ↔ ${_esc(e.pb.it.nom)} — ${e.count} aventure${e.count>1?'s':''}</title></line>`;
-  }).join('');
-
-  const nodesSvg = positioned.map(p => {
-    const r = REL_NODE_R;
-    const it = p.it;
-    const c = it.char || {};
-    // Comme les tokens VTT : on utilise char.photo avec photoX/photoY
-    const photo = c.photo || it.imageUrl || '';
-    const initials = _esc(it.initials || (it.nom || '?').slice(0,2).toUpperCase());
-
-    let portraitSvg;
-    if (photo) {
-      // photoX/Y dans [-1, 1] : on les traduit en décalage de l'image dans le viewport circulaire
-      // Pour que photoX=photoY=0 soit centré et photoX=1 décale d'un demi-rayon vers la droite
-      const fx = c.photoX || 0, fy = c.photoY || 0;
-      const imgSize = r * 2.4;        // image légèrement plus grande que le cercle (zoom natif)
-      const imgX = p.x - imgSize/2 - fx * r;
-      const imgY = p.y - imgSize/2 - fy * r;
-      portraitSvg = `<image href="${_esc(photo)}"
-        x="${imgX.toFixed(1)}" y="${imgY.toFixed(1)}"
-        width="${imgSize.toFixed(1)}" height="${imgSize.toFixed(1)}"
-        clip-path="url(#pp-rel-clip-${_esc(it.charId)})"
-        preserveAspectRatio="xMidYMid slice"/>`;
-    } else {
-      portraitSvg = `<text x="${p.x}" y="${p.y}" text-anchor="middle" dy=".35em"
-        font-family="Cinzel, serif" font-weight="700" font-size="16"
-        fill="var(--text)">${initials}</text>`;
-    }
-
-    return `<g class="pp-rel-node" data-char-id="${_esc(it.charId)}" data-id="${_esc(it.id)}"
-             style="--node-col:${p.col}" tabindex="0" role="button" aria-label="${_esc(it.nom)}">
-      <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r + 3}" fill="var(--bg-card)" stroke="${p.col}" stroke-width="3" class="pp-rel-ring"/>
-      ${portraitSvg}
-      <text x="${p.x.toFixed(1)}" y="${(p.y + r + 18).toFixed(1)}" text-anchor="middle"
-        font-family="Cinzel, serif" font-size="13" font-weight="600"
-        fill="var(--text)" class="pp-rel-label">${_esc(it.nom)}</text>
-    </g>`;
-  }).join('');
-
-  // Picker des PJ visibles
-  const isAllSelected = !selected;
-  const pickerHtml = `
-    <div class="pp-rel-picker ${STORE.relPickerOpen ? 'is-open' : ''}">
-      <button type="button" class="pp-rel-picker-toggle" data-pp-action="relTogglePicker">
-        👥 ${isAllSelected ? `Tous les PJ (${allPJ.length})` : `${selected.size} / ${allPJ.length} PJ`}
-        <span class="pp-rel-picker-caret">${STORE.relPickerOpen ? '▴' : '▾'}</span>
-      </button>
-      ${STORE.relPickerOpen ? `
-        <div class="pp-rel-picker-panel">
-          <div class="pp-rel-picker-actions">
-            <button type="button" class="btn btn-outline btn-sm" data-pp-action="relSelectAll">Tout sélectionner</button>
-            <button type="button" class="btn btn-outline btn-sm" data-pp-action="relSelectNone">Aucun</button>
-            <button type="button" class="btn btn-outline btn-sm" data-pp-action="relResetPositions" title="Remet les PJ en cercle">↺ Repositionner</button>
-          </div>
-          <div class="pp-rel-picker-list">
-            ${allPJ.map(p => {
-              const checked = !selected || selected.has(p.charId);
-              const c = p.char || {};
-              const photo = c.photo || p.imageUrl || '';
-              const portraitChar = { ...c, photo, nom: p.nom };
-              return `<label class="pp-rel-picker-item">
-                <input type="checkbox" data-pp-action="relToggleChar" data-pp-on="change"
-                  data-char-id="${_esc(p.charId)}" ${checked ? 'checked' : ''}>
-                <span class="pp-rel-picker-portrait">
-                  ${characterPortraitContent(portraitChar, { fallbackClass: 'pp-rel-picker-init' })}
-                </span>
-                <span class="pp-rel-picker-name">${_esc(p.nom)}</span>
-              </label>`;
-            }).join('')}
-          </div>
-        </div>
-      ` : ''}
-    </div>`;
-
-  return `
-    <div class="pp-relations">
-      <div class="pp-relations-header">
-        <div class="pp-relations-hint">
-          Glisse les portraits pour les déplacer · clique pour ouvrir la fiche · les traits or relient les PJ ayant aventuré dans le <strong>même groupe</strong>.
-        </div>
-        ${pickerHtml}
-      </div>
-      <div class="pp-relations-stage">
-        <svg viewBox="0 0 ${REL_W} ${REL_H}" class="pp-relations-svg" preserveAspectRatio="xMidYMid meet">
-          ${defsSvg}
-          ${edgesSvg}
-          ${nodesSvg}
-        </svg>
-      </div>
-    </div>`;
-}
-
-// Drag des nœuds : convertit clientX/Y → coords SVG, met à jour les positions
-// stockées dans STORE.relPositions, et déplace nœud + arêtes liées en live.
-function _bindRelationsDrag() {
-  const svg = document.querySelector('.pp-relations-svg');
-  if (!svg || svg._dragBound) return;
-  svg._dragBound = true;
-
-  const clientToSvg = (clientX, clientY) => {
-    const pt = svg.createSVGPoint();
-    pt.x = clientX; pt.y = clientY;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return { x: 0, y: 0 };
-    const out = pt.matrixTransform(ctm.inverse());
-    return { x: out.x, y: out.y };
-  };
-
-  let dragging = null;  // { charId, node, offsetX, offsetY, moved }
-
-  svg.addEventListener('pointerdown', (e) => {
-    const node = e.target.closest('.pp-rel-node');
-    if (!node) return;
-    const charId = node.dataset.charId;
-    if (!charId) return;
-    e.preventDefault();
-    const ring = node.querySelector('.pp-rel-ring');
-    const cx = parseFloat(ring.getAttribute('cx'));
-    const cy = parseFloat(ring.getAttribute('cy'));
-    const p = clientToSvg(e.clientX, e.clientY);
-    dragging = { charId, node, offsetX: p.x - cx, offsetY: p.y - cy, moved: false, startX: cx, startY: cy };
-    node.setPointerCapture?.(e.pointerId);
-    node.classList.add('is-dragging');
-  });
-
-  svg.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    const p = clientToSvg(e.clientX, e.clientY);
-    const x = p.x - dragging.offsetX;
-    const y = p.y - dragging.offsetY;
-    if (!dragging.moved && (Math.abs(x - dragging.startX) > 2 || Math.abs(y - dragging.startY) > 2)) {
-      dragging.moved = true;
-    }
-    _moveRelNode(dragging.node, dragging.charId, x, y);
-  });
-
-  const endDrag = (e) => {
-    if (!dragging) return;
-    const { charId, node, moved, startX, startY } = dragging;
-    const ring = node.querySelector('.pp-rel-ring');
-    const x = parseFloat(ring.getAttribute('cx'));
-    const y = parseFloat(ring.getAttribute('cy'));
-    node.classList.remove('is-dragging');
-    node.releasePointerCapture?.(e.pointerId);
-    if (moved) {
-      STORE.relPositions[charId] = { x, y };
-    } else {
-      // Clic simple sans drag → ouvrir la fiche
-      const id = node.dataset.id;
-      if (id) { STORE.activeId = id; _refreshView(); window.scrollTo(0, 0); }
-    }
-    dragging = null;
-  };
-  svg.addEventListener('pointerup', endDrag);
-  svg.addEventListener('pointercancel', endDrag);
-}
-
-// Déplace en live un nœud (ring + image + label + clipPath + edges liées)
-function _moveRelNode(node, charId, x, y) {
-  const ring = node.querySelector('.pp-rel-ring');
-  if (ring) { ring.setAttribute('cx', x); ring.setAttribute('cy', y); }
-  const img = node.querySelector('image');
-  if (img) {
-    const w = parseFloat(img.getAttribute('width'));
-    const h = parseFloat(img.getAttribute('height'));
-    // Conserve l'offset photoX/Y déjà appliqué : on recalc en partant du centre
-    img.setAttribute('x', x - w / 2);
-    img.setAttribute('y', y - h / 2);
-  }
-  const label = node.querySelector('.pp-rel-label');
-  if (label) {
-    label.setAttribute('x', x);
-    label.setAttribute('y', y + REL_NODE_R + 18);
-  }
-  // Le clipPath dédié à ce charId doit suivre
-  const clipCircle = document.querySelector(`#pp-rel-clip-${CSS.escape(charId)} circle`);
-  if (clipCircle) { clipCircle.setAttribute('cx', x); clipCircle.setAttribute('cy', y); }
-  // Met à jour toutes les arêtes touchant ce charId
-  document.querySelectorAll('.pp-rel-edge').forEach(line => {
-    const [a, b] = (line.dataset.edge || '').split('|');
-    if (a === charId) { line.setAttribute('x1', x); line.setAttribute('y1', y); }
-    if (b === charId) { line.setAttribute('x2', x); line.setAttribute('y2', y); }
-  });
+  const active = items.find(item => item.id === STORE.activeId) || items[0];
+  return STORE.relMode === 'matrix' ? _renderRelationMatrix(items) : _renderRelationEgo(active, STORE.items);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -924,10 +815,7 @@ function _renderFiche(item, items) {
     ? `<img class="pp-fiche-portrait" src="${_esc(item.imageUrl)}" alt="${_esc(item.nom)}">`
     : `<div class="pp-fiche-portrait pp-fiche-portrait-empty">${item.initials}</div>`;
   const profileCharId = item.char?.id || item.charId;
-  const profileMissionCount = profileCharId ? STORE.story.filter(ev => {
-    if ((ev.participants || []).some(p => p.id === profileCharId)) return true;
-    return _missionGroupCharIds(ev.id).has(profileCharId);
-  }).length : 0;
+  const profileMissionCount = profileCharId ? _computeRecentMissions(profileCharId, Infinity).length : 0;
   const profileAchievementCount = profileCharId
     ? STORE.achievements.filter(a => (a.contributeurs || []).includes(profileCharId)).length
     : 0;
@@ -1296,11 +1184,8 @@ function _renderChroniqueBlock(item) {
   const missions = isExpanded ? allMissions : allMissions.slice(0, visibleLimit);
   const remainingCount = Math.max(0, allMissions.length - visibleLimit);
 
-  // Compte le total des missions auxquelles le PJ a participé
-  const totalCount = STORE.story.filter(ev => {
-    if ((ev.participants || []).some(p => p.id === charId)) return true;
-    return _missionGroupCharIds(ev.id).has(charId);
-  }).length;
+  // Compte uniquement les missions rattachées à un groupe encore existant.
+  const totalCount = allMissions.length;
   const latest = allMissions[0];
   const missionCount = allMissions.filter(m => m.type === 'mission').length;
   const storyCount = allMissions.length - missionCount;
@@ -1417,11 +1302,244 @@ function _renderTopAdventurersBlock(item, items) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ROSTER V4 — registre maître/détail, galerie et carte des relations
+// ══════════════════════════════════════════════════════════════════════════════
+function _playerKey(item) {
+  return item.ownerUid || item.joueur || 'sans-joueur';
+}
+
+function _playerGroups(items = STORE.items) {
+  const groups = new Map();
+  items.forEach(item => {
+    const key = _playerKey(item);
+    if (!groups.has(key)) groups.set(key, { key, name: item.joueur || 'Sans joueur', items: [], online: false });
+    const group = groups.get(key);
+    group.items.push(item);
+    // Le compte courant est forcément en ligne. La page ne crée volontairement
+    // aucun listener Presence supplémentaire (quota Firestore).
+    if (item.ownerUid && item.ownerUid === STATE.user?.uid) group.online = true;
+  });
+  return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+}
+
+function _playerAvatar(group, cls = '') {
+  return `<span class="pp-player-avatar ${cls}" data-online="${group.online}">${_esc((group.name || '?').charAt(0).toUpperCase())}</span>`;
+}
+
+function _portraitStyle(item) {
+  const cc = item.cardCrop;
+  return cc
+    ? `position:absolute;left:${(Number(cc.offX || 0) * 100).toFixed(2)}%;top:${(Number(cc.offY || 0) * 100).toFixed(2)}%;width:${(Number(cc.imgW || 1) * 100).toFixed(2)}%;height:auto;max-width:none`
+    : 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+}
+
+function _portrait(item, className = 'pp-register-portrait') {
+  const image = item.imageUrl || item.portraitUrl;
+  return `<span class="${className}" style="--pp-accent:${_accentColor(item.nom)}">${image
+    ? `<img src="${_esc(image)}" alt="Portrait de ${_esc(item.nom)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" style="${_portraitStyle(item)}">`
+    : `<b>${_esc(item.initials)}</b>`}</span>`;
+}
+
+function _renderRosterTop(items) {
+  const groups = _playerGroups(items);
+  const views = [
+    ['register', 'Registre', 'list'],
+    ['gallery', 'Galerie', 'cards'],
+    ['relations', 'Liens', 'relations'],
+  ];
+  return `<header class="pp-roster-top">
+    <div class="pp-roster-title"><h1>Joueurs</h1><small>${items.length} personnage${items.length !== 1 ? 's' : ''} · ${groups.length} joueur${groups.length !== 1 ? 's' : ''}${groups.some(g => g.online) ? ` · ${groups.filter(g => g.online).length} en ligne` : ''}</small></div>
+    <div class="pp-roster-views" role="tablist" aria-label="Affichage">
+      ${views.map(([mode, label, icon]) => `<button type="button" role="tab" aria-selected="${STORE.viewMode === mode}" class="${STORE.viewMode === mode ? 'is-active' : ''}" data-pp-action="setViewMode" data-mode="${mode}">${_ppIcon(icon)}<span>${label}</span></button>`).join('')}
+    </div>
+    <span class="pp-roster-spacer"></span>
+    ${STATE.isAdmin ? `<button type="button" class="pp-roster-primary" data-pp-action="newPlayer">${_ppIcon('plus')} Présentation</button>` : ''}
+  </header>`;
+}
+
+function _renderRosterFilters(items) {
+  const groups = _playerGroups(items);
+  return `<div class="pp-roster-filters">
+    <label class="pp-roster-search">${_ppIcon('search')}<input type="search" placeholder="Nom, classe, trait, joueur…" value="${_esc(STORE.filterSearch)}" autocomplete="off" data-pp-action="search" data-pp-on="input"><kbd>/</kbd>${STORE.filterSearch ? `<button type="button" data-pp-action="clearSearch" aria-label="Effacer">${_ppIcon('x')}</button>` : ''}</label>
+    <div class="pp-player-filters" role="group" aria-label="Filtrer par joueur">
+      <button type="button" class="${!STORE.filterJoueur ? 'is-active' : ''}" data-pp-action="setJoueur" data-joueur="">Tous <b>${items.length}</b></button>
+      ${groups.map(group => `<button type="button" class="${STORE.filterJoueur === group.name ? 'is-active' : ''}" data-pp-action="setJoueur" data-joueur="${_esc(group.name)}" title="${_esc(group.name)}${group.online ? ' · en ligne' : ''}">${_playerAvatar(group)}<span>${_esc(group.name)}</span><b>${group.items.length}</b></button>`).join('')}
+    </div>
+  </div>`;
+}
+
+function _renderRegisterList(items) {
+  let lastKey = '';
+  const rows = items.map(item => {
+    const key = _playerKey(item);
+    let groupHead = '';
+    if (STORE.grouped && key !== lastKey) {
+      lastKey = key;
+      const group = _playerGroups(items).find(g => g.key === key);
+      groupHead = `<div class="pp-register-group">${_playerAvatar(group)}<span>${_esc(group.name)}</span><i>${group.online ? 'en ligne' : ''}</i><b>${group.items.length}</b></div>`;
+    }
+    const subtitle = [item.classe, item.race, STORE.grouped ? '' : item.joueur].filter(Boolean).join(' · ');
+    return `${groupHead}<div class="pp-register-row-wrap" data-pp-id="${_esc(item.id)}">
+      ${STATE.isAdmin && !STORE.grouped && STORE.sortBy === 'ordre' ? `<span class="pp-register-drag" title="Réordonner">${_ppIcon('grip')}</span>` : ''}
+      <button type="button" class="pp-register-row ${item.id === STORE.activeId ? 'is-selected' : ''}" data-pp-action="selectItem" data-id="${_esc(item.id)}" aria-current="${item.id === STORE.activeId}">
+        ${_portrait(item)}
+        <span class="pp-register-row-text"><b>${_esc(item.nom)}</b><small>${_esc(subtitle || 'Personnage')}</small></span>
+        <span class="pp-register-marks">${item.char?.isDefault ? `<span class="is-main" title="Personnage principal">${_ppIcon('star')}</span>` : ''}${item.visible === false ? `<span class="is-hidden" title="Masqué aux joueurs">${_ppIcon('lock')}</span>` : ''}<span class="pp-register-level">${Number(item.level) || 1}</span></span>
+      </button>
+    </div>`;
+  }).join('');
+
+  return `<aside class="pp-register-rail">
+    <div class="pp-register-tools">${_renderRosterFilters(STORE.items)}<div class="pp-register-toolrow"><span>${items.length} résultat${items.length !== 1 ? 's' : ''}</span><label><input type="checkbox" data-pp-action="toggleGrouped" data-pp-on="change" ${STORE.grouped ? 'checked' : ''}> Grouper par joueur</label>${STATE.isAdmin && !STORE.grouped ? `<select data-pp-action="setSort" data-pp-on="change" aria-label="Tri"><option value="nom" ${STORE.sortBy === 'nom' ? 'selected' : ''}>A–Z</option><option value="ordre" ${STORE.sortBy === 'ordre' ? 'selected' : ''}>Ordre manuel</option><option value="niveau" ${STORE.sortBy === 'niveau' ? 'selected' : ''}>Niveau</option></select>` : ''}</div></div>
+    <div class="pp-register-list" id="pp-register-list">${rows || `<div class="pp-roster-empty">Aucun personnage.<button type="button" data-pp-action="resetFilters">Réinitialiser les filtres</button></div>`}</div>
+    <div class="pp-register-keys"><kbd>↑</kbd><kbd>↓</kbd> changer · <kbd>1</kbd>–<kbd>4</kbd> onglets</div>
+  </aside>`;
+}
+
+function _renderVitalBar(label, current, max, cls) {
+  const pct = max ? Math.max(0, Math.min(100, Math.round(Number(current ?? max) / Number(max) * 100))) : 0;
+  return `<div class="pp-detail-vital ${cls}"><div><span>${label}</span><b>${current ?? max}<small>/${max}</small></b></div><i><span style="width:${pct}%"></span></i></div>`;
+}
+
+function _identityRows(item) {
+  return (item.identity || []).map(entry => Array.isArray(entry)
+    ? { key: String(entry[0] || ''), value: String(entry[1] || '') }
+    : { key: String(entry?.k || entry?.key || ''), value: String(entry?.v || entry?.value || '') })
+    .filter(entry => entry.key && entry.value);
+}
+
+function _presentationHtml(item) {
+  const isSlideshow = item.afficherBio && hasFreePage(item.bioPage);
+  const narrative = item.afficherBio
+    ? (isSlideshow
+      ? renderFreePageHtml({ page: item.bioPage, className: 'pp-free-page', keyboard: true })
+      : item.content
+        ? richTextContentHtml({ html: item.content, className: 'pp-rich-content' })
+        : item.bio ? `<div class="pp-bio-legacy">${_nl2br(item.bio)}</div>` : '')
+    : '';
+  const identity = item.afficherIdentite ? _identityRows(item) : [];
+  const stats = item.afficherStats ? item.stats : [];
+  const best = stats.length ? Math.max(...stats.map(s => Number(s.value) || 0)) : 0;
+  const equipment = item.afficherEquip && item.char ? getEquipmentSlots().map(slot => {
+    const equipped = item.char.equipement?.[slot.id];
+    return equipped?.nom ? { slot: slot.label, name: equipped.nom } : null;
+  }).filter(Boolean) : [];
+  return `<div class="pp-detail-columns ${isSlideshow ? 'is-slideshow' : ''}"><article class="pp-detail-bio ${isSlideshow ? 'is-slideshow' : ''}">${isSlideshow ? `<div class="pp-slideshow-toolbar"><span>Présentation</span><button type="button" data-pp-action="fullscreenPresentation">${_ppIcon('external')} Plein écran</button></div>` : ''}${narrative || `<div class="pp-roster-empty">${_ppIcon('book')}<p>${item.afficherBio ? 'Pas encore de présentation.' : 'Présentation masquée.'}</p>${_canManageItem(item) ? `<button type="button" data-pp-action="editItem" data-id="${_esc(item.id)}">Rédiger la présentation</button>` : ''}</div>`}</article>
+    <aside class="pp-detail-aside">
+      ${identity.length ? `<section><h3>Identité</h3><dl>${identity.map(row => `<dt>${_esc(row.key)}</dt><dd>${_esc(row.value)}</dd>`).join('')}</dl></section>` : ''}
+      ${stats.length ? `<section><h3>Caractéristiques</h3><div class="pp-detail-stats">${stats.map(stat => { const mod = getModFromScore(Number(stat.value) || 0); return `<div class="${Number(stat.value) === best ? 'is-best' : ''}" style="--stat:${stat.color || _accentColor(item.nom)}"><span>${_esc(stat.label.slice(0, 3).toUpperCase())}</span><b>${stat.value}</b><em>${modStr(mod)}</em></div>`; }).join('')}</div></section>` : ''}
+      ${equipment.length ? `<section><h3>Équipement</h3><ul class="pp-detail-equipment">${equipment.map(row => `<li><span>${_esc(row.slot)}</span><b>${_esc(row.name)}</b></li>`).join('')}</ul></section>` : ''}
+    </aside>
+  </div>`;
+}
+
+function _missionStatus(mission) {
+  const raw = _norm(mission.statut || mission.status || '');
+  if (raw.includes('cours') || raw === 'active') return ['active', 'En cours'];
+  if (raw.includes('prev') || raw.includes('plan')) return ['planned', 'Prévue'];
+  return ['done', 'Terminée'];
+}
+
+function _missionMembers(mission, currentCharId, items) {
+  const ids = _missionGroupMemberIds(mission.id, currentCharId);
+  ids.delete(currentCharId);
+  return [...ids].map(id => items.find(it => it.charId === id)).filter(Boolean);
+}
+
+function _chronicleHtml(item, items) {
+  const missions = _computeRecentMissions(item.charId, Infinity);
+  const achievements = STORE.achievements.filter(a => (a.contributeurs || a.by || []).includes(item.charId));
+  if (!missions.length && !achievements.length) return `<div class="pp-roster-empty">${_ppIcon('book')}<p>Aucune aventure pour l’instant.</p></div>`;
+  return `<div class="pp-detail-columns"><ol class="pp-detail-timeline">${missions.map(mission => {
+    const [statusClass, statusLabel] = _missionStatus(mission);
+    const members = _missionMembers(mission, item.charId, items);
+    return `<li class="${statusClass}"><i></i><div><header><b>${_esc(mission.titre || 'Sans titre')}</b><span>${statusLabel}</span></header>${mission.date ? `<small>${_esc(mission.date)}</small>` : ''}${members.length ? `<div class="pp-detail-chips">${members.map(member => `<button type="button" data-pp-action="selectItem" data-id="${_esc(member.id)}">${_portrait(member, 'pp-detail-chip-portrait')}${_esc(member.nom.split(' ')[0])}</button>`).join('')}</div>` : ''}</div></li>`;
+  }).join('')}</ol><aside class="pp-detail-aside"><section><h3>Hauts-faits · ${achievements.length}</h3>${achievements.length ? `<ul class="pp-detail-achievements">${achievements.map(a => `<li>★ <span>${_esc(a.titre || a.nom || 'Haut-fait')}</span></li>`).join('')}</ul>` : '<p>Aucun pour l’instant.</p>'}</section></aside></div>`;
+}
+
+function _companionsHtml(item, items) {
+  const partners = _computeTopAdventurers(item.charId, items, 99);
+  const max = Math.max(1, ...partners.map(p => p.count));
+  const met = new Set(partners.map(p => p.item.id));
+  const never = items.filter(other => other.id !== item.id && !met.has(other.id));
+  return `${partners.length ? `<div class="pp-detail-companions">${partners.map(({ item: other, count }) => `<button type="button" data-pp-action="selectItem" data-id="${_esc(other.id)}">${_portrait(other, 'pp-detail-companion-portrait')}<span><b>${_esc(other.nom)}</b><small>${_esc([other.classe, other.joueur].filter(Boolean).join(' · '))}</small></span><em><i><span style="width:${Math.round(count / max * 100)}%"></span></i>${count} aventure${count !== 1 ? 's' : ''}</em></button>`).join('')}</div>` : `<div class="pp-roster-empty">${_ppIcon('users')}<p>N’a encore partagé aucun groupe.</p></div>`}${never.length ? `<section class="pp-detail-never"><h3>Pas encore croisés</h3><div class="pp-detail-chips">${never.map(other => `<button type="button" data-pp-action="selectItem" data-id="${_esc(other.id)}">${_portrait(other, 'pp-detail-chip-portrait')}${_esc(other.nom)}</button>`).join('')}</div></section>` : ''}`;
+}
+
+function _galleryDetailHtml(item) {
+  const photos = item.gallery || [];
+  return photos.length ? `<div class="pp-detail-gallery">${photos.map((photo, index) => `<button type="button" data-pp-action="lightbox" data-pres-id="${_esc(item.presentationId)}" data-idx="${index}"><img src="${_esc(photo.url || photo.thumb)}" alt="Illustration ${index + 1} de ${_esc(item.nom)}" loading="lazy" decoding="async"><span>${photo.isPortrait ? 'Portrait' : `Illustration ${index + 1}`}</span></button>`).join('')}</div>` : `<div class="pp-roster-empty">${_ppIcon('image')}<p>Aucune illustration.</p>${_canManageItem(item) ? `<button type="button" data-pp-action="editItem" data-id="${_esc(item.id)}">Ajouter des illustrations</button>` : ''}</div>`;
+}
+
+function _renderRegisterDetail(item, items) {
+  if (!item) return `<main class="pp-register-detail"><div class="pp-roster-empty">Sélectionne un personnage.</div></main>`;
+  const index = items.findIndex(it => it.id === item.id);
+  const group = _playerGroups(STORE.items).find(g => g.key === _playerKey(item));
+  const siblings = group?.items.filter(it => it.id !== item.id) || [];
+  const missions = _computeRecentMissions(item.charId, Infinity);
+  const partners = _computeTopAdventurers(item.charId, items, 99);
+  const tabs = [
+    ['presentation', 'Présentation'], ['chronicle', 'Chronique', missions.length],
+    ['companions', 'Compagnons', partners.length], ['gallery', 'Galerie', item.gallery.length],
+  ];
+  const tabContent = {
+    presentation: () => _presentationHtml(item),
+    chronicle: () => _chronicleHtml(item, items),
+    companions: () => _companionsHtml(item, items),
+    gallery: () => _galleryDetailHtml(item),
+  }[STORE.detailTab] || (() => _presentationHtml(item));
+  const tags = item.afficherTags ? (item.tags || []) : [];
+  const vitalParts = STATE.isAdmin ? [
+    item.afficherPV && item.pvMax != null ? _renderVitalBar('PV', item.pvActuel, item.pvMax, 'is-pv') : '',
+    item.afficherPM && item.pmMax != null ? _renderVitalBar('PM', item.pmActuel, item.pmMax, 'is-pm') : '',
+    item.afficherCA && item.ca != null ? `<div class="pp-detail-simple"><span>CA</span><b>${item.ca}</b></div>` : '',
+    item.afficherOr && item.gold != null ? `<div class="pp-detail-simple"><span>Or</span><b>${item.gold}</b></div>` : '',
+  ].filter(Boolean) : [];
+  return `<main class="pp-register-detail">
+    <section class="pp-detail-head" style="--pp-accent:${_accentColor(item.nom)}">
+      <button type="button" class="pp-mobile-list" data-pp-action="mobileBack">${_ppIcon('arrowLeft')} Liste</button>
+      ${_portrait(item, 'pp-detail-portrait')}
+      <div class="pp-detail-identity"><div class="pp-detail-name"><h2>${_esc(item.nom)}</h2>${item.visible === false ? `<span>${_ppIcon('lock')} Masqué</span>` : ''}</div><p>${_esc([item.classe, item.race].filter(Boolean).join(' · '))}${item.afficherNiveau ? ` · <b>Niv. ${item.level}</b>` : ''}</p>${group ? `<div class="pp-detail-player">${_playerAvatar(group)}<span>Joué par <b>${_esc(group.name)}</b></span>${siblings.length ? `<span>· aussi ${siblings.map(sibling => `<button type="button" data-pp-action="selectItem" data-id="${_esc(sibling.id)}">${_esc(sibling.nom)}</button>`).join(', ')}</span>` : ''}</div>` : ''}${tags.length ? `<div class="pp-detail-tags">${tags.map(tag => `<span>${_esc(tag)}</span>`).join('')}</div>` : ''}${item.afficherCitation && item.quote ? `<q>${_esc(item.quote)}</q>` : ''}</div>
+      <div class="pp-detail-actions"><div class="pp-detail-nav"><button type="button" data-pp-action="stepItem" data-step="-1" ${index <= 0 ? 'disabled' : ''}>${_ppIcon('arrowLeft')}</button><span>${index + 1}<i>/</i>${items.length}</span><button type="button" data-pp-action="stepItem" data-step="1" ${index >= items.length - 1 ? 'disabled' : ''}>${_ppIcon('arrowRight')}</button></div>${_canManageItem(item) ? `<div><button type="button" class="is-primary" data-pp-action="openCharacter" data-char-id="${_esc(item.charId)}">${_ppIcon('external')} Fiche de jeu</button><button type="button" data-pp-action="editItem" data-id="${_esc(item.id)}">${_ppIcon('edit')} Modifier</button><button type="button" class="is-icon" data-pp-action="toggleVisible" data-id="${_esc(item.id)}" title="${item.visible === false ? 'Publier' : 'Masquer'}">${_ppIcon(item.visible === false ? 'eyeOff' : 'eye')}</button></div>` : ''}</div>
+    </section>
+    ${vitalParts.length ? `<section class="pp-detail-vitals">${vitalParts.join('')}<span class="pp-detail-mj">${_ppIcon('lock')} Visible MJ uniquement</span></section>` : ''}
+    <nav class="pp-detail-tabs" role="tablist">${tabs.map(([key, label, count], tabIndex) => `<button type="button" role="tab" aria-selected="${STORE.detailTab === key}" class="${STORE.detailTab === key ? 'is-active' : ''}" data-pp-action="setDetailTab" data-tab="${key}">${label}${count !== undefined ? `<em>${count}</em>` : ''}<kbd>${tabIndex + 1}</kbd></button>`).join('')}</nav>
+    <div class="pp-detail-panel">${tabContent()}</div>
+  </main>`;
+}
+
+function _renderGalleryScreen(items) {
+  const groupByKey = new Map(_playerGroups(STORE.items).map(group => [group.key, group]));
+  return `<div class="pp-gallery-screen">
+    <div class="pp-gallery-toolbar">${_renderRosterFilters(STORE.items)}<div class="pp-gallery-toolbar-row"><span>${items.length} personnage${items.length !== 1 ? 's' : ''}</span><label><input type="checkbox" data-pp-action="toggleGrouped" data-pp-on="change" ${STORE.grouped ? 'checked' : ''}> Trier par joueur</label></div></div>
+    ${items.length ? `<div class="pp-gallery-grid">${items.map(item => {
+      const group = groupByKey.get(_playerKey(item));
+      return `<button type="button" class="pp-gallery-card ${item.id === STORE.activeId ? 'is-selected' : ''}" data-pp-action="openRegister" data-id="${_esc(item.id)}" style="--pp-accent:${_accentColor(item.nom)}">
+        <span class="pp-gallery-image">${_portrait(item, 'pp-gallery-portrait')}<em>${item.level}</em>${item.visible === false ? `<i title="Masqué">${_ppIcon('lock')}</i>` : ''}${item.char?.isDefault ? `<span class="pp-gallery-main" title="Personnage principal">${_ppIcon('star')}</span>` : ''}</span>
+        <span class="pp-gallery-copy"><b>${_esc(item.nom)}</b><small>${_esc([item.classe, item.race].filter(Boolean).join(' · '))}</small>${group ? `<span class="pp-gallery-player">${_playerAvatar(group)}${_esc(group.name)}</span>` : ''}</span>
+      </button>`;
+    }).join('')}</div>` : `<div class="pp-roster-empty">Aucun personnage.<button type="button" data-pp-action="resetFilters">Réinitialiser les filtres</button></div>`}
+  </div>`;
+}
+
+function _renderRelationsScreen(items) {
+  const relationItems = items.filter(item => item.charId);
+  const selected = relationItems.find(item => item.id === STORE.activeId) || relationItems[0];
+  if (selected && selected.id !== STORE.activeId) STORE.activeId = selected.id;
+  const partners = selected ? _computeTopAdventurers(selected.charId, STORE.items, 99) : [];
+  const met = new Set(partners.map(partner => partner.item.id));
+  const never = selected ? STORE.items.filter(item => item.charId && item.id !== selected.id && !met.has(item.id)) : [];
+  const modeBar = `<div class="pp-relations-modebar"><div class="pp-relations-segment" role="tablist" aria-label="Mode des liens"><button type="button" class="${STORE.relMode === 'ego' ? 'is-active' : ''}" data-pp-action="setRelationMode" data-mode="ego">Autour d’un personnage</button><button type="button" class="${STORE.relMode === 'matrix' ? 'is-active' : ''}" data-pp-action="setRelationMode" data-mode="matrix">Matrice du groupe</button></div><span>${STORE.relMode === 'matrix' ? `${relationItems.length} personnages · filtres appliqués` : selected ? `Centré sur <b>${_esc(selected.nom)}</b> · clique sur un compagnon pour recentrer` : ''}</span></div>`;
+  const side = selected ? `<aside class="pp-relations-side" style="--pp-accent:${_accentColor(selected.nom)}"><header>${_portrait(selected, 'pp-relations-side-portrait')}<div><h2>${_esc(selected.nom)}</h2><small>${_esc([selected.classe, `Niv. ${selected.level}`, selected.joueur].filter(Boolean).join(' · '))}</small></div></header><h3>Compagnons · ${partners.length}</h3><div>${partners.map(({ item, count }) => `<button type="button" data-pp-action="selectItem" data-id="${_esc(item.id)}">${_portrait(item)}<span><b>${_esc(item.nom)}</b><small>${count} aventure${count !== 1 ? 's' : ''}</small></span></button>`).join('') || '<p>Aucun.</p>'}</div>${never.length ? `<h3>Pas encore croisés · ${never.length}</h3><div class="pp-relations-never">${never.map(item => `<button type="button" data-pp-action="selectItem" data-id="${_esc(item.id)}">${_portrait(item, 'pp-rel-matrix-portrait')}<span>${_esc(item.nom.split(' ')[0])}</span></button>`).join('')}</div>` : ''}<button type="button" class="pp-roster-primary" data-pp-action="openRegister" data-id="${_esc(selected.id)}">Voir la présentation</button></aside>` : '';
+  return `<div class="pp-relations-screen is-${STORE.relMode}">${STORE.relMode === 'ego' ? _renderRegisterList(relationItems) : ''}<div class="pp-relations-main">${modeBar}${STORE.relMode === 'matrix' ? `<div class="pp-gallery-filters">${_renderRosterFilters(STORE.items)}</div>` : ''}${_renderRelationsView(relationItems)}</div>${side}</div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // PAGE PRINCIPALE — entrée + dispatch sommaire/fiche
 // ══════════════════════════════════════════════════════════════════════════════
 export async function renderPlayersPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
+  _bindRosterKeyboard();
 
   // Story (chronique) + quests (groupes) servent aux partenaires d'aventure.
   const [presentations, characters, achievements, story, quests] = await Promise.all([
@@ -1438,10 +1556,12 @@ export async function renderPlayersPage() {
   STORE.quests        = quests;
   STORE.items         = _buildDataset(presentations, characters);
 
+  if (!STORE.items.some(item => item.id === STORE.activeId)) STORE.activeId = STORE.items[0]?.id || '';
+
   if (!STORE.items.length) {
     content.innerHTML = `
-      <div class="pp-page">
-        ${_renderHero([], [])}
+      <div class="pp-page pp-roster-page">
+        ${_renderRosterTop([])}
         <div class="pp-page-body">
           ${STATE.isAdmin
             ? `<div class="pp-empty">
@@ -1462,23 +1582,20 @@ export async function renderPlayersPage() {
 }
 
 function _renderView(content) {
-  const activeItem = STORE.activeId ? STORE.items.find(i => i.id === STORE.activeId) : null;
   const filtered = _applyFilters(STORE.items);
+  if (filtered.length && !filtered.some(item => item.id === STORE.activeId)) STORE.activeId = filtered[0].id;
+  const activeItem = filtered.find(item => item.id === STORE.activeId) || null;
+  const body = STORE.viewMode === 'register'
+    ? `<div class="pp-register-layout ${STORE.mobileDetail ? 'is-mobile-detail' : ''}">${_renderRegisterList(filtered)}${_renderRegisterDetail(activeItem, filtered)}</div>`
+    : STORE.viewMode === 'relations'
+      ? _renderRelationsScreen(filtered)
+      : _renderGalleryScreen(filtered);
   content.innerHTML = `
-    <div class="pp-page">
-      ${_renderHero(STORE.items, filtered, activeItem)}
-      <div id="pp-view-area" class="pp-page-body">
-        ${activeItem ? _renderFiche(activeItem, STORE.items) : _renderSommaire(STORE.items)}
-      </div>
+    <div class="pp-page pp-roster-page">
+      ${_renderRosterTop(STORE.items)}
+      <div id="pp-view-area" class="pp-roster-body">${body}</div>
     </div>`;
-  if (activeItem) requestAnimationFrame(() => {
-    _bindHexagonTooltips();
-    document.querySelector('.pp-strip-item.is-active')
-      ?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-  });
-  if (!activeItem && STORE.viewMode === 'relations') {
-    requestAnimationFrame(() => _bindRelationsDrag());
-  }
+  _saveViewState();
 }
 
 function _refreshView() {
@@ -1488,17 +1605,89 @@ function _refreshView() {
   _initSortable();
 }
 
+function _stepRoster(direction) {
+  const items = _applyFilters(STORE.items);
+  if (!items.length || !direction) return;
+  const current = items.findIndex(item => item.id === STORE.activeId);
+  const next = items[Math.max(0, Math.min(items.length - 1, (current < 0 ? 0 : current) + direction))];
+  if (!next) return;
+  STORE.activeId = next.id;
+  if (STORE.viewMode === 'register' && window.innerWidth < 860) STORE.mobileDetail = true;
+  _refreshView();
+  requestAnimationFrame(() => document.querySelector('.pp-register-row.is-selected')?.scrollIntoView({ block: 'nearest' }));
+}
+
+let _rosterKeyboardBound = false;
+function _bindRosterKeyboard() {
+  if (_rosterKeyboardBound) return;
+  _rosterKeyboardBound = true;
+  document.addEventListener('keydown', event => {
+    if (!document.querySelector('.pp-roster-page')) return;
+    // La visionneuse de galerie possède sa propre navigation. Tant qu'elle est
+    // ouverte, aucune flèche ne doit changer le personnage situé en arrière-plan.
+    if (document.getElementById('pp-lightbox')) return;
+    // Dans une présentation en diaporama, ←/→ appartiennent aux diapos. Les
+    // touches ↑/↓ et j/k restent disponibles pour changer de personnage.
+    if (document.querySelector('[data-free-page-reader][data-free-page-keyboard] [data-fpe-reader-nav]')
+      && ['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(event.key)) return;
+    const active = document.activeElement;
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(active?.tagName) || active?.isContentEditable;
+    const search = document.querySelector('.pp-roster-search input');
+    if (event.key === 'Escape' && active === search) {
+      STORE.filterSearch = '';
+      _refreshView();
+      return;
+    }
+    if (event.key === '/' && !typing) {
+      event.preventDefault();
+      search?.focus();
+      return;
+    }
+    if (typing) {
+      if (active === search && ['ArrowDown', 'ArrowUp'].includes(event.key)) {
+        event.preventDefault();
+        _stepRoster(event.key === 'ArrowDown' ? 1 : -1);
+        requestAnimationFrame(() => document.querySelector('.pp-roster-search input')?.focus());
+      }
+      return;
+    }
+    if (event.key === 'Enter' && active?.classList?.contains('pp-rel-node')) {
+      event.preventDefault();
+      STORE.activeId = active.dataset.id || STORE.activeId;
+      _refreshView();
+      return;
+    }
+    if (STORE.viewMode !== 'gallery' && ['ArrowDown', 'ArrowRight', 'j'].includes(event.key)) {
+      event.preventDefault(); _stepRoster(1); return;
+    }
+    if (STORE.viewMode !== 'gallery' && ['ArrowUp', 'ArrowLeft', 'k'].includes(event.key)) {
+      event.preventDefault(); _stepRoster(-1); return;
+    }
+    if (STORE.viewMode === 'register' && /^[1-4]$/.test(event.key)) {
+      STORE.detailTab = ['presentation', 'chronicle', 'companions', 'gallery'][Number(event.key) - 1];
+      event.preventDefault(); _refreshView();
+    }
+  });
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // HANDLERS — délégation data-pp-action
 // ══════════════════════════════════════════════════════════════════════════════
 Object.assign(ppHandlers, {
   updateVisiblePill: (el) => _ppUpdateVisiblePill(el.checked),
   refreshVisCount:   ()   => _ppRefreshVisCount(),
-  openFiche:     (el) => { STORE.activeId = el.dataset.id; _refreshView(); window.scrollTo(0, 0); },
-  back:          ()   => { STORE.activeId = ''; _refreshView(); },
+  openFiche:     (el) => { STORE.activeId = el.dataset.id; STORE.viewMode = 'register'; _refreshView(); },
+  selectItem:    (el) => {
+    STORE.activeId = el.dataset.id;
+    if (STORE.viewMode === 'register' && window.innerWidth < 860) STORE.mobileDetail = true;
+    _refreshView();
+    requestAnimationFrame(() => document.querySelector('.pp-register-row.is-selected')?.scrollIntoView({ block: 'nearest' }));
+  },
+  openRegister:  (el) => { STORE.activeId = el.dataset.id; STORE.viewMode = 'register'; STORE.mobileDetail = window.innerWidth < 860; _refreshView(); },
+  mobileBack:    () => { STORE.mobileDetail = false; _refreshView(); },
+  back:          ()   => { STORE.mobileDetail = false; _refreshView(); },
   search:        (el) => {
     STORE.filterSearch = el.value;
-    STORE.activeId = '';
     const caret = el.selectionStart;
     _refreshView();
     // Restaure le focus + la position du curseur après re-render
@@ -1511,9 +1700,23 @@ Object.assign(ppHandlers, {
     });
   },
   clearSearch:   ()   => { STORE.filterSearch = ''; _refreshView(); },
-  setJoueur:     (el) => { STORE.filterJoueur = el.value; STORE.activeId = ''; _refreshView(); },
-  setSort:       (el) => { STORE.sortBy = el.value; STORE.activeId = ''; _refreshView(); },
-  setViewMode:   (el) => { STORE.viewMode = el.dataset.mode || 'gallery'; STORE.activeId = ''; _refreshView(); },
+  setJoueur:     (el) => { STORE.filterJoueur = el.dataset.joueur ?? el.value ?? ''; _refreshView(); },
+  setSort:       (el) => { STORE.sortBy = el.value; _refreshView(); },
+  setViewMode:   (el) => { STORE.viewMode = el.dataset.mode || 'register'; STORE.mobileDetail = false; _refreshView(); },
+  setRelationMode: (el) => { STORE.relMode = el.dataset.mode === 'matrix' ? 'matrix' : 'ego'; _refreshView(); },
+  toggleGrouped: (el) => { STORE.grouped = Boolean(el.checked); if (!STORE.grouped) STORE.sortBy = 'nom'; _refreshView(); },
+  setDetailTab:  (el) => { STORE.detailTab = el.dataset.tab || 'presentation'; _refreshView(); },
+  fullscreenPresentation: (el) => {
+    const reader = el.closest('.pp-detail-bio')?.querySelector('[data-free-page-reader]');
+    if (!reader) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+      return;
+    }
+    reader.requestFullscreen?.().catch(() => showNotif('Plein écran indisponible.', 'info'));
+  },
+  stepItem:      (el) => _stepRoster(Number(el.dataset.step) || 0),
+  openCharacter: (el) => openCharacterSheetFromShowcase(el.dataset.charId),
   toggleChronique: (el) => {
     const charId = el.dataset.charId;
     if (!charId) return;
@@ -1542,21 +1745,6 @@ Object.assign(ppHandlers, {
       showNotif('Impossible d’ouvrir cette mission dans la Trame.', 'error');
     }
   },
-  relTogglePicker: () => { STORE.relPickerOpen = !STORE.relPickerOpen; _refreshView(); },
-  relToggleChar: (el) => {
-    const id = el.dataset.charId; if (!id) return;
-    const all = STORE.items.filter(i => i.charId).map(i => i.charId);
-    // Initialise la sélection si elle est encore "tous"
-    if (!STORE.relSelected) STORE.relSelected = new Set(all);
-    if (el.checked) STORE.relSelected.add(id);
-    else            STORE.relSelected.delete(id);
-    // Si on a tout coché → revient à "tous" (état neutre)
-    if (STORE.relSelected.size === all.length) STORE.relSelected = null;
-    _refreshView();
-  },
-  relSelectAll:  () => { STORE.relSelected = null; _refreshView(); },
-  relSelectNone: () => { STORE.relSelected = new Set(); _refreshView(); },
-  relResetPositions: () => { STORE.relPositions = {}; _refreshView(); },
   resetFilters:  ()   => {
     STORE.filterSearch = ''; STORE.filterJoueur = '';
     _refreshView();
@@ -1598,13 +1786,14 @@ async function _toggleVisible(id) {
 let _ppSortable = null;
 let _ppGallerySortable = null;
 function _initSortable() {
-  if (!STATE.isAdmin) return;
-  const list = document.getElementById('pp-gallery');
-  if (!list) return;
   _ppSortable?.destroy();
+  _ppSortable = null;
+  if (!STATE.isAdmin || STORE.viewMode !== 'register' || STORE.grouped || STORE.sortBy !== 'ordre') return;
+  const list = document.getElementById('pp-register-list');
+  if (!list) return;
   _ppSortable = makeSortable(list, {
     prefix: 'pp',
-    handle: '.pp-card-drag',
+    handle: '.pp-register-drag',
     delay: 100,
     onEnd: async () => {
       const ids = [...list.querySelectorAll('[data-pp-id]')].map(el => el.dataset.ppId);
@@ -2182,17 +2371,21 @@ function _openLightbox(presId, startIdx = 0) {
   };
   const close = () => {
     overlay.classList.add('is-closing');
-    document.removeEventListener('keydown', onKey);
+    document.removeEventListener('keydown', onKey, true);
     setTimeout(() => overlay.remove(), 180);
   };
   const next = () => { idx = (idx + 1) % photos.length; render(); };
   const prev = () => { idx = (idx - 1 + photos.length) % photos.length; render(); };
   const onKey = (e) => {
-    if (e.key === 'Escape')    close();
+    if (!['Escape', 'ArrowRight', 'ArrowLeft'].includes(e.key)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.key === 'Escape') close();
     else if (e.key === 'ArrowRight') next();
-    else if (e.key === 'ArrowLeft')  prev();
+    else prev();
   };
-  document.addEventListener('keydown', onKey);
+  // Capture avant les raccourcis du registre et ceux du lecteur de diapos.
+  document.addEventListener('keydown', onKey, true);
 
   // Clic sur le fond (mais pas sur l'image ni les contrôles) → fermer.
   overlay.addEventListener('click', (e) => {

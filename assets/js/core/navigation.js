@@ -135,7 +135,7 @@ const FEATURE_CSS = {
   world:      ['histoire.css'],
   diapo:      ['diapo.css'],
   collection: ['histoire.css'],
-  players:    ['histoire.css'],
+  players:    ['histoire.css', 'players.css'],
   // agenda.css : le bandeau du Bastion est construit avec les classes partagées
   // `.ag-top`/`.ag-scope`/`.ag-menu`/`.ag-tabs` (entièrement scopées `.ag-*`) →
   // sinon le bandeau s'affiche sans mise en forme. bastion.css garde ses ajouts `bs-*`.
