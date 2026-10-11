@@ -28,6 +28,14 @@ test('applyEmotes : :nom: → <img>, inconnu laissé tel quel, liste vide sans e
   assert.equal(applyEmotes('salut :rire:', []), 'salut :rire:');
 });
 
+test('applyEmotes : un alias historique affiche la même image', () => {
+  const html = applyEmotes('Avant :lol: après', [{ name: 'rire', aliases: ['lol'], url: 'https://img/rire.png' }]);
+  assert.match(html, /chat-emote-inline/);
+  assert.match(html, /https:\/\/img\/rire\.png/);
+  assert.equal(html.startsWith('Avant <img'), true);
+  assert.equal(html.endsWith('> après'), true);
+});
+
 // ── RÉGRESSION : ordre d'application ──────────────────────────────────────────
 // Bug réel : linkify appliqué APRÈS applyEmotes capturait l'URL du src de l'<img>
 // et la remplaçait par « <a href=… » → src cassé → 404 sur /%3Ca%20href=.

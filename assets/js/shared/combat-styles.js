@@ -120,6 +120,98 @@ export function detectCombatStyle(character, styles = [], formats = []) {
   return null;
 }
 
+// '*' = n'importe quelle arme, '' = main vide, sinon type (ou ancien libellé).
+function _matchesHand(conditions, labels) {
+  return conditions.length === 0
+    || conditions.some(value => value === '*' ? labels.length > 0 : value ? labels.includes(value) : labels.length === 0);
+}
+const _realWeapon = w => (w?.nom || w?.format) ? w : null;
+
+/**
+ * Pourquoi un style ne s'applique PAS à une paire d'armes (ou null s'il s'applique).
+ * Reflète EXACTEMENT detectCombatStyle, dans le même ordre de vérification.
+ */
+export function explainCombatStyle(style, mainWeapon, secondaryWeapon, formats = []) {
+  const s = normalizeCombatStyle(style);
+  const main = _realWeapon(mainWeapon), secondary = _realWeapon(secondaryWeapon);
+  const mainLabels = weaponFamilyLabels(formats, main);
+  const secondaryLabels = weaponFamilyLabels(formats, secondary);
+  const secondarySubtype = String(secondary?.sousType || secondary?.nom || '').toLowerCase();
+  const requiredHands = parseInt(s.condMains, 10);
+  const subtypeConditions = (s.condSousTypeS || []).map(v => String(v).toLowerCase());
+  if (!_matchesHand(s.condPrincipale || [], mainLabels)) return 'main principale';
+  if ((requiredHands === 1 || requiredHands === 2) && !(mainLabels.length > 0 && weaponHands(main) === requiredHands)) return 'maniement';
+  if (!_matchesHand(s.condSecondaire || [], secondaryLabels)) return 'main secondaire';
+  if (subtypeConditions.length && !subtypeConditions.some(v => secondarySubtype.includes(v))) return 'sous-type secondaire';
+  return null;
+}
+
+// Un style « attrape-tout » : aucune condition → correspond à toute combinaison.
+function _isCatchAll(style) {
+  const s = normalizeCombatStyle(style);
+  return !(s.condPrincipale || []).length && !(s.condSecondaire || []).length
+    && !(parseInt(s.condMains, 10) === 1 || parseInt(s.condMains, 10) === 2)
+    && !(s.condSousTypeS || []).length;
+}
+
+/**
+ * Matrice de couverture types × types (+ main vide). Pour chaque combinaison
+ * possible, le style gagnant (premier qui correspond). Une arme à 2 mains occupe
+ * les deux mains : toute combinaison avec une 2M et une autre arme est impossible.
+ */
+export function combatStyleCoverage(styles = [], formats = []) {
+  const list = (Array.isArray(formats) ? formats : []).filter(f => f && f.label);
+  const slots = [null, ...list]; // null = main vide
+  const toWeapon = f => f ? { format: f.label, mains: f.defaults?.mains || '' } : null;
+  const is2h = w => !!w && weaponHands(w) === 2;
+  const wins = {}, matches = {}, capturedBy = {};
+  (styles || []).forEach(s => { wins[s.id] = 0; matches[s.id] = 0; capturedBy[s.id] = {}; });
+  let gaps = 0;
+  const grid = slots.map(mf => {
+    const mainW = toWeapon(mf);
+    return slots.map(sf => {
+      const secW = toWeapon(sf);
+      if ((is2h(mainW) && secW) || (is2h(secW) && mainW)) return { impossible: true };
+      const matching = (styles || []).filter(s => explainCombatStyle(s, mainW, secW, formats) === null);
+      matching.forEach(s => { matches[s.id]++; });
+      const winner = matching[0] || null;
+      if (winner) {
+        wins[winner.id]++;
+        matching.slice(1).forEach(s => { capturedBy[s.id][winner.id] = (capturedBy[s.id][winner.id] || 0) + 1; });
+      } else gaps++;
+      return { winner: winner?.id || null, color: winner?.couleur || null, matching: matching.map(s => s.id) };
+    });
+  });
+  return { grid, slots: slots.map(f => (f ? f.label : '')), wins, matches, capturedBy, gaps };
+}
+
+/** Tri suggéré : du plus spécifique (moins de correspondances) au plus général ;
+ * les styles sans aucune condition (attrape-tout) en dernier. Stable. */
+export function autoOrderCombatStyles(styles = [], formats = []) {
+  const { matches } = combatStyleCoverage(styles, formats);
+  const idx = new Map((styles || []).map((s, i) => [s, i]));
+  const score = s => (_isCatchAll(s) ? Infinity : (matches[s.id] ?? Infinity));
+  return [...(styles || [])].sort((a, b) => (score(a) - score(b)) || (idx.get(a) - idx.get(b)));
+}
+
+// Libellé stocké = « emoji nom » : séparer / recomposer le 1er graphème emoji.
+const _GRAPH_SEG = (typeof Intl !== 'undefined' && Intl.Segmenter) ? new Intl.Segmenter('fr', { granularity: 'grapheme' }) : null;
+export function splitStyleLabel(label) {
+  const raw = String(label || '').trim();
+  const first = _GRAPH_SEG ? [..._GRAPH_SEG.segment(raw)][0]?.segment || '' : (Array.from(raw)[0] || '');
+  if (first && /\p{Extended_Pictographic}/u.test(first)) return { icon: first, name: raw.slice(first.length).trim() };
+  return { icon: '', name: raw };
+}
+export const joinStyleLabel = (icon, name) => [icon, name].filter(Boolean).join(' ').trim();
+
+/** Anciens libellés de format → types d'arme canoniques (pour « Convertir »). */
+export const LEGACY_FORMAT_MAP = {
+  'Arme 1M CaC Phy.': ['Épée', 'Dague', 'Hache', 'Marteau'],
+  'Arme 2M CaC Phy.': ['Lance'],
+  'Arme 2M Dist Phy.': ['Arc', 'Arbalète'],
+  'Arme 2M CaC Mag.': ['Bâton de mage'],
+};
+
 /** Modificateur automatique d'un style pour un jet d'attaque donné. */
 export function combatStyleAttackModifiers(style, { distance, isMeleeAttack = false, isHealingAction = false } = {}) {
   const rules = normalizeCombatStyle(style).rules;
