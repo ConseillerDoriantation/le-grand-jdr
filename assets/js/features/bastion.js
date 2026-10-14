@@ -29,7 +29,7 @@ import { characterAvatarHtml } from '../shared/portraits.js';
 import { pickImageFile, compressDataUrl } from '../shared/image-upload.js';
 import { applyEmotes, linkify } from './chat/chat-format.js';
 import { ALL_EMOJIS, EMOJI_CATEGORIES } from '../shared/emoji-catalog.js';
-import { getRouteSub } from '../shared/route.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 import {
   BASTION_WALL_STATUSES,
   BASTION_WALL_TYPES,
@@ -2347,19 +2347,39 @@ const _BS_TABS = [
 const _BS_TAB_KEY = 'bs-tab';
 
 function _bsGetTab() {
-  if (STORE.tab && _BS_TABS.some(([k]) => k === STORE.tab)) return STORE.tab;
+  const routeTab = getRouteSub('bastion');
+  if (_BS_TABS.some(([k]) => k === routeTab)) { STORE.tab = routeTab; return routeTab; }
+  if (routeTab.startsWith('post:')) { STORE.tab = 'mur'; return 'mur'; }
+  if (STORE.tab && _BS_TABS.some(([k]) => k === STORE.tab)) {
+    setRouteSub('bastion', STORE.tab, { replace: true });
+    return STORE.tab;
+  }
   try {
     const t = localStorage.getItem(_BS_TAB_KEY);
-    if (_BS_TABS.some(([k]) => k === t)) { STORE.tab = t; return t; }
+    if (_BS_TABS.some(([k]) => k === t)) {
+      STORE.tab = t;
+      setRouteSub('bastion', t, { replace: true });
+      return t;
+    }
   } catch { /* stockage privé indisponible */ }
+  setRouteSub('bastion', 'salles', { replace: true });
   return 'salles';
 }
 function _bastionSetTab(tab) {
   if (!_BS_TABS.some(([k]) => k === tab)) return;
   STORE.tab = tab;
   try { localStorage.setItem(_BS_TAB_KEY, tab); } catch { /* stockage privé indisponible */ }
+  setRouteSub('bastion', tab);
   _renderPage();
 }
+
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'bastion' || !_BS_TABS.some(([key]) => key === event.detail.sub)) return;
+  event.preventDefault();
+  STORE.tab = event.detail.sub;
+  try { localStorage.setItem(_BS_TAB_KEY, STORE.tab); } catch { /* stockage privé indisponible */ }
+  _renderPage();
+});
 
 // Perso courant du scope « Je joue » (source unique = _wallUi.charId, défaut = perso ★).
 function _bastionScopeChar() {
@@ -2444,7 +2464,7 @@ function _renderHeader(b) {
           ${_BS_TABS.map(([k, ic, lbl]) => {
             const on = k === activeTab;
             const badge = k === 'mur' && unread > 0 ? `<span class="bs-tab-badge">${unread}</span>` : '';
-            return `<button class="ag-tab${on ? ' is-on' : ''}" data-action="_bastionSetTab" data-tab="${k}" aria-pressed="${on}">
+            return `<button class="ag-tab${on ? ' is-on' : ''}" data-action="_bastionSetTab" data-tab="${k}" data-nav-page="bastion" data-nav-sub="${k}" aria-pressed="${on}">
               <span aria-hidden="true">${ic}</span> ${lbl}
               <span class="ag-tab-cnt">${tabCounts[k]}</span>${badge}
             </button>`;

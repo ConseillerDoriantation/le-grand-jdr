@@ -25,6 +25,7 @@ import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
 import { openCatalogAdmin } from '../shared/catalog-admin.js';
 import { catalogReplacementFor } from '../shared/catalog-admin-utils.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 const DEFAULT_ACH_CATS = [
@@ -1958,9 +1959,11 @@ function _achSetFilter(filter) {
   });
   _achRenderContentPreserveViewport();
 };
-function _achSetView(view) {
+function _achSetView(view, { syncRoute = true } = {}) {
+  if (!['galerie', 'timeline', 'missions'].includes(view)) return;
   STORE.view = view;
   _achSavePreferences();
+  if (syncRoute) setRouteSub('achievements', view);
   document.querySelectorAll('.view-tab').forEach((btn) => {
     const active = btn.dataset.val === view;
     btn.classList.toggle('active', active);
@@ -2396,6 +2399,8 @@ PAGES.achievements = async function() {
   _achRenderedContentEl=null;
   _achLastRenderSignature='';
   _achRestorePreferences();
+  const routeView = getRouteSub('achievements');
+  if (['galerie', 'timeline', 'missions'].includes(routeView)) STORE.view = routeView;
   let [items, order, story] = await Promise.all([
     loadCollection('achievements'),
     _loadOrder(),
@@ -2431,6 +2436,7 @@ PAGES.achievements = async function() {
   if (!Array.isArray(STORE.charFilters)) STORE.charFilters = STORE.charFilter && STORE.charFilter !== 'all' ? [STORE.charFilter] : [];
   STORE.charMatchMode = STORE.charMatchMode === 'shared' ? 'shared' : 'any';
   STORE.view = ['galerie', 'timeline', 'missions'].includes(STORE.view) ? STORE.view : 'galerie';
+  if (routeView !== STORE.view) setRouteSub('achievements', STORE.view, { replace: true });
   STORE.search ??= '';
   PAGES._achievementsShellState = { ...getAchievementsShellState(), categories: ACH_CATS };
 
@@ -2467,6 +2473,14 @@ PAGES.achievements = async function() {
     if (!_achLocalMutationDepth) _achRenderContentPreserveViewport();
   });
 };
+
+document.addEventListener('app:route-sub-changed', (event) => {
+  const { page, sub } = event.detail || {};
+  if (page !== 'achievements' || !document.getElementById('ach-content')) return;
+  if (!['galerie', 'timeline', 'missions'].includes(sub)) return;
+  event.preventDefault();
+  _achSetView(sub, { syncRoute: false });
+});
 
 registerActions({
   _achSetSearch:         (el)  => _achSetSearch(el.value),

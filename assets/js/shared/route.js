@@ -36,12 +36,15 @@ export function getRouteSub(page) {
   return route.page === page ? route.sub : '';
 }
 
-// La feature déclare sa sous-route courante. `replaceState` : pas d'entrée
-// d'historique, pas d'événement `hashchange` → aucun re-render déclenché.
-export function setRouteSub(page, sub = '') {
+// La feature déclare sa sous-route courante. Par défaut chaque changement
+// d'onglet crée une vraie étape dans l'historique ; `replace` sert aux gestes
+// continus (flèches, carrousel…) qui ne doivent pas remplir le bouton Retour.
+// pushState/replaceState ne déclenchent pas `hashchange` : la feature garde la
+// main sur son rendu immédiat, puis relit la sous-route lors de Retour/Avance.
+export function setRouteSub(page, sub = '', { replace = false } = {}) {
   const route = parseRoute();
   if (route.page !== page) return; // page changée entre-temps → ne rien écraser
   const next = _sub(sub);
   if (route.sub === next) return;
-  history.pushState(null, '', routeUrl(page, next));
+  history[replace ? 'replaceState' : 'pushState'](null, '', routeUrl(page, next));
 }

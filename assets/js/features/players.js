@@ -10,7 +10,6 @@
 // Pattern d'événements : data-pp-action="X" + handlers dans `ppHandlers`
 // (cohérent avec bestiary/shop).
 // ══════════════════════════════════════════════════════════════════════════════
-import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { confirmDelete, tryUpsert } from '../shared/crud.js';
 
@@ -37,6 +36,7 @@ import { quillEditorHtml, getQuillHtml, bindQuillEditors } from '../shared/rich-
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { characterPortraitContent } from '../shared/portraits.js';
 import { getEquipmentSlots } from '../shared/equipment-slots.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS (cohérent bestiary/shop, voir shared/scoped-actions.js)
@@ -183,6 +183,43 @@ function _saveViewState() {
     grouped: STORE.grouped,
   });
 }
+
+const _PLAYER_VIEWS = new Set(['register', 'gallery', 'relations']);
+const _PLAYER_DETAIL_TABS = new Set(['presentation', 'chronicle', 'companions', 'gallery']);
+
+function _playersRouteSub() {
+  if (STORE.viewMode === 'gallery') return 'gallery';
+  if (STORE.viewMode === 'relations') {
+    return ['relations', STORE.relMode, STORE.activeId].filter(Boolean).join('/');
+  }
+  return STORE.activeId ? `register/${STORE.activeId}/${STORE.detailTab}` : 'register';
+}
+
+function _restorePlayersRoute() {
+  const [view, first = '', second = ''] = getRouteSub('players').split('/');
+  if (!_PLAYER_VIEWS.has(view)) return false;
+  STORE.viewMode = view;
+  STORE.mobileDetail = false;
+  if (view === 'register') {
+    if (first) STORE.activeId = first;
+    if (_PLAYER_DETAIL_TABS.has(second)) STORE.detailTab = second;
+  } else if (view === 'relations') {
+    STORE.relMode = first === 'matrix' ? 'matrix' : 'ego';
+    if (second) STORE.activeId = second;
+  }
+  return true;
+}
+
+function _syncPlayersRoute({ replace = false } = {}) {
+  setRouteSub('players', _playersRouteSub(), { replace });
+}
+
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'players' || !_restorePlayersRoute()) return;
+  event.preventDefault();
+  if (!STORE.items.some(item => item.id === STORE.activeId)) STORE.activeId = STORE.items[0]?.id || '';
+  _refreshView();
+});
 const _chroniqueCollator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
 
 function _chroniqueDateValue(value) {
@@ -1350,7 +1387,14 @@ function _renderRosterTop(items) {
   return `<header class="pp-roster-top">
     <div class="pp-roster-title"><h1>Joueurs</h1><small>${items.length} personnage${items.length !== 1 ? 's' : ''} · ${groups.length} joueur${groups.length !== 1 ? 's' : ''}${groups.some(g => g.online) ? ` · ${groups.filter(g => g.online).length} en ligne` : ''}</small></div>
     <div class="pp-roster-views" role="tablist" aria-label="Affichage">
-      ${views.map(([mode, label, icon]) => `<button type="button" role="tab" aria-selected="${STORE.viewMode === mode}" class="${STORE.viewMode === mode ? 'is-active' : ''}" data-pp-action="setViewMode" data-mode="${mode}">${_ppIcon(icon)}<span>${label}</span></button>`).join('')}
+      ${views.map(([mode, label, icon]) => {
+        const sub = mode === 'register'
+          ? (STORE.activeId ? `register/${STORE.activeId}/${STORE.detailTab}` : 'register')
+          : mode === 'relations'
+            ? ['relations', STORE.relMode, STORE.activeId].filter(Boolean).join('/')
+            : 'gallery';
+        return `<button type="button" role="tab" aria-selected="${STORE.viewMode === mode}" class="${STORE.viewMode === mode ? 'is-active' : ''}" data-pp-action="setViewMode" data-mode="${mode}" data-nav-page="players" data-nav-sub="${_esc(sub)}">${_ppIcon(icon)}<span>${label}</span></button>`;
+      }).join('')}
     </div>
     <span class="pp-roster-spacer"></span>
     ${STATE.isAdmin ? `<button type="button" class="pp-roster-primary" data-pp-action="newPlayer">${_ppIcon('plus')} Présentation</button>` : ''}
@@ -1509,12 +1553,13 @@ function _renderRegisterDetail(item, items) {
 
 function _renderGalleryScreen(items) {
   const groupByKey = new Map(_playerGroups(STORE.items).map(group => [group.key, group]));
+  const canReorder = STATE.isAdmin && !STORE.grouped;
   return `<div class="pp-gallery-screen">
-    <div class="pp-gallery-toolbar">${_renderRosterFilters(STORE.items)}<div class="pp-gallery-toolbar-row"><span>${items.length} personnage${items.length !== 1 ? 's' : ''}</span><label><input type="checkbox" data-pp-action="toggleGrouped" data-pp-on="change" ${STORE.grouped ? 'checked' : ''}> Trier par joueur</label></div></div>
-    ${items.length ? `<div class="pp-gallery-grid">${items.map(item => {
+    <div class="pp-gallery-toolbar">${_renderRosterFilters(STORE.items)}<div class="pp-gallery-toolbar-row"><span>${items.length} personnage${items.length !== 1 ? 's' : ''}</span>${canReorder ? `<span class="pp-gallery-order-hint">${_ppIcon('grip')} Glisser pour réordonner</span>` : ''}<label><input type="checkbox" data-pp-action="toggleGrouped" data-pp-on="change" ${STORE.grouped ? 'checked' : ''}> Trier par joueur</label></div></div>
+    ${items.length ? `<div id="pp-gallery-grid" class="pp-gallery-grid">${items.map(item => {
       const group = groupByKey.get(_playerKey(item));
-      return `<button type="button" class="pp-gallery-card ${item.id === STORE.activeId ? 'is-selected' : ''}" data-pp-action="openRegister" data-id="${_esc(item.id)}" style="--pp-accent:${_accentColor(item.nom)}">
-        <span class="pp-gallery-image">${_portrait(item, 'pp-gallery-portrait')}<em>${item.level}</em>${item.visible === false ? `<i title="Masqué">${_ppIcon('lock')}</i>` : ''}${item.char?.isDefault ? `<span class="pp-gallery-main" title="Personnage principal">${_ppIcon('star')}</span>` : ''}</span>
+      return `<button type="button" class="pp-gallery-card ${item.id === STORE.activeId ? 'is-selected' : ''}" data-pp-action="openRegister" data-id="${_esc(item.id)}" data-pp-id="${_esc(item.id)}" style="--pp-accent:${_accentColor(item.nom)}">
+        <span class="pp-gallery-image">${_portrait(item, 'pp-gallery-portrait')}<em>${item.level}</em>${item.visible === false ? `<i title="Masqué">${_ppIcon('lock')}</i>` : ''}${item.char?.isDefault ? `<span class="pp-gallery-main" title="Personnage principal">${_ppIcon('star')}</span>` : ''}${canReorder ? `<span class="pp-gallery-drag" title="Réordonner" aria-label="Réordonner">${_ppIcon('grip')}</span>` : ''}</span>
         <span class="pp-gallery-copy"><b>${_esc(item.nom)}</b><small>${_esc([item.classe, item.race].filter(Boolean).join(' · '))}</small>${group ? `<span class="pp-gallery-player">${_playerAvatar(group)}${_esc(group.name)}</span>` : ''}</span>
       </button>`;
     }).join('')}</div>` : `<div class="pp-roster-empty">Aucun personnage.<button type="button" data-pp-action="resetFilters">Réinitialiser les filtres</button></div>`}
@@ -1556,7 +1601,12 @@ export async function renderPlayersPage() {
   STORE.quests        = quests;
   STORE.items         = _buildDataset(presentations, characters);
 
+  _restorePlayersRoute();
+
   if (!STORE.items.some(item => item.id === STORE.activeId)) STORE.activeId = STORE.items[0]?.id || '';
+  // Une URL de page nue (#players) devient immédiatement l'état affiché exact.
+  // Ainsi, le premier Retour après plusieurs onglets retrouve aussi cette vue.
+  _syncPlayersRoute({ replace: true });
 
   if (!STORE.items.length) {
     content.innerHTML = `
@@ -1613,6 +1663,7 @@ function _stepRoster(direction) {
   if (!next) return;
   STORE.activeId = next.id;
   if (STORE.viewMode === 'register' && window.innerWidth < 860) STORE.mobileDetail = true;
+  _syncPlayersRoute({ replace: true });
   _refreshView();
   requestAnimationFrame(() => document.querySelector('.pp-register-row.is-selected')?.scrollIntoView({ block: 'nearest' }));
 }
@@ -1665,6 +1716,7 @@ function _bindRosterKeyboard() {
     }
     if (STORE.viewMode === 'register' && /^[1-4]$/.test(event.key)) {
       STORE.detailTab = ['presentation', 'chronicle', 'companions', 'gallery'][Number(event.key) - 1];
+      _syncPlayersRoute();
       event.preventDefault(); _refreshView();
     }
   });
@@ -1676,14 +1728,15 @@ function _bindRosterKeyboard() {
 Object.assign(ppHandlers, {
   updateVisiblePill: (el) => _ppUpdateVisiblePill(el.checked),
   refreshVisCount:   ()   => _ppRefreshVisCount(),
-  openFiche:     (el) => { STORE.activeId = el.dataset.id; STORE.viewMode = 'register'; _refreshView(); },
+  openFiche:     (el) => { STORE.activeId = el.dataset.id; STORE.viewMode = 'register'; _syncPlayersRoute(); _refreshView(); },
   selectItem:    (el) => {
     STORE.activeId = el.dataset.id;
     if (STORE.viewMode === 'register' && window.innerWidth < 860) STORE.mobileDetail = true;
+    _syncPlayersRoute();
     _refreshView();
     requestAnimationFrame(() => document.querySelector('.pp-register-row.is-selected')?.scrollIntoView({ block: 'nearest' }));
   },
-  openRegister:  (el) => { STORE.activeId = el.dataset.id; STORE.viewMode = 'register'; STORE.mobileDetail = window.innerWidth < 860; _refreshView(); },
+  openRegister:  (el) => { STORE.activeId = el.dataset.id; STORE.viewMode = 'register'; STORE.mobileDetail = window.innerWidth < 860; _syncPlayersRoute(); _refreshView(); },
   mobileBack:    () => { STORE.mobileDetail = false; _refreshView(); },
   back:          ()   => { STORE.mobileDetail = false; _refreshView(); },
   search:        (el) => {
@@ -1702,10 +1755,20 @@ Object.assign(ppHandlers, {
   clearSearch:   ()   => { STORE.filterSearch = ''; _refreshView(); },
   setJoueur:     (el) => { STORE.filterJoueur = el.dataset.joueur ?? el.value ?? ''; _refreshView(); },
   setSort:       (el) => { STORE.sortBy = el.value; _refreshView(); },
-  setViewMode:   (el) => { STORE.viewMode = el.dataset.mode || 'register'; STORE.mobileDetail = false; _refreshView(); },
-  setRelationMode: (el) => { STORE.relMode = el.dataset.mode === 'matrix' ? 'matrix' : 'ego'; _refreshView(); },
-  toggleGrouped: (el) => { STORE.grouped = Boolean(el.checked); if (!STORE.grouped) STORE.sortBy = 'nom'; _refreshView(); },
-  setDetailTab:  (el) => { STORE.detailTab = el.dataset.tab || 'presentation'; _refreshView(); },
+  setViewMode:   (el) => {
+    STORE.viewMode = el.dataset.mode || 'register';
+    if (STORE.viewMode === 'gallery' && !STORE.grouped) STORE.sortBy = 'ordre';
+    STORE.mobileDetail = false;
+    _syncPlayersRoute();
+    _refreshView();
+  },
+  setRelationMode: (el) => { STORE.relMode = el.dataset.mode === 'matrix' ? 'matrix' : 'ego'; _syncPlayersRoute(); _refreshView(); },
+  toggleGrouped: (el) => {
+    STORE.grouped = Boolean(el.checked);
+    if (!STORE.grouped) STORE.sortBy = STORE.viewMode === 'gallery' ? 'ordre' : 'nom';
+    _refreshView();
+  },
+  setDetailTab:  (el) => { STORE.detailTab = el.dataset.tab || 'presentation'; _syncPlayersRoute(); _refreshView(); },
   fullscreenPresentation: (el) => {
     const reader = el.closest('.pp-detail-bio')?.querySelector('[data-free-page-reader]');
     if (!reader) return;
@@ -1785,31 +1848,63 @@ async function _toggleVisible(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 let _ppSortable = null;
 let _ppGallerySortable = null;
+async function _persistRosterOrder(container) {
+  const movedIds = [...container.querySelectorAll('[data-pp-id]')].map(el => el.dataset.ppId).filter(Boolean);
+  if (!movedIds.length) return;
+
+  // Quand la galerie est filtrée, seules les positions occupées par le
+  // sous-ensemble visible sont remplacées. Les personnages masqués par le
+  // filtre gardent ainsi leur place relative.
+  const localOrder = _getLocalOrdre() || [];
+  const rank = item => {
+    const stored = Number(item.ordre);
+    if (Number.isFinite(stored) && stored !== 999) return stored;
+    const localIndex = localOrder.indexOf(item.id);
+    return localIndex >= 0 ? localIndex + 1 : Number.MAX_SAFE_INTEGER;
+  };
+  const ordered = [...STORE.items].sort((a, b) => rank(a) - rank(b)
+    || a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }));
+  const movedSet = new Set(movedIds);
+  const slots = ordered.map((item, index) => movedSet.has(item.id) ? index : -1).filter(index => index >= 0);
+  const byId = new Map(STORE.items.map(item => [item.id, item]));
+  slots.forEach((slot, index) => { ordered[slot] = byId.get(movedIds[index]); });
+
+  const writes = [];
+  ordered.forEach((item, index) => {
+    if (!item) return;
+    const ordre = index + 1;
+    if (Number(item.ordre) !== ordre && item.presentationId) {
+      writes.push(updateInCol('players', item.presentationId, { ordre }));
+    }
+    item.ordre = ordre;
+  });
+  _setLocalOrdre(ordered.filter(Boolean).map(item => item.id));
+  await Promise.all(writes);
+}
+
 function _initSortable() {
   _ppSortable?.destroy();
   _ppSortable = null;
-  if (!STATE.isAdmin || STORE.viewMode !== 'register' || STORE.grouped || STORE.sortBy !== 'ordre') return;
-  const list = document.getElementById('pp-register-list');
+  if (!STATE.isAdmin || STORE.grouped || STORE.sortBy !== 'ordre') return;
+  const isGallery = STORE.viewMode === 'gallery';
+  if (!isGallery && STORE.viewMode !== 'register') return;
+  const list = document.getElementById(isGallery ? 'pp-gallery-grid' : 'pp-register-list');
   if (!list) return;
   _ppSortable = makeSortable(list, {
     prefix: 'pp',
-    handle: '.pp-register-drag',
-    delay: 100,
+    draggable: isGallery ? '.pp-gallery-card' : '.pp-register-row-wrap',
+    handle: isGallery ? '.pp-gallery-drag' : '.pp-register-drag',
+    filter: isGallery ? 'a, input, select, textarea, .btn, .btn-icon' : 'button, a, input, select, textarea, .btn, .btn-icon',
+    delay: 80,
+    swapThreshold: .62,
+    fallbackTolerance: 4,
     onEnd: async () => {
-      const ids = [...list.querySelectorAll('[data-pp-id]')].map(el => el.dataset.ppId);
-      // Diff avant mutation : n'écrire que les fiches dont l'ordre change.
-      const writes = [];
-      ids.forEach((id, idx) => {
-        const item = STORE.items.find(i => i.id === id);
-        if (!item) return;
-        const ordre = idx + 1;
-        if (Number(item.ordre) !== ordre && item.presentationId) {
-          writes.push(updateInCol('players', item.presentationId, { ordre }));
-        }
-        item.ordre = ordre;
-      });
-      _setLocalOrdre(ids);
-      await Promise.all(writes);
+      try {
+        await _persistRosterOrder(list);
+      } catch (error) {
+        console.warn('[players] réorganisation impossible', error);
+        showNotif('Impossible d’enregistrer ce nouvel ordre.', 'error');
+      }
     },
   });
 }

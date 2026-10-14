@@ -63,15 +63,20 @@ test('la lightbox garde les flèches pour sa propre galerie', () => {
   assert.match(players, /e\.stopImmediatePropagation\(\)/);
 });
 
-test('la galerie utilise une grille unique compacte et un tri sans séparateurs', () => {
+test('la galerie utilise une grille adaptative et retrouve son tri manuel', () => {
   assert.match(players, /class="pp-gallery-toolbar"/);
   assert.match(players, /Trier par joueur/);
   assert.match(players, /class="pp-gallery-grid"/);
   assert.doesNotMatch(players, /class="pp-gallery-group"/);
   assert.match(css, /\.pp-gallery-screen \{[^}]*width: 100%;[^}]*padding: 0 clamp\(16px,2vw,36px\)/);
-  assert.match(css, /repeat\(auto-fill,minmax\(380px,1fr\)\)/);
+  assert.match(css, /repeat\(auto-fill,minmax\(260px,1fr\)\)/);
   assert.match(players, /pp-gallery-main/);
   assert.match(players, /pp-gallery-player/);
+  assert.match(players, /class="pp-gallery-drag"/);
+  assert.match(players, /data-pp-id=/);
+  assert.match(players, /isGallery \? '\.pp-gallery-drag' : '\.pp-register-drag'/);
+  assert.match(players, /filter: isGallery \? 'a, input, select, textarea/);
+  assert.match(players, /await _persistRosterOrder\(list\)/);
 });
 
 test('la vue Liens propose le graphe ego et la matrice persistante', () => {

@@ -52,6 +52,7 @@ import { pickImageFile, compressDataUrl } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 import { replaceHtmlPreservingView } from '../shared/view-context.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // ── Stats PNJ (admin) ────────────────────────────────────────────────────────
 // Les vitales/caractéristiques saisies sont les valeurs DE BASE. Les objets
@@ -294,6 +295,37 @@ let _npcSheetTab   = 'combat';   // onglet actif de la fiche PNJ : 'combat' | 's
 let _npcRelSel     = null;       // id du lien d'affinité sélectionné dans le Cercle des relations
 let _npcLink       = { npcId: null, charId: null, charNom: '', typeId: null };  // sélection en cours dans le modal « Lier »
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+
+const NPC_ROUTE_PANELS = ['dossier', 'tactique', 'relations', 'chronologie'];
+const NPC_ROUTE_SHEET_TABS = ['combat', 'sorts'];
+
+function _npcRouteSub(id = _activeId, panel = _npcPanel, sheetTab = _npcSheetTab) {
+  if (!id) return '';
+  const safePanel = NPC_ROUTE_PANELS.includes(panel) && (panel !== 'tactique' || STATE.isAdmin)
+    ? panel
+    : 'dossier';
+  const safeTab = NPC_ROUTE_SHEET_TABS.includes(sheetTab) ? sheetTab : 'combat';
+  return `${id}/${safePanel}/${safeTab}`;
+}
+
+function _applyNpcRoute(sub) {
+  const [id, panel = 'dossier', sheetTab = 'combat'] = String(sub || '').split('/');
+  if (!id || !_npcs.some(npc => npc.id === id)) return false;
+  _activeId = id;
+  _npcPanel = NPC_ROUTE_PANELS.includes(panel) && (panel !== 'tactique' || STATE.isAdmin)
+    ? panel
+    : 'dossier';
+  _npcSheetTab = NPC_ROUTE_SHEET_TABS.includes(sheetTab) ? sheetTab : 'combat';
+  _filterSearch = '';
+  _filterStatus = '';
+  _filterHidden = false;
+  _activeOrgFilter = null;
+  return true;
+}
+
+function _syncNpcRoute({ replace = false } = {}) {
+  setRouteSub('npcs', _npcRouteSub(), { replace });
+}
 let _equipPickerState = {
   npcId: '', slot: '', q: '', sort: 'name', filtersOpen: true,
   filters: { type: '', rarity: '', stat: '', damage: '', trait: '', feature: '', availability: '' },
@@ -426,6 +458,7 @@ export async function renderNpcs() {
   // spinner disgracieux. Le splash reste visible pendant _load, puis _renderPage.
   await _load();
   const target = consumeTargetEntity('npc');
+  const targetId = target?.id || '';
   _pendingTargetNpcId = target?.id || _pendingTargetNpcId;
   if (_pendingTargetNpcId && _npcs.some(n => n.id === _pendingTargetNpcId)) {
     _activeId = _pendingTargetNpcId;
@@ -435,7 +468,9 @@ export async function renderNpcs() {
     _activeOrgFilter = null;
     _pendingTargetNpcId = null;
   }
-  if (!_activeId && _npcs.length) _activeId = _npcs[0].id;
+  if (!targetId) _applyNpcRoute(getRouteSub('npcs'));
+  if (!_npcs.some(npc => npc.id === _activeId)) _activeId = _npcs[0]?.id || null;
+  _syncNpcRoute({ replace: true });
   _renderPage(content);
   _bindCharPickOutside();
 
@@ -452,6 +487,7 @@ export async function renderNpcs() {
       _filterHidden = false;
       _activeOrgFilter = null;
       _pendingTargetNpcId = null;
+      _syncNpcRoute({ replace: true });
     }
     _refreshList({ keepScroll: true });
     _refreshActivePanel();
@@ -631,7 +667,8 @@ function _renderNavItem(n) {
   const hasVtt = n.pv || n.pm || n.ca || n.vitesse || Object.keys(n.stats || {}).length || Object.keys(n.equipement || {}).length;
   return `
   <div class="npc-nav-item ${isActive ? 'is-active' : ''} ${n.statut === 'mort' ? 'npc-nav-item--dead' : ''}" style="${_afVars(af)}"
-    data-action="selectNpc" data-id="${n.id}" data-npc-id="${n.id}">
+    data-action="selectNpc" data-id="${n.id}" data-npc-id="${n.id}"
+    data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(n.id))}">
 
     <div class="npc-nav-avatar">
       ${n.imageUrl
@@ -1249,9 +1286,9 @@ function _renderFiche(n) {
   const _tico = (id) => `<span class="tab-ico" aria-hidden="true"><svg class="cs-tab-svg"><use href="./assets/img/icons.svg#icon-${id}"/></svg></span>`;
   const tabsBar = `
     <nav class="tabs-v3 npc-sheet-tabs" role="tablist" aria-label="Sections du PNJ">
-      <button type="button" class="tab-v3 ${tab === 'combat' ? 'active' : ''}" role="tab" aria-selected="${tab === 'combat'}" data-action="npcSetTab" data-tab="combat">
+      <button type="button" class="tab-v3 ${tab === 'combat' ? 'active' : ''}" role="tab" aria-selected="${tab === 'combat'}" data-action="npcSetTab" data-tab="combat" data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, _npcPanel, 'combat'))}">
         ${_tico('sword')} Combat</button>
-      <button type="button" class="tab-v3 ${tab === 'sorts' ? 'active' : ''}" role="tab" aria-selected="${tab === 'sorts'}" data-action="npcSetTab" data-tab="sorts">
+      <button type="button" class="tab-v3 ${tab === 'sorts' ? 'active' : ''}" role="tab" aria-selected="${tab === 'sorts'}" data-action="npcSetTab" data-tab="sorts" data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, _npcPanel, 'sorts'))}">
         ${_tico('sparkles')} Sorts <span class="tab-badge">${deckActifs}/${deckMax}${deckFree ? ` +${deckFree}` : ''}</span></button>
     </nav>`;
   // Onglet Sorts actif → le PNJ devient l'hôte du moteur de sorts (édition +
@@ -1527,6 +1564,7 @@ function _renderNpcPanelTabs() {
     <nav class="tabs-v3 npc-tabs-v3" role="tablist" aria-label="Sections de la fiche PNJ">
       ${_npcPanelDefs().map(tab => `
         <button type="button" class="${_npcPanel === tab.id ? 'is-active' : ''}" data-action="npcSetPanel" data-panel="${tab.id}"
+          data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, tab.id, _npcSheetTab))}"
           role="tab" aria-selected="${_npcPanel === tab.id}">
           <span>${_esc(tab.label)}</span>
           <small>${_esc(tab.hint)}</small>
@@ -1549,8 +1587,18 @@ function _renderNpcEmptyPanel(text) {
   return `<section class="npc-work-card npc-empty-panel">${_esc(text)}</section>`;
 }
 
-function _npcSetPanel(btn) {
-  _npcPanel = btn?.dataset?.panel || 'dossier';
+function _npcSetPanel(panel, { syncRoute = true } = {}) {
+  _npcPanel = NPC_ROUTE_PANELS.includes(panel) && (panel !== 'tactique' || STATE.isAdmin)
+    ? panel
+    : 'dossier';
+  if (syncRoute) _syncNpcRoute();
+  _refreshActivePanel();
+}
+
+function _npcSetSheetTab(sheetTab, { syncRoute = true } = {}) {
+  if (!NPC_ROUTE_SHEET_TABS.includes(sheetTab)) return;
+  _npcSheetTab = sheetTab;
+  if (syncRoute) _syncNpcRoute();
   _refreshActivePanel();
 }
 
@@ -2162,10 +2210,13 @@ function _renderFlatList(filtered) {
 }
 
 // ── Sélection & filtres ───────────────────────────────────────────────────────
-export function selectNpc(id) {
+export function selectNpc(id, { syncRoute = true, replace = false } = {}) {
+  if (!_npcs.some(item => item.id === id)) return;
   _activeId = id;
   const npc = _npcs.find(item => item.id === id);
   if (npc) recordRecentNavigation({ type: 'npc', id, title: npc.nom || npc.name || '' });
+
+  if (syncRoute) _syncNpcRoute({ replace });
 
   _refreshList();
   _refreshActivePanel();
@@ -3635,6 +3686,7 @@ export async function deleteNpc(id) {
     _npcs      = _npcs.filter(n => n.id !== id);
     _affiPerso = _affiPerso.filter(a => a.npcId !== id);
     if (_activeId === id) _activeId = _npcs[0]?.id || null;
+    _syncNpcRoute({ replace: true });
     showNotif('PNJ supprimé.', 'success');
     _renderPage(document.getElementById('main-content'));
     return true;
@@ -4505,6 +4557,7 @@ async function _npcCreate() {
     const entry = { id: newId || `npc_${Date.now()}`, ...data };
     if (!_npcs.find(n => n.id === entry.id)) _npcs.push(entry);
     _activeId = entry.id;
+    _syncNpcRoute();
     _renderPage(document.getElementById('main-content'));
     showNotif('PNJ créé — modifie-le directement dans la fiche.', 'success');
   } catch (e) { notifySaveError(e); }
@@ -4525,6 +4578,7 @@ function _refreshActivePanel() {
 
   if (!_npcs.find(x => x.id === _activeId)) {
     _activeId = active?.id || null;
+    _syncNpcRoute({ replace: true });
   }
 
   replaceHtmlPreservingView(
@@ -4551,6 +4605,16 @@ export async function deleteAffinitePerso(id) {
 // ── Override PAGES.npcs ───────────────────────────────────────────────────────
 PAGES.npcs = renderNpcs;
 
+// Retour/Avance entre deux PNJ ou deux panneaux : on réutilise les données déjà
+// en mémoire et les abonnements existants, sans remonter la page ni relire Firestore.
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'npcs' || !document.querySelector('.npc-page')) return;
+  if (!_applyNpcRoute(event.detail.sub)) return;
+  event.preventDefault();
+  _refreshList({ keepScroll: true });
+  _refreshActivePanel();
+});
+
 
 registerActions({
   _npcSearch:                (el) => _npcSearch(el.value),
@@ -4568,7 +4632,7 @@ registerActions({
   npcLinkPickType:           (btn) => { _npcLink.typeId = btn.dataset.typeId; document.querySelectorAll('.npc-linkmodal-type').forEach(t => t.classList.toggle('is-sel', t === btn)); _npcLinkUpdateConfirm(); },
   npcLinkModalFilter:        (el)  => { const q = (el.value || '').trim().toLowerCase(); document.querySelectorAll('.npc-linkmodal-tile').forEach(t => { t.style.display = t.textContent.toLowerCase().includes(q) ? '' : 'none'; }); },
   npcLinkConfirm:            ()    => _npcLinkConfirm(),
-  npcSetTab:                 (btn) => { const t = btn?.dataset?.tab; if (t === 'combat' || t === 'sorts') { _npcSheetTab = t; _refreshActivePanel(); } },
+  npcSetTab:                 (btn) => _npcSetSheetTab(btn?.dataset?.tab),
   // Deck de sorts PNJ (hôte-aware via forms.js) — dispo sur la page PNJ.
   toggleSort:                (btn) => _spellToggle(Number(btn.dataset.idx), btn),
   duplicateSort:             (btn) => _spellDuplicate(Number(btn.dataset.idx)),
@@ -4591,7 +4655,7 @@ registerActions({
   npcManualEquipCancel:      () => popModal(),
   npcEditAction:             (btn) => _npcEditAction(btn),
   npcDeleteAction:           (btn) => _npcDeleteAction(btn),
-  npcSetPanel:               (btn) => _npcSetPanel(btn),
+  npcSetPanel:               (btn) => _npcSetPanel(btn?.dataset?.panel),
   npcSetPhoto:               (btn) => _npcSetPhoto(btn),
   npcViewPhoto:              (btn) => _npcViewPhoto(btn),
   npcSetStatut:              (btn) => _npcSetStatut(btn),

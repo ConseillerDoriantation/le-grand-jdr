@@ -24,6 +24,7 @@ import { registerActions } from '../core/actions.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
 import { calendarDayDiff, mergeRecurringPreset, suggestionPresentation, weekDatesFrom } from './agenda-utils.js';
 import { agendaSessionsFromDoc, isAgendaSessionUpcoming, moveAgendaSession } from '../shared/agenda-sessions.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // ── Constantes ────────────────────────────────────────────────────────────
 const SLOTS = [
@@ -84,6 +85,13 @@ let _ag = {
   cmp:        [],               // clés de créneaux comparés (2-3)
   inputBound: false,            // listeners pinceau/tooltip installés une seule fois
 };
+
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'agenda' || !['planning', 'cand', 'players'].includes(event.detail.sub)) return;
+  event.preventDefault();
+  _ag.tab = event.detail.sub;
+  _agRerender();
+});
 
 // ── Helpers date ──────────────────────────────────────────────────────────
 function _toISO(d) {
@@ -1689,7 +1697,7 @@ function _agRenderTop() {
     ['planning', 'Planning', nUpcoming],
     ['cand', 'Créneaux possibles', nCand],
     ['players', 'Joueurs', _agScopeMembers().length],
-  ].map(([id, lbl, n]) => `<button class="ag-tab${_ag.tab === id ? ' is-on' : ''}" data-action="_agSetTab" data-tab="${id}">${lbl}<span class="ag-tab-cnt">${n}</span></button>`).join('');
+  ].map(([id, lbl, n]) => `<button class="ag-tab${_ag.tab === id ? ' is-on' : ''}" data-action="_agSetTab" data-tab="${id}" data-nav-page="agenda" data-nav-sub="${id}">${lbl}<span class="ag-tab-cnt">${n}</span></button>`).join('');
 
   const menu = _agEl('ag-menu');
   if (menu) {
@@ -2164,6 +2172,9 @@ async function renderAgendaPage() {
   _ag.cmp = []; _ag.dragging = false;
   _ag.myAvailLoaded = false; _ag.savePending = false;
   if (!STATE.isAdmin) _ag.role = 'player';
+  const routeTab = getRouteSub('agenda');
+  if (['planning', 'cand', 'players'].includes(routeTab)) _ag.tab = routeTab;
+  else setRouteSub('agenda', _ag.tab, { replace: true });
 
   content.innerHTML = `
     <div class="ag-root" id="ag-root">
@@ -2253,7 +2264,12 @@ registerActions({
   _agDateLibre:             (btn) => openManualSessionModal(btn.dataset.questId),
   // ── Refonte : bandeau / onglets / calendrier ──
   _agSetGroup:              (el)  => { _ag.groupFilter = (el.value || '') || null; _ag.cmp = []; _agRerender(); },
-  _agSetTab:                (btn) => { _ag.tab = btn.dataset.tab; _agRerender(); },
+  _agSetTab:                (btn) => {
+    if (!['planning', 'cand', 'players'].includes(btn.dataset.tab)) return;
+    _ag.tab = btn.dataset.tab;
+    setRouteSub('agenda', _ag.tab);
+    _agRerender();
+  },
   _agSetRole:               (btn) => { if (!STATE.isAdmin) return; _ag.role = btn.dataset.role; _agRerender(); },
   _agCalNav:                (btn) => { _ag.calMonthOffset = btn.dataset.today ? 0 : (_ag.calMonthOffset || 0) + Number(btn.dataset.delta || 0); _ag.cmp = []; _agRerender(); },
   _agToggleRec:             ()    => { _ag.recOpen = !_ag.recOpen; _agRenderPlanning(); },

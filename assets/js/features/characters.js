@@ -111,7 +111,7 @@ import { bindQuillEditors } from '../shared/rich-text-quill.js';
 import { registerActions } from '../core/actions.js';
 // URL de la fiche : #characters/<idPerso>/<onglet> — permet le clic molette sur
 // un onglet (nouvel onglet navigateur sur CE perso) et le partage d'un lien direct.
-import { setRouteSub } from '../shared/route.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 import {
   captureViewContext,
   restoreViewContextAfterRender,
@@ -563,6 +563,15 @@ const V3_TAB_REMAP = {
   quetes:     'journal',
 };
 
+function _characterRouteSub(charId, tab) {
+  const [routeCharId, routeTab, routeMode] = getRouteSub('characters').split('/');
+  if (tab === 'sorts' && routeCharId === charId && routeTab === 'sorts'
+    && ['grimoire', 'prepare'].includes(routeMode)) {
+    return `${charId}/sorts/${routeMode}`;
+  }
+  return `${charId}/${tab}`;
+}
+
 function _resolveV3Tab(raw) {
   if (V3_TABS.includes(raw)) return raw;
   return V3_TAB_REMAP[raw] || 'combat';
@@ -915,7 +924,7 @@ function _buildTabsHtml(c, v3Tab) {
     role="tab" aria-selected="${t.k===v3Tab?'true':'false'}" aria-controls="char-tab-content"
     tabindex="${t.k===v3Tab?'0':'-1'}"
     data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}"
-    data-nav-sub="${c.id}/${t.k}">
+    data-nav-page="characters" data-nav-sub="${_characterRouteSub(c.id, t.k)}">
     <span class="tab-ico" aria-hidden="true">${_ico(t.ico)}</span> ${t.lbl}
     ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
   </button>`).join('');
@@ -1401,7 +1410,7 @@ function renderCharSheet(c, keepTab) {
   STATE.activeChar = c;
   charSession.set(c, canEdit, v3Tab);
   _currentTopTab = v3Tab;
-  setRouteSub('characters', `${c.id}/${v3Tab}`);
+  setRouteSub('characters', _characterRouteSub(c.id, v3Tab));
 
   // ── Valeurs dérivées ──────────────────────────
   const pvMax  = calcPVMax(c), pmMax = calcPMMax(c);
@@ -2540,7 +2549,7 @@ function _restoreTabScroll(scrollTop) {
   });
 }
 
-function showCharTab(tab, el) {
+function showCharTab(tab, el, { syncRoute = true } = {}) {
   // V3 : 6 onglets uniquement. Toute valeur legacy est remappée.
   const v3 = _resolveV3Tab(tab);
 
@@ -2556,7 +2565,7 @@ function showCharTab(tab, el) {
   _currentTopTab  = v3;
   charSession.set(charSession.getCurrentChar(), charSession.getCanEditChar(), v3);
   // L'URL suit l'onglet affiché (le perso, lui, ne change pas ici → prevChar).
-  if (prevChar) setRouteSub('characters', `${prevChar}/${v3}`);
+  if (prevChar && syncRoute) setRouteSub('characters', _characterRouteSub(prevChar, v3));
 
   // Onglets v3 (nouveau template) — classe active + ARIA (sélection + roving tabindex)
   document.querySelectorAll('#char-tabs-v3 .tab-v3').forEach(t => {
@@ -2579,6 +2588,17 @@ function showCharTab(tab, el) {
   const saved  = charId ? _scrollByTab.get(_scrollKey(charId, v3)) : null;
   if (saved != null) _restoreTabScroll(saved);
 }
+
+// Retour/Avance entre deux onglets du même personnage : mise à jour locale,
+// sans démonter la fiche ni réamorcer son abonnement live. Un changement de
+// personnage reste géré par le routeur complet afin de recalculer les droits.
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'characters') return;
+  const [charId, tab] = String(event.detail.sub || '').split('/');
+  if (!charId || !tab || charId !== charSession.getCurrentChar()?.id) return;
+  event.preventDefault();
+  showCharTab(tab, null, { syncRoute: false });
+});
 
 // ══════════════════════════════════════════════
 // EXPORT — expose tout sur window pour les onclick HTML

@@ -22,6 +22,7 @@ import { makeSortable } from '../shared/sortable-helper.js';
 import { removeQuestAgendaSessions } from '../shared/agenda-sessions.js';
 import { openMissionSheet } from './story-mission-sheet.js';
 import { watchPageCollection } from '../shared/realtime.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // ── Palettes ──────────────────────────────────────────────────────────────────
 // Palette d'axes distincte des couleurs de statut (En cours / Terminée / Échouée)
@@ -71,6 +72,7 @@ const STORE = {
   modalStoryId:   '',   // id de la mission en édition ('' = nouvelle)
   editingGroupId: null, // id du groupe en cours de modification (null = création)
   storyActe:      '',   // acte filtré dans la sidebar
+  storyActes:     [],   // actes du dernier rendu (résolution de la sous-route)
   mapItemsCache:  [],   // cache items de la carte (PNJ, lieux…)
 };
 
@@ -90,6 +92,38 @@ function setStoryPrefs(patch) {
   try { localStorage.setItem(STORY_PREFS_KEY, JSON.stringify({ ...getStoryPrefs(), ...patch })); }
   catch {}
 }
+
+const STORY_VIEWS = ['carte', 'saga', 'list'];
+function _storyActRouteKey(name = '') {
+  let hash = 2166136261;
+  const value = String(name);
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+function _storyRouteState(sub = getRouteSub('story'), actes = STORE.storyActes) {
+  const [first = '', second = ''] = String(sub || '').split('/');
+  if (STORY_VIEWS.includes(first)) return { view: first, acte: '' }; // ancien lien
+  if (!first.startsWith('act:') || !STORY_VIEWS.includes(second)) return { view: '', acte: '' };
+  const key = first.slice(4);
+  return { view: second, acte: (actes || []).find(acte => _storyActRouteKey(acte) === key) || '' };
+}
+function _storyRouteSub(view = getStoryPrefs().view, acte = STORE.storyActe) {
+  const safeView = STORY_VIEWS.includes(view) ? view : 'carte';
+  return acte ? `act:${_storyActRouteKey(acte)}/${safeView}` : safeView;
+}
+
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'story') return;
+  const route = _storyRouteState(event.detail.sub);
+  if (!route.view) return;
+  event.preventDefault();
+  if (route.acte) STORE.storyActe = route.acte;
+  setStoryPrefs({ view: route.view });
+  PAGES.story?.();
+});
 
 // Abonnement live de la Trame : re-render quand une mission change (statut,
 // ordre, récit, participants…) sans attendre une actualisation manuelle.
@@ -533,7 +567,8 @@ function _stGroupOpenMemberPicker(btn) {
           <strong>${_esc(q.titre || 'Groupe')}</strong>
           <span>${chars.length} personnage${chars.length > 1 ? 's' : ''} disponible${chars.length > 1 ? 's' : ''}</span>
         </div>
-        <input class="mv-picker-search" type="search" placeholder="Rechercher un personnage ou un joueur..." data-input="_stGroupMemberFilter" autofocus>
+        <input class="mv-picker-search" type="search" placeholder="Rechercher un personnage ou un joueur..."
+          dir="ltr" autocomplete="off" spellcheck="false" data-modal-initial-focus>
       </div>
       <div class="mv-picker-list">
         ${rows || `<div class="mv-picker-empty">Tous les personnages sont déjà dans ce groupe.</div>`}
@@ -547,11 +582,19 @@ function _stGroupOpenMemberPicker(btn) {
       subtitle: 'Choisir un participant sans encombrer la carte du groupe',
       accent: '#22c38e',
     });
+  // Filtrage strictement local : ne pas passer par la délégation globale, qui
+  // peut être réarmée quand la modale empilée restaure son parent. Le même
+  // nœud reste monté et la sélection est conservée, donc la saisie ne repart
+  // jamais au début du champ entre deux caractères.
+  const searchInput = document.querySelector('#modal-body .mv-picker-search');
+  searchInput?.addEventListener('input', event => _stGroupMemberFilter(event.currentTarget));
 }
 
 function _stGroupMemberFilter(input) {
   const root = input.closest('.mv-picker');
   if (!root) return;
+  const selectionStart = input.selectionStart;
+  const selectionEnd = input.selectionEnd;
   const needle = String(input.value || '').trim().toLowerCase();
   let visible = 0;
   root.querySelectorAll('.mv-picker-member').forEach(btn => {
@@ -561,6 +604,9 @@ function _stGroupMemberFilter(input) {
   });
   const empty = root.querySelector('.mv-picker-empty--filtered');
   if (empty) empty.hidden = visible > 0;
+  if (document.activeElement === input && selectionStart != null && selectionEnd != null) {
+    try { input.setSelectionRange(selectionStart, selectionEnd); } catch { /* search non compatible */ }
+  }
 }
 
 // MJ : assigner un personnage d'office au groupe (clic sur un portrait).
@@ -807,7 +853,7 @@ async function renderStory() {
     renderStory();
   });
 
-  const prefs = getStoryPrefs();
+  let prefs = getStoryPrefs();
   const visibleItems = items.filter(i => STATE.isAdmin || i.visibleJoueurs !== false);
   const playerMissionIds = STATE.isAdmin ? new Set() : _storyMissionIdsForPlayer(visibleItems, questGroups);
   const personalScope = !STATE.isAdmin && prefs.playerScope === 'mine';
@@ -818,11 +864,20 @@ async function renderStory() {
   const fromItems = [...new Set(scopedItems.map(i => i.acte).filter(Boolean))];
   const allActes = [...new Set([...(STATE.isAdmin ? savedActes : []), ...fromItems])].sort();
   if (!allActes.length) allActes.push('Acte I');
+  STORE.storyActes = allActes;
 
-  const activeActe = STORE.storyActe && allActes.includes(STORE.storyActe)
+  const route = _storyRouteState(getRouteSub('story'), allActes);
+  if (route.view) {
+    setStoryPrefs({ view: route.view });
+    prefs = getStoryPrefs();
+  }
+
+  const activeActe = route.acte || (STORE.storyActe && allActes.includes(STORE.storyActe)
     ? STORE.storyActe
-    : allActes[0];
+    : allActes[0]);
   STORE.storyActe = activeActe;
+  const canonicalRoute = _storyRouteSub(prefs.view, activeActe);
+  if (getRouteSub('story') !== canonicalRoute) setRouteSub('story', canonicalRoute, { replace: true });
 
   // Items de l'acte courant, visibles selon rôle
   const acteItems = scopedItems.filter(i => (i.acte || 'Acte I') === activeActe);
@@ -892,7 +947,7 @@ async function renderStory() {
           const n = scopedItems.filter(i => (i.acte || 'Acte I') === acte).length;
           // data-acte + délégation : robuste aux apostrophes / guillemets dans le nom
           return `<button class="tab ${active ? 'active' : ''}" role="tab" aria-selected="${active}"
-            data-acte="${_esc(acte)}" data-action="_stSwitchActe">${_esc(acte)}<span class="tab-badge">${n}</span></button>`;
+            data-acte="${_esc(acte)}" data-action="_stSwitchActe" data-nav-page="story" data-nav-sub="${_storyRouteSub(prefs.view, acte)}">${_esc(acte)}<span class="tab-badge">${n}</span></button>`;
         }).join('')}
         ${STATE.isAdmin ? `<button class="tab-new" data-action="openNewActeModal">＋ Acte</button>` : ''}
       </div>
@@ -916,9 +971,9 @@ async function renderStory() {
         </select>
         <span class="count">${filteredItems.length} mission${filteredItems.length>1?'s':''}</span>
         <div class="views" role="tablist" aria-label="Mode d'affichage de la trame">
-          <button class="${prefs.view==='carte'?'on':''}" data-action="_stSetView" data-view="carte" role="tab" aria-selected="${prefs.view === 'carte'}">Carte</button>
-          <button class="${prefs.view==='saga'?'on':''}" data-action="_stSetView" data-view="saga" role="tab" aria-selected="${prefs.view === 'saga'}">Saga</button>
-          <button class="${prefs.view==='list'?'on':''}" data-action="_stSetView" data-view="list" role="tab" aria-selected="${prefs.view === 'list'}">Liste</button>
+          <button class="${prefs.view==='carte'?'on':''}" data-action="_stSetView" data-view="carte" data-nav-page="story" data-nav-sub="${_storyRouteSub('carte', activeActe)}" role="tab" aria-selected="${prefs.view === 'carte'}">Carte</button>
+          <button class="${prefs.view==='saga'?'on':''}" data-action="_stSetView" data-view="saga" data-nav-page="story" data-nav-sub="${_storyRouteSub('saga', activeActe)}" role="tab" aria-selected="${prefs.view === 'saga'}">Saga</button>
+          <button class="${prefs.view==='list'?'on':''}" data-action="_stSetView" data-view="list" data-nav-page="story" data-nav-sub="${_storyRouteSub('list', activeActe)}" role="tab" aria-selected="${prefs.view === 'list'}">Liste</button>
         </div>
       </div>
 
@@ -973,7 +1028,12 @@ async function renderStory() {
 }
 
 function _stSetFilter(key, val) { setStoryPrefs({ [key]: val }); PAGES.story?.(); }
-function _stSetView(view) { setStoryPrefs({ view }); PAGES.story?.(); }
+function _stSetView(view) {
+  if (!STORY_VIEWS.includes(view)) return;
+  setStoryPrefs({ view });
+  setRouteSub('story', _storyRouteSub(view));
+  PAGES.story?.();
+}
 function _stResetFilters() { setStoryPrefs({ search:'', statut:'' }); PAGES.story?.(); }
 function _stSetPlayerScope(scope) {
   setStoryPrefs({ playerScope: scope === 'mine' ? 'mine' : 'all' });
@@ -984,6 +1044,7 @@ function _stSetPlayerScope(scope) {
 function _stSwitchActe(acte) {
   if (!acte) return;
   STORE.storyActe = String(acte);
+  setRouteSub('story', _storyRouteSub(getStoryPrefs().view, STORE.storyActe));
   PAGES.story?.();
 }
 
@@ -2745,7 +2806,6 @@ registerActions({
   _stGroupPickChar:        (btn) => _stGroupPickChar(btn.dataset.id, btn.dataset.mission, btn.dataset.char),
   _stGroupFieldSave:       (el)  => _stGroupFieldSave(el),
   _stGroupOpenMemberPicker:(btn) => _stGroupOpenMemberPicker(btn),
-  _stGroupMemberFilter:    (el)  => _stGroupMemberFilter(el),
   _stGroupAddMember:       (el)  => _stGroupAddMember(el),
   _stGroupRemoveMember:    (btn) => _stGroupRemoveMember(btn),
   _stGroupDelete:          (btn) => _stGroupDelete(btn.dataset.id, btn.dataset.mission),

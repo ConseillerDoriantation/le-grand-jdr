@@ -46,6 +46,7 @@ import { compressDataUrl } from '../shared/image-upload.js';
 import { shopAffinityScore, shopCartTotals, shopItemBuyState, shopUpgradeGain } from '../shared/shop-cart.js';
 import { atelierApplyBuild, atelierCompactSlots, atelierGainScore, atelierNetCost } from '../shared/shop-atelier.js';
 import { damageProfileToRelations, parseShopItemQuickEntry, relationsToDamageProfile } from '../shared/shop-item-editor.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 import {
   equipmentSlotAcceptsItem, getEquipmentItemOptions, getEquipmentSlot,
   getEquipmentSlots, resolveEquipmentSlotForItem,
@@ -409,6 +410,10 @@ function _renderManageMenu() {
 
 export async function renderShop() {
   await Promise.all([loadShopData(), loadShopCharacters()]);
+  const routeSection = getRouteSub('shop').split('/')[0];
+  if (routeSection === 'atelier') _shopSection = _prepareAtelier() ? 'atelier' : 'shop';
+  else if (routeSection === 'artisan' && STATE.isAdmin) _shopSection = 'artisan';
+  else if (routeSection === 'shop') _shopSection = 'shop';
   const target = consumeTargetEntity('shop');
   const targetItemId = target?.id || _pendingTargetShopItemId;
   const targetMode = target?.meta?.mode || _pendingTargetShopMode || 'detail';
@@ -439,6 +444,7 @@ export async function renderShop() {
     const cat = _cats.find(c => c.id === _activeCat);
     if (!cat || (!STATE.isAdmin && cat.masquee)) { _view = 'home'; _activeCat = null; }
   }
+  if (routeSection !== _shopSection) setRouteSub('shop', _shopSection, { replace: true });
   const content = document.getElementById('main-content');
   if (!content) return;
 
@@ -521,15 +527,15 @@ export async function renderShop() {
   html += `
       <nav class="sh-page-tabs" role="tablist" aria-label="Sections de la boutique">
         <button type="button" class="sh-page-tab ${_shopSection === 'shop' ? 'active' : ''}"
-          data-sh-action="setSection" data-section="shop" role="tab" aria-selected="${_shopSection === 'shop'}">
+          data-sh-action="setSection" data-section="shop" data-nav-page="shop" data-nav-sub="shop" role="tab" aria-selected="${_shopSection === 'shop'}">
           ${_shopIcon('bag')} Boutique${_cartTotals(activeChar).count ? `<span class="sh-page-tab-count">${_cartTotals(activeChar).count}</span>` : ''}
         </button>
         <button type="button" class="sh-page-tab ${_shopSection === 'atelier' ? 'active' : ''}"
-          data-sh-action="setSection" data-section="atelier" role="tab" aria-selected="${_shopSection === 'atelier'}">
+          data-sh-action="setSection" data-section="atelier" data-nav-page="shop" data-nav-sub="atelier" role="tab" aria-selected="${_shopSection === 'atelier'}">
           ${_shopIcon('wand')} Atelier
         </button>
         ${STATE.isAdmin ? `<button type="button" class="sh-page-tab ${_shopSection === 'artisan' ? 'active' : ''}"
-          data-sh-action="setSection" data-section="artisan" role="tab" aria-selected="${_shopSection === 'artisan'}">
+          data-sh-action="setSection" data-section="artisan" data-nav-page="shop" data-nav-sub="artisan" role="tab" aria-selected="${_shopSection === 'artisan'}">
           ${_shopIcon('hammer')} Artisan
         </button>` : '' /* Artisan masqué aux joueurs — refonte du craft en cours */}
       </nav>
@@ -5108,6 +5114,7 @@ function _renderAtelierPage() {
 function shopOpenAtelier(prefillItemId = '') {
   if (!_prepareAtelier(prefillItemId)) { showNotif('Sélectionne d’abord un personnage.', 'error'); return; }
   _shopSection = 'atelier';
+  setRouteSub('shop', 'atelier');
   renderShop();
 }
 
@@ -5117,8 +5124,21 @@ function shopSetSection(section) {
   if (section === 'artisan') _artisanNeedsReset = true;
   else unmountArtisanPage();
   _shopSection = section;
+  setRouteSub('shop', section);
   renderShop();
 }
+
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'shop') return;
+  const section = String(event.detail.sub || '').split('/')[0];
+  if (!['shop', 'atelier', 'artisan'].includes(section) || (section === 'artisan' && !STATE.isAdmin)) return;
+  if (section === 'atelier' && !_prepareAtelier()) return;
+  event.preventDefault();
+  if (section === 'artisan') _artisanNeedsReset = true;
+  else unmountArtisanPage();
+  _shopSection = section;
+  renderShop();
+});
 
 function _atelierPointerOver(event) {
   if (_shopSection !== 'atelier') return;

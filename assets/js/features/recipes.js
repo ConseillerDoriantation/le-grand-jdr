@@ -19,6 +19,7 @@ import { formatWeaponDamageText, isWeaponLikeItem } from '../shared/equipment-ut
 import { canControlCharacter } from '../shared/character-state.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { normalizeWeaponFamilyKey, resolveWeaponFamily } from '../shared/weapon-family.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // ── État local ─────────────────────────────────────────────────────────────────
 
@@ -72,6 +73,14 @@ const STORE = {
 };
 
 let _recipeReturnCharacterId = '';
+
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'recettes' || !TABS.some(tab => tab.id === event.detail.sub)) return;
+  event.preventDefault();
+  STORE.tab = event.detail.sub;
+  STORE.filterTxt = '';
+  _render();
+});
 
 async function _ensureRecipeData() {
   const adventureId = STATE.adventure?.id || '';
@@ -266,7 +275,9 @@ async function renderRecipes() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">⏳</div></div>`;
   await _ensureRecipeData();
-  STORE.tab = STORE.tab || 'cuisine';
+  const routeTab = getRouteSub('recettes');
+  STORE.tab = TABS.some(tab => tab.id === routeTab) ? routeTab : (STORE.tab || 'cuisine');
+  if (!TABS.some(tab => tab.id === routeTab)) setRouteSub('recettes', STORE.tab, { replace: true });
   _render();
 }
 
@@ -308,7 +319,7 @@ function _render() {
     <div class="rec-toolbar">
       <div class="rec-tabs">
         ${TABS.map(t => `
-          <button class="rec-tab ${STORE.tab===t.id?'active':''}" data-action="recSetTab" data-id="${t.id}">
+          <button class="rec-tab ${STORE.tab===t.id?'active':''}" data-action="recSetTab" data-id="${t.id}" data-nav-page="recettes" data-nav-sub="${t.id}">
             <span class="rec-tab-emoji">${t.emoji}</span>
             <span class="rec-tab-label">${t.label}</span>
             <span class="rec-tab-count">${counts[t.id]}</span>
@@ -1313,7 +1324,13 @@ async function saveCharacterRecipeAccess(characterId) {
   } catch (error) { notifySaveError(error); }
 }
 
-function setRecipeTab(t) { STORE.tab = t; STORE.filterTxt = ""; _render(); }
+function setRecipeTab(t) {
+  if (!TABS.some(tab => tab.id === t)) return;
+  STORE.tab = t;
+  STORE.filterTxt = '';
+  setRouteSub('recettes', t);
+  _render();
+}
 function searchRecipes(v) { STORE.filterTxt = v; _renderGrid(); }
 
 // ══════════════════════════════════════════════════════════════════════════════
