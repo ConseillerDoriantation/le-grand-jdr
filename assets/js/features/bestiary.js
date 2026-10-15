@@ -27,6 +27,7 @@ import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
 import { naturalWeaponDamageFormula } from '../shared/bestiary-combat.js';
 import { openCatalogAdmin } from '../shared/catalog-admin.js';
 import { catalogAutoPlural, catalogReplacementFor } from '../shared/catalog-admin-utils.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // DÃ‰LÃ‰GATION D'Ã‰VÃ‰NEMENTS â€” remplace les onclick/oninput/onchange inline
@@ -63,6 +64,15 @@ let _bstDragBlockClick = false;
 let _bstClickGuardInstalled = false;
 let _bstReordering = false;
 let _pendingTargetBeastId = null;
+let _pendingRouteBeastId = null;
+
+function _bstRouteId() {
+  return String(getRouteSub('bestiaire') || '').split('/')[0] || '';
+}
+
+function _bstSyncRoute({ replace = false } = {}) {
+  setRouteSub('bestiaire', STORE.activeId || '', { replace });
+}
 
 // ── Refonte fiche MJ (v2) — état local des sections éditables ─────────────────
 let _bstDmgEdit  = false;         // Profil de dégâts : mode édition (segments) vs lecture
@@ -1129,6 +1139,7 @@ export async function renderBestiary() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">...</div></div>`;
   const target = consumeTargetEntity('bestiary');
+  const targetId = target?.id || '';
   _pendingTargetBeastId = target?.id || _pendingTargetBeastId;
 
   // SÃ‰CURITÃ‰ : la vue "bestiaire d'un joueur" (viewAsUid) ne doit JAMAIS persister
@@ -1191,6 +1202,14 @@ export async function renderBestiary() {
 
   const cachedCreatures = getCachedCollection(col);
   _bstApplyData(cachedCreatures || []);
+  if (targetId && STORE.activeId === targetId) {
+    _bstSyncRoute({ replace: true });
+  } else if (!targetId) {
+    const routeId = _bstRouteId();
+    _pendingRouteBeastId = routeId || null;
+    STORE.activeId = routeId && STORE.creatures.some(creature => creature.id === routeId) ? routeId : null;
+    if (STORE.activeId) _pendingRouteBeastId = null;
+  }
   _render();
 
   const trackerUid = (STATE.isAdmin && STORE.viewAsUid) || STATE.user?.uid;
@@ -1234,6 +1253,11 @@ function _bstApplyData(all) {
     STORE.filterType = '';
     STORE.filterRang = '';
     _pendingTargetBeastId = null;
+    _bstSyncRoute({ replace: true });
+  }
+  if (!_pendingTargetBeastId && _pendingRouteBeastId && STORE.creatures.some(c => c.id === _pendingRouteBeastId)) {
+    STORE.activeId = _pendingRouteBeastId;
+    _pendingRouteBeastId = null;
   }
 }
 
@@ -1401,6 +1425,7 @@ async function _bstCreateDraft() {
     const newId = await addToCol(col, data);
     await _bstHydrate();
     STORE.activeId = newId;
+    _bstSyncRoute();
     _render();
     setTimeout(() => {
       const nameInput = document.querySelector('.bst-panel-name-input');
@@ -1579,13 +1604,17 @@ function _bstInstallInput() {
       e.preventDefault();
       _bstFocusIdx = Math.max(0, Math.min(cards.length - 1, _bstFocusIdx + step));
       const t = cards[_bstFocusIdx];
-      STORE.activeId = t.dataset.id; _syncActivePanel();
+      STORE.activeId = t.dataset.id;
+      _bstSyncRoute({ replace: true });
+      _syncActivePanel();
       document.querySelectorAll('.bst-bc')[_bstFocusIdx]?.focus({ preventScroll: false });
       return;
     }
     if (e.key === 'Enter' && _bstFocusIdx >= 0 && !inField) {
       e.preventDefault();
-      STORE.activeId = cards[_bstFocusIdx].dataset.id; _syncActivePanel();
+      STORE.activeId = cards[_bstFocusIdx].dataset.id;
+      _bstSyncRoute();
+      _syncActivePanel();
     }
   });
 }
@@ -1773,7 +1802,8 @@ function _renderCard(c, sortable = _canReorderBestiary()) {
   const sub = [c.type, c.environnement].filter(Boolean).join(' · ') || 'Sans classification';
   const isActive = c.id === STORE.activeId;
   return `<button class="bst-bc${isActive ? ' on' : ''}${c.hidden && admin ? ' hid' : ''}${sortable ? ' bst-sortable-item' : ''}"
-    style="--rc:${rs.color}" data-beast-id="${_esc(c.id)}" data-bst-action="open" data-id="${_esc(c.id)}">
+    style="--rc:${rs.color}" data-beast-id="${_esc(c.id)}" data-bst-action="open" data-id="${_esc(c.id)}"
+    data-nav-page="bestiaire" data-nav-sub="${_esc(c.id)}">
     <span class="bst-bc-r"></span>
     <span class="bst-bc-m">
       ${c.imageUrl ? `<img src="${_esc(c.imageUrl)}" alt="" loading="lazy">` : `<span class="bst-bc-e">${_esc(c.emoji || '❓')}</span>`}
@@ -2081,13 +2111,15 @@ export function openBestiaryEntry(id) {
   _bstOpen(id);
 }
 
-function _bstOpen(id) {
+function _bstOpen(id, { syncRoute = true, replace = false } = {}) {
   if (_bstDragBlockClick) return;
   STORE.activeId = STORE.activeId === id ? null : id;
+  if (syncRoute) _bstSyncRoute({ replace });
   _syncActivePanel();
 }
-function _bstClose() {
+function _bstClose({ syncRoute = true, replace = false } = {}) {
   STORE.activeId = null;
+  if (syncRoute) _bstSyncRoute({ replace });
   _syncActivePanel();
 }
 
@@ -2241,6 +2273,7 @@ async function _bstSwitchBestiaire(id) {
   STORE.filterType  = '';
   STORE.filterRang  = '';
   STORE.filterPrep  = '';
+  _bstSyncRoute({ replace: true });
   await renderBestiary();
 }
 
@@ -2250,6 +2283,7 @@ async function _bstViewAs(uid) {
   if (!STATE.isAdmin) return;
   STORE.viewAsUid = (uid && uid !== STATE.user?.uid) ? uid : null;
   STORE.activeId  = null;
+  _bstSyncRoute({ replace: true });
   await renderBestiary();
 }
 
@@ -2265,6 +2299,7 @@ async function _bstCreateBestiaire() {
   STORE.activeId    = null;
   STORE.filterRang  = '';
   STORE.filterPrep  = '';
+  _bstSyncRoute({ replace: true });
   await renderBestiary();
 }
 
@@ -2433,6 +2468,18 @@ function _bstReset(id) {
 
 // â”€â”€ Override PAGES.bestiaire + exports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 PAGES.bestiaire = renderBestiary;
+
+// La fiche ouverte appartient à l'historique de navigation, mais sa restauration
+// reste purement locale : les créatures et le tracker déjà abonnés sont réutilisés.
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'bestiaire' || !document.getElementById('bst-root')) return;
+  const id = String(event.detail.sub || '').split('/')[0] || '';
+  if (id && !STORE.creatures.some(creature => creature.id === id)) return;
+  event.preventDefault();
+  _pendingRouteBeastId = null;
+  STORE.activeId = id || null;
+  _syncActivePanel();
+});
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // MODAL IMAGE â€” Ã©diteur d'image dÃ©diÃ© de la crÃ©ature (depuis le panneau)

@@ -30,6 +30,7 @@ import { STATE } from '../core/state.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import PAGES from './pages.js';
 import { registerActions } from '../core/actions.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // Rétro-compat : le contenu legacy est du texte brut (avec retours ligne) ;
 // le nouveau contenu est du HTML rich-text. On détecte la présence d'une balise
@@ -299,9 +300,12 @@ async function renderWorld() {
   // Catégories + section active visibles. Pour un joueur, une section dans une
   // catégorie masquée est elle aussi masquée (cohérence nav ↔ contenu).
   const { visibleCats, visibleSections } = _worldVisibleData();
+  const routeSection = getRouteSub('world');
+  if (routeSection && visibleSections.some(s => s.id === routeSection)) STORE.activeId = routeSection;
   if (!STORE.activeId || !visibleSections.find(s => s.id === STORE.activeId)) {
     STORE.activeId = visibleSections[0]?.id || null;
   }
+  if (STORE.activeId && routeSection !== STORE.activeId) setRouteSub('world', STORE.activeId, { replace: true });
   const activeSection = visibleSections.find(s => s.id === STORE.activeId) || null;
   const activeCat = activeSection ? _worldCategoryFor(activeSection) : null;
   const stats = _worldStats(visibleCats, visibleSections);
@@ -433,7 +437,7 @@ function _renderNavItem(s) {
   const snippet = _searchSnippet(s);
   return `<div
     data-nav-id="${_esc(s.id)}" data-sec-id="${_esc(s.id)}"
-    data-action="selectWorldSection" data-id="${_esc(s.id)}" role="button" tabindex="0"${isActive ? ' aria-current="page"' : ''}
+    data-action="selectWorldSection" data-id="${_esc(s.id)}" data-nav-page="world" data-nav-sub="${_esc(s.id)}" role="button" tabindex="0"${isActive ? ' aria-current="page"' : ''}
     class="world-nav-item${isActive ? ' is-active' : ''}${isHidden ? ' is-hidden' : ''}">
     ${STATE.isAdmin && !_searchQuery ? `<span class="world-nav-grip">${GRIP}</span>` : ''}
     <span class="world-nav-icon">${_esc(s.icone || '📖')}</span>
@@ -709,11 +713,12 @@ function _renderReader(section) {
   _afterReaderRender();
 }
 
-function selectWorldSection(id) {
+function selectWorldSection(id, { syncRoute = true } = {}) {
   const section = STORE.sections.find(s => s.id === id);
   if (!section) return;
   _editingContentId = null;   // naviguer quitte l'éditeur de contenu
   STORE.activeId = id;
+  if (syncRoute) setRouteSub('world', id);
   document.querySelectorAll('[data-nav-id]').forEach(el => {
     const on = el.dataset.navId === id;
     el.classList.toggle('is-active', on);
@@ -1096,6 +1101,14 @@ async function deleteWorldCategory(id) {
 // ── Override PAGES.world ──────────────────────────────────────────────────────
 PAGES.world = renderWorld;
 
+document.addEventListener('app:route-sub-changed', (event) => {
+  const { page, sub } = event.detail || {};
+  if (page !== 'world' || !document.getElementById('world-main-content')) return;
+  if (!STORE.sections.some(section => section.id === sub)) return;
+  event.preventDefault();
+  selectWorldSection(sub, { syncRoute: false });
+  worldScrollTo('world-main-content');
+});
 
 registerActions({
   openWorldSectionModal:  (btn) => openWorldSectionModal(btn.dataset.id || undefined, btn.dataset.catId || undefined),

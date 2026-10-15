@@ -23,6 +23,7 @@ import {
   TOGGLEABLE_FEATURES, enabledFeaturesOf, isPremiumFeature, isFeatureAllowedByPlan,
 } from '../shared/features.js';
 import { hasAdventurePremiumAccess, hasPremiumAccess } from '../shared/premium.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 const COLORS = ['#4f8cff', '#22c38e', '#a970ff', '#ff9544', '#ff5a7e', '#f4c430', '#62c6e8', '#9ca3af'];
 const FALLBACK_COLOR = '#4f8cff';
@@ -46,6 +47,7 @@ const _hub = {
   invitationsPromise: null,
   agendaAdventureId: '',
   agendaSession: undefined,
+  agendaWatchMounted: false,
 };
 
 const _manage = {
@@ -175,7 +177,10 @@ function _watchAgendaSession() {
   if (_hub.agendaAdventureId !== adventureId) {
     _hub.agendaAdventureId = adventureId;
     _hub.agendaSession = undefined;
+    _hub.agendaWatchMounted = false;
   }
+  if (_hub.agendaWatchMounted) return;
+  _hub.agendaWatchMounted = true;
   watchPageDoc('adventures-agenda-session', 'agenda_session', 'next', 'aventures', data => {
     if (STATE.adventure?.id !== adventureId || _hub.agendaSession === data) return;
     _hub.agendaSession = data;
@@ -378,7 +383,7 @@ function _renderAdventureList(adventures) {
       const session = _nextSession(adv);
       const char = _characterOf(adv, STATE.user?.uid);
       const role = _role(adv);
-      return '<button type="button" class="av-row' + (selected ? ' is-selected' : '') + (active ? ' is-active' : '') + '" data-action="_advSelect" data-id="' + adv.id + '">' +
+      return '<button type="button" class="av-row' + (selected ? ' is-selected' : '') + (active ? ' is-active' : '') + '" data-action="_advSelect" data-id="' + adv.id + '" data-nav-page="aventures" data-nav-sub="' + adv.id + '">' +
         '<span class="av-row-main">' + _emblem(adv, 'is-small') +
           '<span><strong>' + _esc(adv.nom || 'Aventure sans nom') + '</strong>' +
           (active ? '<em>Active</em>' : '') +
@@ -454,9 +459,25 @@ async function renderAventuresPage() {
   await _ensureInvitations();
   if (STATE.currentPage !== 'aventures' || !document.getElementById('main-content')) return;
   const adventures = Array.isArray(STATE.adventures) ? STATE.adventures : [];
-  const visible = _visibleAdventures([...adventures]);
+  const routeId = getRouteSub('aventures');
+  const routeAdventure = routeId ? adventures.find(adv => adv.id === routeId) : null;
+  if (routeAdventure) {
+    _hub.selectedId = routeId;
+    _hub.detailClosed = false;
+  }
+  let visible = _visibleAdventures([...adventures]);
+  // Un lien direct ou Retour doit rouvrir sa campagne même si un ancien filtre
+  // local la masquait. Les filtres ne font volontairement pas partie de l'URL.
+  if (routeAdventure && !visible.some(adv => adv.id === routeId)) {
+    _hub.filter = _isArchived(routeAdventure) ? 'archived' : 'all';
+    _hub.query = '';
+    visible = _visibleAdventures([...adventures]);
+  }
   if (!_hub.detailClosed && !visible.some(adv => adv.id === _hub.selectedId)) {
     _hub.selectedId = visible.find(adv => adv.id === STATE.adventure?.id)?.id || visible[0]?.id || '';
+  }
+  if (!_hub.detailClosed && _hub.selectedId && routeId !== _hub.selectedId) {
+    setRouteSub('aventures', _hub.selectedId, { replace: true });
   }
   const selected = _hub.detailClosed ? null : (adventures.find(adv => adv.id === _hub.selectedId) || null);
   content.innerHTML = '<div class="av-page">' +
@@ -504,6 +525,7 @@ async function doCreateAdventure() {
     await _refreshAdventures();
     _hub.selectedId = adv.id;
     _hub.detailClosed = false;
+    setRouteSub('aventures', adv.id);
     closeModal();
     showNotif('Aventure créée.', 'success');
     renderAventuresPage();
@@ -672,6 +694,7 @@ async function archiveAdventure(advId) {
     _hub.filter = _isArchived(adv) ? 'all' : 'archived';
     _hub.selectedId = advId;
     _hub.detailClosed = false;
+    setRouteSub('aventures', advId, { replace: true });
     showNotif(_isArchived(adv) ? 'Aventure réactivée.' : 'Aventure archivée.', 'success');
     renderAventuresPage();
   } catch (error) {
@@ -783,6 +806,7 @@ function createAdventureFromBackup() {
       const result = await importAdventure(adv.id, payload);
       await _refreshAdventures();
       _hub.selectedId = adv.id;
+      setRouteSub('aventures', adv.id);
       renderAventuresPage();
       showNotif(result.failed.length ? 'Aventure créée avec certains échecs de restauration.' : 'Aventure restaurée.', result.failed.length ? 'error' : 'success');
     } catch (error) {
@@ -882,6 +906,7 @@ async function deleteAdventureAndRefresh(advId) {
       return;
     }
     _hub.selectedId = STATE.adventure?.id || STATE.adventures[0]?.id || '';
+    setRouteSub('aventures', _hub.selectedId, { replace: true });
     renderAventuresPage();
   } catch (error) {
     showNotif(error.message || 'Échec de la suppression.', 'error');
@@ -981,6 +1006,28 @@ async function relinkAdventurePlayer(advId, oldUid, newUid) {
 import PAGES from './pages.js';
 PAGES.aventures = renderAventuresPage;
 
+document.addEventListener('app:page-changed', (event) => {
+  if (event.detail?.page !== 'aventures') _hub.agendaWatchMounted = false;
+});
+
+document.addEventListener('app:route-sub-changed', (event) => {
+  const { page, sub } = event.detail || {};
+  if (page !== 'aventures' || !document.querySelector('.av-page')) return;
+  if (!sub) {
+    event.preventDefault();
+    _hub.selectedId = '';
+    _hub.detailClosed = true;
+    renderAventuresPage();
+    return;
+  }
+  if (!(STATE.adventures || []).some(adventure => adventure.id === sub)) return;
+  event.preventDefault();
+  _hub.selectedId = sub;
+  _hub.leaveId = '';
+  _hub.detailClosed = false;
+  renderAventuresPage();
+});
+
 registerActions({
   openCreateAdventureModal: () => openCreateAdventureModal(),
   openManageAdventureModal: button => openManageAdventureModal(button.dataset.id),
@@ -1011,11 +1058,13 @@ registerActions({
     _hub.selectedId = button.dataset.id;
     _hub.leaveId = '';
     _hub.detailClosed = false;
+    setRouteSub('aventures', _hub.selectedId);
     renderAventuresPage();
   },
   _advCloseDetail: () => {
     _hub.selectedId = '';
     _hub.detailClosed = true;
+    setRouteSub('aventures', '');
     renderAventuresPage();
   },
   _advLeaveAsk: button => {

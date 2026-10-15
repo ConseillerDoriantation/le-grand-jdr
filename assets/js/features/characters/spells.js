@@ -22,6 +22,7 @@ import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATI
 import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _isLightSpell, _calcSortReduction, _autoSourceReduction, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
 import { computeSheetLines, renderSheetLines } from '../../shared/spell-sheet-lines.js';
 import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
+import { getRouteSub, setRouteSub } from '../../shared/route.js';
 
 // Ressource de coût lisible d'un sort (label court : PM / PV / Or / —).
 const _sortResLabel = (s) => spellCostRes(s).label;
@@ -982,6 +983,13 @@ export function bindSortCardsDnd(c, canEdit) {
 export function renderCharDeck(c, canEdit) {
   _ensureSpellRenderCaches();
   _sortsLoadUiFor(c.id);   // état UI par personnage (mode/densité/pliage) + reset des filtres transitoires
+  if (!_spellRerenderOverride) {
+    const [routeCharId, routeTab, routeMode] = getRouteSub('characters').split('/');
+    if (routeCharId === c.id && routeTab === 'sorts') {
+      if (['grimoire', 'prepare'].includes(routeMode)) _sortsMode = routeMode;
+      else setRouteSub('characters', `${c.id}/sorts/${_sortsMode}`, { replace: true });
+    }
+  }
   const allSorts = c.deck_sorts || [];
   const cats     = c.sort_cats  || [];
   const mainP    = getMainWeapon(c);
@@ -1177,12 +1185,12 @@ export function renderCharDeck(c, canEdit) {
     <!-- Deux espaces mentaux distincts : collection / équipement -->
     <div class="cs-sorts-viewrow">
       <div class="cs-sorts-viewseg" role="tablist" aria-label="Mode de l'onglet Sorts">
-        <button class="cs-sorts-seg ${mode==='grimoire'?'on':''}" role="tab" aria-selected="${mode==='grimoire'}" data-action="_sortsSetMode" data-mode="grimoire" title="Gérer tes sorts : catégories, filtres, édition">
+        <button class="cs-sorts-seg ${mode==='grimoire'?'on':''}" role="tab" aria-selected="${mode==='grimoire'}" data-action="_sortsSetMode" data-mode="grimoire" ${npcSpellHost ? '' : `data-nav-page="characters" data-nav-sub="${_esc(`${c.id}/sorts/grimoire`)}"`} title="Gérer tes sorts : catégories, filtres, édition">
           <span class="cs-sorts-seg-ico">📖</span>
           <span class="cs-sorts-seg-copy"><strong>Grimoire</strong></span>
           <b>${allSorts.length}</b>
         </button>
-        <button class="cs-sorts-seg cs-sorts-seg--deck ${mode==='prepare'?'on':''} ${deckOver?'is-over':''}" role="tab" aria-selected="${mode==='prepare'}" data-action="_sortsSetMode" data-mode="prepare" title="${npcSpellHost ? 'Les nouveaux sorts sont ajoutés automatiquement. Clique une tuile pour les ajouter ou les retirer du Deck.' : 'Préparer ton Deck : clique une tuile pour ajouter ou retirer un sort (capacité INT)'}">
+        <button class="cs-sorts-seg cs-sorts-seg--deck ${mode==='prepare'?'on':''} ${deckOver?'is-over':''}" role="tab" aria-selected="${mode==='prepare'}" data-action="_sortsSetMode" data-mode="prepare" ${npcSpellHost ? '' : `data-nav-page="characters" data-nav-sub="${_esc(`${c.id}/sorts/prepare`)}"`} title="${npcSpellHost ? 'Les nouveaux sorts sont ajoutés automatiquement. Clique une tuile pour les ajouter ou les retirer du Deck.' : 'Préparer ton Deck : clique une tuile pour ajouter ou retirer un sort (capacité INT)'}">
           <span class="cs-sorts-seg-ico">⚡</span>
           <span class="cs-sorts-seg-copy"><strong>Deck</strong></span>
           <b>${deckCount}<small>/${deckMax}${deckFree ? ` +${deckFree}` : ''}</small></b>
@@ -1482,6 +1490,8 @@ function _sortsSetMode(m) {
   _sortsReplaceIdx = null;
   lsJson.set('cs-sorts-mode', mode);   // défaut global (nouveaux persos)
   _sortsPersistUi();
+  const c = _getCurrentSpellChar();
+  if (!_spellRerenderOverride && c?.id) setRouteSub('characters', `${c.id}/sorts/${mode}`);
   _sortsRerender();
 }
 // Facettes combinables : re-cliquer une facette active la désactive.

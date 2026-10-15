@@ -21,7 +21,7 @@ import { confirmModal, openModal, promptModal, closeModalDirect } from '../share
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
-import { getRouteSub } from '../shared/route.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
 import { resolveAvatarUrl } from '../shared/avatar.js';
 import { canControlCharacter, getControlledCharacters } from '../shared/character-state.js';
@@ -55,6 +55,7 @@ let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
 let _statsEvoMetric = 'dmgDealt';      // métrique du comparatif missions/groupes
 let _statsAnalysisMode = 'overview';   // 'overview' | 'compare'
 let _statsTab = 'overview';            // onglet actif : overview|ranking|players|rolls|audit
+const _STATS_TABS = ['overview', 'ranking', 'players', 'rolls', 'audit'];
 let _statsPopOpen = false;             // popover « joueurs ciblés » ouvert (persisté entre rendus)
 let _statsMissionPopOpen = false;      // popover « Mission » (avec images) ouvert
 let _statsRankSort = { key: 'dmg', dir: -1 }; // tri du tableau de classement (dir : -1 desc, 1 asc)
@@ -819,17 +820,23 @@ async function _adminValidateAllSpells() {
 // ── Rendu ──
 function _cmjOpen(vm) {
   _cmjState.vm = vm;
-  if (!_cmjState.tab) {
+  const routeTab = getRouteSub('admin');
+  if (['todo', 'players', 'settings'].includes(routeTab)) {
+    _cmjState.tab = routeTab;
+  } else if (!_cmjState.tab) {
     const stored = (() => { try { return localStorage.getItem(_CMJ_TAB_KEY) || ''; } catch { return ''; } })();
     _cmjState.tab = ['todo', 'players', 'settings'].includes(stored) ? stored : (vm.items.length ? 'todo' : 'settings');
   }
   if (_cmjState.tab === 'todo' && !vm.items.length) _cmjState.tab = 'settings';
+  if (routeTab !== _cmjState.tab) setRouteSub('admin', _cmjState.tab, { replace: true });
   if (_cmjState.cur >= _cmjVisible().length) _cmjState.cur = Math.max(0, _cmjVisible().length - 1);
   _cmjRender();
   _cmjMount();
 }
-function _cmjSetTab(id) {
+function _cmjSetTab(id, { syncRoute = true } = {}) {
+  if (!['todo', 'players', 'settings'].includes(id)) return;
   _cmjState.tab = id; try { localStorage.setItem(_CMJ_TAB_KEY, id); } catch {}
+  if (syncRoute) setRouteSub('admin', id);
   _cmjState.refocus = null; _cmjRender(); window.scrollTo(0, 0);
 }
 function _cmjRender() {
@@ -841,7 +848,7 @@ function _cmjRender() {
     { id: 'players', l: 'Joueurs', badge: vm.players.length },
     { id: 'settings', l: 'Réglages' },
   ];
-  const tabsHtml = tabs.map((t, i) => `<button type="button" role="tab" class="cmj-tab${_cmjState.tab === t.id ? ' on' : ''}" data-cmj-tab="${t.id}" aria-selected="${_cmjState.tab === t.id}" title="${t.l} (${i + 1})">${_esc(t.l)}${t.badge != null ? `<span class="cmj-n${t.hot ? ' hot' : ''}">${t.badge}</span>` : ''}</button>`).join('');
+  const tabsHtml = tabs.map((t, i) => `<button type="button" role="tab" class="cmj-tab${_cmjState.tab === t.id ? ' on' : ''}" data-cmj-tab="${t.id}" data-nav-page="admin" data-nav-sub="${t.id}" aria-selected="${_cmjState.tab === t.id}" title="${t.l} (${i + 1})">${_esc(t.l)}${t.badge != null ? `<span class="cmj-n${t.hot ? ' hot' : ''}">${t.badge}</span>` : ''}</button>`).join('');
   const view = _cmjState.tab === 'players' ? _cmjRenderPlayers() : _cmjState.tab === 'settings' ? _cmjRenderSettings() : _cmjRenderTodo();
   root.innerHTML = `<div class="cmj">${_CMJ_SPRITE}
     <div class="cmj-head">
@@ -962,6 +969,7 @@ function _cmjMount() {
     if (!document.querySelector('.cmj')) return;
     const t = e.target.closest('[data-cmj-tab],[data-cmj-sec],[data-cmj-exp],[data-cmj-bulk],[data-cmj-autoall],[data-cmj-pf],[data-cmj-psort],[data-cmj-goto],.cmj-rw');
     if (!t) return;
+    if ((e.ctrlKey || e.metaKey) && t.matches('[data-nav-sub]')) return;
     if (t.dataset.cmjTab) return _cmjSetTab(t.dataset.cmjTab);
     if (t.dataset.cmjSec) { _cmjState.sec = t.dataset.cmjSec; _cmjState.cur = 0; return _cmjRender(); }
     if (t.dataset.cmjExp) return _cmjToggle(t.dataset.cmjExp);
@@ -969,7 +977,7 @@ function _cmjMount() {
     if (t.hasAttribute('data-cmj-autoall')) { return _cmjRepairAll(); }
     if (t.dataset.cmjPf) { _cmjState.pf = t.dataset.cmjPf; return _cmjRender(); }
     if (t.dataset.cmjPsort) { _cmjState.psort = t.dataset.cmjPsort; return _cmjRender(); }
-    if (t.dataset.cmjGoto) { _cmjState.sec = 'all'; _cmjState.tab = 'todo'; try { localStorage.setItem(_CMJ_TAB_KEY, 'todo'); } catch {} _cmjState.cur = _cmjVisible().findIndex(i => i.id === t.dataset.cmjGoto); _cmjRender(); const r = document.querySelector(`.cmj-row[data-id="${CSS.escape(t.dataset.cmjGoto)}"]`); if (r) { r.classList.add('flash'); r.querySelector('.cmj-rw')?.focus({ preventScroll: false }); } return; }
+    if (t.dataset.cmjGoto) { _cmjState.sec = 'all'; _cmjState.tab = 'todo'; try { localStorage.setItem(_CMJ_TAB_KEY, 'todo'); } catch {} setRouteSub('admin', 'todo'); _cmjState.cur = _cmjVisible().findIndex(i => i.id === t.dataset.cmjGoto); _cmjRender(); const r = document.querySelector(`.cmj-row[data-id="${CSS.escape(t.dataset.cmjGoto)}"]`); if (r) { r.classList.add('flash'); r.querySelector('.cmj-rw')?.focus({ preventScroll: false }); } return; }
     if (t.classList.contains('cmj-rw') && !e.target.closest('button')) { _cmjState.cur = +t.dataset.cmjIdx; _cmjMoveCur(0); const id = t.parentElement.dataset.id; if (_cmjVisible().find(i => i.id === id)?.spell) _cmjToggle(id); }
   });
   document.addEventListener('input', e => {
@@ -1632,7 +1640,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   </div>` : '';
   const tabDefs = [['overview', 'Vue d’ensemble'], ['ranking', 'Classement'], ['players', 'Joueurs'], ['rolls', 'Jets & moyennes'], ['audit', 'Audit']];
   const tabCounts = { ranking: rows.length, players: rows.length };
-  const tabsBar = `<div class="stats-tabs">${tabDefs.map(([k, l]) => `<button class="stats-tab${_statsTab === k ? ' on' : ''}" data-action="_statsSetTab" data-tab="${k}">${l}${tabCounts[k] ? `<span class="stats-tab-cnt">${tabCounts[k]}</span>` : ''}</button>`).join('')}</div>`;
+  const tabsBar = `<div class="stats-tabs">${tabDefs.map(([k, l]) => `<button class="stats-tab${_statsTab === k ? ' on' : ''}" data-action="_statsSetTab" data-tab="${k}" data-nav-page="statistiques" data-nav-sub="${k}">${l}${tabCounts[k] ? `<span class="stats-tab-cnt">${tabCounts[k]}</span>` : ''}</button>`).join('')}</div>`;
   const controls = `<div class="stats-topbar"><div class="stats-topbar-in">
     <div class="stats-topbar-row">
       <div class="stats-brand"><h1>Statistiques</h1><small>${_esc(scopeKicker)}</small></div>
@@ -3414,9 +3422,9 @@ const PAGES = {
           </div>
         </div>
         <div class="view-toggle" role="tablist" aria-label="Mode d'affichage des hauts-faits">
-          <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie" role="tab" aria-selected="${activeView === 'galerie'}">▦ Galerie</button>
-          <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline" role="tab" aria-selected="${activeView === 'timeline'}">⋮ Chronologie</button>
-          <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions" role="tab" aria-selected="${activeView === 'missions'}">🎯 Missions</button>
+          <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie" data-nav-page="achievements" data-nav-sub="galerie" role="tab" aria-selected="${activeView === 'galerie'}">▦ Galerie</button>
+          <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline" data-nav-page="achievements" data-nav-sub="timeline" role="tab" aria-selected="${activeView === 'timeline'}">⋮ Chronologie</button>
+          <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions" data-nav-page="achievements" data-nav-sub="missions" role="tab" aria-selected="${activeView === 'missions'}">🎯 Missions</button>
         </div>
       </div>
     </section>
@@ -3739,6 +3747,9 @@ const PAGES = {
 
   // ─── STATISTIQUES ─────────────────────────────────────────────────────────────
   async statistiques() {
+    const routeTab = getRouteSub('statistiques');
+    if (_STATS_TABS.includes(routeTab)) _statsTab = routeTab;
+    else setRouteSub('statistiques', _statsTab, { replace: true });
     const content = document.getElementById('main-content');
     content.innerHTML = `<div id="stats-root" class="stats-root">${loadingHtml('Chargement des statistiques…')}</div>`;
     const revision = ++_statsLoadRevision;
@@ -4245,8 +4256,9 @@ registerActions({
   // restent en mémoire, donc aucun nouvel accès réseau n'est déclenché.
   _statsSetTab: (btn) => {
     const tab = btn.dataset.tab;
-    if (!tab || tab === _statsTab) return;
+    if (!_STATS_TABS.includes(tab) || tab === _statsTab) return;
     _statsTab = tab;
+    setRouteSub('statistiques', tab);
     _statsRender(_statsScope);
     document.getElementById('stats-root')?.scrollIntoView({ block: 'start' });
   },
@@ -4556,6 +4568,24 @@ registerActions({
   _adminMergeDuplicate: (btn) => _adminMergeDuplicate(btn.dataset.uids, btn.dataset.email),
   _adminMergeDuplicateConfirm: () => _adminMergeDuplicateConfirm(),
   _adminMergeDuplicateCancel: () => closeModalDirect(),
+});
+
+// Retour/Avance entre les onglets lourds sans reconstruire la page ni relancer
+// ses lectures. Le routeur considère la sous-route comme traitée quand
+// preventDefault() est appelé.
+document.addEventListener('app:route-sub-changed', (event) => {
+  const { page, sub } = event.detail || {};
+  if (page === 'admin' && _cmjState.vm && ['todo', 'players', 'settings'].includes(sub)) {
+    event.preventDefault();
+    _cmjSetTab(sub, { syncRoute: false });
+    return;
+  }
+  if (page === 'statistiques' && document.getElementById('stats-root') && _STATS_TABS.includes(sub)) {
+    event.preventDefault();
+    _statsTab = sub;
+    _statsRender(_statsScope);
+    document.getElementById('stats-root')?.scrollIntoView({ block: 'start' });
+  }
 });
 
 export default PAGES;

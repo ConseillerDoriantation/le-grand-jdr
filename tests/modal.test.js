@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+const modalSource = readFileSync(new URL('../assets/js/shared/modal.js', import.meta.url), 'utf8');
 
 class FakeClassList {
   constructor() { this.values = new Set(); }
@@ -85,6 +88,14 @@ test('fermer une confirmation empilée ne déclenche pas la garde de la modale d
 
   clearModalCloseGuard();
   closeModalDirect();
+});
+
+test('une confirmation conserve le DOM vivant de l’éditeur situé dessous', () => {
+  assert.match(modalSource, /function _parkModalBody\(body\)/);
+  assert.match(modalSource, /while \(body\.firstChild\) parked\.appendChild\(body\.firstChild\)/);
+  assert.match(modalSource, /parked\.hidden = true/);
+  assert.match(modalSource, /_restoreParkedModalBody\(bodyEl, previous\.parkedBody\)/);
+  assert.doesNotMatch(modalSource, /if \(bodyEl\)\s+bodyEl\.innerHTML\s*=\s*previous\.body/);
 });
 
 test('une fermeture réelle nettoie la garde avant la prochaine confirmation autonome', () => {

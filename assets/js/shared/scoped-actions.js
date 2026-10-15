@@ -86,6 +86,11 @@ export function bindScopedActions(prefix, handlers) {
   const dispatch = (e) => {
     const el = e.target.closest(selector);
     if (!el) return;
+    // Laisse la navigation globale traiter Ctrl/⌘+clic comme un vrai lien.
+    // Le listener scopé est en capture : sans cette garde, il ouvrirait aussi
+    // la fiche dans l'onglet courant avant que le nouvel onglet soit créé.
+    if (e.type === 'click' && (e.ctrlKey || e.metaKey)
+      && el.closest('[data-nav-sub],[data-navigate]')) return;
     const action = el.dataset[actionKey];
     const fn = handlers[action];
     if (typeof fn !== 'function') return;
