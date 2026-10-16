@@ -135,6 +135,8 @@ function _emptyModifiers() {
     // effet par effet (certains sont encore masqués dans l'éditeur).
     caBonus: 0,
     damageBonus: 0,
+    healBonus: 0,
+    critRangeBonus: 0,
     moveDelta: 0,
     saveBonus: {},
     resistances: [],
@@ -181,6 +183,8 @@ function _normalizeModifiers(modifiers = {}) {
   normalized.damageReduction = Math.max(0, _num(modifiers.damageReduction));
   normalized.caBonus = _num(modifiers.caBonus);
   normalized.damageBonus = _num(modifiers.damageBonus);
+  normalized.healBonus = _num(modifiers.healBonus);
+  normalized.critRangeBonus = Math.max(0, _num(modifiers.critRangeBonus));
   normalized.moveDelta = Number((_numF(modifiers.moveDelta) || 0).toFixed(2));
   const sb = {};
   if (modifiers.saveBonus && typeof modifiers.saveBonus === 'object') {
@@ -194,7 +198,7 @@ function _normalizeModifiers(modifiers = {}) {
 
 // ── Paliers (partie B) ────────────────────────────────────────────────────────
 // Effet d'un palier : { kind, value?, mode?, target?, stat?, element? }.
-const _TIER_KINDS = new Set(['toucher', 'pm', 'dr', 'roll', 'ca', 'dmg', 'save', 'resist', 'move']);
+const _TIER_KINDS = new Set(['toucher', 'pm', 'dr', 'roll', 'ca', 'dmg', 'heal', 'crit', 'save', 'resist', 'move']);
 function _normalizeTierEffect(raw = {}) {
   const kind = _TIER_KINDS.has(raw.kind) ? raw.kind : null;
   if (!kind) return null;
@@ -210,6 +214,7 @@ function _normalizeTierEffect(raw = {}) {
   let v = kind === 'move' ? _numF(raw.value) : _num(raw.value);
   if (!v) v = kind === 'pm' ? -step : step;
   if (kind === 'dr' && v < 1) v = 1;
+  if (kind === 'crit' && v < 1) v = 1;
   return { kind, value: Number(v.toFixed(2)) };
 }
 // Effets dérivés de l'ancien `modifiers` (migration en lecture).
@@ -255,6 +260,8 @@ function _aggregateTierEffects(effects = []) {
       case 'dr': m.damageReduction += _num(e.value); break;
       case 'ca': m.caBonus += _num(e.value); break;
       case 'dmg': m.damageBonus += _num(e.value); break;
+      case 'heal': m.healBonus += _num(e.value); break;
+      case 'crit': m.critRangeBonus += _num(e.value); break;
       case 'move': m.moveDelta += _numF(e.value); break;
       case 'save': if (e.stat) m.saveBonus[e.stat] = (m.saveBonus[e.stat] || 0) + _num(e.value); break;
       case 'resist': if (e.element && !m.resistances.includes(e.element)) m.resistances.push(e.element); break;
@@ -856,6 +863,8 @@ const _AT_STAT_NAMES = { force: 'Force', dexterite: 'Dextérité', constitution:
 const _AT_KINDS = {
   toucher: { b: 'TCH', n: 'Toucher', d: 'Bonus aux jets d’attaque', v: 1, good: e => e.value > 0 },
   dmg: { b: 'DGT', n: 'Dégâts d’arme', d: 'Ajoutés aux dégâts infligés', v: 1, good: e => e.value > 0 },
+  heal: { b: 'SOI', n: 'Soin', d: 'Ajouté aux sorts de soin (pas aux dégâts ni à la CA)', v: 1, good: e => e.value > 0 },
+  crit: { b: 'CRI', n: 'Plage de critique', d: 'Critique sur une plage élargie (19–20…)', v: 1, min: 1, good: () => true },
   ca: { b: 'CA', n: 'Classe d’armure', d: 'Bonus de CA', v: 1, good: e => e.value > 0 },
   dr: { b: 'RD', n: 'Réduction de dégâts', d: 'Soustraite aux dégâts subis', v: 1, min: 1, good: () => true },
   pm: { b: 'PM', n: 'Coût des sorts', d: 'PM ajoutés ou retirés', v: -1, good: e => e.value < 0 },
@@ -864,7 +873,7 @@ const _AT_KINDS = {
   resist: { b: 'RES', n: 'Résistance', d: 'À un type de dégâts', multi: 1, good: () => true },
   roll: { b: 'JET', n: 'Avantage / désavantage', d: 'Sur une carac ou compétence', multi: 1, good: e => e.mode === 'advantage' },
 };
-const _AT_BADGE = { toucher: 'TCH', pm: 'PM', dr: 'RD', roll: 'JET', ca: 'CA', dmg: 'DGT', save: 'SVG', resist: 'RES', move: 'DEP' };
+const _AT_BADGE = { toucher: 'TCH', pm: 'PM', dr: 'RD', roll: 'JET', ca: 'CA', dmg: 'DGT', heal: 'SOI', crit: 'CRI', save: 'SVG', resist: 'RES', move: 'DEP' };
 const _AT_SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
 <symbol id="at-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></symbol>
 <symbol id="at-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
@@ -909,6 +918,8 @@ function _atEffTxt(f) {
     case 'roll': return `${f.mode === 'advantage' ? 'Avantage' : 'Désavantage'} ${_atTgtL(f.target)}`;
     case 'ca': return `CA ${_atSg(f.value)}`;
     case 'dmg': return `Dégâts ${_atSg(f.value)}`;
+    case 'heal': return `Soin ${_atSg(f.value)}`;
+    case 'crit': return `Critique ${Math.max(2, 20 - f.value)}–20`;
     case 'save': return `Sauvegarde ${_AT_STAT_NAMES[f.stat] || f.stat} ${_atSg(f.value)}`;
     case 'resist': return `Résistance ${_atDmgTypes.find(t => t.id === f.element)?.label || f.element}`;
     case 'move': return `Déplacement ${_atSg(f.value)} m`;
@@ -943,6 +954,9 @@ function _atCtlHtml(set, ti, fi, f) {
     const opts = list.map(t => `<option value="${_esc(t.id)}"${f.element === t.id ? ' selected' : ''}>${_esc(((t.icon ? t.icon + ' ' : '') + (t.label || t.id)))}</option>`).join('');
     return `<select class="at-sel" data-at-fxel="${ti}:${fi}">${opts}</select>`;
   }
+  if (f.kind === 'crit') {
+    return `<div class="at-stp"><button type="button" data-at-step="${ti}:${fi}:-1" aria-label="Plage plus étroite">−</button><span>${Math.max(2, 20 - (f.value || 1))}–20</span><button type="button" data-at-step="${ti}:${fi}:1" aria-label="Plage plus large">+</button></div>`;
+  }
   return _atStpHtml(ti, fi, f);
 }
 function _atKsub(f) {
@@ -950,6 +964,8 @@ function _atKsub(f) {
   if (f.kind === 'pm') return f.value < 0 ? 'Réduction' : 'Surcoût';
   if (f.kind === 'save') return 'Ajouté au jet de sauvegarde';
   if (f.kind === 'resist') return 'Dégâts de ce type réduits de moitié';
+  if (f.kind === 'crit') return `Critique dès ${Math.max(2, 20 - f.value)}`;
+  if (f.kind === 'heal') return 'Ajouté aux sorts de soin';
   return _AT_KINDS[f.kind]?.d || '';
 }
 function _atMainHtml() {
@@ -994,6 +1010,8 @@ function _atSimHtml() {
     if (f.kind === 'roll') r.push([_atTgtL(f.target) || 'Jet', f.mode === 'advantage' ? '2d20, garder le haut' : '2d20, garder le bas']);
     if (f.kind === 'pm') r.push(['Sort à 5 PM', `${Math.max(0, 5 + f.value)} PM`]);
     if (f.kind === 'dr') r.push(['Coup de 8 dégâts', `${Math.max(0, 8 - f.value)} subis`]);
+    if (f.kind === 'crit') r.push(['Attaque', `critique sur ${Math.max(2, 20 - f.value)}–20`]);
+    if (f.kind === 'heal') r.push(['Soin de 2d4', `2d4 ${_atSg(f.value)} PV`]);
   });
   if (r.length) h += `<div class="at-sec"><span class="at-lbl">Exemples de jets</span><div class="at-rolls">${r.map(([a, b]) => `<div class="at-roll"><span>${_esc(a)}</span><b>${_esc(b)}</b></div>`).join('')}</div></div>`;
   h += `<div class="at-sec"><span class="at-lbl">Sur la fiche</span><div class="at-chipline"><span class="at-pchip${applied.length ? '' : ' off'}" style="--c:${_esc(s.color)}" title="${_esc(s.description)}"><i>${_atSlotLabels.map((_, i) => `<u class="${i < count ? 'on' : ''}"></u>`).join('')}</i>${applied.length ? name : `Set ${count}/${_atMax}`}${applied.length ? `<span>${_esc(s.description || fx.map(x => _atEffTxt(x[0])).join(' · '))}</span>` : ''}</span></div></div>`;

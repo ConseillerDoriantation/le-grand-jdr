@@ -100,7 +100,7 @@ import {
 } from './vtt-emotes.js';
 import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
-  _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf,
+  _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf, _armorSetCritRangeBonusOf,
 } from './vtt-effective.js';
 import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttInsFilterConditionPicker, _vttBuildJetsBody, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
 import {
@@ -4528,7 +4528,7 @@ async function _vttLightCast(src, opt, targetName, effectLbl) {
   const luck = await _consumeLuckyReroll(src.id, src, d20, d20 === 1);
   if (luck) d20 = luck.d20;
   const fumble = d20 === 1;
-  const crit = !fumble && d20 >= Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+  const crit = !fumble && d20 >= Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src)));
   const statsDelta = _applyCastStatsDelta(src, opt, { natural: d20, result: d20, crit, fumble });
   const lS = _live(src);
   const costLbl = opt.pmCost > 0 ? `, ${opt.pmCost} ${_RES_LABEL[opt.costRes || 'pm'] || 'PM'} perdus` : '';
@@ -8193,7 +8193,7 @@ function _vttActionSimulationSpec(ctx = _atkCtx) {
     hitCount,
     extraHitCount: bonusHitDice,
     effect,
-    critThreshold: Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(VS.tokens[ctx.srcId]?.data))),
+    critThreshold: Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(VS.tokens[ctx.srcId]?.data) - _armorSetCritRangeBonusOf(VS.tokens[ctx.srcId]?.data))),
     maximizeCritical: !!opt.mods?.chance,
   };
 }
@@ -10031,7 +10031,7 @@ async function _vttRollAttack() {
       _enchD20 = eMode === 'adv' ? Math.max(eR1, eR2) : eMode === 'dis' ? Math.min(eR1, eR2) : eR1;
       const eLuck = actionSimulation ? null : await _consumeLuckyReroll(srcId, src, _enchD20, _enchD20 === 1);
       if (eLuck) _enchD20 = eLuck.d20;
-      const eCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+      const eCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src)));
       _enchRC = _enchD20 >= eCritThreshold;
 
       if (_enchD20 === 1) {
@@ -10243,7 +10243,7 @@ async function _vttRollAttack() {
         hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit + hExtraHitSum;
       }
       // Combo Chance : élargit la plage critique (RC abaissé sur le sort)
-      const hCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+      const hCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src)));
       // Réussite automatique (mjAutoHit) : le soin réussit toujours — ni échec
       // critique (potion consommée pour rien) ni réussite critique.
       const hIsCrit   = !opt.autoHit && hD20 >= hCritThreshold;
@@ -10558,7 +10558,7 @@ async function _vttRollAttack() {
     // le double-max n'est pas appliqué ici.
     // Technique d'arme (Élan total) : abaisse aussi le seuil de critique.
     const critThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20)
-      - _conditionCritRangeBonusOf(src) - techniqueCritRangeBonus(selectedTechniques)));
+      - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src) - techniqueCritRangeBonus(selectedTechniques)));
     let isCrit   = d20 >= critThreshold;
     let isFumble = d20 === 1;
 

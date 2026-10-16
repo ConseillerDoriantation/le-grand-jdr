@@ -10,6 +10,7 @@ import { charSession } from '../../shared/char-session.js';
 import { getMaitriseBonus as getSharedMaitriseBonus, getMod, statShort } from '../../shared/char-stats.js';
 import { getProtectionCAOverride, getProtectionReductionStep, getComboConfig, getInvokedArm } from '../../shared/spell-matrices.js';
 import { getMainWeapon } from './data.js';
+import { getArmorSetData } from '../../shared/equipment-utils.js';
 import { ZONE_SHAPES, _zoneCount, _zoneDims, _zoneShapeUnlocked, _zoneCellCount } from '../../shared/spell-zones.js';
 import { damageTypeEmitsLight } from '../../shared/damage-types.js';
 import { calcSpellDuration, calcSpellTargets, getAfflictionMode, spellConditionId, isLightSpell, lightSpellRadius, getProtectionModes, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
@@ -192,11 +193,14 @@ export function _calcSortDegats(s, c) {
  * - Format texte libre (ex: "moitié des dégâts") → affiché tel quel, rien ajouté
  */
 export function _calcSortSoin(s, c) {
+  // Bonus de soin apporté par un set d'armure complet (effet de palier « Soin »).
+  // N'affecte QUE le soin : ni les dégâts, ni la CA des sorts défensifs.
+  const healB = getArmorSetData(c)?.modifiers?.healBonus || 0;
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
     const base = (s?.soin || '').trim();
     const statKey = resolveSpellModifierStat(s, 'degatsStat');
-    const mod = statKey ? getMod(c, statKey) : 0;
-    return mod ? `${base}${mod > 0 ? ' +' : ' '}${mod}` : base;
+    const flat = (statKey ? getMod(c, statKey) : 0) + healB;
+    return flat ? `${base}${flat > 0 ? ' +' : ' '}${flat}` : base;
   }
   // Multi-modes : seules les runes Protection attribuées au Soin ajoutent des dés.
   const nbProt = protectionRunesFor(s, 'soin');
@@ -208,15 +212,17 @@ export function _calcSortSoin(s, c) {
   const noMod   = !statKey;
   const statVal = noMod ? 10 : ((c?.stats?.[statKey] || 8) + (c?.statsBonus?.[statKey] || 0));
   const statMod = noMod ? 0 : Math.floor((Math.min(22, statVal) - 10) / 2);
-  const statStr = statMod > 0 ? ` +${statMod}` : statMod < 0 ? ` ${statMod}` : '';
 
   // Maîtrise de l'arme : pertinente uniquement pour les sorts magiques (l'arme est le focus)
   const mainP   = getMainWeapon(c);
   const maitrise = usesHealingMastery(s, isMagic, statKey) ? getSharedMaitriseBonus(c, mainP) : 0;
-  const maitriseStr = maitrise > 0 ? ` +${maitrise}` : maitrise < 0 ? ` ${maitrise}` : '';
+
+  // Plat unique = stat + maîtrise + bonus de soin du set d'armure.
+  const flat = statMod + maitrise + healB;
+  const flatStr = flat > 0 ? ` +${flat}` : flat < 0 ? ` ${flat}` : '';
 
   const buildDefault = (diceCount) => {
-    return `${diceCount}d4${statStr}${maitriseStr}`;
+    return `${diceCount}d4${flatStr}`;
   };
 
   if (!base || base.toLowerCase() === '= base') {
@@ -225,13 +231,13 @@ export function _calcSortSoin(s, c) {
   if (nbProt > 0) {
     const match = base.match(/^(\d+)(d\d+)(.*)$/i);
     if (match) {
-      // Format XdY reconnu → on ajoute les dés Protection + stat + maîtrise.
-      return `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}${statStr}${maitriseStr}`;
+      // Format XdY reconnu → on ajoute les dés Protection + stat + maîtrise + soin set.
+      return `${parseInt(match[1]) + nbProt}${match[2]}${match[3]}${flatStr}`;
     }
     // Texte libre → on n'ajoute rien, on respecte ce qui est écrit
     return base;
   }
-  if (maitriseStr || statStr) return `${base}${statStr}${maitriseStr}`;
+  if (flatStr) return `${base}${flatStr}`;
   return base;
 }
 
