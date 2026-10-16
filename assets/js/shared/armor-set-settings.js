@@ -926,6 +926,26 @@ function _atEffTxt(f) {
   }
   return '';
 }
+// Transforme un objet modifiers agrégé en effets d'affichage fusionnés : un seul
+// item par genre cumulable (CA, Soin, Toucher…), un par cible pour save/resist/roll.
+// Sert aux aperçus cumulés (simulation, chip fiche) pour ne pas répéter un genre.
+function _atModifiersToEffects(m = {}) {
+  const out = [];
+  if (m.toucherBonus) out.push({ kind: 'toucher', value: m.toucherBonus });
+  if (m.damageBonus) out.push({ kind: 'dmg', value: m.damageBonus });
+  if (m.healBonus) out.push({ kind: 'heal', value: m.healBonus });
+  if (m.critRangeBonus) out.push({ kind: 'crit', value: m.critRangeBonus });
+  if (m.caBonus) out.push({ kind: 'ca', value: m.caBonus });
+  if (m.damageReduction) out.push({ kind: 'dr', value: m.damageReduction });
+  if (m.spellPmDelta) out.push({ kind: 'pm', value: m.spellPmDelta });
+  if (m.moveDelta) out.push({ kind: 'move', value: m.moveDelta });
+  Object.entries(m.saveBonus || {}).forEach(([stat, value]) => { if (value) out.push({ kind: 'save', stat, value }); });
+  (m.resistances || []).forEach(element => out.push({ kind: 'resist', element }));
+  Object.entries(m.rollImpact?.statModes || {}).forEach(([k, mode]) => out.push({ kind: 'roll', target: 'stat:' + k, mode }));
+  (m.rollImpact?.skillModes || []).forEach(r => out.push({ kind: 'roll', target: 'skill:' + r.name, mode: r.mode }));
+  return out;
+}
+const _atMergedEffects = (s, count, max) => _atModifiersToEffects(armorSetAggregateAtCount(s, count, max));
 
 /* ── Rendu ── */
 function _atListHtml() {
@@ -991,21 +1011,22 @@ function _atMainHtml() {
   const free = Array.from({ length: _atMax }, (_, k) => k + 1).filter(x => !(s.tiers || []).some(t => Math.min(t.pieces, _atMax) === x));
   h += `<button type="button" class="at-addtier" data-at-addtier ${free.length ? '' : 'disabled'}>${_atIc('plus')}${free.length ? `Ajouter un palier (${free[free.length - 1] === _atMax ? 'set complet' : free[free.length - 1] + ' pièces'})` : 'Tous les seuils sont utilisés'}</button></div>`;
   h += `<p class="at-hint">${(s.tiers || []).length ? (s.cumulative !== false ? 'Les paliers s’additionnent : à 3 pièces, les effets à 2 pièces restent actifs.' : 'Seul le palier le plus haut atteint s’applique.') : 'Sans palier, ce type sert uniquement à classer les objets dans la boutique.'}</p></section>`;
-  h += `<section class="at-sec"><span class="at-lbl">Texte joueur</span><input class="at-inp" id="at-fDesc" value="${_esc(s.description)}" placeholder="${_esc(armorSetAppliedTiers(s, _atMax, _atMax).flatMap(t => t.effects).map(_atEffTxt).join(' · ') || 'Ex. Les runes s’éveillent au contact de la magie.')}"><p class="at-hint">Affiché dans l’infobulle du set. Laissé vide, la fiche affiche les effets générés.</p></section>`;
+  h += `<section class="at-sec"><span class="at-lbl">Texte joueur</span><input class="at-inp" id="at-fDesc" value="${_esc(s.description)}" placeholder="${_esc(_atMergedEffects(s, _atMax, _atMax).map(_atEffTxt).join(' · ') || 'Ex. Les runes s’éveillent au contact de la magie.')}"><p class="at-hint">Affiché dans l’infobulle du set. Laissé vide, la fiche affiche les effets générés.</p></section>`;
   return h;
 }
 function _atSimHtml() {
   const s = _atCur(); if (!s) return '';
   const count = _atSim.filter(x => x === 'me').length;
   const applied = armorSetAppliedTiers(s, count, _atMax);
-  const fx = applied.flatMap(t => t.effects.map(f => [f, Math.min(t.pieces, _atMax)]));
+  // Effets cumulés et fusionnés par genre (un seul « CA +3 », pas trois « CA +1 »).
+  const fx = _atMergedEffects(s, count, _atMax);
   const next = (s.tiers || []).filter(t => Math.min(t.pieces, _atMax) > count).sort((a, b) => a.pieces - b.pieces)[0];
   const name = _esc(s.type) || 'ce type';
   let h = `<h2>Simulation</h2><p>Équipe un personnage fictif pour voir le set en jeu.</p><div class="at-pcs" style="--c:${_esc(s.color)}">${_atSlotLabels.map((sl, i) => `<div class="at-pc"><span>${_esc(sl)}</span><div class="at-seg">${[['me', _esc(s.type) || 'Ce type'], ['other', 'Autre'], ['none', 'Vide']].map(([v, l]) => `<button type="button" class="${_atSim[i] === v ? 'on' + (v === 'me' ? ' me' : '') : ''}" data-at-sim="${i}:${v}">${l}</button>`).join('')}</div></div>`).join('')}</div>`;
   h += `<div class="at-score${applied.length ? ' live' : ''}" style="--c:${_esc(s.color)}"><b>${count}/${_atMax}</b><span>${applied.length ? `${applied.length > 1 ? 'Paliers' : 'Palier'} ${applied.map(t => Math.min(t.pieces, _atMax) === _atMax ? 'complet' : Math.min(t.pieces, _atMax)).join(' + ')} actif${applied.length > 1 ? 's' : ''}` : next ? `Encore ${Math.min(next.pieces, _atMax) - count} pièce${Math.min(next.pieces, _atMax) - count > 1 ? 's' : ''} pour le premier palier` : 'Aucun palier défini'}</span></div>`;
-  h += `<div class="at-sec"><span class="at-lbl">Effets appliqués</span><div class="at-res">${fx.length ? fx.map(([f, p]) => `<div class="at-ln"><span class="at-badge ${_atBadgeCls(f)}">${_AT_BADGE[f.kind]}</span><span>${_esc(_atEffTxt(f))}<em>${p === _atMax ? 'complet' : p + ' p.'}</em></span></div>`).join('') : '<span class="at-none">Aucun effet actif.</span>'}</div>${next && applied.length ? `<span class="at-none">Prochain palier à ${Math.min(next.pieces, _atMax)} pièces : ${next.effects.map(_atEffTxt).join(' · ') || 'aucun effet'}</span>` : ''}</div>`;
+  h += `<div class="at-sec"><span class="at-lbl">Effets appliqués</span><div class="at-res">${fx.length ? fx.map(f => `<div class="at-ln"><span class="at-badge ${_atBadgeCls(f)}">${_AT_BADGE[f.kind]}</span><span>${_esc(_atEffTxt(f))}</span></div>`).join('') : '<span class="at-none">Aucun effet actif.</span>'}</div>${next && applied.length ? `<span class="at-none">Prochain palier à ${Math.min(next.pieces, _atMax)} pièces : ${next.effects.map(_atEffTxt).join(' · ') || 'aucun effet'}</span>` : ''}</div>`;
   const r = [];
-  fx.map(x => x[0]).forEach(f => {
+  fx.forEach(f => {
     if (f.kind === 'toucher') r.push(['Attaque', `1d20 + mod ${_atSg(f.value)}`]);
     if (f.kind === 'roll') r.push([_atTgtL(f.target) || 'Jet', f.mode === 'advantage' ? '2d20, garder le haut' : '2d20, garder le bas']);
     if (f.kind === 'pm') r.push(['Sort à 5 PM', `${Math.max(0, 5 + f.value)} PM`]);
@@ -1014,7 +1035,7 @@ function _atSimHtml() {
     if (f.kind === 'heal') r.push(['Soin de 2d4', `2d4 ${_atSg(f.value)} PV`]);
   });
   if (r.length) h += `<div class="at-sec"><span class="at-lbl">Exemples de jets</span><div class="at-rolls">${r.map(([a, b]) => `<div class="at-roll"><span>${_esc(a)}</span><b>${_esc(b)}</b></div>`).join('')}</div></div>`;
-  h += `<div class="at-sec"><span class="at-lbl">Sur la fiche</span><div class="at-chipline"><span class="at-pchip${applied.length ? '' : ' off'}" style="--c:${_esc(s.color)}" title="${_esc(s.description)}"><i>${_atSlotLabels.map((_, i) => `<u class="${i < count ? 'on' : ''}"></u>`).join('')}</i>${applied.length ? name : `Set ${count}/${_atMax}`}${applied.length ? `<span>${_esc(s.description || fx.map(x => _atEffTxt(x[0])).join(' · '))}</span>` : ''}</span></div></div>`;
+  h += `<div class="at-sec"><span class="at-lbl">Sur la fiche</span><div class="at-chipline"><span class="at-pchip${applied.length ? '' : ' off'}" style="--c:${_esc(s.color)}" title="${_esc(s.description)}"><i>${_atSlotLabels.map((_, i) => `<u class="${i < count ? 'on' : ''}"></u>`).join('')}</i>${applied.length ? name : `Set ${count}/${_atMax}`}${applied.length ? `<span>${_esc(s.description || fx.map(_atEffTxt).join(' · '))}</span>` : ''}</span></div></div>`;
   return h;
 }
 function _atFootHtml() {
