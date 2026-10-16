@@ -100,6 +100,23 @@ test('armor set B : les nouveaux effets (ca/dmg/move/save/resist) sont agrégés
   assert.deepEqual(data.modifiers.resistances, ['feu']);
 });
 
+test('armor set B : les effets soin et plage de critique sont agrégés (cumulés)', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  setArmorSetSettingsForTests([
+    { id: 'beni', type: 'Béni', enabled: true, cumulative: true, tiers: [
+      { pieces: 1, effects: [{ kind: 'heal', value: 2 }] },
+      { pieces: 2, effects: [{ kind: 'heal', value: 1 }, { kind: 'crit', value: 1 }] },
+    ] },
+  ]);
+  const data = getArmorSetData({ equipement: {
+    'Tête': { nom: 'Heaume béni', typeArmure: 'Béni' },
+    Torse: { nom: 'Plastron béni', typeArmure: 'Béni' },
+  } });
+  assert.equal(data.isActive, true);
+  assert.equal(data.modifiers.healBonus, 3);        // 2 + 1 cumulés
+  assert.equal(data.modifiers.critRangeBonus, 1);   // critique sur 19-20
+});
+
 test('armor set B : une résistance de set entre dans le profil de dégâts', () => {
   setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
   setArmorSetSettingsForTests([
@@ -161,6 +178,8 @@ test('armor set : les types et effets personnalisés sont pilotés par aventure'
     damageReduction: 3,
     caBonus: 0,
     damageBonus: 0,
+    healBonus: 0,
+    critRangeBonus: 0,
     moveDelta: 0,
     saveBonus: {},
     resistances: [],

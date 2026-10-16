@@ -100,7 +100,7 @@ import {
 } from './vtt-emotes.js';
 import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
-  _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf,
+  _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf, _armorSetCritRangeBonusOf,
 } from './vtt-effective.js';
 import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttInsFilterConditionPicker, _vttBuildJetsBody, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
 import {
@@ -3621,7 +3621,7 @@ async function _publishCombatLog(payload) {
 
 function _optionFixedBonus(opt) {
   return (opt?.rawDice !== undefined)
-    ? ((opt.formulaFixedBonus || 0) + (opt.dmgStatMod || 0) + (opt.maitriseBonus || 0))
+    ? ((opt.formulaFixedBonus || 0) + (opt.dmgStatMod || 0) + (opt.maitriseBonus || 0) + (opt.dmgSetBonus || 0))
     : 0;
 }
 
@@ -4528,7 +4528,7 @@ async function _vttLightCast(src, opt, targetName, effectLbl) {
   const luck = await _consumeLuckyReroll(src.id, src, d20, d20 === 1);
   if (luck) d20 = luck.d20;
   const fumble = d20 === 1;
-  const crit = !fumble && d20 >= Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+  const crit = !fumble && d20 >= Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src)));
   const statsDelta = _applyCastStatsDelta(src, opt, { natural: d20, result: d20, crit, fumble });
   const lS = _live(src);
   const costLbl = opt.pmCost > 0 ? `, ${opt.pmCost} ${_RES_LABEL[opt.costRes || 'pm'] || 'PM'} perdus` : '';
@@ -5960,6 +5960,7 @@ function _buildAttackOptions(t) {
   const wDmgStatLabel= wDmgStats.map(s => statShort(s) || s).join('+');
   const wTchMod      = c ? getMod(c, wTchStat)  : 0;
   const wSetBonus    = c ? (getArmorSetData(c).modifiers.toucherBonus || 0) : 0;
+  const wSetDmgBonus = c ? (getArmorSetData(c).modifiers.damageBonus || 0) : 0;
   const wMaitrise    = c && !wReplace && weapon ? getMaitriseBonus(c, weapon) : 0;
   // Règles de type de dégâts (missEffect, armorPen, dmgBonus)
   const wReplaceTypeId = wReplace?.element || 'physique';
@@ -6023,6 +6024,8 @@ function _buildAttackOptions(t) {
     dmgStatMod:       wDmgMod,
     dmgStatLabel:     wDmgStatLabel,
     maitriseBonus:    wMaitrise,
+    dmgSetBonus:      wSetDmgBonus,
+    dmgSetBonusLabel: 'Set',
     typeRules,
     damageTypeId:     _wDefaultTypeId,
     damageTypeIcon:   _wFinalTypeObj?.icon || (wReplace ? '✨' : ''),
@@ -6081,6 +6084,8 @@ function _buildAttackOptions(t) {
       dmgStatMod: secondaryDmgMod,
       dmgStatLabel: secondaryDmgStats.map(stat => statShort(stat) || stat).join('+'),
       maitriseBonus: secondaryMastery,
+      dmgSetBonus: wSetDmgBonus,
+      dmgSetBonusLabel: 'Set',
       typeRules: getDamageTypeRules(VS.damageTypes, secondaryTypeId),
       damageTypeId: secondaryTypeId,
       damageTypeIcon: secondaryType?.icon || '',
@@ -7829,6 +7834,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
     if (opt.formulaFixedBonus) { tot += opt.formulaFixedBonus; parts.push(`Formule ${sn(opt.formulaFixedBonus)}`); }
     if (opt.dmgStatMod)        { tot += opt.dmgStatMod;     parts.push(`${opt.dmgStatLabel} ${sn(opt.dmgStatMod)}`); }
     if (opt.maitriseBonus>0)   { tot += opt.maitriseBonus;  parts.push(`Maîtrise +${opt.maitriseBonus}`); }
+    if (opt.dmgSetBonus)       { tot += opt.dmgSetBonus;    parts.push(`${opt.dmgSetBonusLabel || 'Set'} ${sn(opt.dmgSetBonus)}`); }
     if (opt.mjAlwaysMax) {
       const maxVal = _maxEffectDisplay(opt.rawDice, tot);
       degatsFormula = _mkCell(`${_dmgIcon} <code style="font-size:.88rem;color:${dmgAccent}">${_esc(maxVal)}</code>`, 0, [`effet max de ${opt.rawDice}${tot ? ` ${sn(tot)}` : ''}`], dmgAccent);
@@ -8193,7 +8199,7 @@ function _vttActionSimulationSpec(ctx = _atkCtx) {
     hitCount,
     extraHitCount: bonusHitDice,
     effect,
-    critThreshold: Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(VS.tokens[ctx.srcId]?.data))),
+    critThreshold: Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(VS.tokens[ctx.srcId]?.data) - _armorSetCritRangeBonusOf(VS.tokens[ctx.srcId]?.data))),
     maximizeCritical: !!opt.mods?.chance,
   };
 }
@@ -10031,7 +10037,7 @@ async function _vttRollAttack() {
       _enchD20 = eMode === 'adv' ? Math.max(eR1, eR2) : eMode === 'dis' ? Math.min(eR1, eR2) : eR1;
       const eLuck = actionSimulation ? null : await _consumeLuckyReroll(srcId, src, _enchD20, _enchD20 === 1);
       if (eLuck) _enchD20 = eLuck.d20;
-      const eCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+      const eCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src)));
       _enchRC = _enchD20 >= eCritThreshold;
 
       if (_enchD20 === 1) {
@@ -10243,7 +10249,7 @@ async function _vttRollAttack() {
         hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit + hExtraHitSum;
       }
       // Combo Chance : élargit la plage critique (RC abaissé sur le sort)
-      const hCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+      const hCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src)));
       // Réussite automatique (mjAutoHit) : le soin réussit toujours — ni échec
       // critique (potion consommée pour rien) ni réussite critique.
       const hIsCrit   = !opt.autoHit && hD20 >= hCritThreshold;
@@ -10558,7 +10564,7 @@ async function _vttRollAttack() {
     // le double-max n'est pas appliqué ici.
     // Technique d'arme (Élan total) : abaisse aussi le seuil de critique.
     const critThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20)
-      - _conditionCritRangeBonusOf(src) - techniqueCritRangeBonus(selectedTechniques)));
+      - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src) - techniqueCritRangeBonus(selectedTechniques)));
     let isCrit   = d20 >= critThreshold;
     let isFumble = d20 === 1;
 
@@ -11582,6 +11588,7 @@ async function _vttRollAttack() {
         dmgFormulaBonus: opt.formulaFixedBonus??0,
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
+        dmgSetBonus: opt.dmgSetBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
         dmgFull: cleanResults.find(result => !result.techniqueSplash)?.dmgPre ?? sharedDmgTotalHit,
         dmgFullHalf: sharedDmgTotalHalf,
@@ -11645,6 +11652,7 @@ async function _vttRollAttack() {
         dmgFormulaBonus: opt.formulaFixedBonus??0,
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
+        dmgSetBonus: opt.dmgSetBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
         dmgTotal: r.dmgTotal, dmgApplied: r.dmgApplied, dmgFull: r.dmgPre ?? sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0, dmgReductionLabel: r.dmgReductionLabel || null,
         bonusHitDice: bonusHitDice||null, extraHitRolls: extraHitRolls.length ? extraHitRolls : null,
