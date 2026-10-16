@@ -12,6 +12,7 @@ import { _esc } from './html.js';
 import { promptModal } from './modal.js';
 import { showNotif } from './notifications.js';
 import { STATE } from '../core/state.js';
+import { normalizeRichTextMentionLabel, richTextMentionText } from './rich-text-mention.js';
 
 const COLORS = [
   { name: 'Défaut', value: 'initial' },
@@ -2549,6 +2550,16 @@ export function sanitizeRichTextHtml(html) {
     cell.removeAttribute('data-rte-active-cell');
     cell.removeAttribute('data-rte-selected-cell');
     cell.removeAttribute('data-rte-resize-edge');
+  });
+  // Quill sérialise ses embeds avec des gardes invisibles. On aplatit les
+  // mentions et on retire tous les @ hérités afin qu'une réouverture reste
+  // strictement idempotente (`@Nom`, jamais `@@Nom`).
+  tpl.content.querySelectorAll('.rt-mention').forEach((mention) => {
+    const label = normalizeRichTextMentionLabel(mention.textContent);
+    mention.textContent = richTextMentionText(label);
+    mention.setAttribute('contenteditable', 'false');
+    if (!mention.dataset.kind) mention.dataset.kind = 'personnage';
+    if (!mention.dataset.ref) mention.dataset.ref = label;
   });
   // Les tableaux anciens ou collés gagnent le même conteneur responsive que
   // ceux créés par la barre d'outils, sans doubler les wrappers déjà présents.

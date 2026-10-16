@@ -7,6 +7,7 @@ import { showNotif } from './notifications.js';
 import { STATE } from '../core/state.js';
 import { ASSET_VERSION } from '../core/version.js';
 import { loadCollection } from '../data/firestore.js';
+import { normalizeRichTextMentionLabel, richTextMentionText } from './rich-text-mention.js';
 
 const _instances = new Map();
 const _states = new WeakMap();
@@ -83,8 +84,8 @@ function registerFormats(Quill) {
   }
   class Mention extends Embed {
     static blotName = 'mention'; static tagName = 'SPAN'; static className = 'rt-mention';
-    static create(value = {}) { const n = super.create(); n.classList.add('rt-chip'); n.dataset.kind = value.kind || 'personnage'; n.dataset.ref = value.ref || value.label || ''; n.contentEditable = 'false'; n.textContent = `@${value.label || value.ref || 'Mention'}`; return n; }
-    static value(n) { return { kind: n.dataset.kind, ref: n.dataset.ref, label: n.textContent.replace(/^@/, '') }; }
+    static create(value = {}) { const n = super.create(); const label = normalizeRichTextMentionLabel(value.label || value.ref); n.classList.add('rt-chip'); n.dataset.kind = value.kind || 'personnage'; n.dataset.ref = value.ref || label; n.contentEditable = 'false'; n.textContent = richTextMentionText(label); return n; }
+    static value(n) { return { kind: n.dataset.kind, ref: n.dataset.ref, label: normalizeRichTextMentionLabel(n.textContent) }; }
   }
   class Divider extends Embed { static blotName = 'divider'; static tagName = 'HR'; }
   class Callout extends Block {
