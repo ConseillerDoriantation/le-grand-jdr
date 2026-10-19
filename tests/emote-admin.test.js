@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   sanitizeEmoteName, uniqueEmoteName, emoteCatalogIssues, finalizeEmoteDraft,
-  createEmoteLookup, resolveEmoteNames, dedupeEmoteImports,
+  createEmoteLookup, normalizeEmoteCatalog, resolveEmoteImageUrl, resolveEmoteNames, dedupeEmoteImports,
 } from '../assets/js/shared/emote-admin.js';
 
 test('les noms d émotes retirent accents espaces et caractères interdits', () => {
@@ -52,4 +52,15 @@ test('l import GitHub déduplique le fichier le nom et les alias', () => {
   const result = dedupeEmoteImports(files, [{ name: 'rire', aliases: ['lol'], url: '/old/same.png' }]);
   assert.deepEqual(result.added, [{ name: 'wow', url: '/new/wow.png' }]);
   assert.equal(result.skipped, 3);
+});
+
+test('les chemins d émotes GitHub historiques utilisent une URL publique même en local', () => {
+  assert.equal(
+    resolveEmoteImageUrl('images/emotes/Eleanor photosynthèse.png'),
+    'https://conseillerdoriantation.github.io/le-grand-jdr/images/emotes/Eleanor%20photosynth%C3%A8se.png',
+  );
+  assert.equal(resolveEmoteImageUrl('/rire.png'), '/rire.png');
+  assert.equal(resolveEmoteImageUrl('https://cdn.example.com/rire.png'), 'https://cdn.example.com/rire.png');
+  assert.equal(normalizeEmoteCatalog([{ id: 'a', name: 'Rire', url: 'images/emotes/rire.png' }])[0].url,
+    'https://conseillerdoriantation.github.io/le-grand-jdr/images/emotes/rire.png');
 });

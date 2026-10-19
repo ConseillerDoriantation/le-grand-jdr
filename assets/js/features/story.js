@@ -1506,10 +1506,12 @@ function _sgSection(l, ch) {
   const open = l.list.find(m => m.id === _SAGA_OPEN[l.key]);
   const pct = l.list.length ? Math.round(l.done / l.list.length * 100) : 0;
   const myIds = _tmMyCharIds(), charById = _charByIdMap();
-  // Missions à venir consécutives empilées par 3 dans une même colonne.
+  // Missions à venir sans illustration : compactes et empilées par 3 dans une
+  // même colonne. Une mission illustrée garde une vraie carte, même si elle
+  // n'a pas encore été jouée, afin que sa couverture reste visible en Saga.
   const items = []; let stack = null;
   l.list.forEach(m => {
-    if (_tmKey(m) === 'todo') {
+    if (_tmKey(m) === 'todo' && !m.imageUrl) {
       if (!stack || stack.length === 3) { stack = []; items.push(stack); }
       stack.push(m);
     } else { stack = null; items.push(m); }
@@ -1532,7 +1534,7 @@ function _sgSection(l, ch) {
 function _sgCard(m, ch, open, myIds, charById) {
   const k = _tmKey(m), n = ch.get(m.ordre || 0), s = stCfg(m), on = open && open.id === m.id ? ' open' : '';
   const ev = m.type === 'event' ? ' · Événement' : '';
-  if (k === 'todo') return `<button class="sg-c todo${on}" data-sg="${_esc(m.id)}" aria-expanded="${!!on}">
+  if (k === 'todo' && !m.imageUrl) return `<button class="sg-c todo${on}" data-sg="${_esc(m.id)}" aria-expanded="${!!on}">
       <span class="sg-ch">Ch. ${_pad2(n)}${ev}</span><b>${_esc(m.titre || 'Sans titre')}</b>
     </button>`;
   const prog = itemProgress(m), mine = _tmMine(m, myIds);

@@ -51,6 +51,7 @@ import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../shared/in
 import { shouldRestoreLegacyBastionCatalog } from '../shared/bastion-catalog.js';
 import { bastionEqualShare, bastionRoomProjects, roomFundingPlan, roomInvestmentAvailable, roomInvestmentContributors as investmentContributors } from '../shared/bastion-investments.js';
 import { touchBastionWallActivity, refreshBastionWallDot } from '../shared/bastion-signal.js';
+import { normalizeEmoteCatalog } from '../shared/emote-admin.js';
 
 
 const STORE = {
@@ -3743,7 +3744,7 @@ function _bastionOpenPostImage(btn) {
 
 async function _loadWallEmotes() {
   const data = await getDocData('world', 'vtt_emotes').catch(() => null);
-  _wallEmotes = Array.isArray(data?.emotes) ? data.emotes.filter(emote => emote?.name && emote?.url) : [];
+  _wallEmotes = normalizeEmoteCatalog(data?.emotes);
 }
 
 // Contenu de l'onglet actif (une seule section à la fois → fin du long scroll).

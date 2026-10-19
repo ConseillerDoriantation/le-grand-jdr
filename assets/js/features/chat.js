@@ -37,6 +37,7 @@ import {
 } from './chat/chat-format.js';
 import { _esc } from '../shared/html.js';
 import { CHAT_REACTIONS as REACTIONS, EMOJI_CATEGORIES as EMOJI_CATS } from '../shared/emoji-catalog.js';
+import { normalizeEmoteCatalog } from '../shared/emote-admin.js';
 
 const ADV = 'adventure';   // id de la conversation d'aventure
 const HISTORY = 40;
@@ -815,7 +816,7 @@ function _reactionsHtml(m) {
 
 // Émotes custom :nom: → <img> (mêmes émotes que le VTT, world/vtt_emotes).
 async function _loadChatEmotes() {
-  try { const d = await getDocData('world', 'vtt_emotes'); _chatEmotes = Array.isArray(d?.emotes) ? d.emotes.filter(e => e && e.name && e.url) : []; }
+  try { const d = await getDocData('world', 'vtt_emotes'); _chatEmotes = normalizeEmoteCatalog(d?.emotes); }
   catch { _chatEmotes = []; }
 }
 // Wrappers : la logique pure vit dans chat/chat-format.js (testée) ; ici on ne

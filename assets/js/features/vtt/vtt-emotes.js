@@ -20,7 +20,7 @@ import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-
 import { bumpSkill, bumpEmote } from '../../shared/stats.js';
 import { _logGmCol, _reactionRef } from './vtt-refs.js';
 import { _STAT_KEY } from './vtt-constants.js';
-import { sanitizeEmoteName, createEmoteLookup, resolveEmoteNames } from '../../shared/emote-admin.js';
+import { sanitizeEmoteName, createEmoteLookup, normalizeEmoteCatalog, resolveEmoteNames } from '../../shared/emote-admin.js';
 import { resolveControlledTokenId } from './vtt-token-control.js';
 import { _live } from './vtt-effective.js';
 import { _vttPublishOptimisticLog } from './vtt-chat.js';
@@ -40,13 +40,13 @@ export async function _loadEmotes() {
   // 1. Tenter le path scopé à l'aventure (path normal)
   try {
     const data = await getDocData('world', 'vtt_emotes');
-    if (Array.isArray(data?.emotes)) { _emotes = data.emotes; return; }
+    if (Array.isArray(data?.emotes)) { _emotes = normalizeEmoteCatalog(data.emotes); return; }
   } catch(e) { console.warn('[vtt] emotes (adventure path) :', e.message); }
 
   // 2. Fallback : path global world/vtt_emotes (migration ancien stockage)
   try {
     const snap = await getDoc(doc(db, 'world', 'vtt_emotes'));
-    _emotes = snap.data()?.emotes || [];
+    _emotes = normalizeEmoteCatalog(snap.data()?.emotes || []);
     if (_emotes.length) console.info('[vtt] emotes chargées depuis le path global (migration)');
   } catch(e) {
     console.warn('[vtt] emotes (global path) :', e.message);
@@ -252,8 +252,9 @@ export async function _vttRollSkill(skillName, stat) {
 
 export async function _saveEmotes(list) {
   try {
-    await saveDoc('world', 'vtt_emotes', { emotes: list });
-    _emotes = list;
+    const normalized = normalizeEmoteCatalog(list);
+    await saveDoc('world', 'vtt_emotes', { emotes: normalized });
+    _emotes = normalized;
     return true;
   } catch(e) {
     showNotif('Erreur sauvegarde émotes : ' + e.message, 'error');

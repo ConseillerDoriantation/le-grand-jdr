@@ -1,8 +1,23 @@
 // Règles pures du catalogue d'émotes. Aucun DOM/Firebase : ce module sert à la
 // modale MJ, au rendu du chat et aux tests de compatibilité des alias.
 
+import { githubPagesUrl } from './github-folder.js';
+
 export const EMOTE_NAME_MAX = 32;
 export const EMOTE_NAME_RE = /^[a-z0-9_]{1,32}$/;
+
+// Les imports GitHub historiques stockaient seulement `images/emotes/x.png`.
+// Ce chemin fonctionne en production, mais casse dans une branche locale où les
+// fichiers importés sur main ne sont pas encore présents. On résout donc les
+// chemins de dépôt et anciennes URL GitHub vers GitHub Pages. Les data/blob,
+// URL externes et chemins absolus locaux restent inchangés.
+export function resolveEmoteImageUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw || /^(?:data|blob):/i.test(raw)) return raw;
+  if (/^https?:\/\/(?:raw\.githubusercontent\.com|github\.com)\//i.test(raw)) return githubPagesUrl(raw);
+  if (!/^https?:\/\//i.test(raw) && !raw.startsWith('/')) return githubPagesUrl(raw);
+  return raw;
+}
 
 export function sanitizeEmoteName(value) {
   return String(value || '')
@@ -27,8 +42,15 @@ export function normalizeEmote(emote = {}, index = 0) {
     ...emote,
     id: String(emote.id || `emote_${index}_${Date.now().toString(36)}`),
     name: sanitizeEmoteName(emote.name),
+    url: resolveEmoteImageUrl(emote.url),
     aliases: emoteAliases(emote),
   };
+}
+
+export function normalizeEmoteCatalog(emotes = []) {
+  return (Array.isArray(emotes) ? emotes : [])
+    .map((emote, index) => normalizeEmote(emote, index))
+    .filter(emote => emote.name && emote.url);
 }
 
 export function emoteKeys(emote) {
