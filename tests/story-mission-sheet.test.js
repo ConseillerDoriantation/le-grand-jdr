@@ -34,6 +34,13 @@ test('les groupes restent inline et les sélecteurs restent dans la fiche', () =
   assert.doesNotMatch(sheet, /confirmModal|promptModal/);
 });
 
+test('les recherches des menus conservent le curseur pendant le filtrage', () => {
+  assert.match(sheet, /function paintMenu\(\{ preserveSearch = false \} = \{\}\)/);
+  assert.match(sheet, /nextInput\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(sheet, /nextInput\.setSelectionRange\(selectionStart, selectionEnd\)/);
+  assert.match(sheet, /'menu-search': el => \{ MM\.query = el\.value; paintMenu\(\{ preserveSearch: true \}\); \}/);
+});
+
 test('la fiche réutilise le cache Firestore et synchronise les participants après adhésion', () => {
   assert.match(sheet, /getCachedCollection\('story'\)/);
   assert.match(sheet, /getCachedCollection\('quests'\)/);
