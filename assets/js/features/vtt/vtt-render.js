@@ -12,11 +12,11 @@ import { VS } from './vtt-state.js';
 import { CELL, TYPE_COLOR } from './vtt-constants.js';
 import { STATE } from '../../core/state.js';
 import { updateDoc } from '../../config/firebase.js';
-import { normalizeImageUrl } from '../../shared/html.js';
-import { githubPagesUrl } from '../../shared/github-folder.js';
+import { resolveMapImageUrl } from './vtt-map-library-utils.js';
 import { _pgRef } from './vtt-refs.js';
 import { _showCtxMenu } from './vtt-utils.js';
 import { showNotif } from '../../shared/notifications.js';
+import { annotationNodePosition } from './vtt-annotation-utils.js';
 import {
   tokenActiveEffects,
   tokenEffectsSignature,
@@ -94,14 +94,6 @@ function _addTokenPortrait(portrait, fallback, src, radius) {
     _tokenImageCache.set(src, image);
     image.src = src;
   }
-}
-
-function _resolveMapImageUrl(url, sourcePath = '') {
-  const raw = String(sourcePath || url || '').trim();
-  if (/^\.?\/?images\/maps\//i.test(raw) || /(?:raw\.githubusercontent\.com|github\.com\/[^/]+\/[^/]+\/(?:blob|tree))\//i.test(raw)) {
-    return githubPagesUrl(raw);
-  }
-  return normalizeImageUrl(String(url || raw).trim());
 }
 
 /** Charge Konva (vendored) sur window.Konva si pas déjà présent. */
@@ -438,7 +430,9 @@ async function _patchImg(imgId, patch) {
  * @param {{hideActBar?:Function, clearHL?:Function, renderInspector?:Function}} deps
  */
 let _lastMapImgSig = null;   // signature des images de fond réellement rendues
+let _mapRenderRevision = 0;  // invalide les callbacks async d'une ancienne scène
 const _mapImgElCache = new Map(); // src résolue → HTMLImageElement déjà chargé (rebuild synchrone)
+const _failedMapImageUrls = new Set(); // empêche une URL en échec d'être retentée à chaque redraw
 
 export function _renderMapImages(deps = {}) {
   const { hideActBar = () => {}, clearHL = () => {}, renderInspector = () => {} } = deps;
@@ -447,11 +441,16 @@ export function _renderMapImages(deps = {}) {
   // Idempotent : si les images de fond sont inchangées ET déjà rendues, ne rien
   // détruire. Le destroy + rechargement asynchrone (new Image().onload) laissait
   // une frame « carte absente » → clignotement à chaque écriture de page (portes…).
-  const bgImgs = VS.activePage.backgroundImages || [];
-  const sig = `${VS.activePage.id}|${JSON.stringify(bgImgs)}`;
+  const bgImgs = (VS.activePage.backgroundImages || [])
+    .map(img => ({ img, src:resolveMapImageUrl(img) }))
+    .filter(entry => entry.src && !_failedMapImageUrls.has(entry.src));
+  const pageId = VS.activePage.id;
+  const sig = `${pageId}|${JSON.stringify(bgImgs)}`;
   const renderedCount = VS.layers.map.find('Image').length + (VS.layers.mapFg?.find('Image').length || 0);
   if (sig === _lastMapImgSig && renderedCount === bgImgs.length) return;
+  if (sig !== _lastMapImgSig) _mapRenderRevision++;
   _lastMapImgSig = sig;
+  const renderRevision = _mapRenderRevision;
   // Nettoyer les images des deux couches (sans détruire les transformers)
   VS.layers.map.find('Image').forEach(n=>n.destroy());
   VS.layers.mapFg?.find('Image').forEach(n=>n.destroy());
@@ -459,18 +458,20 @@ export function _renderMapImages(deps = {}) {
   if (VS.imgTrFg) { VS.imgTrFg.nodes([]); }
   VS.selImg = null;
 
-  for (const img of (VS.activePage.backgroundImages??[])) {
+  for (const { img, src } of bgImgs) {
     const isFg   = img.layer === 'fg';
     const tgtLyr = isFg ? VS.layers.mapFg : VS.layers.map;
     const tr     = isFg ? VS.imgTrFg      : VS.imgTr;
 
-    const src = _resolveMapImageUrl(img.url, img.sourcePath);
     const build = (el) => {
-      if (!VS.activePage) return; // page changée entre temps
+      // Une image lente d'une scène précédente ne doit jamais être injectée
+      // dans les calques réutilisés par la scène désormais active.
+      if (VS.activePage?.id !== pageId || renderRevision !== _mapRenderRevision || _lastMapImgSig !== sig) return;
+      if (tgtLyr.findOne?.(`.img-${img.id}`)) return;
       const ki = new K.Image({
         image:el, x:img.x*CELL, y:img.y*CELL,
         width:img.w*CELL, height:img.h*CELL,
-        name:`img-${img.id}`,
+        name:`map-image img-${img.id}`,
       });
 
       if (STATE.isAdmin) {
@@ -547,10 +548,16 @@ export function _renderMapImages(deps = {}) {
     const cached = _mapImgElCache.get(src);
     if (cached && cached.complete && cached.naturalWidth) {
       build(cached);
+    } else if (cached) {
+      // Plusieurs placements peuvent partager le même fichier. Chaque placement
+      // garde son callback, tout en réutilisant une seule requête réseau.
+      cached.addEventListener('load', () => build(cached), { once:true });
     } else {
       const el = new Image();
       el.crossOrigin = 'anonymous';
       el.onload = () => { _mapImgElCache.set(src, el); build(el); };
+      el.onerror = () => { _failedMapImageUrls.add(src); _mapImgElCache.delete(src); };
+      _mapImgElCache.set(src, el);
       el.src = src;
     }
   }
@@ -587,13 +594,15 @@ export function _buildAnnotVisual(K, data) {
     hitStrokeWidth: Math.max(16, (data.strokeWidth || 2) + 12) };
   let shape;
   if (data.type === 'freehand' || data.type === 'line') {
+    const position = annotationNodePosition(data);
     shape = new K.Line({ ...base, points: data.points || [],
-      x: data.offsetX||0, y: data.offsetY||0,
+      x: position.x, y: position.y,
       tension: data.type === 'freehand' ? 0.3 : 0, fill:'transparent' });
   } else if (data.type === 'polygon') {
+    const position = annotationNodePosition(data);
     // Forme tracée sommet par sommet (triangle, etc.) → ligne fermée + remplissage opt.
     shape = new K.Line({ ...base, points: data.points || [],
-      x: data.offsetX||0, y: data.offsetY||0, closed: true, fill });
+      x: position.x, y: position.y, closed: true, fill });
   } else if (data.type === 'spellzone') {
     // Zone de sort persistante (utilitaire) : rectangle pointillé teinté + label,
     // visible de tous, posé au centre (x,y). Auto-supprimé à expiration (par round).

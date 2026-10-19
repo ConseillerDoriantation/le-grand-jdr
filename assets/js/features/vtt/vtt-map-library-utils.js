@@ -1,4 +1,6 @@
-import { GH_DEFAULT_REPO } from '../../shared/github-folder.js';
+import { GH_DEFAULT_REPO, githubPagesUrl } from '../../shared/github-folder.js';
+import { normalizeImageUrl } from '../../shared/html.js';
+import { CLOUDINARY_ENABLED, isCloudinaryUrl } from '../../shared/media-hosting.js';
 
 function cleanPath(value) {
   let path = String(value || '').split(/[?#]/)[0].replace(/\\/g, '/');
@@ -28,6 +30,21 @@ export function githubAssetIdentity(value, defaultRepo = GH_DEFAULT_REPO) {
     return `github:${String(defaultRepo || '').toLowerCase()}/${cleanPath(raw)}`;
   }
   return null;
+}
+
+/**
+ * Résout une carte sans jamais interroger Cloudinary lorsque l'hébergement est
+ * désactivé. Un sourcePath GitHub reste prioritaire sur une ancienne URL CDN.
+ */
+export function resolveMapImageUrl(imageOrUrl, sourcePath = '') {
+  const image = imageOrUrl && typeof imageOrUrl === 'object' ? imageOrUrl : null;
+  const url = String(image?.url ?? imageOrUrl ?? '').trim();
+  const source = String(image?.sourcePath ?? sourcePath ?? '').trim();
+  const raw = source || url;
+  if (!raw) return '';
+  if (/^\.?\/?images\/maps\//i.test(raw) || githubAssetIdentity(raw)) return githubPagesUrl(raw);
+  const resolved = normalizeImageUrl(url || raw);
+  return !CLOUDINARY_ENABLED && isCloudinaryUrl(resolved) ? '' : resolved;
 }
 
 export function mapLibraryImageKey(image = {}) {

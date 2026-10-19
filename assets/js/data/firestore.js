@@ -419,6 +419,9 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   'story',
   'achievements',
   'collection',
+  // Cotisations Bastion : collection bornée (1 doc joueur/personnage/salle),
+  // partagée par la page, le dashboard et le badge de navigation.
+  'bastionInvestments',
   // Bestiaire principal : lu par la page Bestiaire, la palette Ctrl+K et le VTT.
   // Lazy-session → 0 lecture en repeat-visit (au prix de la RAM, cf. note ci-dessus).
   'bestiary',

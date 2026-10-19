@@ -29,3 +29,13 @@ test('les portes et vitres ont une grande cible et une aide au survol', () => {
   assert.match(css, /\.vtt-structure-tip\.open/);
   assert.match(css, /\.vtt-map-legend-row/);
 });
+
+test('le brouillard laisse le clic gauche aux structures mais conserve son clic droit', () => {
+  assert.match(fog, /const _isFogTool = tool => tool === 'hide' \|\| tool === 'reveal'/);
+  assert.match(fog, /const canSelectFogOp = _isFogTool\(_editTool\)/);
+  assert.match(fog, /listening: canSelectFogOp/);
+  assert.match(fog, /if \(canSelectFogOp\) \{\s*rect\.on\('click tap'/);
+  assert.match(fog, /function _fogOpAtPos\(pos\)/);
+  assert.match(fog, /contextmenu: onContextMenu/);
+  assert.match(fog, /_selectItem\(fogOp\.id\)/);
+});

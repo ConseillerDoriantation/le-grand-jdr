@@ -13,21 +13,22 @@ test('la page Joueurs utilise le registre maître-détail par défaut', () => {
   assert.match(players, /Grouper par joueur/);
 });
 
-test('les trois vues et les quatre onglets partagent la même sélection', () => {
+test('les trois vues et les deux parcours regroupés partagent la même sélection', () => {
   assert.match(players, /\['register', 'Registre'/);
   assert.match(players, /\['gallery', 'Galerie'/);
   assert.match(players, /\['relations', 'Liens'/);
-  assert.match(players, /\['presentation', 'Présentation'/);
-  assert.match(players, /\['chronicle', 'Chronique'/);
-  assert.match(players, /\['companions', 'Compagnons'/);
-  assert.match(players, /\['gallery', 'Galerie', item\.gallery\.length\]/);
+  assert.match(players, /\['presentation', 'Profil', 'user'\]/);
+  assert.match(players, /\['chronicle', 'Parcours', 'book'\]/);
+  assert.match(players, /function _profileHtml\(item\)[\s\S]*'Présentation'[\s\S]*'Galerie'/);
+  assert.match(players, /function _journeyHtml\(item, items\)[\s\S]*'Chronique'[\s\S]*'Compagnons'/);
+  assert.match(players, /function _normalizeDetailTab\(tab = ''\)/);
 });
 
 test('la navigation clavier et la recherche rapide restent disponibles', () => {
   assert.match(players, /event\.key === '\/'/);
   assert.match(players, /\['ArrowDown', 'ArrowRight', 'j'\]/);
   assert.match(players, /\['ArrowUp', 'ArrowLeft', 'k'\]/);
-  assert.match(players, /\^\[1-4\]\$/);
+  assert.match(players, /\^\[1-2\]\$/);
   assert.match(players, /event\.key === 'Escape'/);
 });
 

@@ -72,6 +72,7 @@ function _spellLightsFor(page, tokens) {
 }
 
 const EDIT_COLOR  = { wall:'#ef4444', door:'#fb923c', window:'#67e8f9', light:'#fbbf24', hide:'#1e293b', reveal:'#fde047' };
+const _isFogTool = tool => tool === 'hide' || tool === 'reveal';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MATH
@@ -732,6 +733,9 @@ export function fogRenderWalls(page, isAdmin) {
   // Les zones révélées restent volontairement très lisibles : en mode
   // Structure, leur contour pointillé ne doit pas se confondre avec la carte.
   if (_editMode && isAdmin) {
+    // Les zones restent visibles avec les outils de structure, mais ne doivent
+    // pas recouvrir leur zone de clic ni empêcher le tracé sur la carte.
+    const canSelectFogOp = _isFogTool(_editTool);
     for (const op of (page.fogOps || [])) {
       const sel = _selectedId === op.id;
       const revealed = op.type === 'reveal';
@@ -746,9 +750,11 @@ export function fogRenderWalls(page, isAdmin) {
         strokeWidth: sel ? 3 : (revealed ? 2.25 : 1.25),
         dash: revealed ? [10, 6] : [4, 5],
         opacity: sel ? 1 : (revealed ? 0.95 : 0.65),
-        listening: true,
+        listening: canSelectFogOp,
       });
-      rect.on('click tap', e => { e.cancelBubble = true; _selectItem(op.id); });
+      if (canSelectFogOp) {
+        rect.on('click tap', e => { e.cancelBubble = true; _selectItem(op.id); });
+      }
       _wallsLayer.add(rect);
     }
   }
@@ -912,7 +918,7 @@ export function fogToggleEditMode(enabled, page) {
   const _snapStep = ev => {
     const e = ev?.evt || ev || {};
     if (e.shiftKey) return 0.1;
-    const rect = _editTool === 'hide' || _editTool === 'reveal';
+    const rect = _isFogTool(_editTool);
     if (e.altKey) return rect ? 0.25 : 0.5;
     return rect ? 0.5 : 1;
   };
@@ -947,12 +953,17 @@ export function fogToggleEditMode(enabled, page) {
   const _hideSnapDot = () => { if (_snapDot) _snapDot.visible(false); };
 
   let _currentStep = 1; // mis à jour à mousedown, conservé pendant le drag
+  let _rightDown = null;
 
   const _isLineTool = t => t === 'wall' || t === 'door' || t === 'window';
-  const _isRectTool = t => t === 'hide' || t === 'reveal';
+  const _isRectTool = _isFogTool;
 
   const onDown = e => {
-    if (e.evt?.button === 2 || e.evt?.button === 1) return; // clic-droit / molette = pan, jamais de pose
+    if (e.evt?.button === 2) {
+      _rightDown = { x:e.evt.clientX, y:e.evt.clientY };
+      return; // clic-droit = pan ou menu contextuel, jamais de pose
+    }
+    if (e.evt?.button === 1) return; // molette = pan, jamais de pose
     const pos = _worldPos(); if (!pos) return;
     const K = window.Konva;
 
@@ -1057,9 +1068,24 @@ export function fogToggleEditMode(enabled, page) {
     _wallsLayer?.batchDraw();
   };
 
+  const onContextMenu = e => {
+    const moved = _rightDown
+      ? Math.hypot(e.evt.clientX - _rightDown.x, e.evt.clientY - _rightDown.y) > 6
+      : false;
+    _rightDown = null;
+    if (moved) return;
+    const pos = _worldPos();
+    const fogOp = pos ? _fogOpAtPos(pos) : null;
+    if (!fogOp) return;
+    e.evt.preventDefault();
+    e.cancelBubble = true;
+    _selectItem(fogOp.id);
+  };
+
   _stageEvts = {
     mousedown: onDown, mousemove: onMove, mouseup: onUp,
     touchstart: onDown, touchmove: onMove, touchend: onUp,
+    contextmenu: onContextMenu,
   };
   Object.entries(_stageEvts).forEach(([ev, fn]) => _stage.on(ev, fn));
 }
@@ -1139,6 +1165,16 @@ export function fogRedo() {
   return false;
 }
 
+function _fogOpAtPos(pos) {
+  if (!_page || !pos) return null;
+  const fogOps = _page.fogOps || [];
+  for (let i = fogOps.length - 1; i >= 0; i--) {
+    const r = fogOps[i];
+    if (pos.x >= r.x*_CELL && pos.x <= (r.x+r.w)*_CELL && pos.y >= r.y*_CELL && pos.y <= (r.y+r.h)*_CELL) return r;
+  }
+  return null;
+}
+
 function _deleteAtPos(pos) {
   if (!_page) return;
   const C = _CELL, THRESH = C * 0.25;
@@ -1166,14 +1202,10 @@ function _deleteAtPos(pos) {
     }
   }
   // Cherche un rectangle de brouillard sous le curseur (dernier ajouté en priorité)
-  const fogOps = _page.fogOps || [];
-  for (let i = fogOps.length - 1; i >= 0; i--) {
-    const r = fogOps[i];
-    if (pos.x >= r.x*C && pos.x <= (r.x+r.w)*C && pos.y >= r.y*C && pos.y <= (r.y+r.h)*C) {
-      const ref = _pgRef(_page.id); if (!ref) return;
-      updateDoc(ref, { fogOps: fogOps.filter(o => o.id !== r.id) }).catch(() => {});
-      return;
-    }
+  const fogOp = _fogOpAtPos(pos);
+  if (fogOp) {
+    const ref = _pgRef(_page.id); if (!ref) return;
+    updateDoc(ref, { fogOps: (_page.fogOps || []).filter(o => o.id !== fogOp.id) }).catch(() => {});
   }
 }
 

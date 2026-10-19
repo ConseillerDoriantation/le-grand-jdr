@@ -132,12 +132,22 @@
 .pp-detail-mj .pp-icon { width: 12px; height: 12px; }
 .pp-detail-tabs { position: sticky; top: 0; z-index: 5; display: flex; gap: 2px; margin-top: 18px; border-bottom: 1px solid var(--pp-border); background: var(--bg, #080d15); }
 .pp-detail-tabs button { position: relative; height: 42px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; background: transparent; color: var(--pp-muted); font-size: 13px; font-weight: 650; }
+.pp-detail-tabs button .pp-icon { width: 14px; height: 14px; }
 .pp-detail-tabs button:hover,.pp-detail-tabs button.is-active { color: var(--text); }
 .pp-detail-tabs button.is-active::after { content: ''; position: absolute; right: 10px; bottom: -1px; left: 10px; height: 2px; border-radius: 2px; background: var(--blue, #4f8cff); }
 .pp-detail-tabs em { color: var(--pp-dim); font: 10.5px 'JetBrains Mono', monospace; font-style: normal; }
 .pp-detail-tabs kbd { opacity: 0; transition: opacity .15s; }
 .pp-detail-tabs:hover kbd { opacity: 1; }
 .pp-detail-panel { padding-top: 22px; }
+.pp-detail-stack { display: flex; flex-direction: column; gap: 30px; }
+.pp-detail-section { min-width: 0; }
+.pp-detail-section + .pp-detail-section { padding-top: 26px; border-top: 1px solid var(--pp-border); }
+.pp-detail-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.pp-detail-section-head h3 { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--text); font: 650 15px 'Cinzel', serif; }
+.pp-detail-section-head h3 .pp-icon { width: 15px; height: 15px; color: var(--gold-light, #7eb0ff); }
+.pp-detail-section-head h3 em { min-width: 21px; height: 19px; display: inline-grid; place-items: center; padding: 0 6px; border-radius: 999px; background: var(--pp-surface-3); color: var(--pp-muted); font: 500 10px 'JetBrains Mono', monospace; font-style: normal; }
+.pp-detail-section-head p { margin: 3px 0 0; color: var(--pp-muted); font-size: 11.5px; }
+.pp-detail-section > .pp-roster-empty { min-height: 132px; }
 .pp-detail-columns { display: grid; grid-template-columns: minmax(0,1fr) 280px; align-items: start; gap: 32px; }
 .pp-detail-bio { max-width: 68ch; color: var(--text-soft); font-size: 14.5px; line-height: 1.7; }
 .pp-detail-columns.is-slideshow { grid-template-columns: minmax(0,1fr) 280px; }

@@ -582,6 +582,33 @@ html, body { min-height:100%; }
 }
 .bastion-nav-dot[hidden] { display: none; }
 .more-menu-item .bastion-nav-dot { margin-left: 8px; }
+.bastion-nav-count {
+  min-width: 18px; height: 18px; padding: 0 5px; margin-left: auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px; background: var(--gold, #4f8cff); color: #fff;
+  font-size: 10px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+}
+.bastion-nav-count[hidden] { display: none; }
+.more-menu-item .bastion-nav-count { margin-left: auto; }
+
+/* Rappel Bastion après clôture d'une session VTT (layout chargé partout). */
+.bs2-session-reminder { display: grid; gap: 12px; min-width: min(420px, 100%); }
+.bs2-session-reminder p { margin: 0; }
+.bs2-session-gain { color: var(--text); font-size: .95rem; }
+.bs2-session-gain b { color: #f5c451; }
+.bs2-session-balance { color: var(--text-muted); font-size: .82rem; }
+.bs2-session-project { display: flex; gap: 12px; align-items: center; padding: 13px; border: 1px solid color-mix(in srgb, #4f8cff 30%, var(--border)); border-radius: 12px; background: color-mix(in srgb, #4f8cff 8%, var(--bg-card)); }
+.bs2-session-project > span { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: #4f8cff20; font-size: 1.2rem; }
+.bs2-session-project div { display: grid; gap: 2px; min-width: 0; }
+.bs2-session-project small { color: var(--text-muted); font-size: .69rem; text-transform: uppercase; letter-spacing: .08em; }
+.bs2-session-project strong { color: var(--text); }
+.bs2-session-project p { color: #f5c451; font-size: .78rem; }
+.bs2-session-prompt { color: var(--text-soft); font-size: .86rem; }
+.bs2-session-reminder footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.bs2-session-action { min-height: 32px; padding: 0 13px; border: 1px solid var(--border-md); border-radius: 999px; background: var(--surface-2); color: var(--text-soft); font: inherit; font-size: .78rem; font-weight: 650; cursor: pointer; }
+.bs2-session-action:hover { border-color: var(--border-strong); color: var(--text); }
+.bs2-session-action.is-primary { border-color: #4f8cff80; background: #4f8cff; color: #fff; }
+.bs2-session-action.is-primary:hover { background: #6297ff; }
 
 .nav-item {
   position: relative;

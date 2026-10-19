@@ -57,7 +57,7 @@ import {
 import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal, setModalCloseGuard } from '../../shared/modal.js';
 import { _esc, _norm, _searchIncludes, appSplashHtml, loadingHtml, normalizeImageUrl } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
-import { githubPagesUrl } from '../../shared/github-folder.js';
+import { endBastionSessionGoldReminder, refreshBastionSessionGoldReminder } from '../../shared/bastion-session-reminder.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
 import { hasAdventurePremiumAccess } from '../../shared/premium.js';
 import PAGES from '../pages.js';
@@ -108,10 +108,11 @@ import {
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
   _vttLibMoveToAndClose, _mapLibRef, _saveMapLib, _vttLibImportGithub, _vttLibCleanDuplicates, _vttLibSearch, _vttLibSearchClear,
 } from './vtt-maplib.js';
-import { dedupeMapLibraryImages } from './vtt-map-library-utils.js';
+import { dedupeMapLibraryImages, resolveMapImageUrl } from './vtt-map-library-utils.js';
 import { _markCharsReady, _markNpcsReady, _markToksReady, _resetAutoSync, _charsReady, _cleanupReserveDuplicates } from './vtt-autosync.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu, _tokenEntityKey } from './vtt-utils.js';
 import { sceneGridSizeForImages } from './vtt-scene-utils.js';
+import { annotationPositionPatch, VTT_POINT_ANNOTATION_TYPES } from './vtt-annotation-utils.js';
 import {
   _vttConditionConfig, _vttConditionConfigDo, _vttConditionConfigInput,
 } from './vtt-conditions-config.js';
@@ -551,7 +552,7 @@ let _polyPts      = [];      // sommets posés [x,y,…] (world coords)
 let _polyLive     = null;    // ligne Konva fermée (aperçu)
 let _polyActive   = false;   // tracé polygone en cours
 // Types d'annotation « à points » (position via offsetX/Y, pas x/y centre).
-const _ANNOT_PTS_TYPES = new Set(['freehand', 'line', 'polygon']);
+const _ANNOT_PTS_TYPES = VTT_POINT_ANNOTATION_TYPES;
 // [état règle (_rulerActive/_rulerOrigin/_rulerHideTimer/…) → vtt-ruler.js]
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -11860,13 +11861,8 @@ function _buildAnnotShape(K, data) {
         if (!s || !ann) continue;
         // Marquer skip rebuild pour éviter le saut visuel au retour onSnapshot
         _skipAnnotRebuild.add(id);
-        const isPts = _ANNOT_PTS_TYPES.has(ann.type);
-        const update = isPts
-          ? { offsetX: s.x(), offsetY: s.y() }
-          : { x: s.x(), y: s.y() };
-        if (!isPts) {
-          ann.x = s.x(); ann.y = s.y();
-        }
+        const update = annotationPositionPatch(ann, s.x(), s.y());
+        Object.assign(ann, update);
         updateDoc(_annotRef(id), update).catch(() => {});
       }
       _annotGroupDragOrigins = null;
@@ -11893,7 +11889,7 @@ function _buildAnnotShape(K, data) {
       const patch = {
         rotation: shape.rotation(),
         scaleX: shape.scaleX(), scaleY: shape.scaleY(),
-        x: shape.x(), y: shape.y(),
+        ...annotationPositionPatch(data, shape.x(), shape.y()),
         ...(data.centered ? { centered: true, w: data.w, h: data.h } : {}),
       };
       updateDoc(_annotRef(data.id), patch).catch(() => {});
@@ -12493,10 +12489,15 @@ function _initListeners() {
     return onSnapshot(_sesRef(), STATE.isAdmin ? {} : { includeMetadataChanges: true }, onSessionSnapshot, () => {});
   }, { pausable: !STATE.isAdmin });
   function onSessionSnapshot(snap) {
+    const previousSession = VS.session;
     const previousCombatActive = !!VS.session?.combat?.active;
     const previousRound = VS.session?.combat?.round ?? 0;
     const previousActiveTokenId = VS.session?.combat?.activeTokenId ?? null;
     VS.session=snap.exists()?snap.data():{};
+    refreshBastionSessionGoldReminder(VS.session, Object.values(VS.characters || {}));
+    if (previousSession?.live && !VS.session.live) {
+      endBastionSessionGoldReminder(previousSession, Object.values(VS.characters || {}));
+    }
     if (!snap.metadata.hasPendingWrites) _applyTurnEpoch(sessionTurnEpoch(VS.session));
     setActiveStatsSession(VS.session.live && VS.session.statsSessionKey
       ? { key: VS.session.statsSessionKey, date: VS.session.statsSessionDate }
@@ -12569,6 +12570,7 @@ function _initListeners() {
 
     VS.characters = next;
     _vttRefreshChatPortraits();
+    refreshBastionSessionGoldReminder(VS.session, Object.values(next));
     for (const [id, e] of Object.entries(VS.tokens)) {
       if (e.data.characterId && changed.has(e.data.characterId)) {
         _patchShape(id); if (VS.selected === id) _renderInspectorSoon();
@@ -13593,12 +13595,7 @@ const _PG_PRESETS = [
   { icon:'🌍', lb:'Grande carte', c:60, r:40, desc:'Exploration vaste' },
 ];
 function _pgPreviewImageUrl(image) {
-  const source = String(image?.sourcePath || image?.url || '').trim();
-  if (!source) return '';
-  if (/^\.?\/?images\/maps\//i.test(source) || /(?:raw\.githubusercontent\.com|github\.com\/[^/]+\/[^/]+\/(?:blob|tree))\//i.test(source)) {
-    return githubPagesUrl(source);
-  }
-  return normalizeImageUrl(String(image?.url || source).trim());
+  return resolveMapImageUrl(image);
 }
 function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, visionUnlimited=false, mapImages=[] } = {}) {
   const canUseAdvancedVtt = _vttAdvancedPremium();

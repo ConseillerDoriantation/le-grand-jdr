@@ -7,27 +7,19 @@
 // ==============================================================================
 import { VS, aid } from './vtt-state.js';
 import { STATE } from '../../core/state.js';
-import { _esc, normalizeImageUrl } from '../../shared/html.js';
+import { _esc } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { promptModal } from '../../shared/modal.js';
 import { db, doc, setDoc, updateDoc } from '../../config/firebase.js';
 import { _pgRef } from './vtt-refs.js';
-import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, githubPagesUrl } from '../../shared/github-folder.js';
-import { dedupeMapLibraryImages, mapLibraryImageKey } from './vtt-map-library-utils.js';
+import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile } from '../../shared/github-folder.js';
+import { dedupeMapLibraryImages, mapLibraryImageKey, resolveMapImageUrl } from './vtt-map-library-utils.js';
 
 export let _libFolder = null;   // null = racine, string = folderId ouvert
 let _libOpen   = true;   // section collapsible dans le tray
 let _libSearch = '';
 export const _mapLibRef = () => doc(db, `adventures/${aid()}/vtt/mapLibrary`);
 const _libCanWrite = () => !!STATE.isAdmin;
-
-function _resolveMapImageUrl(url, sourcePath = '') {
-  const raw = String(sourcePath || url || '').trim();
-  if (/^\.?\/?images\/maps\//i.test(raw) || /(?:raw\.githubusercontent\.com|github\.com\/[^/]+\/[^/]+\/(?:blob|tree))\//i.test(raw)) {
-    return githubPagesUrl(raw);
-  }
-  return normalizeImageUrl(String(url || raw).trim());
-}
 
 // Reset au teardown / changement d'aventure (appelé par vtt.js).
 export function _resetMapLib() { _libFolder = null; }
@@ -47,7 +39,9 @@ export function _renderLibSection() {
   if (!_libOpen) { el.innerHTML = ''; return; }
 
   const folders = VS.mapLib.folders || [];
-  const images  = VS.mapLib.images  || [];
+  // Les anciennes URLs Cloudinary restent dans les données afin de ne rien
+  // supprimer implicitement, mais elles ne produisent aucune requête réseau.
+  const images  = (VS.mapLib.images || []).filter(image => resolveMapImageUrl(image));
   const curFolder = _libFolder ? folders.find(f => f.id === _libFolder) : null;
   const folderImages = _libFolder
     ? images.filter(i => i.folderId === _libFolder)
@@ -75,7 +69,7 @@ export function _renderLibSection() {
     ? `<div class="vtt-lib-grid">${sorted.map(img => `
         <div class="vtt-lib-card" role="button" tabindex="0" draggable="true" data-vtt-drag="image:${img.id}" data-vtt-fn="_vttLibPlace" data-vtt-args="${img.id}" data-lib-search="${_esc([img.name, img.sourcePath, img.url].map(v => String(v || '')).join(' ').toLowerCase())}" title="${_esc(img.name||'Image')} · clic = pleine carte · glisser = placement précis">
           <div class="vtt-lib-card-thumb">
-            <img src="${_esc(_resolveMapImageUrl(img.url, img.sourcePath))}" alt="${_esc(img.name||'')}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
+            <img src="${_esc(resolveMapImageUrl(img))}" alt="${_esc(img.name||'')}" loading="lazy" data-img-err="mark-parent" data-img-err-class="vtt-lib-card--err">
           </div>
           <div class="vtt-lib-card-meta">
             <div class="vtt-lib-card-name">${_esc(img.name||'image')}</div>
@@ -271,13 +265,15 @@ export function _vttLibPlace(imgId, cell = null) {
   if (!VS.activePage) { showNotif('Aucune page active', 'error'); return; }
   const img = VS.mapLib.images.find(i => i.id === imgId);
   if (!img) return;
+  const resolvedUrl = resolveMapImageUrl(img);
+  if (!resolvedUrl) { showNotif('Cette ancienne image Cloudinary est indisponible. Utilise sa version GitHub.', 'error'); return; }
   const isDrop = cell && Number.isFinite(cell.col) && Number.isFinite(cell.row);
   const w = isDrop ? Math.max(1, Math.min(8, VS.activePage.cols)) : VS.activePage.cols;
   const h = isDrop ? Math.max(1, Math.min(5, VS.activePage.rows)) : VS.activePage.rows;
   const x = isDrop ? Math.max(0, Math.min(VS.activePage.cols - w, cell.col - Math.floor(w / 2))) : 0;
   const y = isDrop ? Math.max(0, Math.min(VS.activePage.rows - h, cell.row - Math.floor(h / 2))) : 0;
   const imgs = [...(VS.activePage.backgroundImages??[]), {
-    id: Date.now().toString(), url: _resolveMapImageUrl(img.url, img.sourcePath), sourcePath: img.sourcePath || null, x, y, w, h,
+    id: Date.now().toString(), url: resolvedUrl, sourcePath: img.sourcePath || null, x, y, w, h,
   }];
   updateDoc(_pgRef(VS.activePage.id), { backgroundImages: imgs })
     .then(() => showNotif('Image placée sur la carte', 'success'))
