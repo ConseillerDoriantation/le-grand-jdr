@@ -409,9 +409,18 @@ export function getArmorTypeMeta(type = '') {
   return { label, tone: 'neutral', color: '', chipText: '', modifiers: getEmptyArmorSetModifiers(), set: null };
 }
 
-export function getArmorSetChipText(setData = {}) {
+export function getArmorSetChipText(setData = {}, { includeNames = true } = {}) {
   if (!setData?.isActive) return '';
-  return setData.activeEffect?.chipText || '';
+  // `activeEffect` décrit la définition complète du type pour compatibilité.
+  // L'affichage joueur doit au contraire refléter uniquement les paliers
+  // réellement atteints, déjà agrégés dans `setData.modifiers`.
+  const effect = formatArmorSetEffect({ modifiers: setData.modifiers || {} });
+  if (!includeNames) return effect;
+  const names = (setData.activeSets || [])
+    .map(active => active?.set?.label || active?.type)
+    .filter(Boolean);
+  const uniqueNames = [...new Set(names)];
+  return uniqueNames.length ? `${uniqueNames.join(' + ')} : ${effect}` : effect;
 }
 
 // Combine plusieurs jeux de modifiers (plusieurs sets actifs) en un seul.

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getArmorSetData, normalizeArmorType, getCharFullDamageProfile } from '../assets/js/shared/equipment-utils.js';
+import { getArmorSetChipText, getArmorSetData, normalizeArmorType, getCharFullDamageProfile } from '../assets/js/shared/equipment-utils.js';
 import { LEGACY_EQUIPMENT_SLOTS, setEquipmentSlotsForTests } from '../assets/js/shared/equipment-slots.js';
 import { DEFAULT_ARMOR_SETS, LEGACY_ARMOR_SETS, getArmorTypeOptions, setArmorSetSettingsForTests } from '../assets/js/shared/armor-set-settings.js';
 
@@ -66,6 +66,8 @@ test('armor set B : un palier partiel s’applique sans set complet, une autre p
   assert.equal(partial.isActive, true);
   assert.equal(partial.modifiers.toucherBonus, 2);
   assert.equal(partial.modifiers.damageReduction, 0);
+  assert.equal(getArmorSetChipText(partial), 'Lourde : Toucher +2');
+  assert.doesNotMatch(getArmorSetChipText(partial), /Dégâts subis/);
 
   // 3 pièces Lourde : les deux paliers cumulés s'appliquent.
   const full = getArmorSetData({ equipement: {
@@ -75,6 +77,7 @@ test('armor set B : un palier partiel s’applique sans set complet, une autre p
   } });
   assert.equal(full.modifiers.toucherBonus, 2);
   assert.equal(full.modifiers.damageReduction, 2);
+  assert.equal(getArmorSetChipText(full, { includeNames: false }), 'Toucher +2 · Dégâts subis -2');
 });
 
 test('armor set B : les nouveaux effets (ca/dmg/move/save/resist) sont agrégés', () => {
@@ -98,6 +101,7 @@ test('armor set B : les nouveaux effets (ca/dmg/move/save/resist) sont agrégés
   assert.equal(data.modifiers.moveDelta, 1.5);
   assert.equal(data.modifiers.saveBonus.constitution, 2);
   assert.deepEqual(data.modifiers.resistances, ['feu']);
+  assert.equal(getArmorSetChipText(data, { includeNames: false }), 'CA +2 · Dégâts +1 · Déplacement +1,5 m · Sauvegarde Constitution +2 · Résistance feu');
 });
 
 test('armor set B : les effets soin et plage de critique sont agrégés (cumulés)', () => {

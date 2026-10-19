@@ -403,16 +403,18 @@ export function formatArmorSetEffect(set = {}) {
     parts.push(`Toucher ${mod.toucherBonus > 0 ? '+' : '-'}${Math.abs(mod.toucherBonus)}`);
   }
   if (mod.damageReduction) {
-    parts.push(`Degats subis -${mod.damageReduction}`);
+    parts.push(`Dégâts subis -${mod.damageReduction}`);
   }
   if (mod.caBonus) parts.push(`CA ${mod.caBonus > 0 ? '+' : '-'}${Math.abs(mod.caBonus)}`);
-  if (mod.damageBonus) parts.push(`Degats ${mod.damageBonus > 0 ? '+' : '-'}${Math.abs(mod.damageBonus)}`);
-  if (mod.moveDelta) parts.push(`Deplacement ${mod.moveDelta > 0 ? '+' : '-'}${String(Math.abs(mod.moveDelta)).replace('.', ',')} m`);
+  if (mod.damageBonus) parts.push(`Dégâts ${mod.damageBonus > 0 ? '+' : '-'}${Math.abs(mod.damageBonus)}`);
+  if (mod.healBonus) parts.push(`Soins ${mod.healBonus > 0 ? '+' : '-'}${Math.abs(mod.healBonus)}`);
+  if (mod.critRangeBonus) parts.push(`Critique +${mod.critRangeBonus}`);
+  if (mod.moveDelta) parts.push(`Déplacement ${mod.moveDelta > 0 ? '+' : '-'}${String(Math.abs(mod.moveDelta)).replace('.', ',')} m`);
   Object.entries(mod.saveBonus || {}).forEach(([k, v]) => { if (v) parts.push(`Sauvegarde ${(_AT_STAT_NAMES[k] || k)} ${v > 0 ? '+' : '-'}${Math.abs(v)}`); });
-  if (Array.isArray(mod.resistances) && mod.resistances.length) parts.push(`Resistance ${mod.resistances.join(', ')}`);
+  if (Array.isArray(mod.resistances) && mod.resistances.length) parts.push(`Résistance ${mod.resistances.join(', ')}`);
   const rollParts = formatArmorSetRollImpacts(mod.rollImpact);
   if (rollParts) parts.push(rollParts);
-  return parts.join(' · ') || set.description || 'Aucun effet chiffre';
+  return parts.join(' · ') || set.description || 'Aucun effet chiffré';
 }
 
 export function formatArmorSetRollImpacts(rollImpact = {}) {

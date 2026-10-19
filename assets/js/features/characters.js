@@ -32,7 +32,7 @@ import {
   loadCombatStyles, detectCombatStyle,
   openCombatStylesAdmin, openDamageTypesAdmin,
   _weaponFormats,
-  _getTraits, getEquippedInventoryIndexMap, getArmorTypeMeta, getArmorSetData,
+  _getTraits, getEquippedInventoryIndexMap, getArmorTypeMeta, getArmorSetChipText, getArmorSetData,
   // V3 — combat helpers
   getMainWeapon, getWeaponToucherParts, getWeaponDegatsParts,
 } from './characters/data.js';
@@ -1771,8 +1771,10 @@ function renderCharCombatV3(c, canEdit) {
       ? `Encore ${nextTier - domCount} pièce${nextTier - domCount > 1 ? 's' : ''} ${domType} pour le ${nextTier === maxPieces ? 'set complet' : `palier à ${nextTier} pièces`}.`
       : 'Aucun bonus d’ensemble configuré pour ce type.';
   }
-  const activeSetName = armorSet.activeEffect?.set?.label || armorSet.fullType || '';
-  const activeSetEffect = armorSet.activeEffect?.chipText || '';
+  const activeSetName = [...new Set((armorSet.activeSets || [])
+    .map(active => active?.set?.label || active?.type)
+    .filter(Boolean))].join(' + ') || armorSet.fullType || '';
+  const activeSetEffect = getArmorSetChipText(armorSet, { includeNames: false });
   const setChip = (armorSet.trackedSlots || []).length
     ? `<span class="cb-set${armorSet.isActive ? ' is-on' : ''}" title="${_esc(activeSetEffect || setHint)}"><span class="cb-pips">${setPips}</span><b>${armorSet.isActive ? _esc(activeSetName) : `Set ${armorSet.equippedCount || 0}/${armorSet.trackedSlots.length}`}</b>${armorSet.isActive && activeSetEffect ? `<span>${_esc(activeSetEffect)}</span>` : ''}</span>`
     : '';
