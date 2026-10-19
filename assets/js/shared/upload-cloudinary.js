@@ -23,7 +23,8 @@
 // à `true` le jour où tu (re)prends un plan Cloudinary (ex. commercialisation)
 // et les call sites recommenceront à uploader via Cloudinary.
 // ══════════════════════════════════════════════════════════════════════
-export const CLOUDINARY_ENABLED = false;
+export { CLOUDINARY_ENABLED, isCloudinaryUrl } from './media-hosting.js';
+import { CLOUDINARY_ENABLED } from './media-hosting.js';
 
 const LS_CLOUD  = 'cloudinary-cloud-name';
 const LS_PRESET = 'cloudinary-upload-preset';

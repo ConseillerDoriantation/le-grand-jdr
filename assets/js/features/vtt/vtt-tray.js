@@ -17,7 +17,7 @@ import { db, setDoc, updateDoc, writeBatch } from '../../config/firebase.js';
 import { showNotif } from '../../shared/notifications.js';
 import { _esc, _searchIncludes, normalizeImageUrl } from '../../shared/html.js';
 import { promptModal } from '../../shared/modal.js';
-import { githubPagesUrl } from '../../shared/github-folder.js';
+import { resolveMapImageUrl } from './vtt-map-library-utils.js';
 import { _sesRef, _pgRef, _tokRef } from './vtt-refs.js';
 import { TYPE_COLOR, hpColor } from './vtt-constants.js';
 import { _live } from './vtt-effective.js';
@@ -415,13 +415,11 @@ function _pageSmartSort(a, b) {
 
 function _pageThumbUrl(p) {
   const imgs = Array.isArray(p?.backgroundImages) ? p.backgroundImages : [];
-  const img = imgs.find(x => x?.url) || imgs[0];
-  const raw = String(img?.sourcePath || img?.url || '').trim();
-  if (!raw) return '';
-  if (/^\.?\/?images\/maps\//i.test(raw) || /(?:raw\.githubusercontent\.com|github\.com\/[^/]+\/[^/]+\/(?:blob|tree))\//i.test(raw)) {
-    return githubPagesUrl(raw);
+  for (const image of imgs) {
+    const resolved = resolveMapImageUrl(image);
+    if (resolved) return resolved;
   }
-  return normalizeImageUrl(String(img?.url || raw).trim());
+  return '';
 }
 
 function _pageCard(p, broadcastId, { showFolder = false } = {}) {

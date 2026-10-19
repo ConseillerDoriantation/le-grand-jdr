@@ -1,10 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   githubAssetIdentity,
   mapLibraryImageKey,
   dedupeMapLibraryImages,
+  resolveMapImageUrl,
 } from '../assets/js/features/vtt/vtt-map-library-utils.js';
+
+const renderSource = readFileSync(new URL('../assets/js/features/vtt/vtt-render.js', import.meta.url), 'utf8');
 
 test('une carte GitHub garde la même identité entre chemin, Raw, blob et Pages', () => {
   const variants = [
@@ -14,6 +18,26 @@ test('une carte GitHub garde la même identité entre chemin, Raw, blob et Pages
     'https://conseillerdoriantation.github.io/le-grand-jdr/images/maps/Grande%20salle.webp',
   ].map(value => githubAssetIdentity(value));
   assert.equal(new Set(variants).size, 1);
+});
+
+test('Cloudinary désactivé ne déclenche aucune requête pour les anciennes cartes', () => {
+  assert.equal(resolveMapImageUrl('https://res.cloudinary.com/dvk7jqouy/image/upload/v1/maps/ancienne.png'), '');
+  assert.equal(
+    resolveMapImageUrl({
+      url: 'https://res.cloudinary.com/dvk7jqouy/image/upload/v1/maps/ancienne.png',
+      sourcePath: 'images/maps/Carte migrée.png',
+    }),
+    'https://conseillerdoriantation.github.io/le-grand-jdr/images/maps/Carte%20migr%C3%A9e.png',
+  );
+});
+
+test('une image partagée reste chargée une fois sans fuir vers une autre scène', () => {
+  assert.match(renderSource, /const _failedMapImageUrls = new Set\(\)/);
+  assert.match(renderSource, /\.filter\(entry => entry\.src && !_failedMapImageUrls\.has\(entry\.src\)\)/);
+  assert.match(renderSource, /else if \(cached\) \{[\s\S]*cached\.addEventListener\('load'/);
+  assert.match(renderSource, /VS\.activePage\?\.id !== pageId \|\| renderRevision !== _mapRenderRevision/);
+  assert.match(renderSource, /findOne\?\.\(`\.img-\$\{img\.id\}`\)/);
+  assert.match(renderSource, /_mapImgElCache\.set\(src, el\);\s*el\.src = src/);
 });
 
 test('le chemin complet distingue deux cartes de même nom dans deux dossiers', () => {

@@ -13,12 +13,17 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { STATE } from '../core/state.js';
-import { saveDoc, subscribeDoc } from '../data/firestore.js';
+import { saveDoc, subscribeCollection, subscribeDoc } from '../data/firestore.js';
 import { isFeatureEnabled } from './features.js';
 import { bastionWallSeenKey } from './bastion-wall.js';
+import { bastionRoomProjects } from './bastion-investments.js';
 
 let _lastActivityAt = 0;
 let _unsubActivity = null;
+let _unsubBastion = null;
+let _unsubInvestments = null;
+let _bastion = null;
+let _investments = [];
 
 // Marque une nouvelle activité du mur (appelé à chaque publication / réponse).
 export function touchBastionWallActivity() {
@@ -37,10 +42,21 @@ export function bastionWallHasUnread() {
   return _lastActivityAt > 0 && _lastActivityAt > _seenAt();
 }
 
+export function bastionSignalSnapshot() {
+  return { bastion: _bastion, investments: _investments, projects: bastionRoomProjects(_bastion || {}, _investments) };
+}
+
 // Affiche/masque la pastille sur les entrées de navigation « Bastion ».
 export function refreshBastionWallDot() {
   const has = bastionWallHasUnread();
   document.querySelectorAll('.bastion-nav-dot').forEach((el) => { el.hidden = !has; });
+  const count = bastionRoomProjects(_bastion || {}, _investments).length;
+  document.querySelectorAll('.bastion-nav-count').forEach((el) => {
+    el.textContent = String(count);
+    el.hidden = has || count < 1;
+    el.setAttribute('aria-label', `${count} chantier${count > 1 ? 's' : ''} ouvert${count > 1 ? 's' : ''}`);
+  });
+  document.dispatchEvent(new CustomEvent('app:bastion-signal-changed'));
 }
 
 // Abonnement au doc d'activité pour toute la session, ré-armé à chaque
@@ -51,12 +67,26 @@ export function refreshBastionWallDot() {
 // pas de lecture refusée facturée).
 export function initBastionWallSignal() {
   _unsubActivity?.();
+  _unsubBastion?.();
+  _unsubInvestments?.();
   _unsubActivity = null;
+  _unsubBastion = null;
+  _unsubInvestments = null;
   _lastActivityAt = 0;
+  _bastion = null;
+  _investments = [];
   refreshBastionWallDot();
   if (!isFeatureEnabled('bastion')) return;
   _unsubActivity = subscribeDoc('bastionWall', 'meta', (data) => {
     _lastActivityAt = Number(data?.lastActivityAt) || 0;
     refreshBastionWallDot();
   }, { silent: true });
+  _unsubBastion = subscribeDoc('bastion', 'main', data => {
+    _bastion = data || null;
+    refreshBastionWallDot();
+  }, { silent: true });
+  _unsubInvestments = subscribeCollection('bastionInvestments', data => {
+    _investments = data || [];
+    refreshBastionWallDot();
+  });
 }

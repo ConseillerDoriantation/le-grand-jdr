@@ -22,12 +22,14 @@ import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
 import { getRouteSub, setRouteSub } from '../shared/route.js';
-import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
+import { characterAvatarHtml, characterColor, characterPortraitContent } from '../shared/portraits.js';
 import { resolveAvatarUrl } from '../shared/avatar.js';
 import { canControlCharacter, getControlledCharacters } from '../shared/character-state.js';
 import { dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey } from '../shared/bastion-wall.js';
 import { createDashboardWallFeed, dashboardWallView } from '../shared/dashboard-wall-feed.js';
+import { bastionRoomProjects, roomInvestmentContributors } from '../shared/bastion-investments.js';
+import { bastionSignalSnapshot } from '../shared/bastion-signal.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
@@ -2896,6 +2898,7 @@ const PAGES = {
     let presence = [];
     let wallDocs = [];
     let wallRead = null;
+    let { bastion, investments: bastionInvestments } = bastionSignalSnapshot();
     let pickGroupId = '';
     let paintQueued = false;
     const groupOverrides = new Map();
@@ -3116,6 +3119,28 @@ const PAGES = {
       return `<section class="db-sec db-wall"><div class="db-sh"><h2>Mur du Bastion</h2>${unread ? `<span class="new">${unread} nouveau${unread > 1 ? 'x' : ''}</span>` : ''}<span class="sp"></span><button type="button" class="db-link" data-navigate="bastion">Ouvrir ${icon('arrow-right')}</button></div><div class="db-card">${shown.length ? shown.map(card).join('') : '<div class="db-empty"><b>Le mur est prêt</b>Publiez la première nouvelle du Bastion.</div>'}<div class="db-wf"><button type="button" class="db-btn" data-navigate="bastion">${icon('edit')} Publier</button>${unread ? '<button type="button" class="db-btn ghost" data-action="_dashMarkWallRead">Tout marquer lu</button>' : ''}</div></div></section>`;
     };
 
+    const bastionSection = () => {
+      const projects = bastionRoomProjects(bastion || {}, bastionInvestments);
+      const catalog = Array.isArray(bastion?.roomCatalog) ? bastion.roomCatalog : [];
+      const buildings = catalog.filter(room => Number(bastion?.salles?.[room.slug]?.weeksLeftToBuild) > 0);
+      const contributorRows = slug => {
+        return roomInvestmentContributors(bastion || {}, bastionInvestments, slug)
+          .map(row => ({ ...row, name: row.charName }));
+      };
+      const projectRow = project => {
+        const rows = contributorRows(project.slug);
+        const segments = rows.map(row => {
+          const char = allChars.find(item => item.id === row.charId) || { nom: row.name };
+          const color = /^#[0-9a-f]{6}$/i.test(char.auraColor || '') ? char.auraColor : characterColor(char);
+          return `<i style="--segment:${color};width:${project.cost ? Math.min(100, row.amount / project.cost * 100) : 0}%"></i>`;
+        }).join('');
+        return `<div class="db-bs-project" style="--room:${_esc(project.def.color || '#7eb0ff')}"><span class="db-bs-icon">${_esc(project.def.emoji || '🏠')}</span><span><b>${_esc(project.name)} ${project.def.unlimited ? project.target : ['','I','II','III'][project.target] || project.target}</b><small>Il manque ${project.remaining} or</small><span class="db-bs-bar">${segments}</span></span></div>`;
+      };
+      const closest = projects[0];
+      const note = closest?.next?.bonus ? String(closest.next.bonus) : '';
+      return `<section class="db-sec db-bastion"><div class="db-sh"><h2>🏰 Bastion</h2><span class="sp"></span><button type="button" class="db-link" data-navigate="bastion" data-nav-sub="salles">Voir les salles ${icon('arrow-right')}</button></div><div class="db-card db-bs-card">${projects.length ? projects.slice(0, 2).map(projectRow).join('') : '<div class="db-empty"><b>Aucun chantier ouvert</b>Une cotisation depuis les salles fera apparaître l’objectif commun ici.</div>'}${closest ? `<div class="db-bs-footer"><span>${_esc(note.length > 76 ? `${note.slice(0, 74)}…` : note)}</span>${closest.remaining > 0 ? `<button type="button" class="db-btn pri" data-navigate="bastion" data-nav-sub="room:${_esc(closest.slug)}">Cotiser ${Math.min(50, closest.remaining)} or</button>` : `<button type="button" class="db-btn pri" data-navigate="bastion" data-nav-sub="room:${_esc(closest.slug)}">Financé</button>`}</div>` : ''}${buildings.length ? `<div class="db-bs-building">${buildings.map(room => `<b>${_esc(room.emoji || '🏗')} ${_esc(room.nom)}</b> ouvre dans ${Number(bastion.salles[room.slug].weeksLeftToBuild)} période${Number(bastion.salles[room.slug].weeksLeftToBuild) > 1 ? 's' : ''}`).join(' · ')}</div>` : ''}</div></section>`;
+    };
+
     function paint() {
       paintQueued = false;
       const root = document.getElementById('dash-root');
@@ -3139,7 +3164,8 @@ const PAGES = {
       const initials = adventure.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toUpperCase() || 'A';
       const online = liveUids().size;
       const wall = isFeatureEnabled('bastion') ? wallSection() : '';
-      root.innerHTML = `<div class="db-top"><button type="button" class="db-adv" data-action="openAdventureSwitcher"><span class="sig">${_esc(initials)}</span><b>${_esc(adventure)}</b><small>${icon('refresh-cw')}Changer</small></button><span class="db-hello">${STATE.isAdmin ? `<span class="db-on"><i></i>${online} joueur${online > 1 ? 's' : ''} connecté${online > 1 ? 's' : ''}</span>` : ''}<span>Bonsoir, <b>${_esc(pseudo)}</b>${STATE.isAdmin ? ' · Maître de jeu' : ''}</span></span></div>${sessionBanner}<div class="db-grid${wall ? '' : ' solo'}"><div class="db-col">${main.join('')}</div>${wall ? `<div class="db-col">${wall}</div>` : ''}</div>`;
+      const bastionCard = isFeatureEnabled('bastion') ? bastionSection() : '';
+      root.innerHTML = `<div class="db-top"><button type="button" class="db-adv" data-action="openAdventureSwitcher"><span class="sig">${_esc(initials)}</span><b>${_esc(adventure)}</b><small>${icon('refresh-cw')}Changer</small></button><span class="db-hello">${STATE.isAdmin ? `<span class="db-on"><i></i>${online} joueur${online > 1 ? 's' : ''} connecté${online > 1 ? 's' : ''}</span>` : ''}<span>Bonsoir, <b>${_esc(pseudo)}</b>${STATE.isAdmin ? ' · Maître de jeu' : ''}</span></span></div>${sessionBanner}<div class="db-grid${wall || bastionCard ? '' : ' solo'}"><div class="db-col">${main.join('')}</div>${wall || bastionCard ? `<div class="db-col">${bastionCard}${wall}</div>` : ''}</div>`;
     }
 
     const replaceParticipants = (groupId, participants) => {
@@ -3219,6 +3245,11 @@ const PAGES = {
     }
     if (isFeatureEnabled('bastion')) {
       _dashWallFeed?.stop();
+      const syncBastionCard = () => {
+        ({ bastion, investments: bastionInvestments } = bastionSignalSnapshot());
+        schedulePaint();
+      };
+      document.addEventListener('app:bastion-signal-changed', syncBastionCard);
       const wallFeed = createDashboardWallFeed(
         { subscribeRecent: subscribeRecentCollection, subscribeWhere: subscribeRecentWhere },
         docs => { wallDocs = docs || []; schedulePaint(); },
@@ -3232,6 +3263,7 @@ const PAGES = {
       }, { silent: true });
       document.addEventListener('app:page-changed', () => {
         wallFeed.stop();
+        document.removeEventListener('app:bastion-signal-changed', syncBastionCard);
         if (_dashWallFeed === wallFeed) _dashWallFeed = null;
         if (_dashUi === uiRef) _dashUi = null;
       }, { once: true });
