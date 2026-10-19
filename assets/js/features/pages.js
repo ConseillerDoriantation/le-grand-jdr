@@ -30,6 +30,7 @@ import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey } fro
 import { createDashboardWallFeed, dashboardWallView } from '../shared/dashboard-wall-feed.js';
 import { bastionRoomProjects, roomInvestmentContributors } from '../shared/bastion-investments.js';
 import { bastionSignalSnapshot } from '../shared/bastion-signal.js';
+import { normalizeEmoteCatalog } from '../shared/emote-admin.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
@@ -3930,7 +3931,7 @@ const PAGES = {
       _statsLegacyRollups = vttLogResult?.rollups || null;
       _statsVttDetailCache = new Map();
       _statsRowsCache = new Map();
-      _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
+      _statsEmoteUrl = new Map(normalizeEmoteCatalog(emoteDoc?.emotes).map(e => [e.name, e.url]));
       _statsRefreshEnrichedView(_statsScope);
     }).catch(err => {
       console.warn('[stats] enrichissement secondaire indisponible', err);

@@ -302,7 +302,7 @@ export async function openEmoteAdminModal({ emotes = [], save, onSaved } = {}) {
     if (!path) return;
     localStorage.setItem('vtt-emote-gh-folder', path);
     try {
-      const files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS });
+      const files = await listGithubFolder(path, { exts: GH_IMAGE_EXTS, urlMode: 'pages' });
       const { added, skipped } = dedupeEmoteImports(files, state.draft, { slugOf: file => slugFromFile(file.name), fileKeyOf: file => fileKey(file.url) });
       if (!added.length) return showNotif('Toutes ces émotes sont déjà présentes', 'info');
       mutate(() => {
