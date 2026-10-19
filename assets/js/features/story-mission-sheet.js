@@ -300,12 +300,28 @@ function menuOptionsHtml() {
     .filter(char => !present.has(char.id) && norm(`${char.nom || ''} ${char.classe || ''}`).includes(query));
   return `<div class="mm-pop"><div class="mm-pop-title">${MM.menu.type === 'join' ? 'Rejoindre avec…' : 'Ajouter un personnage'}</div>${search}<div class="mm-pop-list">${list.map(char => `<button data-mm-action="${MM.menu.type === 'join' ? 'join' : 'member-add'}" data-group="${group?.id || ''}" data-char="${char.id}" class="mm-pop-option">${characterAvatarHtml(char, { size: 28, className: 'mm-avatar', border: 'none' })}<span><b>${_esc(char.nom || 'Personnage')}</b><small>${_esc([char.classe, char.race].filter(Boolean).join(' · '))}</small></span></button>`).join('') || '<div class="mm-pop-empty">Aucun personnage disponible.</div>'}</div></div>`;
 }
-function paintMenu() {
+function paintMenu({ preserveSearch = false } = {}) {
   const layer = document.querySelector('.mm-pop-layer');
   if (!layer) return;
+  const previousInput = layer.querySelector('.mm-pop-search input');
+  const keepCaret = preserveSearch && document.activeElement === previousInput;
+  const selectionStart = keepCaret ? previousInput.selectionStart : null;
+  const selectionEnd = keepCaret ? previousInput.selectionEnd : null;
   layer.innerHTML = menuOptionsHtml();
   layer.classList.toggle('open', !!MM.menu);
-  if (MM.menu) requestAnimationFrame(() => layer.querySelector('input')?.focus());
+  if (!MM.menu) return;
+  const nextInput = layer.querySelector('.mm-pop-search input');
+  if (keepCaret && nextInput) {
+    // Le filtre reconstruit la liste, donc également son champ. Rétablir le
+    // focus et la sélection dans le même événement empêche la saisie de
+    // repartir au début à chaque caractère (axes, personnages et missions).
+    nextInput.focus({ preventScroll: true });
+    if (selectionStart != null && selectionEnd != null) {
+      try { nextInput.setSelectionRange(selectionStart, selectionEnd); } catch { /* input non compatible */ }
+    }
+    return;
+  }
+  requestAnimationFrame(() => nextInput?.focus());
 }
 
 async function saveField(field, value, { rerender = true } = {}) {
@@ -346,7 +362,7 @@ Object.assign(handlers, {
   visibility: () => saveField('visibleJoueurs', current().visibleJoueurs === false),
   order: el => saveField('ordre', Math.max(0, (Number(current().ordre) || 0) + (Number(el.dataset.delta) || 0))),
   menu: el => { MM.menu = { type: el.dataset.menu, groupId: el.dataset.group || '', anchor: el.dataset.anchor || '' }; MM.query = ''; paintMenu(); },
-  'menu-search': el => { MM.query = el.value; paintMenu(); },
+  'menu-search': el => { MM.query = el.value; paintMenu({ preserveSearch: true }); },
   'axis-select': el => { closeMenu(); return saveField('axe', el.dataset.value || ''); },
   'act-select': async el => {
     const value = el.dataset.value || 'Acte I'; closeMenu();

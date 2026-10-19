@@ -32,6 +32,12 @@ test('les valeurs de combat restent calculées par les helpers métier', () => {
   assert.doesNotMatch(sheet, /const PROF\s*=|const ITEMS\s*=/);
 });
 
+test('le set affiché reprend les paliers réellement appliqués', () => {
+  const combat = sheet.slice(sheet.indexOf('function renderCharCombatV3'), sheet.indexOf('// ══════════════════════════════════════════════════════════════════════════════\n// V3 — INVENTAIRE'));
+  assert.match(combat, /getArmorSetChipText\(armorSet, \{ includeNames: false \}\)/);
+  assert.doesNotMatch(combat, /activeEffect\?\.chipText/);
+});
+
 test('le détail est sticky sur desktop et devient une feuille basse sous 900 px', () => {
   assert.match(css, /\.cs-v3 \.main-col:has\(\.cb-wrap\)\s*\{[^}]*overflow:\s*clip/);
   assert.match(css, /\.cs-v3 \.cb-detail\s*\{[^}]*position:\s*sticky/);

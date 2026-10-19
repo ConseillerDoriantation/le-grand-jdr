@@ -155,7 +155,9 @@ function _armorBlock(c) {
   const slots = getEquipmentSlots().filter(slot => slot.kind !== 'weapon');
   const set = getArmorSetData(c);
   const dominant = set.dominantType ? getArmorTypeMeta(set.dominantType) : null;
-  const setName = set.activeEffect?.set?.label || dominant?.set?.label || set.fullType || set.dominantType || 'Set de protection';
+  const setName = [...new Set((set.activeSets || [])
+    .map(active => active?.set?.label || active?.type)
+    .filter(Boolean))].join(' + ') || dominant?.set?.label || set.fullType || set.dominantType || 'Set de protection';
   const setEffect = set.isActive ? (getArmorSetChipText(set) || set.activeEffect?.chipText || 'Bonus de set actif') : 'Set incomplet, aucun bonus';
   const pips = (set.slots || []).map(entry => {
     const color = set.isActive ? 'var(--amber)' : _safeColor(getArmorTypeMeta(entry.type)?.color, '#56667c');
