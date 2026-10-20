@@ -24,10 +24,24 @@ test('le verrou est constant au zoom et peut être découvert par une tentative 
 });
 
 test('les portes et vitres ont une grande cible et une aide au survol', () => {
-  assert.match(fog, /strokeWidth:22\*k/);
+  assert.match(fog, /function _structureHitStrokeWidth\(k\)/);
+  assert.match(fog, /coarsePointer \? 40 : 32/);
+  assert.match(fog, /strokeWidth:hitStrokeWidth/);
   assert.match(fog, /rgba\(126,176,255,\.45\)/);
   assert.match(css, /\.vtt-structure-tip\.open/);
   assert.match(css, /\.vtt-map-legend-row/);
+});
+
+test('les cibles joueur sont recalculées après la construction du brouillard', () => {
+  assert.match(fog, /_playerFogCanvas = isAdmin \? null : canvas;[\s\S]*if \(!isAdmin\) fogRenderWalls\(page, false\)/);
+  assert.match(fog, /function _playerStructureIsVisible\(g, page = _page\)[\s\S]*_structurePoint\(g, along, normal\)/);
+  assert.match(fog, /const canInteract = isAdmin \|\| _playerStructureIsVisible\(g, page\)/);
+});
+
+test('seules les structures ouvrables captent le clic et le battant ouvert reste cliquable', () => {
+  assert.match(fog, /if \(!_editMode && state\.canOpen\)/);
+  assert.match(fog, /if \(state\.type === 'door' && state\.open\) hitPaths\.push\(_openDoorLeafPoints\(g, k\)\)/);
+  assert.match(fog, /for \(const hitPoints of hitPaths\)/);
 });
 
 test('le brouillard laisse le clic gauche aux structures mais conserve son clic droit', () => {
