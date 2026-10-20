@@ -255,6 +255,9 @@ const TYPE_COLORS = ['#d63031','#e74c3c','#ff6b6b','#ff7675','#ff4757','#e84393'
   '#55efc4','#7bed9f','#00cec9','#0abde3','#81ecec','#48dbfb','#00a8ff','#4f8cff','#0984e3','#3742fa','#6c5ce7',
   '#9c88ff','#a29bfe','#b47fff','#8e44ad','#636e72','#2d3436'
 ];
+const DEFAULT_AFFINITE_TYPE = {
+  id: '__relation__', label: 'Relation', emoji: '🔗', couleur: '#4f8cff', builtin: true,
+};
 
 const afx = (n) => AFFINITE[Math.max(0, Math.min(4, n ?? 2))];
 // Variables CSS inline pour les couleurs dynamiques d'affinité (consommées par npcs.css).
@@ -361,7 +364,11 @@ async function _load() {
 }
 
 // ── Helpers types ─────────────────────────────────────────────────────────────
-const _getAffiniteType      = (id) => _affiniteTypes.find(t => t.id === id) || null;
+const _affiniteTypeChoices  = () => [
+  DEFAULT_AFFINITE_TYPE,
+  ..._affiniteTypes.filter(t => t?.id && t.id !== DEFAULT_AFFINITE_TYPE.id),
+];
+const _getAffiniteType      = (id) => _affiniteTypeChoices().find(t => t.id === id) || null;
 const _getAffiniteTypeLabel = (id, fb = '') => _getAffiniteType(id)?.label   || fb || '';
 const _getAffiniteTypeColor = (id) => _getAffiniteType(id)?.couleur || TYPE_COLORS[0];
 const _getAffiniteTypeEmoji = (id) => _getAffiniteType(id)?.emoji   || '✨';
@@ -948,7 +955,7 @@ function _renderHistorique(n) {
 function _renderRelationChip(a, npcId) {
   const { emoji, color } = _typeView(a);
   const vars = `--rc:${color};--rc-bg:${color}12;--rc-bd:${color}30`;
-  const typeOpts = _affiniteTypes.map(t =>
+  const typeOpts = _affiniteTypeChoices().map(t =>
     `<option value="${t.id}" ${t.id === a.typeId ? 'selected' : ''}>${t.emoji || '✨'} ${_esc(_displayText(t.label))}</option>`).join('');
   return `
   <div class="npc-rel-chip npc-rel-chip--edit" style="${vars}">
@@ -1007,7 +1014,7 @@ function _renderRelationsPanel(n) {
   const myAffi    = persoList.filter(a => myChars.some(c => c.id === a.charId));
 
   if (STATE.isAdmin) {
-    const chars = sortCharactersForDisplay(STATE.characters || []);
+    const chars = _npcLinkableCharacters();
     return `
     <div class="npc-card">
       <div class="npc-card-hd">
@@ -1040,7 +1047,7 @@ function _renderRelationsPanel(n) {
           </div>
           <select class="npc-select" id="afp-type-${n.id}">
             <option value="">— Type —</option>
-            ${_affiniteTypes.map(t => `<option value="${t.id}">${t.emoji || '✨'} ${_esc(_displayText(t.label))}</option>`).join('')}
+            ${_affiniteTypeChoices().map(t => `<option value="${t.id}">${t.emoji || '✨'} ${_esc(_displayText(t.label))}</option>`).join('')}
           </select>
           <button class="npc-event-btn" data-action="npcAddAffiPerso" data-npc-id="${n.id}">＋ Ajouter</button>
         </div>
@@ -1955,7 +1962,7 @@ function _renderNpcSpecificRelationsDesk(n) {
   const myAffi = persoList.filter(a => myChars.some(c => c.id === a.charId));
 
   if (STATE.isAdmin) {
-    const chars = sortCharactersForDisplay(STATE.characters || []);
+    const chars = _npcLinkableCharacters();
     return `
       <section class="npc-work-card npc-work-card--links">
         <div class="npc-work-card-head">
@@ -1983,7 +1990,7 @@ function _renderNpcSpecificRelationsDesk(n) {
           </div>
           <select class="npc-select" id="afp-type-${n.id}">
             <option value="">Type de relation</option>
-            ${_affiniteTypes.map(t => `<option value="${t.id}">${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('')}
+            ${_affiniteTypeChoices().map(t => `<option value="${t.id}">${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('')}
           </select>
           <button class="npc-event-btn" data-action="npcAddAffiPerso" data-npc-id="${n.id}">Lier</button>
         </div>
@@ -2003,7 +2010,7 @@ function _renderNpcSpecificRelationsDesk(n) {
 function _renderNpcRelationCard(a, { publicOnly = false, playerView = false } = {}) {
   const { emoji, color, label } = _typeView(a);
   const vars = `--rc:${color};--rc-bg:${color}12;--rc-bd:${color}34`;
-  const typeOpts = _affiniteTypes.map(t =>
+  const typeOpts = _affiniteTypeChoices().map(t =>
     `<option value="${t.id}" ${t.id === a.typeId ? 'selected' : ''}>${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('');
   const publicNote = (a.notePublique || '').trim();
   const privateNote = (a.note || '').trim();
@@ -2088,7 +2095,7 @@ function _renderNpcRelationHub(n, af) {
   let detail = '';
   if (sel) {
     const { color } = _typeView(sel);
-    const typeOpts = _affiniteTypes.map(t =>
+    const typeOpts = _affiniteTypeChoices().map(t =>
       `<option value="${t.id}" ${t.id === sel.typeId ? 'selected' : ''}>${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('');
     detail = `
       <div class="npc-hub-detail" style="--rc:${color}">
@@ -2130,7 +2137,7 @@ function _renderNpcRelationHub(n, af) {
   const composer = adm
     ? `<button type="button" class="npc-hub-addbtn" data-action="npcOpenLinkModal" data-npc-id="${n.id}">
         <span class="npc-hub-addbtn-ico">🔗</span>
-        <span class="npc-hub-addbtn-txt"><b>Lier un joueur à ce PNJ</b><small>Choisis un personnage et sa relation particulière</small></span>
+        <span class="npc-hub-addbtn-txt"><b>Lier un personnage à ce PNJ</b><small>Choisis un personnage et sa relation particulière</small></span>
         <span class="npc-hub-addbtn-plus">＋</span>
       </button>`
     : '';
@@ -4351,6 +4358,22 @@ async function _npcAffiField(el) {
 }
 
 // Ajout inline d'une affinité spécifique (personnage + type) — sans modal.
+function _npcLinkableCharacters() {
+  const byId = new Map();
+  // Le cache propre à la page est chargé dans _load(). STATE.characters reste
+  // prioritaire lorsqu'il est disponible, car il porte les mutations locales
+  // les plus récentes. Aucun accès Firestore supplémentaire n'est déclenché ici.
+  for (const character of _relationCharacters || []) {
+    if (character?.id) byId.set(character.id, character);
+  }
+  for (const character of STATE.characters || []) {
+    if (character?.id) byId.set(character.id, character);
+  }
+  return sortCharactersForDisplay([...byId.values()]);
+}
+
+const _npcLinkCharacter = (charId) => _npcLinkableCharacters().find(c => c.id === charId) || null;
+
 async function _npcAddAffiPerso(btn) {
   if (!STATE.isAdmin) return;
   const npcId = btn.dataset.npcId;
@@ -4359,7 +4382,7 @@ async function _npcAddAffiPerso(btn) {
   if (!charSel) { showNotif('Choisis un personnage.', 'error'); return; }
   if (!typeId)  { showNotif('Choisis un type d\'affinité.', 'error'); return; }
   const [charId, charNom] = charSel.split('|');
-  const char = (STATE.characters || []).find(c => c.id === charId);
+  const char = _npcLinkCharacter(charId);
   const type = _getAffiniteType(typeId);
   const data = {
     npcId,
@@ -4379,9 +4402,9 @@ async function _npcAddAffiPerso(btn) {
   } catch (e) { notifySaveError(e); }
 }
 
-// ── Flux « Lier un joueur » : modal visuel en 2 étapes (choix joueur + relation) ──
+// ── Flux « Lier un personnage » : modal en 2 étapes (personnage + relation) ───
 async function _npcCreateLink(npcId, charId, charNom, typeId) {
-  const char = (STATE.characters || []).find(c => c.id === charId);
+  const char = _npcLinkCharacter(charId);
   const type = _getAffiniteType(typeId);
   const data = {
     npcId, charId, charNom, charPhoto: _charPortraitSrc(char),
@@ -4400,9 +4423,13 @@ function _npcOpenLinkModal(btn) {
   if (!STATE.isAdmin) return;
   const npcId = btn?.dataset?.npcId;
   const n = _npcs.find(x => x.id === npcId); if (!n) return;
-  _npcLink = { npcId, charId: null, charNom: '', typeId: null };
+  const hasCustomTypes = _affiniteTypes.length > 0;
+  _npcLink = {
+    npcId, charId: null, charNom: '',
+    typeId: hasCustomTypes ? null : DEFAULT_AFFINITE_TYPE.id,
+  };
   const linked = new Set(_affiPerso.filter(a => a.npcId === npcId).map(a => a.charId));
-  const chars = sortCharactersForDisplay(STATE.characters || []).filter(c => !linked.has(c.id));
+  const chars = _npcLinkableCharacters().filter(c => !linked.has(c.id));
   const tiles = chars.length
     ? chars.map(c => `
         <button type="button" class="npc-linkmodal-tile" data-action="npcLinkPickChar" data-char-id="${c.id}" data-char-nom="${_esc(c.nom || '?')}">
@@ -4411,15 +4438,13 @@ function _npcOpenLinkModal(btn) {
           <small>${_esc(c.ownerPseudo || '')}</small>
         </button>`).join('')
     : `<div class="npc-empty-line">Tous les personnages ont déjà un lien avec ce PNJ.</div>`;
-  const chips = _affiniteTypes.length
-    ? _affiniteTypes.map(t => `
-        <button type="button" class="npc-linkmodal-type" data-action="npcLinkPickType" data-type-id="${t.id}" style="--rc:${t.couleur || '#4f8cff'}">
-          <span class="npc-linkmodal-type-emo">${t.emoji || '✨'}</span> ${_esc(_displayText(t.label))}</button>`).join('')
-    : `<div class="npc-empty-line">Aucun type de relation. Crée-en un via « 🏷 Types ».</div>`;
-  openModal(`🔗 Lier un joueur à ${_esc(n.nom || 'ce PNJ')}`, `
+  const chips = _affiniteTypeChoices().map(t => `
+        <button type="button" class="npc-linkmodal-type${t.id === _npcLink.typeId ? ' is-sel' : ''}" data-action="npcLinkPickType" data-type-id="${t.id}" style="--rc:${t.couleur || '#4f8cff'}">
+          <span class="npc-linkmodal-type-emo">${t.emoji || '✨'}</span> ${_esc(_displayText(t.label))}</button>`).join('');
+  openModal(`🔗 Lier un personnage à ${_esc(n.nom || 'ce PNJ')}`, `
     <div class="npc-linkmodal">
       <div class="npc-linkmodal-step">
-        <div class="npc-linkmodal-head"><span class="npc-linkmodal-num">1</span> Quel joueur ?</div>
+        <div class="npc-linkmodal-head"><span class="npc-linkmodal-num">1</span> Quel personnage ?</div>
         <input type="text" class="npc-linkmodal-search" data-input="npcLinkModalFilter" placeholder="🔍 Rechercher un personnage…" autocomplete="off">
         <div class="npc-linkmodal-grid">${tiles}</div>
       </div>
@@ -4441,7 +4466,7 @@ function _npcLinkUpdateConfirm() {
 
 async function _npcLinkConfirm() {
   if (!_npcLink.npcId || !_npcLink.charId || !_npcLink.typeId) {
-    showNotif('Choisis un joueur et une relation.', 'error');
+    showNotif('Choisis un personnage et une relation.', 'error');
     return;
   }
   const ok = await _npcCreateLink(_npcLink.npcId, _npcLink.charId, _npcLink.charNom, _npcLink.typeId);
@@ -4449,7 +4474,8 @@ async function _npcLinkConfirm() {
 }
 
 // ── Sélecteur de personnage avec portraits (pour l'ajout d'affinité) ─────────
-const _profilePortraitSrc = (p = {}) => p.portraitUrl || p.photo || p.avatar || p.avatarUrl || '';
+const _profilePortraitSrc = (p = {}) =>
+  p?.portraitUrl || p?.photo || p?.avatar || p?.avatarUrl || '';
 const _playerProfileForChar = (charId = '', charNom = '') => {
   const byId = charId ? _playerProfiles.find(p =>
     p.charId === charId || p.characterId === charId || p.persoId === charId || p.linkedCharId === charId
@@ -4459,7 +4485,7 @@ const _playerProfileForChar = (charId = '', charNom = '') => {
   return targetName ? _playerProfiles.find(p => _norm(p.nom || p.name || '') === targetName) || null : null;
 };
 const _charPortraitSrc = (c = {}, profile = null) =>
-  c.photo || c.portraitUrl || c.avatar || c.avatarUrl || _profilePortraitSrc(profile) || '';
+  c?.photo || c?.portraitUrl || c?.avatar || c?.avatarUrl || _profilePortraitSrc(profile);
 const _relationCharacterFor = (a = {}) => {
   const chars = [...(STATE.characters || []), ..._relationCharacters];
   const byId = a.charId ? chars.find(x => x.id === a.charId) : null;
@@ -4467,9 +4493,12 @@ const _relationCharacterFor = (a = {}) => {
   const targetName = _norm(a.charNom || '');
   return targetName ? chars.find(x => _norm(x.nom || x.name || '') === targetName) || null : null;
 };
-const _charAvatar = (c) => _charPortraitSrc(c)
-  ? `<img class="npc-charpick-av" src="${_esc(_charPortraitSrc(c))}" alt="">`
-  : `<span class="npc-charpick-av npc-charpick-av--ph">${_esc((c.nom || '?')[0].toUpperCase())}</span>`;
+const _charAvatar = (c) => {
+  const src = _charPortraitSrc(c);
+  return src
+    ? `<img class="npc-charpick-av" src="${_esc(src)}" alt="">`
+    : `<span class="npc-charpick-av npc-charpick-av--ph">${_esc((c?.nom || '?')[0].toUpperCase())}</span>`;
+};
 
 const _storedRelationPortraitSrc = (a = {}, profile = null) => {
   const stored = a.charPhoto || a.photo || a.portraitUrl || a.avatar || a.avatarUrl || '';
@@ -4478,9 +4507,9 @@ const _storedRelationPortraitSrc = (a = {}, profile = null) => {
 };
 
 const _profileCroppedAvatar = (profile = {}) => {
-  const src = profile.imageUrl || '';
+  const src = profile?.imageUrl || '';
   if (!src) return '';
-  const cc = profile.cardCrop;
+  const cc = profile?.cardCrop;
   const imgStyle = cc
     ? `position:absolute;left:${(cc.offX * 100).toFixed(2)}%;top:${(cc.offY * 100).toFixed(2)}%;width:${(cc.imgW * 100).toFixed(2)}%;height:auto;max-width:none`
     : 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top';
