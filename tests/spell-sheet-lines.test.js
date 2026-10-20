@@ -29,8 +29,16 @@ test('Protection soin (soutien) : ligne unique avec segment + maîtrise de soin'
   assert.deepEqual(ids(s), ['prot']);   // sans protSplit : ligne unique (compat)
   const l = line(s, 'prot');
   assert.equal(l.override.fieldId, 's-soin');
+  assert.equal(l.override.statId, 's-degats-stat-soin');
+  assert.equal(l.override.statLabel, 'Soin');
   assert.equal(l.mastery, 'heal');
   assert.equal(l.segment.hiddenId, 's-prot-mode');
+});
+
+test('Protection mana permet aussi de choisir explicitement son modificateur', () => {
+  const l = line({ types: ['defensif'], counts: { Protection: 1 }, protMode: 'mana' }, 'prot');
+  assert.equal(l.override.statId, 's-degats-stat-soin');
+  assert.equal(l.override.statLabel, 'Régénération');
 });
 
 test('Protection CA + Réaction = Bouclier réactif : pas d’override', () => {
@@ -189,13 +197,21 @@ test('renderSheetLines : override de dégâts (tuned) écrit via proxy data-ovr 
   assert.match(html, /data-action="_toggleLineTune" data-line="dmg"/);
   assert.match(html, /data-ovr="s-degats"/);
   assert.match(html, /data-statproxy="s-degats-stat"/);
+  assert.match(html, /data-statproxy="s-degats-stat" data-change="_syncSpellStatProxy"/);
   assert.match(html, /data-action="_lineTuneAuto"/);
 });
 
 test('renderSheetLines : ligne Toucher (statOnly) expose le proxy s-toucher-stat', () => {
   const lines = computeSheetLines({ types: ['offensif'], counts: { Puissance: 1 } });
   const html = renderSheetLines(lines, { hit: { value: '1d20', toucherHtml: '<option>Int</option>' } }, new Set(['hit']));
-  assert.match(html, /data-statproxy="s-toucher-stat"/);
+  assert.match(html, /data-statproxy="s-toucher-stat" data-change="_syncSpellStatProxy"/);
+});
+
+test('renderSheetLines : le réglage du soin propose son sélecteur de modificateur', () => {
+  const lines = computeSheetLines({ types: ['defensif'], counts: { Protection: 1 }, protMode: 'soin' });
+  const html = renderSheetLines(lines, { prot: { value: '2d4', statHtml: '<option>Sagesse</option>' } }, new Set(['prot']));
+  assert.match(html, /<label>Soin<\/label>/);
+  assert.match(html, /data-statproxy="s-degats-stat-soin" data-change="_syncSpellStatProxy"/);
 });
 
 test('renderSheetLines : segment Protection écrit via _selectProtMode + hidden préservé', () => {

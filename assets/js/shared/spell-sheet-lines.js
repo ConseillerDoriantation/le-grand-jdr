@@ -37,7 +37,7 @@ export const ACTION_RUNE = 'Déclenchement';
  * @property {string} id     - id stable de la ligne ('hit','dmg','prot','soin','regen','ench','affl','amp','shape','disp','inv','trig','mods')
  * @property {string} icon
  * @property {{key:string,hiddenId:string,opts:Array<[string,string]>}} [segment] - contrôle de mode inline (écrit un input caché)
- * @property {{fieldId?:string,statId?:string,statOnly?:boolean}} [override]       - tiroir « régler » (_autoValHtml)
+ * @property {{fieldId?:string,statId?:string,statLabel?:string,statOnly?:boolean}} [override] - tiroir « régler » (_autoValHtml)
  * @property {{hiddenId:string,label:string,saveStatId?:string}} [select]          - sélecteur d'état
  * @property {boolean} [sub]   - sous-ligne (rendue sous son parent, ex. forme de zone)
  * @property {boolean} [drain] - combo Drain (indicateur % au lieu du montant)
@@ -116,7 +116,11 @@ export function computeSheetLines(state = {}) {
     if (isDrain) line.drain = true;
     else if (reactiveShield) line.reactiveShield = true;          // pas d'override (valeur = « bloque 1 attaque »)
     else if (protMode === 'ca') line.override = { fieldId: 's-ca' };
-    else if (protMode !== 'reduction') line.override = { fieldId: 's-soin' };   // soin / mana : montant réglable
+    else if (protMode !== 'reduction') line.override = {
+      fieldId: 's-soin',
+      statId: 's-degats-stat-soin',
+      statLabel: protMode === 'mana' ? 'Régénération' : 'Soin',
+    };   // soin / mana : montant + modificateur réglables
     lines.push(line);
     // Runes suivantes : chacune renforce un mode déjà présent ou en ouvre un autre.
     if (protSplit && !isDrain) {
@@ -127,12 +131,18 @@ export function computeSheetLines(state = {}) {
         // Réglage manuel porté par la 1re ligne de chaque mode (champ unique par mode).
         const firstOfMode = protModes.indexOf(mode) === i;
         if (firstOfMode && mode === 'ca') sub.override = { fieldId: 's-ca' };
-        else if (firstOfMode && (mode === 'soin' || mode === 'mana')) sub.override = { fieldId: 's-soin' };
+        else if (firstOfMode && (mode === 'soin' || mode === 'mana')) sub.override = {
+          fieldId: 's-soin',
+          statId: 's-degats-stat-soin',
+          statLabel: mode === 'mana' ? 'Régénération' : 'Soin',
+        };
         lines.push(sub);
       }
     }
   } else if (isAmpSupportHeal && !isDrain && !isRegen) {
-    lines.push({ slot: 'prot', id: 'soin', icon: '💚', override: { fieldId: 's-soin' } });
+    lines.push({ slot: 'prot', id: 'soin', icon: '💚', override: {
+      fieldId: 's-soin', statId: 's-degats-stat-soin', statLabel: 'Soin',
+    } });
   }
   // Maîtrise de soin : uniquement s'il n'y a pas de ligne de dégâts (sinon la maîtrise
   // est portée par la ligne Dégâts). Réplique la règle « premier effet qui l'utilise ».
@@ -279,8 +289,8 @@ export function renderSheetLines(lines = [], ctx = {}, tuned = new Set(), opts =
       if (l.override) {
         const o = l.override;
         if (!o.statOnly) inner += `<label>Formule</label><input class="tun-in" data-ovr="${_esc(o.fieldId)}" value="${_esc(c.current || '')}" placeholder="${_esc(c.placeholder || c.value || '')}">`;
-        if (o.toucherId) inner += `<label>Toucher</label><select class="tun-sel" data-statproxy="${_esc(o.toucherId)}">${c.toucherHtml || ''}</select>`;
-        if (o.statId)   inner += `<label>${o.toucherId ? 'Dégâts' : 'Stat'}</label><select class="tun-sel" data-statproxy="${_esc(o.statId)}">${c.statHtml || ''}</select>`;
+        if (o.toucherId) inner += `<label>Toucher</label><select class="tun-sel" data-statproxy="${_esc(o.toucherId)}" data-change="_syncSpellStatProxy">${c.toucherHtml || ''}</select>`;
+        if (o.statId)   inner += `<label>${_esc(o.statLabel || (o.toucherId ? 'Dégâts' : 'Stat'))}</label><select class="tun-sel" data-statproxy="${_esc(o.statId)}" data-change="_syncSpellStatProxy">${c.statHtml || ''}</select>`;
         if (!o.statOnly) inner += `<button type="button" class="rst" data-action="_lineTuneAuto" data-ovr="${_esc(o.fieldId)}" data-line="${_esc(l.id)}">auto</button>`;
       }
       // Slots de relocation (états, invocation…) : conteneurs déplacés depuis le store.

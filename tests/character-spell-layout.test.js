@@ -25,3 +25,9 @@ test('ouvrir une fiche de sort ne lance aucun défilement horizontal natif', () 
   assert.doesNotMatch(inspectHandler, /scrollIntoView/);
   assert.match(inspectHandler, /_sortsScrollIntoViewY/);
 });
+
+test('le modificateur choisi dans la fiche est synchronisé et lu avant le défaut de l arme', () => {
+  assert.match(spellsJs, /function _syncSpellStatProxy\(el\)[\s\S]*target\.value = el\.value;[\s\S]*_updateSortPreview\(\);/);
+  assert.match(spellsJs, /_syncSpellStatProxy:\s*\(el\)\s*=>\s*_syncSpellStatProxy\(el\)/);
+  assert.match(spellsJs, /degatsStat:\s*_readSpellStatOverride\('s-degats-stat', 's-degats-stat-soin'\)/);
+});

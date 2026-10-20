@@ -3847,11 +3847,9 @@ export async function openSortModal(idx, s) {
       });
       modal.addEventListener('change', (event) => {
         const t = event.target;
-        // Proxy de stat (toucher / dégâts) : recopie dans le vrai select du store.
+        // Les proxys de stat passent par le registre data-change central. Ne pas
+        // re-rendre ici avant que leur valeur ait été recopiée dans le store.
         if (t?.dataset?.statproxy != null) {
-          const sel = document.getElementById(t.dataset.statproxy);
-          if (sel) sel.value = t.value;
-          _updateSortPreview();
           return;
         }
         if (t?.classList?.contains('s-maitrise-active-toggle')) {
@@ -5535,12 +5533,33 @@ function _buildSortFromDOM() {
       const n = parseInt(raw);
       return Number.isFinite(n) && n >= 0 ? n : null;
     })(),
-    toucherStat: _readVisibleStatOverride('s-toucher-stat'),
-    degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
+    toucherStat: _readSpellStatOverride('s-toucher-stat'),
+    degatsStat:  _readSpellStatOverride('s-degats-stat', 's-degats-stat-soin'),
     invocation:  _buildInvocationFromDOM(),
     consumable:  _readConsumableFromDOM(),
     mjNotes: document.getElementById('s-mj-notes')?.value || '',
   };
+}
+
+// La fiche « lire = régler » affiche des selects proxy tandis que les vrais
+// champs restent dans le store caché. La valeur visible est la source de vérité
+// tant que le tiroir est ouvert ; cela évite qu'un ancien défaut d'arme soit
+// relu entre le changement du select et l'enregistrement.
+function _readSpellStatOverride(...ids) {
+  const proxies = [...document.querySelectorAll('[data-statproxy]')];
+  for (const id of ids) {
+    const proxy = proxies.find(el => el.dataset.statproxy === id);
+    if (proxy) return proxy.value || '';
+  }
+  return _readVisibleStatOverride(...ids);
+}
+
+function _syncSpellStatProxy(el) {
+  const targetId = el?.dataset?.statproxy;
+  if (!targetId) return;
+  const target = document.getElementById(targetId);
+  if (target) target.value = el.value;
+  _updateSortPreview();
 }
 
 /** Rafraîchit la preview live dans l'éditeur de sort */
@@ -6079,11 +6098,10 @@ export async function saveSort(idx, btn = null) {
         const n = parseInt(raw);
         return Number.isFinite(n) && n >= 0 ? n : null;
       })(),
-      // Stats overrides : '' = suit l'arme principale (auto).
-      // On lit uniquement les sélecteurs VISIBLES (helper _readVisibleStatOverride)
-      // → évite que le sélecteur d'une section cachée n'écrase la sélection utilisateur.
-      toucherStat: _readVisibleStatOverride('s-toucher-stat'),
-      degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
+      // Stats overrides : '' = suit l'arme principale (auto). Le proxy visible
+      // est prioritaire afin que le choix courant soit bien celui enregistré.
+      toucherStat: _readSpellStatOverride('s-toucher-stat'),
+      degatsStat:  _readSpellStatOverride('s-degats-stat', 's-degats-stat-soin'),
       invocation:   _buildInvocationFromDOM(),
       // Note MJ : VERROUILLÉE côté joueur — un joueur ne peut ni la modifier ni
       // l'effacer, elle est reconduite telle quelle (le champ de la forge n'est
@@ -6231,8 +6249,8 @@ function _buildSortFromForm(idx, prevList = []) {
       const n = parseInt(raw);
       return Number.isFinite(n) && n >= 0 ? n : null;
     })(),
-    toucherStat: _readVisibleStatOverride('s-toucher-stat'),
-    degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
+    toucherStat: _readSpellStatOverride('s-toucher-stat'),
+    degatsStat:  _readSpellStatOverride('s-degats-stat', 's-degats-stat-soin'),
     mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
   });
 }
@@ -6275,6 +6293,7 @@ registerActions({
   _classicStateChanged:   ()    => _classicStateChanged(),
   _sortsSearchInput:      (el)  => _sortsSetSearch(el.value),
   _refreshAutoValChips:   ()    => _refreshAutoValChips(),
+  _syncSpellStatProxy:    (el)  => _syncSpellStatProxy(el),
   _csMjValToggle:         (el)  => el.closest('.cs-mj-validation')?.classList.toggle('is-on', el.checked),
   _csSetMjVal:            (btn) => {
     const val = btn.dataset.mjval;
