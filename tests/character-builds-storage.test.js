@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { compactActiveBuildForStorage } from '../assets/js/shared/character-build-storage.js';
+import {
+  MAX_BUILD_ORIGINAL_CHARS,
+  compactActiveBuildForStorage,
+} from '../assets/js/shared/character-build-storage.js';
 
 const photoA = 'data:image/jpeg;base64,' + 'a'.repeat(40_000);
 const photoB = 'data:image/jpeg;base64,' + 'b'.repeat(30_000);
@@ -73,4 +76,15 @@ test('changer le build actif compacte uniquement la nouvelle projection active',
   assert.equal(stored.find(build => build.id === 'a').photoOriginal, originalA);
   assert.equal(stored.find(build => build.id === 'b').photo, undefined);
   assert.equal(stored.find(build => build.id === 'b').photoOriginal, undefined);
+});
+
+test('les anciens originaux trop lourds des builds inactifs sont remplacés par leur portrait cadré', () => {
+  const c = characterWithBuilds();
+  c.builds[1].photoOriginal = 'data:image/jpeg;base64,' + 'x'.repeat(MAX_BUILD_ORIGINAL_CHARS);
+
+  const stored = compactActiveBuildForStorage(c.builds, 'a');
+  const inactive = stored.find(build => build.id === 'b');
+
+  assert.equal(inactive.photoOriginal, photoB);
+  assert.equal(c.builds[1].photoOriginal.length > MAX_BUILD_ORIGINAL_CHARS, true, 'la source ne doit pas être mutée');
 });
