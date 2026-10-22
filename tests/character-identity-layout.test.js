@@ -28,7 +28,9 @@ test('le portrait photographique ouvre l’image complète avec zoom et déplace
   assert.match(sidebar, /data-action="openCharacterPortraitViewer"/);
   assert.match(source, /openImageLightbox\(\{/);
   assert.match(source, /src: c\.photoOriginal \|\| c\.photo/);
-  assert.match(photoSource, /compressDataUrl\(sourceDataUrl \|\| dataUrl\)/);
+  assert.match(photoSource, /compressDataUrl\(sourceDataUrl \|\| rawCropped/);
+  assert.match(photoSource, /maxBytes: ORIGINAL_PHOTO_BUDGET/);
+  assert.match(photoSource, /maxBytes: CROPPED_PHOTO_BUDGET/);
   assert.match(photoSource, /photoOriginal,/);
   assert.match(lightboxSource, /classList\.add\('is-zoomed'\)/);
   assert.match(lightboxSource, /focusX \* image\.scrollWidth/);

@@ -14,6 +14,11 @@ import { getCharacterById } from '../shared/character-state.js';
 
 const VIEW_SIZE   = 300;
 const OUTPUT_SIZE = 300;
+// Le portrait cadré est utilisé partout ; l'original sert uniquement à la
+// visionneuse. Les deux restent dans Firestore, donc leur poids doit être borné
+// en octets et pas seulement en résolution.
+const CROPPED_PHOTO_BUDGET = 70_000;
+const ORIGINAL_PHOTO_BUDGET = 180_000;
 
 let _activePhotoCrop = null;
 let _activePhotoSource = null;
@@ -73,9 +78,9 @@ function cancelCharacterPhotoCrop() {
 }
 
 async function saveCroppedCharacterPhoto(charId) {
-  const dataUrl = _activePhotoCrop?.getBase64();
+  const rawCropped = _activePhotoCrop?.getBase64();
   const sourceDataUrl = _activePhotoSource;
-  if (!dataUrl) { showNotif('Erreur : cropper non initialisé.', 'error'); return; }
+  if (!rawCropped) { showNotif('Erreur : cropper non initialisé.', 'error'); return; }
 
   const c = getCharacterById(charId);
   if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
@@ -83,7 +88,19 @@ async function saveCroppedCharacterPhoto(charId) {
   // `photo` reste la miniature carrée légère utilisée partout dans l'app.
   // `photoOriginal` conserve la composition complète avant cadrage, bornée en
   // taille pour ne pas approcher inutilement la limite de document Firestore.
-  const photoOriginal = await compressDataUrl(sourceDataUrl || dataUrl);
+  const dataUrl = await compressDataUrl(rawCropped, {
+    max: OUTPUT_SIZE, quality: 0.78, maxBytes: CROPPED_PHOTO_BUDGET, minSide: 220,
+  }) || rawCropped;
+  const photoOriginal = await compressDataUrl(sourceDataUrl || rawCropped, {
+    max: 900, quality: 0.74, maxBytes: ORIGINAL_PHOTO_BUDGET, minSide: 420,
+  }) || dataUrl;
+  const previous = {
+    photo: c.photo ?? null,
+    photoOriginal: c.photoOriginal ?? null,
+    photoZoom: c.photoZoom ?? 1,
+    photoX: c.photoX ?? 0,
+    photoY: c.photoY ?? 0,
+  };
   c.photo = dataUrl; c.photoOriginal = photoOriginal;
   c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
   try {
@@ -93,6 +110,7 @@ async function saveCroppedCharacterPhoto(charId) {
     showNotif('Photo enregistrée !', 'success');
     charSession.renderSheet(c, charSession.getCurrentCharTab() || 'combat');
   } catch (e) {
+    Object.assign(c, previous);
     showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
   }
 }
