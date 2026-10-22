@@ -35,6 +35,9 @@ let _musicProgTimer = null;
 let _musicSortables = [];   // instances Sortable actives
 let _previewEl     = null;  // aperçu local MJ (non diffusé)
 let _ambienceEl    = null;  // 2ᵉ canal : ambiance en boucle, jouée EN PLUS de la musique
+const _oneShotEls  = new Set(); // 3ᵉ canal : effets ponctuels superposés aux deux autres
+let _oneShotStateSeen = false;  // ignore l'ancien effet conservé dans le doc au premier snapshot
+let _lastOneShotRequestId = null;
 let _lastAppliedSeek = 0;   // dernier seekVersion appliqué (évite de re-seeker à chaque resync)
 let _autoplayArmed = false; // reprise auto au 1er geste si l'autoplay est bloqué (refresh)
 let _autoplayResumeHandler = null;
@@ -79,6 +82,7 @@ const _MUSIC_SPRITE = `<svg id="vtt-ms-sprite" width="0" height="0" style="posit
 <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
 <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4.5 13H11l-1 9L19.5 10H13z"/></symbol>
 <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/></symbol>
 <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1" fill="currentColor"/><circle cx="15" cy="6" r="1" fill="currentColor"/><circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/><circle cx="9" cy="18" r="1" fill="currentColor"/><circle cx="15" cy="18" r="1" fill="currentColor"/></symbol>
 </defs></svg>`;
@@ -655,6 +659,7 @@ function _trackRow(s, ctx, i, mj) {
     <span class="n"><span class="num">${i + 1}</span><span class="ph">${_mi(isCurrent && !paused ? 'pause' : 'play')}</span>${_MS_WAVE}</span>
     <span class="nm"><span>${_esc(s.name)}</span>${mj && titleHidden ? _mi('eyeoff') : ''}${isAmb ? '<span class="ambtag">AMBIANCE</span>' : ''}</span>
     ${mj ? `<span class="qa">
+      <button class="ib sm" data-vtt-fn="_vttPlayOneShot" data-vtt-args="${s.id}" data-tip="Jouer une fois par-dessus">${_mi('bolt')}</button>
       <button class="ib sm" data-vtt-fn="_vttPlaySound" data-vtt-args="${s.id}|true" data-tip="Jouer en boucle">${_mi('loop')}</button>
       <button class="ib sm amb${isAmb ? ' on' : ''}" data-vtt-fn="_vttPlayAmbience" data-vtt-args="${s.id}" data-tip="${isAmb ? "Couper l'ambiance" : 'En ambiance (par-dessus)'}">${_mi('fog')}</button>
       <button class="ib sm prev${previewing ? ' on' : ''}" data-vtt-fn="_vttPreview" data-vtt-args="${s.id}|$this" data-tip="Pré-écoute (vous seul)">${_mi('phones')}</button>
@@ -934,6 +939,23 @@ async function _vttPlayAmbience(soundId) {
   const next = _musicState.ambienceSoundId === soundId ? null : soundId;
   await _setMusicState({ ambienceSoundId: next });
 }
+
+// MJ : diffuse un effet ponctuel sans toucher à la musique ni à l'ambiance.
+// Chaque clic porte un identifiant unique : deux déclenchements rapprochés du
+// même fichier restent deux lectures distinctes sur tous les clients.
+function _vttPlayOneShot(soundId) {
+  if (!STATE.isAdmin || !soundId) return Promise.resolve();
+  const requestId = globalThis.crypto?.randomUUID?.()
+    || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const oneShot = { soundId, requestId, requestedAt: Date.now() };
+
+  // Lecture locale immédiate, avant le retour réseau. Le marqueur empêche
+  // l'écho du snapshot Firestore de la rejouer une seconde fois chez le MJ.
+  _oneShotStateSeen = true;
+  _lastOneShotRequestId = requestId;
+  void _playOneShotById(soundId);
+  return _setMusicState({ oneShot });
+}
 async function _vttStopAmbience() {
   if (!STATE.isAdmin) return;
   await _setMusicState({ ambienceSoundId: null });
@@ -990,6 +1012,57 @@ function _killAmbience() {
   }
 }
 
+function _disposeOneShot(el) {
+  if (!el) return;
+  _oneShotEls.delete(el);
+  if (el._endedHandler) el.removeEventListener('ended', el._endedHandler);
+  if (el._errorHandler) el.removeEventListener('error', el._errorHandler);
+  try { el.pause(); el.src = ''; } catch { /* lecteur déjà libéré */ }
+}
+
+function _killOneShots() {
+  [..._oneShotEls].forEach(_disposeOneShot);
+}
+
+async function _playOneShotById(soundId) {
+  const sound = _sounds.find(s => s.id === soundId) || await _loadMusicSoundById(soundId);
+  if (!sound?.url) return;
+
+  const el = new Audio(sound.url);
+  el.dataset.soundId = soundId;
+  el.loop = false;
+  el.volume = _getUserVolume();
+  el._endedHandler = () => _disposeOneShot(el);
+  el._errorHandler = () => {
+    console.error('[vtt music] effet ponctuel injouable:', el.error?.code, sound.url);
+    if (STATE.isAdmin) showNotif(`🔇 Effet « ${sound.name} » injouable — vérifier l'URL`, 'error');
+    _disposeOneShot(el);
+  };
+  el.addEventListener('ended', el._endedHandler, { once:true });
+  el.addEventListener('error', el._errorHandler, { once:true });
+  _oneShotEls.add(el);
+  el.play().then(_disarmAutoplayWhenReady).catch(err => {
+    if (err?.name === 'NotAllowedError') _armAutoplayResume();
+    else { console.error('[vtt music] effet play():', err?.name || err); _disposeOneShot(el); }
+  });
+}
+
+function _syncOneShot(ms) {
+  const request = ms?.oneShot;
+  const requestId = request?.requestId || null;
+
+  // Le document conserve volontairement le dernier déclenchement. À l'arrivée
+  // sur le VTT (ou après un refresh), on le mémorise sans rejouer un vieux son.
+  if (!_oneShotStateSeen) {
+    _oneShotStateSeen = true;
+    _lastOneShotRequestId = requestId;
+    return;
+  }
+  if (!requestId || requestId === _lastOneShotRequestId || !request?.soundId) return;
+  _lastOneShotRequestId = requestId;
+  void _playOneShotById(request.soundId);
+}
+
 function _disarmAutoplayResume() {
   if (_autoplayResumeHandler) {
     _AUTOPLAY_RESUME_EVENTS.forEach(ev => document.removeEventListener(ev, _autoplayResumeHandler, true));
@@ -1001,7 +1074,8 @@ function _disarmAutoplayResume() {
 function _autoplayStillBlocked() {
   const musicBlocked = !!(_audioEl?.paused && _musicState?.playing && !_musicState?.paused);
   const ambienceBlocked = !!(_ambienceEl?.paused && _musicState?.ambienceSoundId);
-  return musicBlocked || ambienceBlocked;
+  const oneShotBlocked = [..._oneShotEls].some(el => el.paused && !el.ended);
+  return musicBlocked || ambienceBlocked || oneShotBlocked;
 }
 
 function _disarmAutoplayWhenReady() {
@@ -1035,6 +1109,7 @@ function _armAutoplayResume() {
     const attempts = [];
     if (_audioEl && _audioEl.paused && _musicState?.playing && !_musicState?.paused) attempts.push(_audioEl.play());
     if (_ambienceEl && _ambienceEl.paused && _musicState?.ambienceSoundId) attempts.push(_ambienceEl.play());
+    _oneShotEls.forEach(el => { if (el.paused && !el.ended) attempts.push(el.play()); });
     if (!attempts.length) { _disarmAutoplayResume(); return; }
     Promise.all(attempts).then(_disarmAutoplayWhenReady).catch(err => {
       if (err?.name !== 'NotAllowedError') console.debug('[vtt music] reprise différée:', err?.name || err);
@@ -1132,9 +1207,11 @@ function _resetMusicState(keepAudio = false) {
     _disarmAutoplayResume();
     _killAudio();
     _killAmbience();
+    _killOneShots();
     _lastAppliedSeek = 0;
   }
   _sounds = []; _playlists = []; _musicState = {};
+  _oneShotStateSeen = false; _lastOneShotRequestId = null;
   _musicCatalogStarted = false; _musicCatalogLoading = false; _musicCatalogReady = null;
   _musicSoundLoads.clear();
 }
@@ -1154,6 +1231,10 @@ function _syncMusicPlayback(ms) {
   _musicState = ms;
   _refreshMusicDockTrigger(ms);
   const panel = document.getElementById('vtt-music-panel');
+
+  // Effets ponctuels : canal indépendant, donc aucune altération de la piste
+  // principale ni de l'ambiance en boucle.
+  _syncOneShot(ms);
 
   // Canal Ambiance : géré à chaque changement d'état, indépendamment de la
   // musique principale (l'ambiance continue même si la musique est arrêtée).
@@ -1596,6 +1677,7 @@ export {
   _vttAddSonUrl,
   _vttCleanMissingSounds,
   _vttPlayAmbience,
+  _vttPlayOneShot,
   _vttStopAmbience,
   _vttPlaylistCtxMenu,
   _vttMusicAddMenu,

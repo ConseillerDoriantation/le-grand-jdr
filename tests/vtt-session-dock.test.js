@@ -71,6 +71,15 @@ test('les commandes musicales répondent avant le retour Firestore', () => {
   assert.match(music, /sound\.hideTitle = hideTitle;[\s\S]*?_setMusicState\(\{ currentTitleHidden: hideTitle \}\);[\s\S]*?updateDoc\(_sonRef\(soundId\), \{ hideTitle \}\)\.catch/);
 });
 
+test('un effet sonore ponctuel se superpose sans remplacer la musique ni l’ambiance', () => {
+  assert.match(music, /function _vttPlayOneShot\(soundId\)[\s\S]*?void _playOneShotById\(soundId\);[\s\S]*?_setMusicState\(\{ oneShot \}\)/);
+  assert.match(music, /function _syncOneShot\(ms\)[\s\S]*?_lastOneShotRequestId[\s\S]*?_playOneShotById\(request\.soundId\)/);
+  assert.match(music, /const el = new Audio\(sound\.url\);[\s\S]*?el\.loop = false/);
+  assert.match(music, /_syncOneShot\(ms\);[\s\S]*?_syncAmbience\(ms\)/);
+  assert.match(music, /data-vtt-fn="_vttPlayOneShot"[\s\S]*?Jouer une fois par-dessus/);
+  assert.match(vtt, /_vttPlayAmbience, _vttPlayOneShot, _vttStopAmbience/);
+});
+
 test('les catégories et les titres musicaux ont un tri précis par poignée', () => {
   assert.match(music, /import Sortable from '\.\.\/\.\.\/vendor\/sortable\.esm\.js'/);
   assert.equal((music.match(/new Sortable\(/g) || []).length, 2);
@@ -93,9 +102,19 @@ test('les catégories et les titres musicaux ont un tri précis par poignée', (
 test('le sélecteur d’émetteur des émotes affiche les portraits avec repli sur l’initiale', () => {
   assert.match(emotes, /const live = _live\(t\)/);
   assert.match(emotes, /live\?\.displayImage \|\| t\?\.imageUrl/);
+  assert.match(emotes, /function _emoteTokenName\(t, fallback = 'Token'\)[\s\S]*_live\(t\)\?\.displayName/);
+  assert.match(emotes, /_esc\(_emoteTokenName\(emitter\)\)/);
+  assert.match(emotes, /_esc\(_emoteTokenName\(x\.data\)\)/);
+  assert.doesNotMatch(emotes, /_esc\(emitter\.name \|\| 'Token'\)/);
   assert.match(emotes, /vtt-emote-av-initial/);
   assert.match(emotes, /<img src=/);
   assert.match(css, /\.vtt-emote-av img \{ width:100%; height:100%; object-fit:cover; \}/);
+});
+
+test('la recherche d’émotes conserve son input et son curseur pendant la saisie', () => {
+  assert.match(emotes, /function _refreshEmoteSearchResults\(\)[\s\S]*?tabs\.innerHTML[\s\S]*?grid\.innerHTML/);
+  assert.match(emotes, /q\.oninput = e => \{ _emoteQuery = e\.target\.value; _refreshEmoteSearchResults\(\); \}/);
+  assert.doesNotMatch(emotes, /q\.oninput = e => \{[^}]*_renderEmotePicker\(\)/);
 });
 
 test('les émotes ne révèlent aucune identité de compte et montrent clairement les favoris', () => {

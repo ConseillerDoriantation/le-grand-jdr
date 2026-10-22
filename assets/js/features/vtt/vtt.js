@@ -40,7 +40,7 @@ import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nea
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, spellConditionId, affordableSpellConditionId, enchantStatesWithinRunes, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, spellConditionId, affordableSpellConditionId, enchantStatesWithinRunes, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesArmorSetBonuses, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm, getProtectionCAOverride, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary, conditionSpellRunes } from '../../shared/conditions.js';
@@ -149,7 +149,7 @@ import {
   _vttPlayPlaylist, _vttMusicNext, _vttMusicPrev, _vttToggleLoop, _vttToggleMusicPause, _vttStopMusic,
   _vttSoundCtxMenu, _vttDeleteSound, _vttCreatePlaylist, _vttCreatePlaylistConfirm,
   _vttDeletePlaylist, _vttAddSoundToPlaylist, _vttRemoveSoundFromPlaylist, _vttCleanMissingSounds,
-  _vttPlayAmbience, _vttStopAmbience, _vttPlaylistCtxMenu, _vttMusicAddMenu, _vttMusicToolsMenu,
+  _vttPlayAmbience, _vttPlayOneShot, _vttStopAmbience, _vttPlaylistCtxMenu, _vttMusicAddMenu, _vttMusicToolsMenu,
   _vttPlColorSelect, _vttPreview, _vttSeek, _vttAddSonUrl, _vttImportGithubRelease,
   _vttMusicToggleHideTitle, _vttMusicToggleSoundTitle, _vttRenamePlaylistConfirm,
   _vttMusicSelectRail,
@@ -4789,7 +4789,10 @@ export async function _persistInvocationState(tokData) {
 // pour son propriétaire. Le nom est résolu sur le perso propriétaire (pas le nom
 // « 🐾 … de X » de l'invocation).
 function _statsActor(t) {
-  if (t?.characterId) return { id: t.characterId, name: t.name || '' };
+  if (t?.characterId) {
+    const character = VS.characters[t.characterId];
+    return { id: t.characterId, name: character?.nom || _live(t)?.displayName || t.name || '' };
+  }
   if (t?.summonOwnerCharId) {
     const oc = VS.characters[t.summonOwnerCharId];
     return { id: t.summonOwnerCharId, name: oc?.nom || t.name || '' };
@@ -5301,6 +5304,8 @@ function _buildSpellOption(s, ctx) {
     : null;
   const abilityWeaponTechniques = Array.isArray(abilityWeaponContext?.format?.techniques)
     ? abilityWeaponContext.format.techniques : [];
+  const actionSource = extras?._itemAction ? 'item' : 'spell';
+  const applyArmorSetBonuses = usesArmorSetBonuses(s, { source: actionSource });
 
   // Bloc de champs communs réutilisé dans chaque variante d'option
   const common = {
@@ -5322,6 +5327,7 @@ function _buildSpellOption(s, ctx) {
     actionDescription: s.designMode === 'classic' ? (s.effet || '') : '',
     mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
     weaponTechniques: abilityWeaponTechniques,
+    applyArmorSetBonuses,
     ...extras,
     // Les actions d'objet legacy sont hors statistiques par défaut. Le choix
     // explicite du MJ sur l'action reste prioritaire.
@@ -5443,6 +5449,9 @@ function _buildSpellOption(s, ctx) {
     const spellMaitrise  = s.designMode !== 'classic' && usesSpellMastery(s)
       ? getMaitriseBonus(c, mainP || {})
       : 0;
+    const spellSetDmgBonus = applyArmorSetBonuses && c
+      ? (getArmorSetData(c).modifiers.damageBonus || 0)
+      : 0;
     const formulaFixedBonus = sFixed - spellMaitrise;
     // Multi-noyau : si le sort a plusieurs éléments, on laisse le joueur choisir
     // au lancement (cf. _vttPickOpt → _showSpellElementPicker). L'élément primaire
@@ -5467,6 +5476,8 @@ function _buildSpellOption(s, ctx) {
       dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
       formulaFixedBonus,
       maitriseBonus: spellMaitrise,
+      dmgSetBonus: spellSetDmgBonus,
+      dmgSetBonusLabel: 'Set',
       drainBaseFormula: mods?.drain ? _vttSortDmgFormula(s, c, { includePower: false }) : null,
       mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
     };
@@ -5489,7 +5500,9 @@ function _buildSpellOption(s, ctx) {
   if (isClassicHeal || protectionRestoreMode === 'soin' || isManaRegen || isAmpSupportHeal) {
     // Régén PM : formule littérale (pas de scaling Protection ni de stat auto) ;
     // la stat explicite éventuelle est déjà intégrée dans la formule.
-    const soinFormula = isManaRegen ? _calcSortMana(s, c) : _vttSortSoinFormula(s, c);
+    const soinFormula = isManaRegen
+      ? _calcSortMana(s, c)
+      : _vttSortSoinFormula(s, c, { source: actionSource });
     const { rawDice: sRawDice, fixed: soinFormulaFixed } = splitSpellDiceFormula(soinFormula);
     const mainP = c ? getMainWeapon(c) : null;
     const soinIsMagic = !!(VS.damageTypes && s?.noyauTypeId
@@ -14465,6 +14478,7 @@ async function _vttUndoAction(logId) {
 async function _vttAddBuffPrompt(tokenId) {
   if (!STATE.isAdmin) return;
   const t = VS.tokens[tokenId]?.data; if (!t) return;
+  const tokenName = _live(t)?.displayName || t.name || 'Token';
   const TYPES = [
     { v:'ca',          ic:'🛡', lbl:'Bonus CA',         needsBonus:true },
     { v:'dot',         ic:'🩸', lbl:'DoT (dégâts/tour)', needsFormula:true },
@@ -14476,7 +14490,7 @@ async function _vttAddBuffPrompt(tokenId) {
     { v:'affliction',  ic:'💀', lbl:'Affliction (libre)',   needsEffect:true },
   ];
   const opts = TYPES.map(t => `<option value="${t.v}">${t.ic} ${t.lbl}</option>`).join('');
-  openModal(`✨ Ajouter un effet sur ${t.name}`, `
+  openModal(`✨ Ajouter un effet sur ${_esc(tokenName)}`, `
     <div class="vtt-form" style="display:flex;flex-direction:column;gap:.7rem">
       <div class="form-group">
         <label>Type d'effet</label>
@@ -16449,6 +16463,7 @@ export const VTT_ACTIONS = {
   _vttAddSoundToPlaylist,
   _vttCleanMissingSounds,
   _vttPlayAmbience,
+  _vttPlayOneShot,
   _vttStopAmbience,
   _vttPlaylistCtxMenu,
   _vttMusicAddMenu,

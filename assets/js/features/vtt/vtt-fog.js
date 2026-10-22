@@ -420,6 +420,10 @@ export function fogUpdate(page, tokens, isAdmin) {
   _playerFogCanvas = isAdmin ? null : canvas;
   _playerFogContext = isAdmin ? null : canvas.getContext('2d', { willReadFrequently: true });
   _fogGeometryKey = geometryKey;
+  // La page est généralement rendue avant que ce canvas asynchrone soit prêt.
+  // Reconstruire alors les seules cibles d'interaction évite que les portes
+  // restent non cliquables côté joueur jusqu'à la prochaine écriture de page.
+  if (!isAdmin) fogRenderWalls(page, false);
   const worldWidth = (page.cols || 24) * _CELL;
   const worldHeight = (page.rows || 18) * _CELL;
   // Réutilise un unique nœud image : on remplace juste son canvas au lieu de
@@ -511,9 +515,10 @@ function _addOpenDoorVisual(K, group, g, k) {
   _addStructureLine(K, group, [...hinge,...thresholdEnd], {
     stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:1.5*k, dash:[3*k,5*k], opacity:.55,
   });
-  const leafEnd = [hinge[0] + g.nx*leafLength, hinge[1] + g.ny*leafLength];
-  _addStructureLine(K, group, [...hinge,...leafEnd], { stroke:VTT_STRUCTURE_STYLE.casing, strokeWidth:11.2*k });
-  _addStructureLine(K, group, [...hinge,...leafEnd], { stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:8*k });
+  const leafPoints = _openDoorLeafPoints(g, k);
+  const leafEnd = leafPoints.slice(2);
+  _addStructureLine(K, group, leafPoints, { stroke:VTT_STRUCTURE_STYLE.casing, strokeWidth:11.2*k });
+  _addStructureLine(K, group, leafPoints, { stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:8*k });
   const start = Math.atan2(g.uy, g.ux);
   const arc = [];
   for (let i=0; i<=12; i++) {
@@ -523,6 +528,35 @@ function _addOpenDoorVisual(K, group, g, k) {
   _addStructureLine(K, group, arc, {
     stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:1.4*k, dash:[3*k,4*k], opacity:.7,
   });
+}
+
+function _openDoorLeafPoints(g, k) {
+  const inset = Math.min(5*k, g.length*.2);
+  const leafLength = Math.max(4*k, g.length - inset*2);
+  const hinge = _structurePoint(g, inset);
+  return [...hinge, hinge[0] + g.nx*leafLength, hinge[1] + g.ny*leafLength];
+}
+
+function _structureHitStrokeWidth(k) {
+  const scale = Math.max(.15, Number(_stage?.scaleX?.()) || 1);
+  const coarsePointer = globalThis.matchMedia?.('(pointer: coarse)')?.matches === true;
+  // Minimum en pixels écran : la cible ne devient plus minuscule en dézoomant.
+  return Math.max(22*k, (coarsePointer ? 40 : 32) / scale);
+}
+
+function _playerStructureIsVisible(g, page = _page) {
+  if (!page?.fogEnabled && !(page?.fogOps || []).length) return true;
+  // Une porte fermée constitue précisément la frontière de vision : son milieu
+  // peut être classé sombre alors que sa face côté joueur est visible. On sonde
+  // plusieurs points des deux côtés, sans rendre cliquable une structure distante.
+  const offset = Math.max(2, _CELL*.12);
+  for (const along of [g.length*.2, g.length*.5, g.length*.8]) {
+    for (const normal of [0, -offset, offset]) {
+      const [x, y] = _structurePoint(g, along, normal);
+      if (_playerPointIsVisible(x, y, page)) return true;
+    }
+  }
+  return false;
 }
 
 function _windowPanelPoints(g, from, to, offset, halfThickness) {
@@ -690,10 +724,11 @@ export function fogRenderWalls(page, isAdmin) {
     const k = C/64;
     const group = new K.Group({ id:`vtt-structure-${w.id}`, name:'vtt-structure' });
     let halo = null;
+    const hitStrokeWidth = _structureHitStrokeWidth(k);
 
     if (state.canOpen && !_editMode) {
       halo = _addStructureLine(K, group, points, {
-        stroke:'rgba(126,176,255,.45)', strokeWidth:20*k, opacity:0,
+        stroke:'rgba(126,176,255,.45)', strokeWidth:hitStrokeWidth, opacity:0,
       });
     }
 
@@ -705,15 +740,21 @@ export function fogRenderWalls(page, isAdmin) {
 
     if (_lockIsVisible(w, isAdmin, page)) _addLockMedallion(K, group, w, g);
 
-    const canInteract = isAdmin || _playerPointIsVisible(g.mx, g.my, page);
-    if (!_editMode) {
-      const hitLine = new K.Line({
-        points, stroke:'rgba(0,0,0,0.001)', strokeWidth:22*k,
-        lineCap:'round', listening:canInteract,
-      });
-      _bindObstacleNode(hitLine, halo, w, state, isAdmin);
-      group.add(hitLine);
-    } else if (isAdmin) {
+    const canInteract = isAdmin || _playerStructureIsVisible(g, page);
+    if (!_editMode && state.canOpen) {
+      const hitPaths = [points];
+      // Quand la porte est ouverte, son battant visible devient lui aussi une
+      // vraie cible ; le joueur n'a plus à deviner l'ancien seuil fermé.
+      if (state.type === 'door' && state.open) hitPaths.push(_openDoorLeafPoints(g, k));
+      for (const hitPoints of hitPaths) {
+        const hitLine = new K.Line({
+          points:hitPoints, stroke:'rgba(0,0,0,0.001)', strokeWidth:hitStrokeWidth,
+          lineCap:'round', listening:canInteract,
+        });
+        _bindObstacleNode(hitLine, halo, w, state, isAdmin);
+        group.add(hitLine);
+      }
+    } else if (_editMode && isAdmin) {
       const hitLine = new K.Line({
         points, stroke:'rgba(0,0,0,0.001)', strokeWidth:14*k,
         lineCap:'round', listening:true,

@@ -13,7 +13,7 @@ import { getMainWeapon } from './data.js';
 import { getArmorSetData } from '../../shared/equipment-utils.js';
 import { ZONE_SHAPES, _zoneCount, _zoneDims, _zoneShapeUnlocked, _zoneCellCount } from '../../shared/spell-zones.js';
 import { damageTypeEmitsLight } from '../../shared/damage-types.js';
-import { calcSpellDuration, calcSpellTargets, getAfflictionMode, spellConditionId, isLightSpell, lightSpellRadius, getProtectionModes, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, getAfflictionMode, spellConditionId, isLightSpell, lightSpellRadius, getProtectionModes, protectionHasMode, protectionRunesFor, resolveSpellModifierStat, usesArmorSetBonuses, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { spellSetCostDelta } from '../../shared/spell-system.js';
 import { calculateSummonStats, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 // Cœurs purs extraits (testables à froid). Ré-exportés plus bas pour l'API publique.
@@ -145,10 +145,11 @@ export function _getSortAction(s) {
  * - Chaque rune Puissance : +1 dé
  */
 export function _calcSortDegats(s, c) {
+  const setB = usesArmorSetBonuses(s) ? (getArmorSetData(c)?.modifiers?.damageBonus || 0) : 0;
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
     const base = (s?.degats || '').trim();
     const statKey = resolveSpellModifierStat(s, 'degatsStat');
-    const mod = statKey ? getMod(c, statKey) : 0;
+    const mod = (statKey ? getMod(c, statKey) : 0) + setB;
     return mod ? `${base}${mod > 0 ? ' +' : ' '}${mod}` : base;
   }
   // Un sort en mode déplacement (rune Amplification → Déplacement) n'inflige jamais de dégâts.
@@ -171,14 +172,16 @@ export function _calcSortDegats(s, c) {
   const match = base.match(/^(\d+)(d\d+)(.*)$/i);
   if (match) {
     let result = `${parseInt(match[1]) + nbPuiss}${match[2]}${match[3]}`;
-    if (maitrise > 0) result += ` +${maitrise}`;
-    else if (maitrise < 0) result += ` ${maitrise}`;
+    const flat = maitrise + setB;
+    if (flat > 0) result += ` +${flat}`;
+    else if (flat < 0) result += ` ${flat}`;
     return result;
   }
   let result = base;
   if (nbPuiss > 0) result += ` +${nbPuiss}d6`;
-  if (maitrise > 0) result += ` +${maitrise}`;
-  else if (maitrise < 0) result += ` ${maitrise}`;
+  const flat = maitrise + setB;
+  if (flat > 0) result += ` +${flat}`;
+  else if (flat < 0) result += ` ${flat}`;
   return result;
 }
 
@@ -195,7 +198,7 @@ export function _calcSortDegats(s, c) {
 export function _calcSortSoin(s, c) {
   // Bonus de soin apporté par un set d'armure complet (effet de palier « Soin »).
   // N'affecte QUE le soin : ni les dégâts, ni la CA des sorts défensifs.
-  const healB = getArmorSetData(c)?.modifiers?.healBonus || 0;
+  const healB = usesArmorSetBonuses(s) ? (getArmorSetData(c)?.modifiers?.healBonus || 0) : 0;
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
     const base = (s?.soin || '').trim();
     const statKey = resolveSpellModifierStat(s, 'degatsStat');
