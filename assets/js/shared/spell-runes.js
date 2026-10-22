@@ -10,6 +10,16 @@ export function usesSpellMastery(spell = {}) {
   return spell?.maitriseActive !== false;
 }
 
+/**
+ * Les sorts héritent historiquement des bonus de set du lanceur. Une action
+ * portée par un objet est autonome par défaut (potion, parchemin…), mais peut
+ * explicitement les réactiver depuis l'éditeur.
+ */
+export function usesArmorSetBonuses(spell = {}, { source = 'spell' } = {}) {
+  if (typeof spell?.applyArmorSetBonuses === 'boolean') return spell.applyArmorSetBonuses;
+  return source !== 'item';
+}
+
 /** La maîtrise d'un soin ne s'applique qu'à un noyau magique avec une stat active. */
 export function usesHealingMastery(spell = {}, isMagic = false, statKey = '') {
   return usesSpellMastery(spell) && isMagic && !!statKey && statKey !== 'none';

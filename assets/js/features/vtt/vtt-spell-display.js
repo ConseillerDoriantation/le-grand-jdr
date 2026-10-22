@@ -9,7 +9,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { getMainWeapon, DEFAULT_UNARMED, getArmorSetData } from '../../shared/equipment-utils.js';
 import { getMaitriseBonus, getMod } from '../../shared/char-stats.js';
-import { protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { protectionRunesFor, resolveSpellModifierStat, usesArmorSetBonuses, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { VS } from './vtt-state.js';
 
 // Rune virtuelle d'action (Réaction / Action Bonus condensées à l'affichage).
@@ -96,9 +96,11 @@ export function _vttSortDmgFormula(s, c, opts = {}) {
  *  - Noyau magique sans arme (Poings) → Intelligence
  *  - Noyau physique / pas de noyau → Constitution
  */
-export function _vttSortSoinFormula(s, c) {
+export function _vttSortSoinFormula(s, c, { source = 'spell' } = {}) {
   // Bonus de soin du set d'armure complet (effet de palier « Soin »).
-  const healB = c ? (getArmorSetData(c)?.modifiers?.healBonus || 0) : 0;
+  const healB = c && usesArmorSetBonuses(s, { source })
+    ? (getArmorSetData(c)?.modifiers?.healBonus || 0)
+    : 0;
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) return _mergeHealFlat((s?.soin || '').trim(), healB);
   // Aligne sur le sheet : getMainWeapon retourne Poings par défaut si vide.
   const mainP    = c ? getMainWeapon(c) : null;

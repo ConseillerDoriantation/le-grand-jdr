@@ -306,12 +306,16 @@ export function _emoteTokenColor(t) {
 
 function _emoteAvatar(t) {
   const live = _live(t);
-  const name = live?.displayName || t?.name || '?';
+  const name = _emoteTokenName(t, '?');
   const image = normalizeImageUrl(live?.displayImage || t?.imageUrl || '');
   return `<span class="vtt-emote-av" style="--c:${_emoteTokenColor(t)}">
     <span class="vtt-emote-av-initial">${_esc(name[0] || '?')}</span>
     ${image ? `<img src="${_esc(image)}" alt="" loading="lazy" draggable="false">` : ''}
   </span>`;
+}
+
+function _emoteTokenName(t, fallback = 'Token') {
+  return _live(t)?.displayName || t?.name || fallback;
 }
 
 // ── Émetteur (token qui envoie) ─────────────────────────────────────
@@ -373,6 +377,36 @@ function _emoteListFor() {
   return _emotes;
 }
 
+function _emoteTabsHtml(list, favs, query) {
+  if (query) return `<span class="vtt-emote-tab on">Résultats <small>${list.length}</small></span>`;
+  return [['fav', '★ Roue', favs.length], ['rec', 'Récents', _getRecents().length], ['all', 'Toutes', _emotes.length]]
+    .map(([k, l, n]) => `<button class="vtt-emote-tab${_emoteTab === k ? ' on' : ''}" data-vtt-fn="_vttEmoteTab" data-vtt-args="${k}">${l} <small>${n}</small></button>`).join('');
+}
+
+function _emoteBodyHtml(list, favs, query) {
+  if (list.length) return `<div class="vtt-emote-grid2">${_emoteTiles(list, favs)}</div>`;
+  if (query) return `<div class="vtt-emote-empty"><b>Aucune émote</b>pour « ${_esc(_emoteQuery)} »</div>`;
+  if (_emoteTab === 'fav') {
+    return `<div class="vtt-emote-empty"><b>Ta roue est vide</b>Clique sur ☆ en coin d'une émote dans « Toutes » pour l'ajouter à la roue (touche E) et aux touches 1–8.</div>`;
+  }
+  return `<div class="vtt-emote-empty"><b>Rien d'envoyé pour l'instant</b></div>`;
+}
+
+// La recherche ne reconstruit que les résultats. L'input conserve ainsi son
+// nœud DOM, son focus et son curseur pendant toute la saisie.
+function _refreshEmoteSearchResults() {
+  const picker = document.getElementById('vtt-emote-picker');
+  if (!picker) return;
+  const favs = _getFavs();
+  const query = _emoteQuery.trim();
+  const list = _emoteListFor();
+  const tabs = picker.querySelector('.vtt-emote-tabs');
+  const grid = picker.querySelector('#vtt-emote-grid');
+  if (tabs) tabs.innerHTML = _emoteTabsHtml(list, favs, query);
+  if (grid) grid.innerHTML = _emoteBodyHtml(list, favs, query);
+  if (_emoteHover) { _emoteHover = null; _refreshEmoteFoot(); }
+}
+
 export function _renderEmotePicker() {
   const el = document.getElementById('vtt-emote-picker');
   if (!el) return;
@@ -390,9 +424,9 @@ export function _renderEmotePicker() {
   const emitter = emitterId ? VS.tokens[emitterId]?.data : null;
   const ctrl = _emoteControllable();
   const emitterBtn = emitter
-    ? `<button class="vtt-emote-emitter" data-vtt-fn="_vttEmoteMenu" title="Token qui envoie l'émote">${_emoteAvatar(emitter)}<small>depuis</small><b>${_esc(emitter.name || 'Token')}</b>${ctrl.length > 1 ? '<i>▾</i>' : ''}</button>`
+    ? `<button class="vtt-emote-emitter" data-vtt-fn="_vttEmoteMenu" title="Token qui envoie l'émote">${_emoteAvatar(emitter)}<small>depuis</small><b>${_esc(_emoteTokenName(emitter))}</b>${ctrl.length > 1 ? '<i>▾</i>' : ''}</button>`
     : `<button class="vtt-emote-emitter" data-vtt-fn="_vttEmoteMenu" title="Aucun token contrôlable"><small>depuis</small><b>—</b></button>`;
-  const item = (x) => `<button class="${x.id === emitterId ? 'on' : ''}" data-vtt-fn="_vttEmotePickEmitter" data-vtt-args="${x.id}">${_emoteAvatar(x.data)}<span>${_esc(x.data.name || 'Token')}</span></button>`;
+  const item = (x) => `<button class="${x.id === emitterId ? 'on' : ''}" data-vtt-fn="_vttEmotePickEmitter" data-vtt-args="${x.id}">${_emoteAvatar(x.data)}<span>${_esc(_emoteTokenName(x.data))}</span></button>`;
   const mine = ctrl.filter(x => _emoteIsMine(x.data));
   const others = ctrl.filter(x => !_emoteIsMine(x.data));
   const menu = (_emoteMenu && ctrl.length > 1)
@@ -400,22 +434,8 @@ export function _renderEmotePicker() {
     : '';
 
   // Onglets ou « Résultats N ».
-  const tabs = q
-    ? `<span class="vtt-emote-tab on">Résultats <small>${list.length}</small></span>`
-    : [['fav', '★ Roue', favs.length], ['rec', 'Récents', _getRecents().length], ['all', 'Toutes', _emotes.length]]
-        .map(([k, l, n]) => `<button class="vtt-emote-tab${_emoteTab === k ? ' on' : ''}" data-vtt-fn="_vttEmoteTab" data-vtt-args="${k}">${l} <small>${n}</small></button>`).join('');
-
-  // Corps.
-  let body;
-  if (!list.length) {
-    body = q
-      ? `<div class="vtt-emote-empty"><b>Aucune émote</b>pour « ${_esc(_emoteQuery)} »</div>`
-      : _emoteTab === 'fav'
-        ? `<div class="vtt-emote-empty"><b>Ta roue est vide</b>Clique sur ☆ en coin d'une émote dans « Toutes » pour l'ajouter à la roue (touche E) et aux touches 1–8.</div>`
-        : `<div class="vtt-emote-empty"><b>Rien d'envoyé pour l'instant</b></div>`;
-  } else {
-    body = `<div class="vtt-emote-grid2">${_emoteTiles(list, favs)}</div>`;
-  }
+  const tabs = _emoteTabsHtml(list, favs, q);
+  const body = _emoteBodyHtml(list, favs, q);
 
   // Pied fixe (hauteur constante) : aperçu au survol, sinon rappel des gestes.
   const foot = _emoteFootHtml();
@@ -445,10 +465,14 @@ function _bindEmoteInputs() {
   });
   const q = document.getElementById('vtt-emote-q');
   if (q) {
-    q.oninput = e => { _emoteQuery = e.target.value; _renderEmotePicker(); };
+    q.oninput = e => { _emoteQuery = e.target.value; _refreshEmoteSearchResults(); };
     q.onkeydown = e => {
       if (e.key === 'Enter') { const f = _emoteListFor()[0]; if (f) _vttSendEmote(f.name); }
-      else if (e.key === 'Escape') { if (_emoteQuery) { _emoteQuery = ''; _renderEmotePicker(); } else _closeEmotePicker(); e.stopPropagation(); }
+      else if (e.key === 'Escape') {
+        if (_emoteQuery) { _emoteQuery = ''; q.value = ''; _refreshEmoteSearchResults(); }
+        else _closeEmotePicker();
+        e.stopPropagation();
+      }
     };
     if (_emoteJustOpened) { _emoteJustOpened = false; setTimeout(() => document.getElementById('vtt-emote-q')?.focus(), 30); }
   }
@@ -566,7 +590,7 @@ export async function _vttSendEmote(name, opts = {}) {
   });
 
   // Statistiques : compte l'émote (attribuée au personnage du token émetteur), chaque envoi.
-  if (token.characterId) bumpEmote(token.characterId, VS.characters[token.characterId]?.nom || token.name, name);
+  if (token.characterId) bumpEmote(token.characterId, _emoteTokenName(token), name);
 
   _emoteLast = name;
   if (_emoteTab === 'rec') _renderEmotePickerIfOpen();
