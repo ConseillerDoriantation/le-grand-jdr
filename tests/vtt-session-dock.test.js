@@ -58,6 +58,16 @@ test('le badge de butin compte les entrées non vues et se réinitialise à l’
   assert.match(loot, /_refreshLootDockTrigger\(\{ markSeen: true \}\)/);
 });
 
+test('la quantité du butin accepte une saisie directe sans écrire à chaque touche', () => {
+  assert.match(loot, /class="vtt-loot-qinput"[\s\S]*?data-loot-qty-input[\s\S]*?type="number"/);
+  assert.match(loot, /data-loot-basket-input="\$\{_esc\(id\)\}"[\s\S]*?type="number"/);
+  assert.match(loot, /qty\.onchange = \(\) => _vttLootQtySet/);
+  assert.match(loot, /input\.oninput = \(\) => \{[\s\S]*?_basket\[itemId\] = _lootQtyValue/);
+  assert.doesNotMatch(loot, /qty\.oninput\s*=[\s\S]{0,120}_saveLoot/);
+  assert.match(loot, /if \(e\.key === 'Enter'\)[\s\S]*?qty\.blur\(\)/);
+  assert.match(css, /\.vtt-loot-qinput\s*\{/);
+});
+
 test('une musique active reprend après actualisation sans recréer son lecteur', () => {
   assert.match(music, /Même son déjà chargé[\s\S]*?_audioEl\.paused[\s\S]*?_audioEl\.play\(\)/);
   assert.match(music, /_AUTOPLAY_RESUME_EVENTS = \['pointerdown', 'click', 'keydown', 'touchstart'\]/);

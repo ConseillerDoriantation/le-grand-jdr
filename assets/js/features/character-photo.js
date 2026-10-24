@@ -4,7 +4,8 @@ import { openModal, closeModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { compressDataUrl, pickImageFile } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
-import { saveBuildPatch } from '../shared/character-builds.js';
+import { getActiveBuild, saveBuildPatch } from '../shared/character-builds.js';
+import { saveCharacterOriginalPhoto } from '../shared/character-media.js';
 
 import { getCharacterById } from '../shared/character-state.js';
 // ══════════════════════════════════════════════════════════════════════════════
@@ -14,9 +15,9 @@ import { getCharacterById } from '../shared/character-state.js';
 
 const VIEW_SIZE   = 300;
 const OUTPUT_SIZE = 300;
-// Le portrait cadré est utilisé partout ; l'original sert uniquement à la
-// visionneuse. Les deux restent dans Firestore, donc leur poids doit être borné
-// en octets et pas seulement en résolution.
+// Le portrait cadré est utilisé partout et reste sur le document personnage.
+// L'original sert uniquement à la visionneuse et vit dans characterMedia afin
+// de ne jamais faire dépasser la limite Firestore de la fiche principale.
 const CROPPED_PHOTO_BUDGET = 70_000;
 const ORIGINAL_PHOTO_BUDGET = 180_000;
 
@@ -86,14 +87,15 @@ async function saveCroppedCharacterPhoto(charId) {
   if (!c) { showNotif('Personnage introuvable.', 'error'); return; }
 
   // `photo` reste la miniature carrée légère utilisée partout dans l'app.
-  // `photoOriginal` conserve la composition complète avant cadrage, bornée en
-  // taille pour ne pas approcher inutilement la limite de document Firestore.
+  // `photoOriginal` conserve la composition complète avant cadrage, mais dans
+  // son propre document média afin de ne plus gonfler la fiche personnage.
   const dataUrl = await compressDataUrl(rawCropped, {
     max: OUTPUT_SIZE, quality: 0.78, maxBytes: CROPPED_PHOTO_BUDGET, minSide: 220,
   }) || rawCropped;
   const photoOriginal = await compressDataUrl(sourceDataUrl || rawCropped, {
     max: 900, quality: 0.74, maxBytes: ORIGINAL_PHOTO_BUDGET, minSide: 420,
   }) || dataUrl;
+  const activeBuildId = getActiveBuild(c)?.id || c.activeBuildId || 'main';
   const previous = {
     photo: c.photo ?? null,
     photoOriginal: c.photoOriginal ?? null,
@@ -101,10 +103,11 @@ async function saveCroppedCharacterPhoto(charId) {
     photoX: c.photoX ?? 0,
     photoY: c.photoY ?? 0,
   };
-  c.photo = dataUrl; c.photoOriginal = photoOriginal;
+  c.photo = dataUrl; c.photoOriginal = null;
   c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
   try {
-    await saveBuildPatch(charId, c, { photo: dataUrl, photoOriginal, photoZoom: 1, photoX: 0, photoY: 0 });
+    await saveCharacterOriginalPhoto(charId, activeBuildId, photoOriginal);
+    await saveBuildPatch(charId, c, { photo: dataUrl, photoOriginal: null, photoZoom: 1, photoX: 0, photoY: 0 });
     _destroyCharacterPhotoCrop();
     closeModal();
     showNotif('Photo enregistrée !', 'success');
@@ -121,6 +124,8 @@ async function deleteCharPhoto(charId) {
   c.photo = null; c.photoOriginal = null;
   c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
   try {
+    const activeBuildId = getActiveBuild(c)?.id || c.activeBuildId || 'main';
+    await saveCharacterOriginalPhoto(charId, activeBuildId, null);
     await saveBuildPatch(charId, c, { photo: null, photoOriginal: null, photoZoom: 1, photoX: 0, photoY: 0 });
     showNotif('Photo supprimée.', 'success');
     charSession.renderSheet(c, charSession.getCurrentCharTab() || 'combat');
