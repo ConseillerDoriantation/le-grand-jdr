@@ -12092,7 +12092,10 @@ button.vtt-loot-qb:hover:not(:disabled) { background:var(--surface-3,var(--bg-el
 .vtt-loot-qstep button { width:26px; height:100%; display:grid; place-items:center; color:var(--text-soft,var(--text)); background:none; border:0; cursor:pointer; }
 .vtt-loot-qstep button:hover:not(:disabled) { background:var(--surface-3,var(--bg-elevated)); }
 .vtt-loot-qstep svg.vtt-loot-i { width:13px; height:13px; }
-.vtt-loot-qstep > span { min-width:30px; padding:0 4px; text-align:center; font-weight:700; font-size:12.5px; border-left:1px solid var(--border); border-right:1px solid var(--border); align-self:stretch; display:flex; align-items:center; justify-content:center; gap:1px; }
+.vtt-loot-qfield { min-width:38px; padding:0 4px; border-left:1px solid var(--border); border-right:1px solid var(--border); align-self:stretch; display:flex; align-items:center; justify-content:center; gap:1px; }
+.vtt-loot-qinput { width:36px; height:100%; padding:0 2px; border:0; outline:0; background:transparent; color:var(--text); text-align:center; font:inherit; font-size:12.5px; font-weight:700; appearance:textfield; -moz-appearance:textfield; }
+.vtt-loot-qinput::-webkit-inner-spin-button, .vtt-loot-qinput::-webkit-outer-spin-button { margin:0; -webkit-appearance:none; }
+.vtt-loot-qinput:focus { background:color-mix(in srgb, var(--accent,#4f8cff) 10%, transparent); }
 .vtt-loot-qstep em { font-style:normal; font-weight:500; color:var(--text-dim,var(--text-muted)); font-size:10.5px; }
 
 /* Journal */

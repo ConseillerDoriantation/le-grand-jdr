@@ -23,13 +23,27 @@ test('le verrou est constant au zoom et peut être découvert par une tentative 
   assert.match(fog, /_shakeStructure\(wall\.id\)/);
 });
 
-test('les portes et vitres ont une grande cible et une aide au survol', () => {
+test('les portes et vitres ont une cible précise et une aide au survol', () => {
   assert.match(fog, /function _structureHitStrokeWidth\(k\)/);
-  assert.match(fog, /coarsePointer \? 40 : 32/);
+  assert.match(fog, /coarsePointer \? 28 : 18/);
   assert.match(fog, /strokeWidth:hitStrokeWidth/);
   assert.match(fog, /rgba\(126,176,255,\.45\)/);
   assert.match(css, /\.vtt-structure-tip\.open/);
   assert.match(css, /\.vtt-map-legend-row/);
+});
+
+test('un token sous le pointeur garde la priorité sur une structure', () => {
+  assert.match(fog, /function _tokenGroupAtPointer\(\)[\s\S]*?_tokenLayer\?\.getIntersection\?\.\(pointer\)/);
+  assert.match(fog, /function _forwardStructureEventToToken\(event, type\)[\s\S]*?token\.fire\(type, \{ evt:event\.evt \}, false\)/);
+  assert.match(fog, /if \(_forwardStructureEventToToken\(event, 'click'\)\) return/);
+  assert.match(fog, /if \(_forwardStructureEventToToken\(event, 'contextmenu'\)\) return/);
+});
+
+test('les structures ignorent la molette, le clic gauche agit et le clic droit ouvre les options MJ', () => {
+  assert.match(fog, /node\.on\('click tap',[\s\S]*?button != null && button !== 0\) return/);
+  assert.match(fog, /node\.on\('contextmenu',[\s\S]*?if \(isAdmin\) _selectItem\(wall\.id\)/);
+  assert.match(fog, /hitLine\.on\('click tap',[\s\S]*?button != null && button !== 0\) return/);
+  assert.match(fog, /hitLine\.on\('contextmenu',[\s\S]*?_selectItem\(w\.id\)/);
 });
 
 test('les cibles joueur sont recalculées après la construction du brouillard', () => {

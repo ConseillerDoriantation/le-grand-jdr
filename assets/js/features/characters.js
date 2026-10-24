@@ -8,6 +8,7 @@ import { _esc, _norm, loadingHtml } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { characterPortraitContent } from '../shared/portraits.js';
 import { openImageLightbox } from '../shared/image-lightbox.js';
+import { characterOriginalPhotoFor } from '../shared/character-media.js';
 import { avatarSrcOf } from '../shared/avatar.js';
 import {
   applyActiveBuild, buildProjectionPatch, createBuild, deleteBuild,
@@ -1262,11 +1263,12 @@ function _toggleIdentityPopover(btn) {
   });
 }
 
-function _openCharacterPortraitViewer(btn) {
+async function _openCharacterPortraitViewer(btn) {
   const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
   if (!c?.photo) return;
+  const src = await characterOriginalPhotoFor(c);
   openImageLightbox({
-    src: c.photoOriginal || c.photo,
+    src,
     alt: `Portrait complet de ${c.nom || 'ce personnage'}`,
   });
 }

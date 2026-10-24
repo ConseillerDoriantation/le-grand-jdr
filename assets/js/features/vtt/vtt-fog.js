@@ -540,8 +540,10 @@ function _openDoorLeafPoints(g, k) {
 function _structureHitStrokeWidth(k) {
   const scale = Math.max(.15, Number(_stage?.scaleX?.()) || 1);
   const coarsePointer = globalThis.matchMedia?.('(pointer: coarse)')?.matches === true;
-  // Minimum en pixels écran : la cible ne devient plus minuscule en dézoomant.
-  return Math.max(22*k, (coarsePointer ? 40 : 32) / scale);
+  // Cible assez tolérante pour rester utilisable en dézoomant, sans déborder
+  // largement sur les tokens et les cases voisines. Le tactile conserve une
+  // marge légèrement supérieure au pointeur précis d'une souris.
+  return Math.max(14*k, (coarsePointer ? 28 : 18) / scale);
 }
 
 function _playerStructureIsVisible(g, page = _page) {
@@ -681,6 +683,29 @@ function _shakeStructure(id) {
   step(0);
 }
 
+function _tokenGroupAtPointer() {
+  const pointer = _stage?.getPointerPosition?.();
+  if (!pointer) return null;
+  let node = _tokenLayer?.getIntersection?.(pointer) || null;
+  while (node && node !== _tokenLayer) {
+    if (String(node.id?.() || '').startsWith('tok-')) return node;
+    node = node.getParent?.() || null;
+  }
+  return null;
+}
+
+/** Le calque des structures est visuellement au-dessus des tokens afin que le
+ * brouillard reste correct. Son hit-test ne doit toutefois jamais voler une
+ * interaction à un token placé au même endroit. */
+function _forwardStructureEventToToken(event, type) {
+  const token = _tokenGroupAtPointer();
+  if (!token) return false;
+  event.cancelBubble = true;
+  _hideStructureTip();
+  token.fire(type, { evt:event.evt }, false);
+  return true;
+}
+
 function _bindObstacleNode(node, halo, wall, state, isAdmin) {
   if (!node) return;
   node.on('mouseenter', event => {
@@ -699,9 +724,19 @@ function _bindObstacleNode(node, halo, wall, state, isAdmin) {
     _wallsLayer?.batchDraw?.();
   });
   node.on('click tap', event => {
+    const button = event.evt?.button;
+    if (button != null && button !== 0) return;
+    if (_forwardStructureEventToToken(event, 'click')) return;
     event.cancelBubble = true;
     _hideStructureTip();
     if (state.canOpen) _toggleDoor(wall, isAdmin, event);
+  });
+  node.on('contextmenu', event => {
+    event.evt?.preventDefault?.();
+    if (_forwardStructureEventToToken(event, 'contextmenu')) return;
+    event.cancelBubble = true;
+    _hideStructureTip();
+    if (isAdmin) _selectItem(wall.id);
   });
 }
 
@@ -759,7 +794,17 @@ export function fogRenderWalls(page, isAdmin) {
         points, stroke:'rgba(0,0,0,0.001)', strokeWidth:14*k,
         lineCap:'round', listening:true,
       });
-      hitLine.on('click tap', event => { event.cancelBubble = true; _selectItem(w.id); });
+      hitLine.on('click tap', event => {
+        const button = event.evt?.button;
+        if (button != null && button !== 0) return;
+        event.cancelBubble = true;
+        _selectItem(w.id);
+      });
+      hitLine.on('contextmenu', event => {
+        event.evt?.preventDefault?.();
+        event.cancelBubble = true;
+        _selectItem(w.id);
+      });
       group.add(hitLine);
       if (_selectedId === w.id) {
         _addStructureLine(K, group, points, {
