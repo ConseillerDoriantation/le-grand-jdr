@@ -10,46 +10,45 @@ const lightboxSource = readFileSync(new URL('../assets/js/shared/image-lightbox.
 const photoSource = readFileSync(new URL('../assets/js/features/character-photo.js', import.meta.url), 'utf8');
 const formsSource = readFileSync(new URL('../assets/js/features/characters/forms.js', import.meta.url), 'utf8');
 const sidebar = source.slice(source.indexOf('function _buildSidebarHtml'), source.indexOf('function _buildBuildSwitcherHtml'));
+const identityCss = css.slice(css.indexOf('/* ── Identité v9'));
 
 test('le bloc identité utilise le portrait rond, l’anneau XP et les surfaces compactes', () => {
   assert.match(sidebar, /class="id-side ids"/);
   assert.match(sidebar, /class="ids-portrait/);
   assert.match(sidebar, /class="ids-ring"/);
-  assert.match(sidebar, /class="ids-level"/);
+  assert.match(sidebar, /class="ids-level\$\{ready/);
   assert.match(sidebar, /class="ids-facts"/);
-  assert.match(css, /\.cs-v3 \.ids-portrait \{[^}]*width: 184px;[^}]*height: 184px;/s);
+  assert.match(identityCss, /\.cs-v3 \.ids-portrait \{[^}]*width: 136px;[^}]*height: 136px;/s);
   assert.match(sidebar, /pathLength="100" stroke-dasharray="\$\{xpPct\}/);
-  assert.match(css, /\.cs-v3 \.id-side\.ids \{[^}]*max-height: calc\(100dvh/s);
-  assert.match(css, /\.cs-v3 \.id-side\.ids \{[^}]*border-radius: 18px;/s);
-  assert.match(css, /\.cs-v3 \.ids-copy h2 \{[^}]*text-transform: uppercase;/s);
+  assert.match(identityCss, /\.cs-v3 \.id-side\.ids \{[^}]*max-height: calc\(100vh/s);
+  assert.match(identityCss, /\.cs-v3 \.id-side\.ids \{[^}]*border-radius: 14px;/s);
+  assert.match(identityCss, /\.cs-v3 input\.ids-name \{[^}]*font: 600 1\.24rem/s);
 });
 
-test('le portrait photographique ouvre l’image complète avec zoom et déplacement', () => {
-  assert.match(sidebar, /data-action="openCharacterPortraitViewer"/);
-  assert.match(source, /openImageLightbox\(\{/);
-  assert.match(source, /const src = await characterOriginalPhotoFor\(c\)/);
-  assert.match(source, /openImageLightbox\(\{\s*src,/);
+test('le portrait ouvre directement le sélecteur et accepte le glisser-déposer', () => {
+  assert.match(sidebar, /data-action="open-character-photo"/);
+  assert.match(sidebar, /data-character-photo-drop="\$\{c\.id\}"/);
+  assert.match(sidebar, /class="ids-portrait-hover"/);
+  assert.match(photoSource, /function openDroppedCharacterPhoto/);
+  assert.match(photoSource, /data-character-photo-drop/);
+  assert.match(photoSource, /reader\.readAsDataURL\(file\)/);
   assert.match(photoSource, /compressDataUrl\(sourceDataUrl \|\| rawCropped/);
   assert.match(photoSource, /maxBytes: ORIGINAL_PHOTO_BUDGET/);
   assert.match(photoSource, /maxBytes: CROPPED_PHOTO_BUDGET/);
   assert.match(photoSource, /saveCharacterOriginalPhoto\(charId, activeBuildId, photoOriginal\)/);
   assert.match(photoSource, /photoOriginal: null/);
-  assert.match(lightboxSource, /classList\.add\('is-zoomed'\)/);
-  assert.match(lightboxSource, /focusX \* image\.scrollWidth/);
-  assert.match(lightboxSource, /addEventListener\('pointermove'/);
-  assert.match(lightboxSource, /media\.scrollLeft = panLeft - dx/);
-  assert.match(lightboxSource, /event\.key === 'Escape'/);
 });
 
-test('le popover Apparence décrit seulement l’effet réel de l’aura et présente la palette', () => {
+test('la pastille Aura ouvre la palette et permet de retirer la photo', () => {
   assert.match(source, /class="ids-pop ids-pop-look"/);
-  assert.match(source, />Choisir une photo<\/button>/);
+  assert.match(sidebar, /class="ids-portrait-edit ids-aura-button"/);
+  assert.doesNotMatch(source, />Choisir une photo<\/button>/);
   assert.match(source, /Couleur de l'anneau d'expérience autour du portrait\./);
   assert.doesNotMatch(source, /jeton sur la carte, pastille dans le chat/);
   assert.match(source, /Object\.entries\(AURA_PALETTE\)/);
+  assert.match(source, /data-action="delete-character-photo"/);
   assert.match(css, /\.cs-v3 \.ids-pop-look \{[^}]*width: 246px;/s);
-  assert.match(css, /\.cs-v3 \.ids-pop-look \{[^}]*width: 246px;/s);
-  assert.match(css, /\.cs-v3 \.ids-ring \{[^}]*stroke-width: 6px;/s);
+  assert.match(identityCss, /\.cs-v3 \.ids-ring \{[^}]*filter: none;/s);
   assert.match(source, /document\.addEventListener\('pointerdown',[\s\S]*?_identityUi\.popover = null;[\s\S]*?_removeIdentityPopover\(\)/);
 });
 
@@ -75,13 +74,13 @@ test('la saisie des PV actuels reprend la valeur synchronisée avec le VTT', () 
 });
 
 test('la hiérarchie d’identité et le calcul compact suivent la maquette', () => {
-  assert.match(css, /\.cs-v3 \.ids-copy h2 \{[^}]*font: 700 1\.28rem/s);
-  assert.match(css, /\.cs-v3 \.ids-copy > p \{[^}]*color: var\(--text-muted\)/s);
+  assert.match(identityCss, /\.cs-v3 input\.ids-name \{[^}]*font: 600 1\.24rem/s);
+  assert.match(identityCss, /\.cs-v3 \.ids-sub \{[^}]*color: var\(--text-muted\)/s);
   assert.match(css, /\.cs-v3 \.ids-titles \{[^}]*font-family: Georgia[^}]*font-style: italic !important/s);
-  assert.match(css, /\.cs-v3 \.ids-edit-open \{[^}]*display: flex;[^}]*margin: 10px auto 0/s);
+  assert.match(identityCss, /\.cs-v3 \.ids-inline:focus \{[^}]*background: var\(--surface-sunken\)/s);
   assert.match(source, /identityFormula = `Base \+ \$\{statShort\} × niveau \+ talents`/);
   assert.match(source, /class="ids-vital-detail-head"[^]*class="ids-calc-row"[^]*class="ids-vital-total"/);
-  assert.doesNotMatch(source.slice(source.indexOf('function _identityVitalBreakdownHtml'), source.indexOf('function _identityFormHtml')), /cs-calc-rows|cs-brk-total/);
+  assert.doesNotMatch(source.slice(source.indexOf('function _identityVitalBreakdownHtml'), source.indexOf('function _buildSidebarHtml')), /cs-calc-rows|cs-brk-total/);
 });
 
 test('la colonne ne bouge pas avec le scroll et tous les calculs utilisent le détail compact', () => {
@@ -101,13 +100,13 @@ test('la colonne ne bouge pas avec le scroll et tous les calculs utilisent le d�
 });
 
 test('ouvrir les popovers ne reconstruit ni ne redimensionne la fiche', () => {
-  const toggle = source.slice(source.indexOf('function _toggleIdentityPopover'), source.indexOf('function _identityStartEdit'));
+  const toggle = source.slice(source.indexOf('function _toggleIdentityPopover'), source.indexOf('async function _openCharacterPortraitViewer'));
   assert.match(toggle, /layer\.id = 'identity-popover-layer'/);
   assert.match(toggle, /document\.body\.appendChild\(layer\)/);
   assert.doesNotMatch(toggle, /side\.insertAdjacentHTML|side\.appendChild/);
   assert.doesNotMatch(sidebar, /_identityPopoverHtml/);
   assert.doesNotMatch(toggle, /_rerenderIdentity|renderCharSheet/);
-  assert.match(toggle, /side\.querySelector\('\.ids-portrait'\)/);
+  assert.match(toggle, /side\.querySelector\('\.ids-aura-button'\)/);
   assert.match(toggle, /side\.querySelector\('\.ids-hero'\)/);
   assert.match(toggle, /popover\.style\.top = `\$\{Math\.round\(rect\.bottom \+ 8\)\}px`/);
   assert.match(toggle, /focus\(\{ preventScroll: true \}\)/);
@@ -148,15 +147,17 @@ test('le statut de vie reste discret et un personnage mort a son portrait en noi
   assert.match(css, /\.cs-v3 \.ids-life \{[^}]*border-radius: 999px/s);
 });
 
-test('l’édition groupée de l’identité persiste nom, classe, race et titres en une écriture', () => {
-  const save = source.slice(source.indexOf('async function _identitySaveEdit'), source.indexOf('function _toggleIdentityVitalBreakdown'));
-  assert.match(save, /nom: draft\.nom/);
-  assert.match(save, /classe: draft\.classe/);
-  assert.match(save, /race: draft\.race/);
-  assert.match(save, /titres:/);
+test('l’édition directe persiste seulement à la validation et ne rerend pas les champs simples', () => {
+  const save = source.slice(source.indexOf('async function _identityInlineCommit'), source.indexOf('async function _identityTitleCommit'));
+  assert.match(sidebar, /data-change="identityInlineCommit"[^>]*data-field="nom"/);
+  assert.match(sidebar, /data-change="identityInlineCommit"[^>]*data-field="classe"/);
+  assert.match(sidebar, /data-change="identityInlineCommit"[^>]*data-field="race"/);
   assert.equal((save.match(/updateInCol\('characters'/g) || []).length, 1);
+  assert.doesNotMatch(save, /_rerenderIdentity|renderCharSheet|showNotif/);
+  assert.match(source, /data-change="identityTitleCommit"/);
+  assert.match(source, /data-change="identityAddTitle"/);
   assert.match(source, /makeSortable\(host/);
-  assert.doesNotMatch(source.slice(source.indexOf('function _initCharacterTitlesSortable'), source.indexOf('function _rerenderIdentity')), /updateInCol/);
+  assert.match(source.slice(source.indexOf('function _initCharacterTitlesSortable'), source.indexOf('function _rerenderIdentity')), /onEnd: async[\s\S]*updateInCol\('characters'/);
 });
 
 test('les builds se créent, changent et se suppriment depuis la fiche sans modale', () => {

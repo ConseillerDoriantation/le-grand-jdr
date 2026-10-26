@@ -90,6 +90,8 @@ export function attachPanZoomCrop({
   outputH = null,           // hauteur output (override outputSize)
   jpegQuality = 0.88,
   background = '#111827',
+  onChange = null,
+  constrainCover = false,
 }) {
   // Résolution des dimensions effectives (viewport + output)
   const vw = viewW ?? viewSize;
@@ -104,27 +106,35 @@ export function attachPanZoomCrop({
   const s = { ox: 0, oy: 0, scale: 1, dragging: false, startMX: 0, startMY: 0, naturalW: 0, naturalH: 0, t0: null };
   const apply = () => { img.style.transform = `translate(${s.ox}px, ${s.oy}px) scale(${s.scale})`; };
   const pinch = (e) => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+  const clampOffsets = () => {
+    if (!constrainCover || !s.naturalW || !s.naturalH) return;
+    const minX = Math.min(0, vw - s.naturalW * s.scale);
+    const minY = Math.min(0, vh - s.naturalH * s.scale);
+    s.ox = _clamp(s.ox, minX, 0);
+    s.oy = _clamp(s.oy, minY, 0);
+  };
   const zoomTo = (newScale, cx, cy) => {
     s.ox = cx - (cx - s.ox) * (newScale / s.scale);
     s.oy = cy - (cy - s.oy) * (newScale / s.scale);
     s.scale = newScale;
+    clampOffsets();
   };
 
   const h = {
-    sliderInput: () => { zoomTo(parseFloat(slider.value), vw / 2, vh / 2); apply(); },
+    sliderInput: () => { zoomTo(parseFloat(slider.value), vw / 2, vh / 2); apply(); onChange?.(); },
     wheel: (e) => {
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.08 : 0.93;
       const nv = _clamp(s.scale * factor, parseFloat(slider.min), parseFloat(slider.max));
       const r = zone.getBoundingClientRect();
       zoomTo(nv, e.clientX - r.left, e.clientY - r.top);
-      slider.value = nv; apply();
+      slider.value = nv; apply(); onChange?.();
     },
     mousedown: (e) => {
       s.dragging = true; s.startMX = e.clientX - s.ox; s.startMY = e.clientY - s.oy;
       zone.style.cursor = 'grabbing'; e.preventDefault();
     },
-    mousemove: (e) => { if (!s.dragging) return; s.ox = e.clientX - s.startMX; s.oy = e.clientY - s.startMY; apply(); },
+    mousemove: (e) => { if (!s.dragging) return; s.ox = e.clientX - s.startMX; s.oy = e.clientY - s.startMY; clampOffsets(); apply(); onChange?.(); },
     mouseup: () => { s.dragging = false; zone.style.cursor = 'grab'; },
     touchstart: (e) => {
       if (e.touches.length === 1) {
@@ -135,12 +145,12 @@ export function attachPanZoomCrop({
     },
     touchmove: (e) => {
       if (e.touches.length === 1 && s.dragging) {
-        const t = e.touches[0]; s.ox = t.clientX - s.startMX; s.oy = t.clientY - s.startMY; apply();
+        const t = e.touches[0]; s.ox = t.clientX - s.startMX; s.oy = t.clientY - s.startMY; clampOffsets(); apply(); onChange?.();
       } else if (e.touches.length === 2 && s.t0 > 0) {
         const d = pinch(e), factor = d / s.t0;
         const nv = _clamp(s.scale * factor, parseFloat(slider.min), parseFloat(slider.max));
         zoomTo(nv, vw / 2, vh / 2);
-        slider.value = nv; s.t0 = d; apply();
+        slider.value = nv; s.t0 = d; apply(); onChange?.();
       }
       e.preventDefault();
     },
@@ -152,7 +162,7 @@ export function attachPanZoomCrop({
     // Initial scale : "cover" du viewport — l'image remplit au minimum la zone
     const init = Math.max(vw / s.naturalW, vh / s.naturalH);
     s.scale = init;
-    slider.min = (Math.min(vw / s.naturalW, vh / s.naturalH) * 0.5).toFixed(3);
+    slider.min = (constrainCover ? init : Math.min(vw / s.naturalW, vh / s.naturalH) * 0.5).toFixed(3);
     slider.max = (init * 6).toFixed(3);
     slider.value = init;
     s.ox = (vw - s.naturalW * init) / 2;
@@ -208,6 +218,11 @@ export function attachPanZoomCrop({
         imgH: (s.scale * s.naturalH) / vh,
       };
     },
+    getZoomRatio() {
+      if (!s.naturalW || !s.naturalH) return null;
+      const cover = Math.max(vw / s.naturalW, vh / s.naturalH);
+      return cover > 0 ? s.scale / cover : null;
+    },
     // Restaure un cadrage depuis des params précédemment sauvegardés.
     // Attend que l'image soit chargée si elle ne l'est pas encore.
     setCropParams(params) {
@@ -215,10 +230,13 @@ export function attachPanZoomCrop({
       const apply2 = () => {
         if (!s.naturalW) return false;
         // Reconstitue scale + offsets depuis les fractions stockées
-        const newScale = (params.imgW * vw) / s.naturalW;
+        const storedScale = (params.imgW * vw) / s.naturalW;
+        const coverScale = Math.max(vw / s.naturalW, vh / s.naturalH);
+        const newScale = constrainCover ? Math.max(coverScale, storedScale) : storedScale;
         s.scale = newScale;
         s.ox = params.offX * vw;
         s.oy = params.offY * vh;
+        clampOffsets();
         slider.value = newScale;
         apply();
         return true;

@@ -8,10 +8,18 @@ const characters = readFileSync(new URL('../assets/js/features/characters.js', i
 const rules = readFileSync(new URL('../docs/firestore-rules.md', import.meta.url), 'utf8');
 
 test('l image originale est stockée hors du document personnage et par build', () => {
-  assert.match(media, /saveDoc\('characterMedia', id, data\)/);
+  assert.match(media, /saveDoc\('characterMedia', id, data, \{ silent: true \}\)/);
   assert.match(media, /characterMediaId\(character\.id, character\.activeBuildId \|\| 'main'\)/);
   assert.match(photo, /saveCharacterOriginalPhoto\(charId, activeBuildId, photoOriginal\)/);
   assert.match(photo, /saveBuildPatch\(charId, c, \{ photo: dataUrl, photoOriginal: null/);
+});
+
+test('un refus de characterMedia ne bloque jamais l enregistrement du portrait', () => {
+  assert.match(media, /catch \(error\)[\s\S]*?return false/);
+  assert.match(media, /getDocDataSilent\('characterMedia', id\)/);
+  const mediaWrite = photo.indexOf('await saveCharacterOriginalPhoto(charId, activeBuildId, photoOriginal)');
+  const portraitWrite = photo.indexOf('await saveBuildPatch(charId, c, { photo: dataUrl, photoOriginal: null');
+  assert.ok(mediaWrite >= 0 && portraitWrite > mediaWrite);
 });
 
 test('la visionneuse charge l original à la demande avec repli sur le portrait', () => {

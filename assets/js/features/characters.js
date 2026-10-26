@@ -169,8 +169,6 @@ let _charCalcAnchor = null;
 const _identityUi = {
   charId: null,
   popover: null,
-  editing: false,
-  draft: null,
   vitalBreakdown: null,
 };
 
@@ -178,8 +176,6 @@ function _identityStateFor(c) {
   if (_identityUi.charId !== c?.id) {
     _identityUi.charId = c?.id || null;
     _identityUi.popover = null;
-    _identityUi.editing = false;
-    _identityUi.draft = null;
     _identityUi.vitalBreakdown = null;
   }
   return _identityUi;
@@ -954,13 +950,10 @@ function _identityPopoverHtml(c, canEdit, { xpCur, xpPalier, xpPct }) {
       </div>
     </section>`;
   }
-  if (ui.popover === 'appearance') {
+  if (ui.popover === 'aura') {
     if (!canEdit) return '';
     const isCustom = !!c.auraColor;
-    return `<section class="ids-pop ids-pop-look" role="dialog" aria-label="Apparence du personnage">
-      <span class="ids-pop-kicker">Apparence</span>
-      <button class="ids-photo-btn" data-action="open-character-photo" data-charid="${c.id}">Choisir une photo</button>
-      <div class="ids-pop-divider"></div>
+    return `<section class="ids-pop ids-pop-look" role="dialog" aria-label="Aura du personnage">
       <span class="ids-pop-kicker">Aura</span>
       <p class="ids-aura-help">Couleur de l'anneau d'expérience autour du portrait.</p>
       <div class="ids-aura">
@@ -970,6 +963,7 @@ function _identityPopoverHtml(c, canEdit, { xpCur, xpPalier, xpPct }) {
           <input type="color" value="${_auraHex(c)}" data-change="setCharAuraColor" data-id="${c.id}">
         </label>
       </div>
+      ${c.photo ? `<div class="ids-pop-divider"></div><button class="ids-photo-remove" data-action="delete-character-photo" data-charid="${c.id}">Retirer la photo</button>` : ''}
     </section>`;
   }
   const ready = xpPalier > 0 && xpCur >= xpPalier;
@@ -1008,25 +1002,8 @@ function _identityVitalBreakdownHtml(c, canEdit) {
   </div>`;
 }
 
-function _identityFormHtml(c) {
-  const ui = _identityStateFor(c);
-  const draft = ui.draft || { nom: c.nom || '', classe: c.classe || '', race: c.race || '', titres: [...(c.titres || [])] };
-  ui.draft = draft;
-  return `<div class="ids-edit" data-identity-edit="${c.id}">
-    <label>Nom<input data-identity-field="nom" maxlength="80" value="${_esc(draft.nom)}"></label>
-    <div class="ids-edit-pair">
-      <label>Classe<input data-identity-field="classe" maxlength="60" value="${_esc(draft.classe)}" list="identity-class-list"></label>
-      <label>Race<input data-identity-field="race" maxlength="60" value="${_esc(draft.race)}" list="identity-race-list"></label>
-    </div>
-    <datalist id="identity-class-list"><option>Guerrier</option><option>Mage</option><option>Voleur</option><option>Clerc</option><option>Rôdeur</option><option>Barde</option></datalist>
-    <datalist id="identity-race-list"><option>Humain</option><option>Elfe</option><option>Demi-Elfe</option><option>Nain</option><option>Halfelin</option><option>Tieffelin</option></datalist>
-    <label>Titres</label>${_characterTitlesHtml(c, true, draft.titres, true)}
-    <div class="ids-edit-actions"><button data-action="identityCancelEdit">Annuler</button><button class="primary" data-action="identitySaveEdit" data-id="${c.id}">Enregistrer</button></div>
-  </div>`;
-}
-
 function _buildSidebarHtml(c, canEdit, { pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckFree, deckMax }) {
-  const ui = _identityStateFor(c);
+  _identityStateFor(c);
   const owner = _characterOwnerMeta(c);
   const lifeStatus = _characterLifeStatus(c);
   const lifeStatusLabel = CHARACTER_LIFE_STATUSES[lifeStatus].label;
@@ -1047,22 +1024,25 @@ function _buildSidebarHtml(c, canEdit, { pvCur, pvMax, pvPct, hpBarCls, pmCur, p
     <div class="ids-hero">
       <div class="ids-portrait${ready ? ' is-ready' : ''}${lifeStatus === 'dead' ? ' is-dead' : ''}">
         <svg viewBox="0 0 144 144" aria-label="${xpPct}% d'expérience"><circle class="ids-ring-bg" cx="72" cy="72" r="65"></circle><circle class="ids-ring" cx="72" cy="72" r="65" pathLength="100" stroke-dasharray="${xpPct} ${Math.max(0, 100 - xpPct)}"></circle></svg>
-        ${c.photo
-          ? `<button type="button" class="ids-portrait-in is-clickable" data-action="openCharacterPortraitViewer" data-id="${c.id}" title="Afficher le portrait en entier" aria-label="Afficher le portrait de ${_esc(c.nom || 'ce personnage')} en entier">${characterPortraitContent(c, { imgStyle: `transform:scale(${c.photoZoom || 1}) translate(${c.photoX || 0}px,${c.photoY || 0}px);transform-origin:center`, fallbackTag: 'span' })}</button>`
+        ${canEdit
+          ? `<button type="button" class="ids-portrait-in is-clickable" data-action="open-character-photo" data-charid="${c.id}" data-character-photo-drop="${c.id}" title="Cliquer ou déposer une image" aria-label="Changer le portrait de ${_esc(c.nom || 'ce personnage')}">${characterPortraitContent(c, { fallbackTag: 'span' })}<span class="ids-portrait-hover">${c.photo ? 'Changer' : 'Ajouter'} la photo</span></button>`
           : `<div class="ids-portrait-in">${characterPortraitContent(c, { fallbackTag: 'span' })}</div>`}
-        ${canEdit ? `<button class="ids-portrait-edit" data-action="toggleIdentityPopover" data-popover="appearance" data-id="${c.id}" title="Modifier l'apparence">✎</button>` : ''}
-        <button class="ids-level" data-action="toggleIdentityPopover" data-popover="xp" data-id="${c.id}" title="Voir la progression"><small>NIV</small>${c.niveau || 1}</button>
+        ${canEdit ? `<button class="ids-portrait-edit ids-aura-button" style="--dot-c:${_auraHex(c)}" data-action="toggleIdentityPopover" data-popover="aura" data-id="${c.id}" title="Aura du personnage" aria-label="Modifier l'aura"></button>` : ''}
       </div>
-      ${ui.editing ? _identityFormHtml(c) : `<div class="ids-copy"><h2>${_esc(c.nom || 'Sans nom')}</h2><p>${classRace}</p>
+      <button class="ids-level${ready ? ' is-ready' : ''}" data-action="toggleIdentityPopover" data-popover="xp" data-id="${c.id}" title="Expérience et niveau"><small>NIV.</small><b>${c.niveau || 1}</b></button>
+      <div class="ids-copy">
+        ${canEdit
+          ? `<input class="ids-inline ids-name" data-change="identityInlineCommit" data-id="${c.id}" data-field="nom" data-original="${_esc(c.nom || '')}" value="${_esc(c.nom || '')}" maxlength="80" placeholder="Nom du personnage" aria-label="Nom du personnage" autocomplete="off">
+            <div class="ids-sub"><input class="ids-inline" data-change="identityInlineCommit" data-id="${c.id}" data-field="classe" data-original="${_esc(c.classe || '')}" value="${_esc(c.classe || '')}" maxlength="60" placeholder="Classe" aria-label="Classe" autocomplete="off"><span>·</span><input class="ids-inline" data-change="identityInlineCommit" data-id="${c.id}" data-field="race" data-original="${_esc(c.race || '')}" value="${_esc(c.race || '')}" maxlength="60" placeholder="Race" aria-label="Race" autocomplete="off"></div>`
+          : `<h2>${_esc(c.nom || 'Sans nom')}</h2><p>${classRace}</p>`}
         ${canEdit ? `<button type="button" class="ids-life is-${lifeStatus}" data-action="toggleIdentityPopover" data-popover="status" data-id="${c.id}" title="Modifier l’état du personnage" aria-label="État : ${lifeStatusLabel}. Modifier">
           <i aria-hidden="true"></i>
           <span>${lifeStatusLabel}</span>
           <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5l3-3"/></svg>
         </button>` : `<span class="ids-life is-${lifeStatus}" title="État du personnage"><i aria-hidden="true"></i><span>${lifeStatusLabel}</span></span>`}
-        ${_characterTitlesHtml(c, false)}
+        ${_characterTitlesHtml(c, canEdit)}
         <button class="ids-xp-line${ready ? ' ready' : ''}" data-action="toggleIdentityPopover" data-popover="xp" data-id="${c.id}">${ready ? `<b>Niveau ${(c.niveau || 1) + 1} prêt</b><span>· gérer</span>` : `<b>${_identityNumber(xpCur)}</b><span>/ ${_identityNumber(xpPalier)} XP · encore ${_identityNumber(Math.max(0, xpPalier - xpCur))}</span>`}</button>
-        ${canEdit ? `<button class="ids-edit-open" data-action="identityStartEdit" data-id="${c.id}">✎ Modifier l'identité</button>` : ''}
-      </div>`}
+      </div>
     </div>
 
     ${_buildBuildSwitcherHtml(c, canEdit)}
@@ -1095,7 +1075,8 @@ function _buildBuildSwitcherHtml(c, canEdit) {
     <select data-change="switchCharacterBuild" data-id="${c.id}" ${canEdit ? '' : 'disabled'}>
       ${builds.map(b => `<option value="${_esc(b.id)}" ${b.id === activeBuildId ? 'selected' : ''}>${_esc(b.name || 'Build')}</option>`).join('')}
     </select>
-    ${canEdit ? `<button type="button" class="ids-build-more${menuOpen ? ' is-open' : ''}" data-action="toggleIdentityPopover" data-popover="builds" data-id="${c.id}" title="Gérer les builds" aria-label="Gérer les builds" aria-expanded="${menuOpen}">⋯</button>` : ''}
+    <em>${builds.length}</em>
+    ${canEdit ? `<button type="button" class="ids-build-more${menuOpen ? ' is-open' : ''}" data-action="toggleIdentityPopover" data-popover="builds" data-id="${c.id}" title="Gérer les builds" aria-label="Gérer les builds" aria-expanded="${menuOpen}">⚙</button>` : ''}
   </div>`;
 }
 
@@ -1139,19 +1120,19 @@ function _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v
   </section>`;
 }
 
-function _characterTitlesHtml(c, canEdit, values = c.titres, draftMode = false) {
+function _characterTitlesHtml(c, canEdit, values = c.titres) {
   const titres = Array.isArray(values) ? values : [];
   if (!titres.length && !canEdit) return '';
-  if (!draftMode) return `<div class="ids-titles">${titres.map(_esc).join('<span aria-hidden="true"> · </span>')}</div>`;
-  return `<div class="ids-title-editor">
+  if (!canEdit) return `<div class="ids-titles">${titres.map(_esc).join('<span aria-hidden="true"> · </span>')}</div>`;
+  return `<div class="ids-title-editor ids-titles">
     <div class="ids-title-list" id="identity-title-list-${_esc(c.id)}">
       ${titres.map((titre, index) => `<div class="ids-title-item">
         <span class="ids-title-handle" title="Glisser pour réordonner" aria-hidden="true">⠿</span>
-        <input data-identity-title data-index="${index}" value="${_esc(titre)}" maxlength="80" aria-label="Titre ${index + 1}">
-        <button data-action="identityRemoveTitle" data-index="${index}" title="Retirer ce titre" aria-label="Retirer ce titre">×</button>
+        <input class="ids-inline" data-change="identityTitleCommit" data-id="${c.id}" data-identity-title data-index="${index}" data-original="${_esc(titre)}" value="${_esc(titre)}" maxlength="80" aria-label="Titre ${index + 1}">
+        <button data-action="identityRemoveTitle" data-id="${c.id}" data-index="${index}" title="Retirer ce titre" aria-label="Retirer ce titre">×</button>
       </div>`).join('')}
     </div>
-    <div class="ids-title-new"><input id="identity-title-new-${_esc(c.id)}" placeholder="Nouveau titre…" maxlength="80" data-enter-click="#identity-title-add-${_esc(c.id)}"><button id="identity-title-add-${_esc(c.id)}" data-action="identityAddTitle" data-id="${c.id}" aria-label="Ajouter le titre">＋</button></div>
+    <input class="ids-inline ids-title-new" id="identity-title-new-${_esc(c.id)}" data-change="identityAddTitle" data-id="${c.id}" placeholder="+ titre" maxlength="80" aria-label="Ajouter un titre">
   </div>`;
 }
 
@@ -1166,10 +1147,17 @@ function _initCharacterTitlesSortable(c) {
     draggable: '.ids-title-item',
     handle: '.ids-title-handle',
     fallbackOnBody: false,
-    onEnd: () => {
-      _identityUi.draft.titres = [...host.querySelectorAll('[data-identity-title]')]
-        .map(input => input.value.trim())
-        .filter(Boolean);
+    onEnd: async () => {
+      const titres = [...host.querySelectorAll('[data-identity-title]')]
+        .map(input => input.value.trim()).filter(Boolean);
+      c.titres = titres;
+      try {
+        await updateInCol('characters', c.id, { titres });
+        _rerenderIdentity(c);
+      } catch (error) {
+        notifySaveError(error);
+        renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
+      }
     },
   });
 }
@@ -1211,15 +1199,6 @@ function _rerenderIdentity(c, focusSelector = '') {
   });
 }
 
-function _readIdentityDraft(c) {
-  const ui = _identityStateFor(c);
-  if (!ui.draft) ui.draft = { nom: c.nom || '', classe: c.classe || '', race: c.race || '', titres: [...(c.titres || [])] };
-  document.querySelectorAll('[data-identity-field]').forEach(input => { ui.draft[input.dataset.identityField] = input.value; });
-  const titleInputs = [...document.querySelectorAll('[data-identity-title]')];
-  if (titleInputs.length) ui.draft.titres = titleInputs.map(input => input.value.trim()).filter(Boolean);
-  return ui.draft;
-}
-
 function _removeIdentityPopover() {
   document.getElementById('identity-popover-layer')?.remove();
 }
@@ -1247,8 +1226,8 @@ function _toggleIdentityPopover(btn) {
   requestAnimationFrame(() => {
     const popover = layer.querySelector('.ids-pop');
     if (!popover) return;
-    const anchor = ui.popover === 'appearance'
-      ? side.querySelector('.ids-portrait') || btn
+    const anchor = ui.popover === 'aura'
+      ? side.querySelector('.ids-aura-button') || btn
       : ui.popover === 'status'
         ? side.querySelector('.ids-life') || btn
       : ui.popover === 'builds'
@@ -1273,67 +1252,88 @@ async function _openCharacterPortraitViewer(btn) {
   });
 }
 
-function _identityStartEdit(btn) {
-  const c = getCharacterById(btn.dataset.id);
-  if (!c || !canControlCharacter(c)) return;
-  const ui = _identityStateFor(c);
-  ui.editing = true;
-  ui.popover = null;
-  ui.draft = { nom: c.nom || '', classe: c.classe || '', race: c.race || '', titres: [...(c.titres || [])] };
-  _rerenderIdentity(c, '[data-identity-field="nom"]');
+function _identityFieldSaved(input) {
+  input.classList.add('is-saved');
+  setTimeout(() => input.isConnected && input.classList.remove('is-saved'), 900);
 }
 
-function _identityCancelEdit() {
-  const c = charSession.getCurrentChar();
-  if (!c) return;
-  const ui = _identityStateFor(c);
-  ui.editing = false;
-  ui.draft = null;
-  _rerenderIdentity(c);
-}
-
-function _identityAddTitle(btn) {
-  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
-  if (!c) return;
-  const draft = _readIdentityDraft(c);
-  const input = document.getElementById(`identity-title-new-${c.id}`);
-  const title = input?.value.trim();
-  if (!title) { input?.focus(); return; }
-  if (draft.titres.some(item => _norm(item) === _norm(title))) { showNotif('Ce titre est déjà présent.', 'info'); input.select(); return; }
-  draft.titres.push(title);
-  _rerenderIdentity(c, `#identity-title-new-${c.id}`);
-}
-
-function _identityRemoveTitle(btn) {
-  const c = charSession.getCurrentChar();
-  if (!c) return;
-  const draft = _readIdentityDraft(c);
-  draft.titres.splice(Number(btn.dataset.index), 1);
-  _rerenderIdentity(c);
-}
-
-async function _identitySaveEdit(btn) {
-  const c = getCharacterById(btn.dataset.id);
-  if (!c || !canControlCharacter(c)) return;
-  const previous = { nom: c.nom, classe: c.classe, race: c.race, titres: [...(c.titres || [])] };
-  const draft = _readIdentityDraft(c);
-  const payload = {
-    nom: draft.nom.trim() || 'Sans nom',
-    classe: draft.classe.trim(),
-    race: draft.race.trim(),
-    titres: [...new Map(draft.titres.map(title => [title.trim().toLocaleLowerCase('fr'), title.trim()])).values()].filter(Boolean),
-  };
-  Object.assign(c, payload);
+async function _identityInlineCommit(input) {
+  const c = getCharacterById(input.dataset.id);
+  const field = input.dataset.field;
+  if (!c || !canControlCharacter(c) || !['nom', 'classe', 'race'].includes(field)) return;
+  const previous = input.dataset.original ?? String(c[field] || '');
+  const next = input.value.trim();
+  if (field === 'nom' && !next) { input.value = previous; return; }
+  if (next === previous) return;
+  c[field] = next;
+  input.value = next;
+  input.dataset.original = next;
   try {
-    await updateInCol('characters', c.id, payload);
-    _identityUi.editing = false;
-    _identityUi.draft = null;
-    showNotif('Identité mise à jour.', 'success');
+    await updateInCol('characters', c.id, { [field]: next });
+    _identityFieldSaved(input);
+    if (field === 'nom') {
+      document.querySelectorAll(`#char-pills .char-pill[data-charid="${CSS.escape(c.id)}"] .char-pill-name`).forEach(el => { el.textContent = next; });
+    }
   } catch (error) {
-    Object.assign(c, previous);
+    c[field] = previous;
+    input.value = previous;
+    input.dataset.original = previous;
     notifySaveError(error);
   }
-  renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
+}
+
+async function _identityTitleCommit(input) {
+  const c = getCharacterById(input.dataset.id);
+  if (!c || !canControlCharacter(c)) return;
+  const index = Number(input.dataset.index);
+  const previousTitles = [...(c.titres || [])];
+  const next = input.value.trim();
+  if (!next) {
+    c.titres.splice(index, 1);
+    try { await updateInCol('characters', c.id, { titres: c.titres }); }
+    catch (error) { c.titres = previousTitles; notifySaveError(error); }
+    _rerenderIdentity(c);
+    return;
+  }
+  if (next === previousTitles[index]) return;
+  c.titres[index] = next;
+  input.value = next;
+  input.dataset.original = next;
+  try {
+    await updateInCol('characters', c.id, { titres: c.titres });
+    _identityFieldSaved(input);
+  } catch (error) {
+    c.titres = previousTitles;
+    input.value = previousTitles[index] || '';
+    input.dataset.original = input.value;
+    notifySaveError(error);
+  }
+}
+
+async function _identityAddTitle(input) {
+  const c = getCharacterById(input.dataset.id) || charSession.getCurrentChar();
+  const title = input.value.trim();
+  if (!c || !canControlCharacter(c) || !title) return;
+  if ((c.titres || []).some(item => _norm(item) === _norm(title))) { input.select(); return; }
+  const previousTitles = [...(c.titres || [])];
+  c.titres = [...previousTitles, title];
+  try {
+    await updateInCol('characters', c.id, { titres: c.titres });
+    _rerenderIdentity(c, `#identity-title-new-${CSS.escape(c.id)}`);
+  } catch (error) {
+    c.titres = previousTitles;
+    notifySaveError(error);
+  }
+}
+
+async function _identityRemoveTitle(btn) {
+  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
+  if (!c || !canControlCharacter(c)) return;
+  const previousTitles = [...(c.titres || [])];
+  c.titres = previousTitles.filter((_, index) => index !== Number(btn.dataset.index));
+  try { await updateInCol('characters', c.id, { titres: c.titres }); }
+  catch (error) { c.titres = previousTitles; notifySaveError(error); }
+  _rerenderIdentity(c);
 }
 
 function _toggleIdentityVitalBreakdown(btn) {
@@ -2527,6 +2527,8 @@ async function setCharAura(charId, aura) {
   const c = getCharacterById(charId);
   if (!c) return;
   c.aura = aura; c.auraColor = null;   // preset choisi → efface la couleur personnalisée
+  document.querySelectorAll('.ids-aura .ids-dot').forEach(dot => dot.classList.toggle('active', dot.dataset.auraKey === aura));
+  document.querySelector('.ids-aura-button')?.style.setProperty('--dot-c', _auraHex(c));
   await updateInCol('characters', charId, { aura, auraColor: null });
   _applyAuraVars(c);
 }
@@ -2534,6 +2536,8 @@ async function setCharAuraColor(charId, hex) {
   const c = getCharacterById(charId);
   if (!c || !/^#[0-9a-fA-F]{6}$/.test(hex || '')) return;
   c.auraColor = hex;
+  document.querySelectorAll('.ids-aura .ids-dot').forEach(dot => dot.classList.toggle('active', dot.classList.contains('custom')));
+  document.querySelector('.ids-aura-button')?.style.setProperty('--dot-c', hex);
   await updateInCol('characters', charId, { auraColor: hex });
   _applyAuraVars(c);
 }
@@ -2712,10 +2716,9 @@ registerActions({
   openCharacterPortraitViewer: (btn) => _openCharacterPortraitViewer(btn),
   toggleIdentityPopover:   (btn)    => _toggleIdentityPopover(btn),
   closeIdentityPopover:    ()       => _closeIdentityPopover(),
-  identityStartEdit:       (btn)    => _identityStartEdit(btn),
-  identityCancelEdit:      ()       => _identityCancelEdit(),
-  identitySaveEdit:        (btn)    => _identitySaveEdit(btn),
-  identityAddTitle:        (btn)    => _identityAddTitle(btn),
+  identityInlineCommit:    (el)     => _identityInlineCommit(el),
+  identityTitleCommit:     (el)     => _identityTitleCommit(el),
+  identityAddTitle:        (el)     => _identityAddTitle(el),
   identityRemoveTitle:     (btn)    => _identityRemoveTitle(btn),
   identityLevelUp:         (btn)    => _identityLevelUp(btn),
   adjustIdentityLevel:     (btn)    => _adjustIdentityLevel(btn),
@@ -2847,18 +2850,24 @@ document.addEventListener('pointerdown', (e) => {
 // ← → bouclent, Home/End vont au premier/dernier, activation automatique au focus.
 // Listener délégué unique (module importé une seule fois en lazy).
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && (_identityUi.popover || _identityUi.editing)) {
+  const identityInput = e.target.closest?.('#cs-sidebar .ids-inline');
+  if (identityInput && e.key === 'Enter') {
+    e.preventDefault();
+    identityInput.blur();
+    return;
+  }
+  if (identityInput && e.key === 'Escape') {
+    e.preventDefault();
+    identityInput.value = identityInput.dataset.original || '';
+    identityInput.blur();
+    return;
+  }
+  if (e.key === 'Escape' && _identityUi.popover) {
     const c = charSession.getCurrentChar();
     if (!c) return;
     e.preventDefault();
-    if (_identityUi.popover) {
-      _identityUi.popover = null;
-      _removeIdentityPopover();
-      if (!_identityUi.editing) return;
-    }
-    _identityUi.editing = false;
-    _identityUi.draft = null;
-    _rerenderIdentity(c);
+    _identityUi.popover = null;
+    _removeIdentityPopover();
     return;
   }
   const tab = e.target.closest?.('#char-tabs-v3 .tab-v3[role="tab"]');

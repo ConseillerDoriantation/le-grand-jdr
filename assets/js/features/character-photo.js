@@ -49,6 +49,15 @@ function openCharacterPhotoPicker(charId) {
   pickImageFile({ onImage: ({ dataUrl }) => _showCropModal(dataUrl, charId) });
 }
 
+function openDroppedCharacterPhoto(file, charId) {
+  if (!file?.type?.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.addEventListener('load', () => {
+    if (typeof reader.result === 'string') _showCropModal(reader.result, charId);
+  }, { once: true });
+  reader.readAsDataURL(file);
+}
+
 function _showCropModal(dataUrl, charId) {
   openModal('📷 Cadrer la photo', `
     ${panZoomCropHTML({ idPrefix: 'crop', viewSize: VIEW_SIZE })}
@@ -145,4 +154,25 @@ document.addEventListener('click', (e) => {
     e.stopPropagation();
     deleteCharPhoto(deleteEl.dataset.charid);
   }
+});
+
+document.addEventListener('dragover', (e) => {
+  const target = e.target.closest?.('[data-character-photo-drop]');
+  if (!target || !e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+  target.classList.add('is-dragover');
+});
+
+document.addEventListener('dragleave', (e) => {
+  const target = e.target.closest?.('[data-character-photo-drop]');
+  if (target && !target.contains(e.relatedTarget)) target.classList.remove('is-dragover');
+});
+
+document.addEventListener('drop', (e) => {
+  const target = e.target.closest?.('[data-character-photo-drop]');
+  if (!target) return;
+  e.preventDefault();
+  target.classList.remove('is-dragover');
+  openDroppedCharacterPhoto(e.dataTransfer?.files?.[0], target.dataset.characterPhotoDrop);
 });
