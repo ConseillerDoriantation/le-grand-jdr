@@ -24,6 +24,8 @@ import {
   makeInventoryHistoryEntry,
 } from '../../shared/inventory-history.js';
 import { getArmorTypeMeta, getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
+import { isFeatureEnabled } from '../../shared/features.js';
+import { recipeBookButton } from '../recipes.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import { characterBuildsForStorage, patchBuildLocally } from '../../shared/character-builds.js';
@@ -711,6 +713,7 @@ export function renderCharInventaire(c, canEdit) {
           </div>
           <nav class="inv5-top-actions" aria-label="Actions de l’inventaire">
             ${canEdit ? `<button class="is-gold" data-action="openSendGoldModal" data-id="${_esc(c.id)}">↗ Or</button><button data-action="openCreateItemModal" data-id="${_esc(c.id)}">🛠️ Créer</button><button data-action="addInvItem">🎁 Butin</button>` : ''}
+            ${isFeatureEnabled('recettes') ? recipeBookButton(c) : ''}
             ${inventoryHistoryButton(c)}
           </nav>
         </header>
