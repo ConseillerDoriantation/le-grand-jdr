@@ -1092,7 +1092,8 @@ body .modal:has(.rc-modal) > #modal-body { padding: 0 !important; height: auto !
 .rc-avs { display: flex; align-items: center; flex: none; }
 .rc-avs .rc-av + .rc-av { margin-left: -6px; }
 .rc-avs em { font-style: normal; font-size: .64rem; color: var(--text-muted); margin-left: 4px; }
-.rc-av { flex: none; width: 26px; height: 26px; border-radius: 50%; display: inline-grid; place-items: center; font: 700 .66rem var(--font-body); font-style: normal; color: #fff; background: var(--c); box-shadow: 0 0 0 2px var(--surface-sunken); }
+.rc-av { flex: none; width: 26px; height: 26px; border-radius: 50%; overflow: hidden; display: inline-grid; place-items: center; font: 700 .66rem var(--font-body); font-style: normal; color: #fff; background: var(--c); box-shadow: 0 0 0 2px var(--surface-sunken); }
+.rc-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .rc-av.sm { width: 20px; height: 20px; font-size: .58rem; }
 .rc-nobody { font-size: .68rem; color: var(--text-dim); flex: none; }
 .rc-ready { flex: none; font-size: .66rem; font-weight: 600; color: var(--emerald); }

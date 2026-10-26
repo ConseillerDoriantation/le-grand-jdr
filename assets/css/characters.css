@@ -23223,6 +23223,8 @@ body .modal:has(.cs) > #modal-body { padding: 0 !important; height: auto !import
 .cs-v3 .iv-body { column-width: 480px; column-gap: 34px; }
 .cs-v3 .iv-sec { display: block; margin: 0 0 24px; }
 .cs-v3 .iv-sec:last-of-type { margin-bottom: 10px; }
+.cs-v3 .iv-sec.iv-whole { break-inside: avoid; }
+.cs-v3 .iv-grp { break-inside: avoid; }
 .cs-v3 .iv-sh { break-after: avoid; }
 .cs-v3 .iv-gh { break-inside: avoid; break-after: avoid; }
 .cs-v3 .iv-row { break-inside: avoid; }

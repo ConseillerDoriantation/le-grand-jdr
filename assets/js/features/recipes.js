@@ -15,6 +15,7 @@ import { STATE } from '../core/state.js';
 import PAGES from './pages.js';
 import { _rareteTag } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes, _trunc } from "../shared/html.js";
+import { characterPortraitContent } from '../shared/portraits.js';
 import { formatWeaponDamageText, isWeaponLikeItem } from '../shared/equipment-utils.js';
 import { canControlCharacter } from '../shared/character-state.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
@@ -1416,13 +1417,19 @@ const RC = { view: 'mj', meUid: '', sel: '', q: '', type: 'all', forUid: '', rea
 
 const _rcColor = uid => { let h = 0; const s = String(uid || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return `hsl(${h % 360} 52% 56%)`; };
 function _rcPlayers() {
-  const seen = new Map();
-  (STATE.characters || []).forEach(c => { if (c?.uid && !seen.has(c.uid)) seen.set(c.uid, c); });
-  return [...seen.values()].map(c => ({ uid: c.uid, perso: c.nom || '?', pseudo: c.ownerPseudo || c.nom || c.uid, color: _rcColor(c.uid), char: c }));
+  // Un représentant par compte : on privilégie le personnage favori (isDefault),
+  // sinon le premier rencontré — son portrait sert d'avatar du joueur.
+  const byUid = new Map();
+  (STATE.characters || []).forEach(c => {
+    if (!c?.uid) return;
+    const cur = byUid.get(c.uid);
+    if (!cur || (c.isDefault && !cur.isDefault)) byUid.set(c.uid, c);
+  });
+  return [...byUid.values()].map(c => ({ uid: c.uid, perso: c.nom || '?', pseudo: c.ownerPseudo || c.nom || c.uid, color: _rcColor(c.uid), char: c }));
 }
 const _rcP = uid => _rcPlayers().find(p => p.uid === uid) || null;
 const _rcCharForUid = uid => (STATE.characters || []).find(c => c.uid === uid) || null;
-const _rcAv = (p, sz = '') => `<i class="rc-av ${sz}" style="--c:${p.color}" title="${_esc(p.perso)} · ${_esc(p.pseudo)}">${_esc((p.perso[0] || '?').toUpperCase())}</i>`;
+const _rcAv = (p, sz = '') => `<i class="rc-av ${sz}" style="--c:${p.color}" title="${_esc(p.perso)} · ${_esc(p.pseudo)}">${characterPortraitContent(p.char || {}, { fallbackTag: 'span', fallbackText: (p.perso[0] || '?').toUpperCase() })}</i>`;
 const _rcIsMJ = () => RC.view === 'mj' && _isAdmin();
 const _rcT = id => TABS.find(t => t.id === id) || TABS[1];
 const _rcShopCatLabel = item => _findShopCat(item?.categorieId)?.nom || item?.categorie || item?.sousType || item?.template || 'Objet';
