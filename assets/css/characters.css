@@ -22986,7 +22986,7 @@ body .modal:has(.cs) > #modal-body { padding: 0 !important; height: auto !import
 @media (max-width: 720px) { .dt-rl { grid-template-columns: minmax(0, 1fr); } .dt-rl-c { justify-content: flex-start; } }
 
 /* ── Inventaire v10 « lisible d'abord » ─────────────────────────────────────── */
-.cs-v3 .iv { display: flex; flex-direction: column; gap: 22px; width: 100%; max-width: 1180px; margin-inline: auto; }
+.cs-v3 .iv { display: flex; flex-direction: column; gap: 22px; width: 100%; }
 .cs-v3 .iv-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .cs-v3 .iv-search { flex: 1; min-width: 200px; position: relative; }
 .cs-v3 .iv-search input { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-full); padding: 9px 14px 9px 36px; color: var(--text); font: 400 .86rem var(--font-body); outline: none; }
@@ -23005,8 +23005,18 @@ body .modal:has(.cs) > #modal-body { padding: 0 !important; height: auto !import
 .cs-v3 .iv-btn.ghost { background: none; border-color: transparent; color: var(--text-muted); }
 .cs-v3 .iv-btn.ghost:hover { background: var(--surface-2); color: var(--text); }
 .cs-v3 .iv-btn.ghost.danger:hover { color: var(--crimson-light); background: rgba(255, 90, 126, .08); }
-.cs-v3 .iv-body { display: flex; flex-direction: column; gap: 26px; }
-.cs-v3 .iv-sec { display: flex; flex-direction: column; }
+/* Colonnes fluides : 1 colonne en étroit, 2–3 selon la largeur. Remplit l'écran
+   et garde des rangées compactes (plus de grand vide au milieu des lignes). */
+.cs-v3 .iv-body { column-width: 480px; column-gap: 34px; }
+.cs-v3 .iv-sec { display: block; margin: 0 0 24px; }
+.cs-v3 .iv-sec:last-of-type { margin-bottom: 10px; }
+.cs-v3 .iv-sh { break-after: avoid; }
+.cs-v3 .iv-gh { break-inside: avoid; break-after: avoid; }
+.cs-v3 .iv-row { break-inside: avoid; }
+.cs-v3 .iv-row.open { break-after: avoid; }
+.cs-v3 .iv-det { break-inside: avoid; break-before: avoid; }
+.cs-v3 .iv-free { break-inside: avoid; }
+.cs-v3 .iv-leg { column-span: all; margin-top: 8px; }
 .cs-v3 .iv-sh { display: flex; align-items: baseline; gap: 10px; padding: 0 4px 8px; border-bottom: 1px solid var(--border-md); }
 .cs-v3 .iv-sh h3 { margin: 0; font: 600 .95rem var(--font-display); letter-spacing: .03em; color: var(--text); }
 .cs-v3 .iv-sh span { font-size: .74rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }

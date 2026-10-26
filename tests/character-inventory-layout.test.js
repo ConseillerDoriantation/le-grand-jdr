@@ -73,7 +73,9 @@ test('la densité v5 (tri, puces, répartition, panneau sticky) est supprimée',
 });
 
 test('CSS v10 présent, scopé .cs-v3, responsive et contraste thème clair', () => {
-  assert.match(css, /\.cs-v3 \.iv \{[^}]*max-width: 1180px[^}]*margin-inline: auto/);
+  // Colonnes fluides pour remplir l'écran (plus de colonne unique centrée).
+  assert.match(css, /\.cs-v3 \.iv-body \{[^}]*column-width: 480px/);
+  assert.match(css, /\.cs-v3 \.iv-leg \{[^}]*column-span: all/);
   assert.match(css, /\.cs-v3 \.iv-row \{/);
   assert.match(css, /\.cs-v3 \.iv-gem \{/);
   assert.match(css, /\.cs-v3 \.iv-row\[data-r\] \.iv-n b \{ color: var\(--iv-rc\)/);
