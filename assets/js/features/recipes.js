@@ -1346,55 +1346,8 @@ function searchRecipes(v) { STORE.filterTxt = v; _renderGrid(); }
 // ══════════════════════════════════════════════════════════════════════════════
 // OVERRIDE + EXPORTS
 // ══════════════════════════════════════════════════════════════════════════════
-PAGES.recettes = renderRecipes;
-
-registerActions({
-  recSetTab: (btn) => setRecipeTab(btn.dataset.id),
-  recSearch: (el) => searchRecipes(el.value),
-  _recOpenModal: (btn) => { _recipeReturnCharacterId = ''; openRecipeModal(btn.dataset.type); },
-  _recEdit: (btn) => openRecipeModal(btn.dataset.type, btn.dataset.id),
-  _recEditShop: (btn) => openShopRecipeModal(btn.dataset.id),
-  _recOpenOutputPicker: (btn) => openRecipeOutputPicker(btn.dataset.type, btn.dataset.id),
-  _recDelete: (btn) => deleteRecipe(btn.dataset.id),
-  _recDeleteShop: (btn) => deleteShopRecipe(btn.dataset.id),
-  _recSave: (btn) => saveRecipe(btn.dataset.id, btn.dataset.type),
-  _recAddIngr: () => addIngredientRow(),
-  _recIngrCheckLink: (el) => _recIngrCheckLink(el),
-  _recIngrPick: (btn) => openIngredientPicker(Number(btn.dataset.idx)),
-  _recIngrPickFilter: (el) => _recIngrPickFilter(el.value),
-  _recIngrPickChoose: (btn) => chooseIngredientFromPicker(btn.dataset.id),
-  _recRemIngr: (btn) => removeIngredientRow(Number(btn.dataset.idx)),
-  _recSelectLinkedShop: (btn) => selectLinkedShopItem(btn.dataset.id),
-  _recShopFilter: (el) => _recFilterShopOptions(el.value),
-  _recClearLinkedShop: () => clearLinkedShopItem(),
-  saveShopRecipe: (btn) => saveShopRecipe(btn.dataset.id),
-  openItemDetailModal: (btn) => openItemDetailModal(btn.dataset.id),
-  openAccesModal: (btn) => openAccesModal(btn.dataset.id),
-  saveAcces: (btn) => saveAcces(btn.dataset.id),
-  openSendRecipeModal: (btn) => openSendRecipeModal(btn.dataset.id),
-  sendRecipe: (btn) => sendRecipe(btn.dataset.id),
-  openCharacterRecipeAccess: (btn) => openCharacterRecipeAccess(btn.dataset.id),
-  openCharacterRecipeOutput: (btn) => openCharacterRecipeOutput(btn.dataset.characterId, btn.dataset.recipeId),
-  editRecipeFromAccess: (btn) => {
-    const rec = STORE.all.find(x => x.id === btn.dataset.recipeId);
-    _recipeReturnCharacterId = btn.dataset.characterId || '';
-    openRecipeModal(rec?.type || 'cuisine', btn.dataset.recipeId);
-  },
-  editShopRecipeFromAccess: (btn) => {
-    _recipeReturnCharacterId = btn.dataset.characterId || '';
-    openShopRecipeModal(btn.dataset.recipeId);
-  },
-  saveCharacterRecipeOutput: (btn) => saveCharacterRecipeOutput(btn.dataset.characterId, btn.dataset.recipeId),
-  openCharacterRecipeCreatePicker: (btn) => openCharacterRecipeCreatePicker(btn.dataset.id),
-  createCharacterRecipe: (btn) => { _recipeReturnCharacterId = btn.dataset.id || ''; openRecipeModal(btn.dataset.type); },
-  saveCharacterRecipeAccess: (btn) => saveCharacterRecipeAccess(btn.dataset.id),
-  filterCharacterRecipeBook: () => _applyRecipeContextFilters('book'),
-  filterCharacterRecipeAccess: () => _applyRecipeContextFilters('access'),
-  setCharacterRecipeType: (btn) => _setRecipeContextFilter(btn, 'type'),
-  setCharacterRecipeStatus: (btn) => _setRecipeContextFilter(btn, 'status'),
-  updateCharacterRecipeAccessCount: () => _updateCharacterRecipeAccessCount(),
-  _recClose: () => closeModal(),
-});
+// Décision #3 : plus de page plein écran — la route Recettes ouvre la modale.
+PAGES.recettes = () => openRecipesModal({});
 
 // ══════════════════════════════════════════════════════════════════════════
 // Recettes v2 — modale unique à deux volets (liste + fiche).
