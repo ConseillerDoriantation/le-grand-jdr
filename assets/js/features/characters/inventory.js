@@ -624,7 +624,177 @@ function _invDetailHtml(c, group, canEdit, zone, categories, recentMap) {
   </aside>`;
 }
 
+// ── Inventaire v10 « lisible d'abord » : trois listes en une colonne, une ligne
+// = nom + quantité + une info clé, détail en accordéon. Réutilise toute la
+// logique métier existante (équipement, vente, envoi, suppression, historique).
+const _IV_RAR = item => Math.max(0, parseInt(item?.rarete ?? item?.rare ?? 0) || 0);
+// Barème réel 1-indexé (Commun = 1). « Notable » = au-dessus du commun → marque
+// + couleur ; 0/1 = aucune marque (volontaire, pour ne pas charger la liste).
+const _IV_NOTABLE = rare => rare >= 2 && !!RARETE_NAMES[rare];
+const _ivRareColor = rare => _IV_NOTABLE(rare) ? (_rareteColor(RARETE_NAMES[rare]) || '#7a8fa8') : '';
+function _ivOrder(recentMap) {
+  return (a, b) => (_invRecentAt(b, recentMap) ? 1 : 0) - (_invRecentAt(a, recentMap) ? 1 : 0)
+    || _IV_RAR(b.item) - _IV_RAR(a.item)
+    || String(a.item.nom || '').localeCompare(String(b.item.nom || ''), 'fr', { sensitivity: 'base' });
+}
+function _ivLegendHtml() {
+  // Liste les raretés notables (index ≥ 2) ; le commun (1) reste « sans marque ».
+  const tiers = RARETE_NAMES.map((n, i) => [n, i]).filter(([n, i]) => i >= 2 && n);
+  if (!tiers.length) return '';
+  return `<div class="iv-leg" aria-label="Légende des raretés">Rareté :${tiers
+    .map(([n]) => `<span style="--iv-rc:${_rareteColor(n) || '#7a8fa8'}"><em>${_esc(n)}</em></span>`).join('')}<span class="nog" style="--iv-rc:var(--text-dim)"><em>Commun : sans marque</em></span></div>`;
+}
+function _ivRowHtml(c, group, zone, canEdit, recentMap, slotLabel = '') {
+  const item = group.item;
+  const rare = _IV_RAR(item);
+  const key = `${zone}::${group.key}`;
+  const open = _invSelected === key;
+  const fresh = !!_invRecentAt(group, recentMap);
+  const notable = _IV_NOTABLE(rare);
+  const b64 = btoa(JSON.stringify(group.indices));
+  return `<div class="iv-row ${zone}${open ? ' open' : ''}" data-action="_invToggleRow" data-key="${_esc(key)}" role="button" tabindex="0" aria-expanded="${open}"${notable ? ` data-r="${rare}"${rare >= RARETE_NAMES.length - 1 ? ' data-top="1"' : ''} style="--iv-rc:${_ivRareColor(rare)}" title="${_esc(RARETE_NAMES[rare])}"` : ''}>
+    <span class="iv-n">${zone === 'worn' && slotLabel ? `<small>${_esc(slotLabel)}</small>` : ''}${fresh ? '<span class="iv-dot" title="Nouveau"></span>' : ''}${notable ? '<span class="iv-gem" aria-hidden="true"></span>' : ''}<b>${_invHighlight(item.nom || 'Sans nom')}</b>${group.qte > 1 ? `<i>×${group.qte}</i>` : ''}</span>
+    <span class="iv-k">${_invHighlight(_invKeyInfo(item))}</span>
+    ${zone === 'belt' && canEdit ? `<button class="iv-use" data-action="_invConsumeOne" data-id="${_esc(c.id)}" data-indices="${b64}">Utiliser</button>` : ''}
+  </div>${open ? _invAccordionDetail(c, group, canEdit, zone) : ''}`;
+}
+function _invAccordionDetail(c, group, canEdit, zone) {
+  const item = group.item;
+  const b64 = btoa(JSON.stringify(group.indices));
+  const catalogItem = getInventoryCatalogItem(item.itemId);
+  const price = getInventoryItemValue(item, catalogItem);
+  const resale = getInventoryItemResaleValue(item, catalogItem);
+  const rare = _IV_RAR(item);
+  const isQuest = _invIsQuestItem(item);
+  const equippedMap = getEquippedInventoryIndexMap(c);
+  const equippedSlots = [...new Set(group.indices.flatMap(i => equippedMap.get(i) || []))];
+  const isEquipped = equippedSlots.length > 0;
+  const compatibleSlots = getEquipmentSlots().filter(slot => equipmentSlotAcceptsItem(slot, item));
+  const preferredSlotId = resolveEquipmentSlotForItem(item);
+  const targetSlot = compatibleSlots.find(slot => !c.equipement?.[slot.id])
+    || compatibleSlots.find(slot => slot.id === preferredSlotId) || compatibleSlots[0] || null;
+  const equipIndex = group.indices.find(i => !(equippedMap.get(i) || []).length) ?? group.indices[0];
+  const readable = getInventoryReadableDocument(item, catalogItem);
+  const effect = String(getItemEffectText(item) || '').trim();
+  const description = String(item.description || '').trim();
+  const occupant = targetSlot && !isEquipped ? c.equipement?.[targetSlot.id] : null;
+  const meta = [
+    _IV_NOTABLE(rare) ? `<b>◆ ${_esc(RARETE_NAMES[rare])}</b>` : '',
+    _esc(_invCategory(item).label),
+    item.mains ? _esc(item.mains) : '',
+    (item.toucher || item.toucherStat) ? `Toucher ${_esc(item.toucher || statShort(item.toucherStat))}` : '',
+    item.portee ? `Portée ${_esc(item.portee)}` : '',
+    price ? `${price} or${group.qte > 1 ? ' / u.' : ''}` : '',
+    item.set ? `Set ${_esc(item.set)}` : '',
+  ].filter(Boolean);
+  const txt = effect || description;
+  const txtEdito = !effect && description;
+  const mainBtn = zone === 'belt'
+    ? (canEdit ? `<button class="iv-btn pri" data-action="_invConsumeOne" data-id="${_esc(c.id)}" data-indices="${b64}">Utiliser</button>` : '')
+    : readable && canEdit ? `<button class="iv-btn pri" data-action="openInventoryReadableContent" data-id="${_esc(c.id)}" data-indices="${b64}">Lire</button>`
+      : isEquipped && canEdit ? `<button class="iv-btn" data-action="clearEquipSlot" data-slot="${_esc(equippedSlots[0])}" data-render-tab="inventaire">Retirer</button>`
+        : targetSlot && canEdit ? `<button class="iv-btn pri" data-action="equipInventoryItem" data-index="${equipIndex}" data-slot="${_esc(targetSlot.id)}" data-render-tab="inventaire">Équiper${occupant ? ' à la place de ' + _esc(occupant.nom || 'X') : ''}</button>`
+          : '';
+  const beltBtn = canEdit && !isEquipped && _invIsBeltItem({ ...item, belt: undefined })
+    ? `<button class="iv-btn ghost" data-action="_invToggleBelt" data-id="${_esc(c.id)}" data-indices="${b64}" data-belt="${zone !== 'belt'}">${zone === 'belt' ? 'Ranger dans le sac' : 'Garder à portée de main'}</button>` : '';
+  const sellBtn = canEdit && !isQuest && item.source === 'boutique' && resale
+    ? `<button class="iv-btn ghost" data-action="openSellInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-prix="${resale}" data-name="${_esc(item.nom || '')}">Vendre</button>` : '';
+  const giveBtn = canEdit ? `<button class="iv-btn ghost" data-action="openSendInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-name="${_esc(item.nom || '')}">Donner</button>` : '';
+  const dropBtn = canEdit && !isQuest ? `<button class="iv-btn ghost danger" data-action="openDeleteInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-name="${_esc(item.nom || '')}">Jeter</button>` : '';
+  return `<div class="iv-det" style="--iv-rc:${_ivRareColor(rare) || 'var(--text-dim)'}">
+    <div class="iv-meta">${meta.map(m => `<span>${m}</span>`).join('')}</div>
+    ${occupant ? `<div class="iv-cmp">Actuellement équipé (${_esc(getEquipmentSlot(targetSlot.id)?.label || targetSlot.label)}) : <b>${_esc(occupant.nom || 'objet')}</b> · ${_esc(_invKeyInfo(occupant))} → remplacé par <b>${_esc(_invKeyInfo(item) || item.nom)}</b></div>` : ''}
+    ${txt ? `<p class="${txtEdito ? 'edito' : ''}">${_esc(txt)}</p>` : ''}
+    ${canEdit ? `<div class="iv-note-wrap">${renderInvPersonalLine(c, group.indices, b64, 'row', canEdit)}</div>` : ''}
+    <div class="iv-acts">${mainBtn}${beltBtn}<span class="sp"></span>${sellBtn}${giveBtn}${dropBtn}</div>
+  </div>`;
+}
+let _ivKeysBound = false;
+function _ivBindInventoryKeys() {
+  if (_ivKeysBound) return; _ivKeysBound = true;
+  document.addEventListener('keydown', e => {
+    if (!document.querySelector('.iv')) return;
+    if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) {
+      const input = document.querySelector('.iv-search input');
+      if (input) { e.preventDefault(); input.focus(); }
+    } else if (e.key === 'Escape' && _invSelected && e.target.tagName !== 'TEXTAREA') {
+      _invSelected = ''; _rerenderInventoryView();
+    }
+  });
+}
+
 export function renderCharInventaire(c, canEdit) {
+  const inv = Array.isArray(c.inventaire) ? c.inventaire : [];
+  const allIndices = inv.map((_, index) => index);
+  const equippedMap = getEquippedInventoryIndexMap(c);
+  const equippedIndices = new Set(equippedMap.keys());
+  const beltIndices = allIndices.filter(index => !equippedIndices.has(index) && _invIsBeltItem(inv[index]));
+  const bagIndices = allIndices.filter(index => !equippedIndices.has(index) && !beltIndices.includes(index));
+  const recentMap = _invRecentAcquisitions(c);
+  const q = _norm(_charInvSearch || '');
+  const matches = group => !q || _invSearchValue(group.item).includes(q);
+  const sortGroups = groups => [...groups].sort(_ivOrder(recentMap));
+
+  const slots = getEquipmentSlots();
+  const wornEntries = slots.map(slot => {
+    const index = [...equippedMap.entries()].find(([, ids]) => ids.includes(slot.id))?.[0];
+    if (!Number.isInteger(index)) return { slot, group: null };
+    const item = inv[index];
+    return { slot, group: { key: `${slot.id}:${_invItemKey(item)}`, item, indices: [index], qte: parseInt(item.quantite || item.qte || 1) || 1 } };
+  });
+  const wornAll = wornEntries.filter(e => e.group);
+  const wornShown = wornAll.filter(e => matches(e.group));
+  const freeSlots = wornEntries.filter(e => !e.group).map(e => e.slot.label);
+
+  const beltGroups = _groupInventoryEntries(inv, beltIndices);
+  const beltShown = sortGroups(beltGroups.filter(matches));
+
+  const bagGroups = _groupInventoryEntries(inv, bagIndices);
+  const bagCats = _invCategoryGroups(bagGroups)
+    .map(cat => ({ ...cat, items: sortGroups(cat.items.filter(matches)) }))
+    .filter(cat => cat.items.length);
+
+  // Nettoie une sélection devenue invalide (objet consommé / déplacé).
+  const allKeys = new Set([
+    ...wornAll.map(e => `worn::${e.group.key}`),
+    ...beltGroups.map(g => `belt::${g.key}`),
+    ...bagGroups.map(g => `bag::${g.key}`),
+  ]);
+  if (_invSelected && !allKeys.has(_invSelected)) _invSelected = '';
+
+  const head = (title, count) => `<div class="iv-sh"><h3>${title}</h3><span>${count}</span></div>`;
+  let listHtml = '';
+  if (wornShown.length || (!q && freeSlots.length)) {
+    listHtml += `<section class="iv-sec">${head('Sur moi', wornAll.length)}`
+      + wornShown.map(e => _ivRowHtml(c, e.group, 'worn', canEdit, recentMap, e.slot.label)).join('')
+      + (!q && freeSlots.length ? `<div class="iv-free">Libre : ${_esc(freeSlots.join(' · '))}</div>` : '')
+      + `</section>`;
+  }
+  if (beltShown.length) {
+    listHtml += `<section class="iv-sec">${head('À portée de main', beltGroups.reduce((s, g) => s + g.qte, 0))}`
+      + beltShown.map(g => _ivRowHtml(c, g, 'belt', canEdit, recentMap)).join('') + `</section>`;
+  }
+  const bagInner = bagCats.map(cat => `<div class="iv-gh">${_esc(cat.label)}</div>`
+    + cat.items.map(g => _ivRowHtml(c, g, 'bag', canEdit, recentMap)).join('')).join('');
+  if (bagInner) {
+    listHtml += `<section class="iv-sec">${head('Sac', bagGroups.reduce((s, g) => s + g.qte, 0))}${bagInner}</section>`;
+  }
+  if (listHtml) listHtml += _ivLegendHtml();
+  else listHtml = `<div class="iv-empty">${q ? `Rien ne correspond à « ${_esc(_charInvSearch)} ».` : 'Inventaire vide.'}</div>`;
+
+  setTimeout(_ivBindInventoryKeys, 0);
+  return `<div class="iv">
+    <div class="iv-bar">
+      <label class="iv-search"><span aria-hidden="true">🔍</span><input type="search" value="${_esc(_charInvSearch)}" placeholder="Chercher un objet…  ( / )" data-input="_charInvSearch" autocomplete="off" aria-label="Rechercher dans l’inventaire"></label>
+      ${canEdit ? `<button class="iv-btn" data-action="addInvItem" data-id="${_esc(c.id)}">+ Ajouter</button>` : ''}
+      ${isFeatureEnabled('recettes') ? recipeBookButton(c) : ''}
+      ${inventoryHistoryButton(c)}
+    </div>
+    <div class="iv-body">${listHtml}</div>
+  </div>`;
+}
+
+function renderCharInventaireLegacy(c, canEdit) {
   const inv = Array.isArray(c.inventaire) ? c.inventaire : [];
   const allIndices = inv.map((_, index) => index);
   const equippedMap = getEquippedInventoryIndexMap(c);
@@ -1842,13 +2012,13 @@ function _rerenderInventoryView({ focusSearch = false } = {}) {
   const c = charSession.getCurrentChar?.() || STATE.activeChar;
   if (!c) return;
   const scrollTop = document.scrollingElement?.scrollTop || window.scrollY || 0;
-  const search = document.querySelector('.inv5-tools input[type="search"]');
+  const search = document.querySelector('.iv-search input[type="search"]');
   const caret = search?.selectionStart ?? String(_charInvSearch || '').length;
   _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
   requestAnimationFrame(() => {
     window.scrollTo(0, scrollTop);
     if (!focusSearch) return;
-    const input = document.querySelector('.inv5-tools input[type="search"]');
+    const input = document.querySelector('.iv-search input[type="search"]');
     if (!input) return;
     input.focus({ preventScroll: true });
     try { input.setSelectionRange(caret, caret); } catch {}
@@ -1959,7 +2129,8 @@ async function _invConsumeOne(charId, indicesB64) {
 }
 
 registerActions({
-  _charInvSearch:      (el)  => { _charInvSearch = el.value; filterInvRows(el.value); },
+  _charInvSearch:      (el)  => { _charInvSearch = el.value; _invSelected = ''; _rerenderInventoryView({ focusSearch: true }); },
+  _invToggleRow:       (btn) => { const key = btn.dataset.key || ''; _invSelected = _invSelected === key ? '' : key; _rerenderInventoryView(); },
   _sendTargetFilter:   (el)  => _sendTargetFilter(el),
   _invCatToggle:       (btn) => { const d = btn.closest('details'); requestAnimationFrame(() => { if (d) _invCatOpen[btn.dataset.cat] = d.open; }); },
   _sellRefreshTotal:   (el)  => _sellRefreshTotal(el, Number(el.dataset.prix), Number(el.dataset.max)),
