@@ -4,7 +4,7 @@
 // La lecture reste paresseuse : aucun coût tant que la visionneuse n'est pas
 // ouverte, puis le cache de la couche Firestore évite les lectures répétées.
 
-import { getDocData, saveDoc } from '../data/firestore.js';
+import { getDocDataSilent, saveDoc } from '../data/firestore.js';
 
 const _cache = new Map();
 const _safePart = value => encodeURIComponent(String(value || 'main')).replaceAll('%2F', '_');
@@ -21,9 +21,17 @@ export async function saveCharacterOriginalPhoto(charId, buildId, photoOriginal)
     photoOriginal: photoOriginal || null,
     updatedAt: Date.now(),
   };
-  await saveDoc('characterMedia', id, data);
+  // Le stockage média est un enrichissement, jamais un prérequis pour changer
+  // le portrait. Une production dont les nouvelles règles ne sont pas encore
+  // déployées doit quand même pouvoir enregistrer la miniature sur `characters`.
   _cache.set(id, data);
-  return data.photoOriginal;
+  try {
+    await saveDoc('characterMedia', id, data, { silent: true });
+    return true;
+  } catch (error) {
+    console.warn('[character media] original conservé uniquement pour cette session', error?.code || error);
+    return false;
+  }
 }
 
 export async function characterOriginalPhotoFor(character) {
@@ -32,7 +40,7 @@ export async function characterOriginalPhotoFor(character) {
   if (character.photoOriginal) return character.photoOriginal;
   const id = characterMediaId(character.id, character.activeBuildId || 'main');
   if (_cache.has(id)) return _cache.get(id)?.photoOriginal || character.photo || '';
-  const data = await getDocData('characterMedia', id);
+  const data = await getDocDataSilent('characterMedia', id);
   _cache.set(id, data || null);
   return data?.photoOriginal || character.photo || '';
 }

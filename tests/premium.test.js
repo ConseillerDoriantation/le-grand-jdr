@@ -17,6 +17,16 @@ test('premium : le compte gratuit garde le socle et verrouille les pages bonus',
   assert.equal(isFeatureAllowedByPlan('statistiques'), false);
 });
 
+test('premium : Recettes est gratuite mais opt-in (accessible sans premium une fois activee)', () => {
+  STATE.profile = { uid: 'mj-free', plan: 'free' };
+  STATE.adventure = { enabledFeatures: ['characters', 'recettes'] };
+  assert.equal(isPremiumFeature('recettes'), false);          // plus derriere le paywall
+  assert.equal(isFeatureEnabled('recettes'), true);           // activee → accessible
+  // Opt-in : une aventure qui ne l'active pas ne l'a pas.
+  STATE.adventure = { enabledFeatures: ['characters'] };
+  assert.equal(isFeatureEnabled('recettes'), false);
+});
+
 test('premium : plan premium ou super-admin debloque les pages bonus', () => {
   STATE.profile = { uid: 'u2', plan: 'premium' };
   STATE.adventure = { enabledFeatures: ['shop'] };

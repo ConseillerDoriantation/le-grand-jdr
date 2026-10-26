@@ -116,10 +116,12 @@ test('Grimoire et Deck sont des sous-vues partageables de la fiche personnage', 
   assert.match(spells, /data-nav-sub="\$\{_esc\(`\$\{c\.id\}\/sorts\/grimoire`\)\}"/);
 });
 
-test('le registre des joueurs mémorise aussi le personnage et l’onglet de détail', async () => {
+test('le registre des joueurs mémorise le personnage et garde le réseau partageable', async () => {
   const players = await read('assets/js/features/players.js');
-  assert.match(players, /register\/\$\{STORE\.activeId\}\/\$\{STORE\.detailTab\}/);
-  assert.match(players, /STORE\.relMode = first === 'matrix' \? 'matrix' : 'ego'/);
+  assert.match(players, /register\/\$\{STORE\.activeId\}/);
+  assert.match(players, /return `relations\/\$\{STORE\.relMode\}\$\{selected\}`/);
+  assert.match(players, /STORE\.relMode = first === 'players' \? 'players' : 'characters'/);
+  assert.match(players, /detailSection:\s*'presentation'/);
   assert.match(players, /_syncPlayersRoute\(\{ replace: true \}\)/);
 });
 
