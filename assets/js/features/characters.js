@@ -146,7 +146,7 @@ import { lsJson } from '../shared/local-storage.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
-let _combatTabUi = { charId: '', selected: '', open: false, candidates: false };
+let _combatTabUi = { charId: '', open: null };
 let _currentTopTab   = 'combat';
 let _csV3InvFilter = { cat: 'all', search: '' };
 let _csV3InvDensity = lsJson.get('cs-inventory-density') === 'list' ? 'list' : 'cards';
@@ -2509,13 +2509,6 @@ document.addEventListener('app:route-sub-changed', event => {
 function _rerenderCombatTab() {
   const c = charSession.getCurrentChar();
   if (c && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, charSession.getCanEditChar());
-}
-
-function _selectCombatDetail(btn) {
-  _combatTabUi.selected = btn.dataset.detail || _combatTabUi.selected;
-  _combatTabUi.open = true;
-  _combatTabUi.candidates = btn.dataset.empty === 'true';
-  _rerenderCombatTab();
 }
 
 async function _stepCombatMastery(index, delta) {
