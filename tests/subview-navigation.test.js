@@ -46,8 +46,9 @@ test('setRouteSub pousse un onglet puis remplace un déplacement continu', async
 
 test('les principales pages à onglets publient et restaurent leur sous-vue', async () => {
   const files = await Promise.all([
-    'players.js', 'shop.js', 'agenda.js', 'recipes.js', 'story.js', 'bastion.js',
+    'players.js', 'shop.js', 'agenda.js', 'story.js', 'bastion.js',
     'account.js', 'world.js', 'aventures.js',
+    // recipes.js retiré : les Recettes sont une modale (décision #3), plus une page à onglets.
   ].map(name => read(`assets/js/features/${name}`)));
   for (const source of files) {
     assert.match(source, /getRouteSub\(/);
