@@ -665,17 +665,18 @@ export function renderCharInventaire(c, canEdit) {
   const head = (title, count) => `<div class="iv-sh"><h3>${title}</h3><span>${count}</span></div>`;
   let listHtml = '';
   if (wornShown.length || (!q && freeSlots.length)) {
-    listHtml += `<section class="iv-sec">${head('Sur moi', wornAll.length)}`
+    listHtml += `<section class="iv-sec iv-whole">${head('Sur moi', wornAll.length)}`
       + wornShown.map(e => _ivRowHtml(c, e.group, 'worn', canEdit, recentMap, e.slot.label)).join('')
       + (!q && freeSlots.length ? `<div class="iv-free">Libre : ${_esc(freeSlots.join(' · '))}</div>` : '')
       + `</section>`;
   }
   if (beltShown.length) {
-    listHtml += `<section class="iv-sec">${head('À portée de main', beltGroups.reduce((s, g) => s + g.qte, 0))}`
+    listHtml += `<section class="iv-sec iv-whole">${head('À portée de main', beltGroups.reduce((s, g) => s + g.qte, 0))}`
       + beltShown.map(g => _ivRowHtml(c, g, 'belt', canEdit, recentMap)).join('') + `</section>`;
   }
-  const bagInner = bagCats.map(cat => `<div class="iv-gh">${_esc(cat.label)}</div>`
-    + cat.items.map(g => _ivRowHtml(c, g, 'bag', canEdit, recentMap)).join('')).join('');
+  // Chaque catégorie du sac = un bloc insécable (ne se coupe pas entre colonnes).
+  const bagInner = bagCats.map(cat => `<div class="iv-grp"><div class="iv-gh">${_esc(cat.label)}</div>`
+    + cat.items.map(g => _ivRowHtml(c, g, 'bag', canEdit, recentMap)).join('') + `</div>`).join('');
   if (bagInner) {
     listHtml += `<section class="iv-sec">${head('Sac', bagGroups.reduce((s, g) => s + g.qte, 0))}${bagInner}</section>`;
   }
