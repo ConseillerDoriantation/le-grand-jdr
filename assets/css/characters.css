@@ -22276,8 +22276,11 @@ body .modal:has(.inv-history-modal-shell) {
 }
 
 /* ══ Combat v11 — une colonne, détail déplié sur place (vocab Inventaire v10) ══ */
-.cs-v3 .cb { display: flex; flex-direction: column; gap: 14px; container-type: inline-size; max-width: 980px; }
-.cs-v3 .cb-zone { background: var(--bg-card, var(--surface-1)); border: 1px solid var(--border); border-radius: var(--r-lg, 16px); overflow: hidden; }
+/* Colonnes fluides (même principe que l'inventaire) : 1 colonne en étroit,
+   2–3 zones côte à côte selon la largeur — remplit l'écran, plus de colonne
+   collée à gauche. Chaque zone est insécable et son propre conteneur de requête. */
+.cs-v3 .cb { column-width: 420px; column-gap: 18px; }
+.cs-v3 .cb-zone { background: var(--bg-card, var(--surface-1)); border: 1px solid var(--border); border-radius: var(--r-lg, 16px); overflow: hidden; break-inside: avoid; margin: 0 0 18px; container-type: inline-size; }
 .cs-v3 .cb-zh { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; padding: 12px 16px 10px; }
 .cs-v3 .cb-zh h3 { margin: 0; font: 600 .86rem var(--font-display); letter-spacing: .04em; color: var(--text); }
 .cs-v3 .cb-zh-r { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: .72rem; color: var(--text-muted); }
@@ -22393,7 +22396,7 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-v3 .cb-el button, .cs-v3 .cb-el .fav { width: 20px; height: 20px; border-radius: 50%; border: 0; background: none; color: var(--text-dim); cursor: pointer; font-size: .8rem; line-height: 1; display: grid; place-items: center; padding: 0; }
 .cs-v3 .cb-el button:hover { color: var(--text); background: var(--surface-3); }
 .cs-v3 .cb-el button.fav, .cs-v3 .cb-el span.fav { color: var(--amber, #f4c430); }
-.cs-v3 .cb-leg { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 0 4px; font-size: .7rem; color: var(--text-dim); }
+.cs-v3 .cb-leg { column-span: all; display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 0 4px; margin-top: 2px; font-size: .7rem; color: var(--text-dim); }
 .cs-v3 .cb-leg span { display: inline-flex; align-items: center; gap: 6px; color: var(--rc); }
 .cs-v3 .cb-leg span::before { content: ""; width: 7px; height: 7px; transform: rotate(45deg); border-radius: 1px; background: var(--rc); }
 @container (max-width: 640px) {
