@@ -249,8 +249,23 @@ function _tokenize(source) {
   return tokens;
 }
 
+// Les formules (CA, vitesse, PV, PM, crit…) sont un petit ensemble fixe issu des
+// réglages, mais _parseFormula est appelée très souvent (chaque stat, chaque
+// rendu, chaque token au VTT) et re-tokenisait la chaîne à chaque fois. On cache
+// le tableau de tokens par chaîne : _tokenize est pur → aucune péremption
+// possible (même chaîne = mêmes tokens). Le parseur ne fait que LIRE les tokens
+// (il avance un index local), donc partager le tableau est sûr. Ensemble borné
+// par le nombre de formules distinctes de la config (poignée d'entrées).
+const _tokenCache = new Map();
+function _cachedTokenize(source) {
+  const key = String(source || '').trim();
+  let tokens = _tokenCache.get(key);
+  if (!tokens) { tokens = _tokenize(key); _tokenCache.set(key, tokens); }
+  return tokens;
+}
+
 function _parseFormula(source, variables = {}) {
-  const tokens = _tokenize(String(source || '').trim());
+  const tokens = _cachedTokenize(source);
   let pos = 0;
   const peek = () => tokens[pos];
   const take = type => {
