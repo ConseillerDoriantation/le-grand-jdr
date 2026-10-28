@@ -134,7 +134,11 @@ function _emptyModifiers() {
     // modèle et calculés par getArmorSetData ; leur branchement combat se fait
     // effet par effet (certains sont encore masqués dans l'éditeur).
     caBonus: 0,
+    // damageBonus = portée « armes » (effets dmg de portée 'all' + 'weapon').
+    // damageSpellBonus = portée « sorts » (effets dmg de portée 'all' + 'spells').
+    // Un effet 'all' alimente les deux (rétro-compatible : anciens effets = 'all').
     damageBonus: 0,
+    damageSpellBonus: 0,
     healBonus: 0,
     critRangeBonus: 0,
     moveDelta: 0,
@@ -183,6 +187,7 @@ function _normalizeModifiers(modifiers = {}) {
   normalized.damageReduction = Math.max(0, _num(modifiers.damageReduction));
   normalized.caBonus = _num(modifiers.caBonus);
   normalized.damageBonus = _num(modifiers.damageBonus);
+  normalized.damageSpellBonus = _num(modifiers.damageSpellBonus);
   normalized.healBonus = _num(modifiers.healBonus);
   normalized.critRangeBonus = Math.max(0, _num(modifiers.critRangeBonus));
   normalized.moveDelta = Number((_numF(modifiers.moveDelta) || 0).toFixed(2));
@@ -199,6 +204,8 @@ function _normalizeModifiers(modifiers = {}) {
 // ── Paliers (partie B) ────────────────────────────────────────────────────────
 // Effet d'un palier : { kind, value?, mode?, target?, stat?, element? }.
 const _TIER_KINDS = new Set(['toucher', 'pm', 'dr', 'roll', 'ca', 'dmg', 'heal', 'crit', 'save', 'resist', 'move']);
+// Portées possibles d'un bonus de dégâts de palier.
+const DMG_SCOPES = new Set(['all', 'spells', 'weapon']);
 function _normalizeTierEffect(raw = {}) {
   const kind = _TIER_KINDS.has(raw.kind) ? raw.kind : null;
   if (!kind) return null;
@@ -215,6 +222,9 @@ function _normalizeTierEffect(raw = {}) {
   if (!v) v = kind === 'pm' ? -step : step;
   if (kind === 'dr' && v < 1) v = 1;
   if (kind === 'crit' && v < 1) v = 1;
+  // Portée du bonus de dégâts : 'all' (armes + sorts, défaut rétro-compatible),
+  // 'spells' (sorts uniquement) ou 'weapon' (attaques d'arme uniquement).
+  if (kind === 'dmg') return { kind, value: Number(v.toFixed(2)), scope: DMG_SCOPES.has(raw.scope) ? raw.scope : 'all' };
   return { kind, value: Number(v.toFixed(2)) };
 }
 // Effets dérivés de l'ancien `modifiers` (migration en lecture).
@@ -259,7 +269,12 @@ function _aggregateTierEffects(effects = []) {
       case 'pm': m.spellPmDelta += _num(e.value); break;
       case 'dr': m.damageReduction += _num(e.value); break;
       case 'ca': m.caBonus += _num(e.value); break;
-      case 'dmg': m.damageBonus += _num(e.value); break;
+      case 'dmg': {
+        const dv = _num(e.value), sc = e.scope || 'all';
+        if (sc !== 'spells') m.damageBonus += dv;      // armes (portée 'all' + 'weapon')
+        if (sc !== 'weapon') m.damageSpellBonus += dv; // sorts (portée 'all' + 'spells')
+        break;
+      }
       case 'heal': m.healBonus += _num(e.value); break;
       case 'crit': m.critRangeBonus += _num(e.value); break;
       case 'move': m.moveDelta += _numF(e.value); break;
@@ -406,7 +421,14 @@ export function formatArmorSetEffect(set = {}) {
     parts.push(`Dégâts subis -${mod.damageReduction}`);
   }
   if (mod.caBonus) parts.push(`CA ${mod.caBonus > 0 ? '+' : '-'}${Math.abs(mod.caBonus)}`);
-  if (mod.damageBonus) parts.push(`Dégâts ${mod.damageBonus > 0 ? '+' : '-'}${Math.abs(mod.damageBonus)}`);
+  // Dégâts : si les portées armes/sorts diffèrent, on les distingue explicitement.
+  const _dsg = v => `${v > 0 ? '+' : '-'}${Math.abs(v)}`;
+  if (mod.damageBonus === mod.damageSpellBonus) {
+    if (mod.damageBonus) parts.push(`Dégâts ${_dsg(mod.damageBonus)}`);
+  } else {
+    if (mod.damageBonus) parts.push(`Dégâts ${_dsg(mod.damageBonus)} (armes)`);
+    if (mod.damageSpellBonus) parts.push(`Dégâts ${_dsg(mod.damageSpellBonus)} (sorts)`);
+  }
   if (mod.healBonus) parts.push(`Soins ${mod.healBonus > 0 ? '+' : '-'}${Math.abs(mod.healBonus)}`);
   if (mod.critRangeBonus) parts.push(`Critique +${mod.critRangeBonus}`);
   if (mod.moveDelta) parts.push(`Déplacement ${mod.moveDelta > 0 ? '+' : '-'}${String(Math.abs(mod.moveDelta)).replace('.', ',')} m`);
@@ -864,7 +886,7 @@ const _AT_STAT_NAMES = { force: 'Force', dexterite: 'Dextérité', constitution:
 // Effets proposés dans l'éditeur (branchés). `multi` = ajoutable plusieurs fois.
 const _AT_KINDS = {
   toucher: { b: 'TCH', n: 'Toucher', d: 'Bonus aux jets d’attaque', v: 1, good: e => e.value > 0 },
-  dmg: { b: 'DGT', n: 'Dégâts d’arme', d: 'Ajoutés aux dégâts infligés', v: 1, good: e => e.value > 0 },
+  dmg: { b: 'DGT', n: 'Dégâts', d: 'Ajoutés aux dégâts infligés (armes, sorts ou les deux)', v: 1, good: e => e.value > 0 },
   heal: { b: 'SOI', n: 'Soin', d: 'Ajouté aux sorts de soin (pas aux dégâts ni à la CA)', v: 1, good: e => e.value > 0 },
   crit: { b: 'CRI', n: 'Plage de critique', d: 'Critique sur une plage élargie (19–20…)', v: 1, min: 1, good: () => true },
   ca: { b: 'CA', n: 'Classe d’armure', d: 'Bonus de CA', v: 1, good: e => e.value > 0 },
@@ -919,7 +941,7 @@ function _atEffTxt(f) {
     case 'dr': return `Dégâts subis −${f.value}`;
     case 'roll': return `${f.mode === 'advantage' ? 'Avantage' : 'Désavantage'} ${_atTgtL(f.target)}`;
     case 'ca': return `CA ${_atSg(f.value)}`;
-    case 'dmg': return `Dégâts ${_atSg(f.value)}`;
+    case 'dmg': return `Dégâts ${_atSg(f.value)}${f.scope === 'spells' ? ' (sorts)' : f.scope === 'weapon' ? ' (armes)' : ''}`;
     case 'heal': return `Soin ${_atSg(f.value)}`;
     case 'crit': return `Critique ${Math.max(2, 20 - f.value)}–20`;
     case 'save': return `Sauvegarde ${_AT_STAT_NAMES[f.stat] || f.stat} ${_atSg(f.value)}`;
@@ -934,7 +956,13 @@ function _atEffTxt(f) {
 function _atModifiersToEffects(m = {}) {
   const out = [];
   if (m.toucherBonus) out.push({ kind: 'toucher', value: m.toucherBonus });
-  if (m.damageBonus) out.push({ kind: 'dmg', value: m.damageBonus });
+  // Dégâts : une seule entrée si armes = sorts, sinon une par portée distincte.
+  if (m.damageBonus === m.damageSpellBonus) {
+    if (m.damageBonus) out.push({ kind: 'dmg', value: m.damageBonus, scope: 'all' });
+  } else {
+    if (m.damageBonus) out.push({ kind: 'dmg', value: m.damageBonus, scope: 'weapon' });
+    if (m.damageSpellBonus) out.push({ kind: 'dmg', value: m.damageSpellBonus, scope: 'spells' });
+  }
   if (m.healBonus) out.push({ kind: 'heal', value: m.healBonus });
   if (m.critRangeBonus) out.push({ kind: 'crit', value: m.critRangeBonus });
   if (m.caBonus) out.push({ kind: 'ca', value: m.caBonus });
@@ -979,6 +1007,12 @@ function _atCtlHtml(set, ti, fi, f) {
   if (f.kind === 'crit') {
     return `<div class="at-stp"><button type="button" data-at-step="${ti}:${fi}:-1" aria-label="Plage plus étroite">−</button><span>${Math.max(2, 20 - (f.value || 1))}–20</span><button type="button" data-at-step="${ti}:${fi}:1" aria-label="Plage plus large">+</button></div>`;
   }
+  if (f.kind === 'dmg') {
+    const sc = f.scope || 'all';
+    const seg = (val, label, title) => `<button type="button" class="${sc === val ? 'on' : ''}" data-at-fxscope="${ti}:${fi}:${val}" title="${_esc(title)}">${label}</button>`;
+    return _atStpHtml(ti, fi, f)
+      + `<div class="at-seg at-scope">${seg('all', 'Tout', 'Attaques et sorts')}${seg('spells', 'Sorts', 'Sorts uniquement')}${seg('weapon', 'Armes', 'Attaques d’arme uniquement')}</div>`;
+  }
   return _atStpHtml(ti, fi, f);
 }
 function _atKsub(f) {
@@ -988,6 +1022,7 @@ function _atKsub(f) {
   if (f.kind === 'resist') return 'Dégâts de ce type réduits de moitié';
   if (f.kind === 'crit') return `Critique dès ${Math.max(2, 20 - f.value)}`;
   if (f.kind === 'heal') return 'Ajouté aux sorts de soin';
+  if (f.kind === 'dmg') return f.scope === 'spells' ? 'Sorts uniquement' : f.scope === 'weapon' ? 'Attaques d’arme uniquement' : 'Attaques et sorts';
   return _AT_KINDS[f.kind]?.d || '';
 }
 function _atMainHtml() {
@@ -1084,7 +1119,7 @@ function _atMount() {
     let soft = false;
     if (_atMenuTi !== null && !ev.target.closest('.at-tier-f')) { _atMenuTi = null; soft = true; }
     if (_atColOpen && !ev.target.closest('.at-colr')) { _atColOpen = false; soft = true; }
-    const t = ev.target.closest('[data-at-sel],[data-at-add],[data-at-col],[data-at-color],[data-at-tog],[data-at-cumul],[data-at-mv],[data-at-dup],[data-at-del],[data-at-delok],[data-at-pip],[data-at-rmtier],[data-at-addtier],[data-at-menu],[data-at-addfx],[data-at-rmfx],[data-at-step],[data-at-rollmode],[data-at-sim],[data-at-revert],[data-at-save],[data-at-close],[data-at-keep],[data-at-discard]');
+    const t = ev.target.closest('[data-at-sel],[data-at-add],[data-at-col],[data-at-color],[data-at-tog],[data-at-cumul],[data-at-mv],[data-at-dup],[data-at-del],[data-at-delok],[data-at-pip],[data-at-rmtier],[data-at-addtier],[data-at-menu],[data-at-addfx],[data-at-rmfx],[data-at-step],[data-at-rollmode],[data-at-fxscope],[data-at-sim],[data-at-revert],[data-at-save],[data-at-close],[data-at-keep],[data-at-discard]');
     if (!t) { if (soft) _atRenderMain(); return; }
     const d = t.dataset, s = _atCur();
     if (d.atSel != null) { _atSelId = d.atSel; _atMenuTi = null; _atColOpen = false; return _atRender(); }
@@ -1105,6 +1140,7 @@ function _atMount() {
     if (d.atRmfx) { const [ti, fi] = d.atRmfx.split(':'); if (s?.tiers[ti]) s.tiers[ti].effects.splice(+fi, 1); return _atRender(); }
     if (d.atStep) { const [ti, fi, dir] = d.atStep.split(':'); const f = s?.tiers[ti]?.effects[fi]; if (f) { const K = _AT_KINDS[f.kind], step = K.step || 1; let v = +((f.value || 0) + (+dir) * step).toFixed(1); if (v === 0) v = +((+dir) * step).toFixed(1); if (K.min && v < K.min) v = K.min; f.value = v; } return _atRender(); }
     if (d.atRollmode) { const [ti, fi, m] = d.atRollmode.split(':'); const f = s?.tiers[ti]?.effects[fi]; if (f) f.mode = m; return _atRender(); }
+    if (d.atFxscope) { const [ti, fi, sc] = d.atFxscope.split(':'); const f = s?.tiers[ti]?.effects[fi]; if (f && DMG_SCOPES.has(sc)) f.scope = sc; return _atRender(); }
     if (d.atSim) { const [i, v] = d.atSim.split(':'); _atSim[+i] = v; _atRenderMain(); return _atRenderSim(); }
     if ('atRevert' in d) { _draft = _clone(_atSaved); if (!_atCur()) _atSelId = _draft[0]?.id || null; return _atRender(); }
     if ('atSave' in d) return _atSave();

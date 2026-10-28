@@ -122,16 +122,30 @@ export function recordNotification(msg, type = 'info', opts = {}) {
   _dispatchHistoryChanged();
 }
 
+// Durée d'affichage par défaut d'un toast. Les erreurs et avertissements portent
+// le message le plus long et le plus important (ex. erreur Firestore détaillée) :
+// on les laisse plus longtemps à l'écran. Une durée explicite a toujours priorité.
+// (Le survol/focus met déjà la fermeture en pause — cf. _pauseHide.)
+export function toastDuration(type, explicit) {
+  if (explicit) return explicit;
+  return (type === 'error' || type === 'warning') ? 6000 : 3000;
+}
+
 /**
  * Toast. `opts` (optionnel) :
  *   action   — { label, onClick } : bouton d'action dans le toast (ex. « ↺ Annuler »)
- *   duration — durée d'affichage en ms (défaut 3000)
+ *   duration — durée d'affichage en ms (défaut : 3000, ou 6000 pour error/warning)
  */
 export function showNotif(msg, type = 'success', opts = {}) {
   const el = document.getElementById('notif');
   if (!el) return;
   _bindToastQol(el);
   if (opts.history !== false) recordNotification(msg, type, opts.historyMeta || {});
+  // Erreurs/avertissements : annonce assertive (lecteurs d'écran) posée AVANT le
+  // changement de texte pour que la zone « live » l'énonce aussitôt.
+  const urgent = type === 'error' || type === 'warning';
+  el.setAttribute('role', urgent ? 'alert' : 'status');
+  el.setAttribute('aria-live', urgent ? 'assertive' : 'polite');
   el.textContent = msg;
   _activeToastAction = typeof opts.action?.onClick === 'function' ? opts.action.onClick : null;
   if (opts.action?.label && typeof opts.action.onClick === 'function') {
@@ -157,7 +171,7 @@ export function showNotif(msg, type = 'success', opts = {}) {
   }, { once: true });
   el.appendChild(close);
   el.className   = `notif ${type} show`;
-  _scheduleHide(el, opts.duration || 3000);
+  _scheduleHide(el, toastDuration(type, opts.duration));
 }
 
 /**

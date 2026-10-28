@@ -5450,7 +5450,7 @@ function _buildSpellOption(s, ctx) {
       ? getMaitriseBonus(c, mainP || {})
       : 0;
     const spellSetDmgBonus = applyArmorSetBonuses && c
-      ? (getArmorSetData(c).modifiers.damageBonus || 0)
+      ? (getArmorSetData(c).modifiers.damageSpellBonus || 0)
       : 0;
     const formulaFixedBonus = sFixed - spellMaitrise;
     // Multi-noyau : si le sort a plusieurs éléments, on laisse le joueur choisir

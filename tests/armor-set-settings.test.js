@@ -182,6 +182,7 @@ test('armor set : les types et effets personnalisés sont pilotés par aventure'
     damageReduction: 3,
     caBonus: 0,
     damageBonus: 0,
+    damageSpellBonus: 0,
     healBonus: 0,
     critRangeBonus: 0,
     moveDelta: 0,
@@ -236,4 +237,44 @@ test('armor set : les anciennes fiches « legere » / « heavy » restent lisibl
   assert.equal(normalizeArmorType('legere'), 'Légère');
   assert.equal(normalizeArmorType('heavy'), 'Lourde');
   assert.equal(normalizeArmorType('Runique'), 'Runique'); // type inconnu : inchangé
+});
+
+// ── Portée du bonus de dégâts de palier (armes / sorts / les deux) ────────────
+function _runiqueData(scope) {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  setArmorSetSettingsForTests([{
+    id: 'sc', type: 'Runique', label: 'Runique', enabled: true,
+    tiers: [{ pieces: 2, effects: [{ kind: 'dmg', value: 2, ...(scope ? { scope } : {}) }] }],
+  }]);
+  return getArmorSetData({
+    equipement: {
+      'Tête': { nom: 'Casque runique', typeArmure: 'Runique' },
+      Torse:  { nom: 'Plastron runique', typeArmure: 'Runique' },
+    },
+  });
+}
+
+test('armor set : un bonus de dégâts « sorts uniquement » n’affecte pas les armes', () => {
+  const d = _runiqueData('spells');
+  assert.equal(d.isActive, true);
+  assert.equal(d.modifiers.damageBonus, 0);      // attaques d'arme : rien
+  assert.equal(d.modifiers.damageSpellBonus, 2); // sorts : +2
+  assert.match(getArmorSetChipText(d, { includeNames: false }), /Dégâts \+2 \(sorts\)/);
+});
+
+test('armor set : un bonus de dégâts « armes uniquement » n’affecte pas les sorts', () => {
+  const d = _runiqueData('weapon');
+  assert.equal(d.modifiers.damageBonus, 2);
+  assert.equal(d.modifiers.damageSpellBonus, 0);
+  assert.match(getArmorSetChipText(d, { includeNames: false }), /Dégâts \+2 \(armes\)/);
+});
+
+test('armor set : par défaut (ou « tout »), le bonus de dégâts vaut pour armes et sorts', () => {
+  for (const scope of [undefined, 'all']) {
+    const d = _runiqueData(scope);
+    assert.equal(d.modifiers.damageBonus, 2, `scope=${scope}`);
+    assert.equal(d.modifiers.damageSpellBonus, 2, `scope=${scope}`);
+    // Pas de mention de portée quand les deux coïncident.
+    assert.match(getArmorSetChipText(d, { includeNames: false }), /Dégâts \+2(?! \()/);
+  }
 });

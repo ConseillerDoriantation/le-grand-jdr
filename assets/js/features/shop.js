@@ -4,6 +4,7 @@ import { deleteField } from '../config/firebase.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 import { openModal, updateModalContent, closeModalDirect, confirmModal, promptModal, setModalCloseGuard, clearModalCloseGuard } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { timeAgo } from '../shared/relative-time.js';
 import { RARETE_NAMES, _rareteColor, buildRaretePicker, pickRarete, loadRarities, getRarities, openRaritiesAdmin } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes, loadingHtml, eyeIcon } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
@@ -2226,13 +2227,9 @@ async function confirmBuyItem(itemId, directQty) {
 // ── Historique boutique : achats & ventes du personnage courant ──────────────
 // Source : c.inventoryHistory (déjà alimenté par l'achat `add` et la vente
 // `sell`). Chaque ligne rouvre la fiche de l'objet si l'article existe encore.
+// Délègue au helper partagé (robuste aux horodatages absents/Timestamp).
 function _shHistoryTimeAgo(ts) {
-  const s = Math.floor((Date.now() - (Number(ts) || 0)) / 1000);
-  if (s < 60) return "à l'instant";
-  const m = Math.floor(s / 60); if (m < 60) return `il y a ${m} min`;
-  const h = Math.floor(m / 60); if (h < 24) return `il y a ${h} h`;
-  const d = Math.floor(h / 24); if (d < 30) return `il y a ${d} j`;
-  return new Date(Number(ts)).toLocaleDateString('fr-FR');
+  return timeAgo(ts, { prefix: 'il y a ', maxDays: 30 });
 }
 
 const _SH_HIST_KINDS = {

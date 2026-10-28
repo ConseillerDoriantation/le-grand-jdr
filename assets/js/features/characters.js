@@ -146,7 +146,7 @@ import { lsJson } from '../shared/local-storage.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
-let _combatTabUi = { charId: '', selected: '', open: false, candidates: false };
+let _combatTabUi = { charId: '', open: null };
 let _currentTopTab   = 'combat';
 let _csV3InvFilter = { cat: 'all', search: '' };
 let _csV3InvDensity = lsJson.get('cs-inventory-density') === 'list' ? 'list' : 'cards';
@@ -1654,6 +1654,7 @@ function renderCharCombatV3(c, canEdit) {
 
   if (_combatTabUi.charId !== String(c.id || '')) _combatTabUi = { charId: String(c.id || ''), open: null };
   const open = _combatTabUi.open;
+  _bindCombatKeys();
 
   if (!_combatTabCache.styles) { loadCombatStyles().then(styles => { _combatTabCache.styles = styles || []; if (charSession.getCurrentChar()?.id === c.id && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit); }).catch(() => { _combatTabCache.styles = []; }); }
   if (!_combatTabCache.dmgTypes) { loadDamageTypes().then(types => { _combatTabCache.dmgTypes = types || []; if (charSession.getCurrentChar()?.id === c.id && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit); }).catch(() => { _combatTabCache.dmgTypes = []; }); }
@@ -1806,7 +1807,11 @@ function renderCharCombatV3(c, canEdit) {
   const els = (damageTypes.length ? getMagicTypes(damageTypes) : []).filter(t => mj || charElements.includes(t.id)).map(t => {
     const active = charElements.includes(t.id), favorite = active && c.favoriteElement === t.id;
     const toggle = mj ? `data-action="toggleCharElement" data-id="${_esc(c.id)}" data-elem="${_esc(t.id)}" title="${active ? 'Retirer' : 'Accorder'} (MJ)"` : '';
-    const fav = active && mj ? `<button class="${favorite ? 'fav' : ''}" data-action="setFavoriteElement" data-id="${_esc(c.id)}" data-elem="${_esc(t.id)}" title="${favorite ? 'Élément par défaut au VTT' : 'Définir par défaut'}">${favorite ? '★' : '☆'}</button>` : (favorite ? '<span class="fav">★</span>' : '');
+    // Octroi d'un élément = MJ. Mais choisir son élément par défaut au VTT parmi
+    // ceux déjà maîtrisés est une préférence du propriétaire de la fiche
+    // (setFavoriteElement est ouvert au joueur). On rend donc l'étoile cliquable
+    // dès que la fiche est éditable, pas seulement pour le MJ.
+    const fav = active && canEdit ? `<button class="${favorite ? 'fav' : ''}" data-action="setFavoriteElement" data-id="${_esc(c.id)}" data-elem="${_esc(t.id)}" title="${favorite ? 'Élément par défaut au VTT' : 'Définir par défaut au VTT'}">${favorite ? '★' : '☆'}</button>` : (favorite ? '<span class="fav">★</span>' : '');
     return `<span class="cb-el${active ? ' on' : ''}" style="--c:${_esc(t.color || '#9ca3af')}" ${toggle}><i></i>${_esc(t.label)}${fav}</span>`;
   }).join('');
 
@@ -2511,11 +2516,19 @@ function _rerenderCombatTab() {
   if (c && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, charSession.getCanEditChar());
 }
 
-function _selectCombatDetail(btn) {
-  _combatTabUi.selected = btn.dataset.detail || _combatTabUi.selected;
-  _combatTabUi.open = true;
-  _combatTabUi.candidates = btn.dataset.empty === 'true';
-  _rerenderCombatTab();
+// Échap ferme le détail ouvert (cohérence avec l'inventaire v10 et les recettes).
+// Écouteur global posé une seule fois, borné à la présence de l'onglet combat.
+let _combatKeysBound = false;
+function _bindCombatKeys() {
+  if (_combatKeysBound) return; _combatKeysBound = true;
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || _combatTabUi.open == null) return;
+    if (!document.querySelector('.cb')) return;                        // onglet combat absent
+    if (document.body?.classList.contains('is-modal-open')) return;    // une modale gère déjà Échap
+    if (/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName || '')) return; // saisie en cours (nom/note de maîtrise)
+    _combatTabUi.open = null;
+    _rerenderCombatTab();
+  });
 }
 
 async function _stepCombatMastery(index, delta) {
