@@ -145,7 +145,7 @@ export function _getSortAction(s) {
  * - Chaque rune Puissance : +1 dé
  */
 export function _calcSortDegats(s, c) {
-  const setB = usesArmorSetBonuses(s) ? (getArmorSetData(c)?.modifiers?.damageBonus || 0) : 0;
+  const setB = usesArmorSetBonuses(s) ? (getArmorSetData(c)?.modifiers?.damageSpellBonus || 0) : 0;
   if (s?.designMode === 'classic' && s?.classicFormulaFinal) {
     const base = (s?.degats || '').trim();
     const statKey = resolveSpellModifierStat(s, 'degatsStat');

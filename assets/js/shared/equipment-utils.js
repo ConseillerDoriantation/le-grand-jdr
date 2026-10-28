@@ -442,6 +442,7 @@ function _combineArmorModifiers(list = []) {
     m.damageReduction += Number(mod.damageReduction || 0);
     m.caBonus += Number(mod.caBonus || 0);
     m.damageBonus += Number(mod.damageBonus || 0);
+    m.damageSpellBonus += Number(mod.damageSpellBonus || 0);
     m.healBonus += Number(mod.healBonus || 0);
     m.critRangeBonus += Number(mod.critRangeBonus || 0);
     m.moveDelta += Number(mod.moveDelta || 0);
