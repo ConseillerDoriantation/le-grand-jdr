@@ -1654,6 +1654,7 @@ function renderCharCombatV3(c, canEdit) {
 
   if (_combatTabUi.charId !== String(c.id || '')) _combatTabUi = { charId: String(c.id || ''), open: null };
   const open = _combatTabUi.open;
+  _bindCombatKeys();
 
   if (!_combatTabCache.styles) { loadCombatStyles().then(styles => { _combatTabCache.styles = styles || []; if (charSession.getCurrentChar()?.id === c.id && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit); }).catch(() => { _combatTabCache.styles = []; }); }
   if (!_combatTabCache.dmgTypes) { loadDamageTypes().then(types => { _combatTabCache.dmgTypes = types || []; if (charSession.getCurrentChar()?.id === c.id && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit); }).catch(() => { _combatTabCache.dmgTypes = []; }); }
@@ -2513,6 +2514,21 @@ document.addEventListener('app:route-sub-changed', event => {
 function _rerenderCombatTab() {
   const c = charSession.getCurrentChar();
   if (c && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, charSession.getCanEditChar());
+}
+
+// Échap ferme le détail ouvert (cohérence avec l'inventaire v10 et les recettes).
+// Écouteur global posé une seule fois, borné à la présence de l'onglet combat.
+let _combatKeysBound = false;
+function _bindCombatKeys() {
+  if (_combatKeysBound) return; _combatKeysBound = true;
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || _combatTabUi.open == null) return;
+    if (!document.querySelector('.cb')) return;                        // onglet combat absent
+    if (document.body?.classList.contains('is-modal-open')) return;    // une modale gère déjà Échap
+    if (/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName || '')) return; // saisie en cours (nom/note de maîtrise)
+    _combatTabUi.open = null;
+    _rerenderCombatTab();
+  });
 }
 
 async function _stepCombatMastery(index, delta) {

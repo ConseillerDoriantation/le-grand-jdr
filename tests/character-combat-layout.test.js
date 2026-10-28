@@ -69,6 +69,19 @@ test('le joueur choisit son élément par défaut au VTT (étoile éditable, pas
     'l’étoile favori ne doit plus être gardée derrière mj');
 });
 
+test('Échap ferme le détail ouvert (cohérence avec l’inventaire et les recettes)', () => {
+  // Écouteur idempotent + appelé depuis le rendu de l'onglet.
+  assert.match(sheet, /function _bindCombatKeys\(\)/);
+  assert.match(combat, /_bindCombatKeys\(\);/);
+  const handler = sheet.slice(sheet.indexOf('function _bindCombatKeys'), sheet.indexOf('async function _stepCombatMastery'));
+  // Ne se déclenche que sur Échap quand un détail est ouvert.
+  assert.match(handler, /e\.key !== 'Escape' \|\| _combatTabUi\.open == null/);
+  // Ne vole pas Échap à une modale ouverte ni à un champ de saisie.
+  assert.match(handler, /is-modal-open/);
+  assert.match(handler, /INPUT\|TEXTAREA\|SELECT/);
+  assert.match(handler, /_combatTabUi\.open = null/);
+});
+
 test('les actions réemploient les mutations existantes', () => {
   for (const marker of [
     'data-action="equipInventoryItem"',
