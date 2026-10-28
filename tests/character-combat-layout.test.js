@@ -59,6 +59,16 @@ test('les actions MJ (maîtrises) sont alignées à droite de leur en-tête', ()
   assert.match(css, /\.cs-v3 \.cb-sub \.cb-btn\s*\{[^}]*margin-left:\s*auto/);
 });
 
+test('le joueur choisit son élément par défaut au VTT (étoile éditable, pas MJ-only)', () => {
+  // L'octroi d'un élément reste réservé au MJ…
+  assert.match(combat, /toggleCharElement[^`]*\(MJ\)/);
+  // …mais l'étoile « favori » (élément par défaut au VTT) est ouverte au
+  // propriétaire de la fiche : rendue cliquable dès que canEdit, pas seulement mj.
+  assert.match(combat, /active && canEdit \? `<button[^`]*setFavoriteElement/);
+  assert.ok(!/active && mj \? `<button[^`]*setFavoriteElement/.test(combat),
+    'l’étoile favori ne doit plus être gardée derrière mj');
+});
+
 test('les actions réemploient les mutations existantes', () => {
   for (const marker of [
     'data-action="equipInventoryItem"',

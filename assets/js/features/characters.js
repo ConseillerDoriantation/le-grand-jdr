@@ -1806,7 +1806,11 @@ function renderCharCombatV3(c, canEdit) {
   const els = (damageTypes.length ? getMagicTypes(damageTypes) : []).filter(t => mj || charElements.includes(t.id)).map(t => {
     const active = charElements.includes(t.id), favorite = active && c.favoriteElement === t.id;
     const toggle = mj ? `data-action="toggleCharElement" data-id="${_esc(c.id)}" data-elem="${_esc(t.id)}" title="${active ? 'Retirer' : 'Accorder'} (MJ)"` : '';
-    const fav = active && mj ? `<button class="${favorite ? 'fav' : ''}" data-action="setFavoriteElement" data-id="${_esc(c.id)}" data-elem="${_esc(t.id)}" title="${favorite ? 'Élément par défaut au VTT' : 'Définir par défaut'}">${favorite ? '★' : '☆'}</button>` : (favorite ? '<span class="fav">★</span>' : '');
+    // Octroi d'un élément = MJ. Mais choisir son élément par défaut au VTT parmi
+    // ceux déjà maîtrisés est une préférence du propriétaire de la fiche
+    // (setFavoriteElement est ouvert au joueur). On rend donc l'étoile cliquable
+    // dès que la fiche est éditable, pas seulement pour le MJ.
+    const fav = active && canEdit ? `<button class="${favorite ? 'fav' : ''}" data-action="setFavoriteElement" data-id="${_esc(c.id)}" data-elem="${_esc(t.id)}" title="${favorite ? 'Élément par défaut au VTT' : 'Définir par défaut au VTT'}">${favorite ? '★' : '☆'}</button>` : (favorite ? '<span class="fav">★</span>' : '');
     return `<span class="cb-el${active ? ' on' : ''}" style="--c:${_esc(t.color || '#9ca3af')}" ${toggle}><i></i>${_esc(t.label)}${fav}</span>`;
   }).join('');
 
