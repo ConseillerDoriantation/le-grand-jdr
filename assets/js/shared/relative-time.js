@@ -16,16 +16,22 @@ export function toMillis(raw) {
 /**
  * Libellé compact : « à l'instant », « 5 min », « 3 h », « 2 j ».
  * @param {number|string|{toMillis:()=>number}} raw  Instant source.
- * @param {{ invalid?: string }} [opts]  Libellé de repli si la date est illisible.
+ * @param {object} [opts]
+ * @param {string} [opts.invalid='récemment']  Repli si la date est illisible.
+ * @param {string} [opts.prefix='']  Préfixe des durées (ex. 'il y a ') ; jamais
+ *   appliqué à « à l'instant ».
+ * @param {number} [opts.maxDays=Infinity]  Au-delà de ce nombre de jours, on
+ *   affiche la date locale (fr-FR) au lieu de « N j ».
  */
-export function timeAgo(raw, { invalid = 'récemment' } = {}) {
+export function timeAgo(raw, { invalid = 'récemment', prefix = '', maxDays = Infinity } = {}) {
   const ms = toMillis(raw);
   if (Number.isNaN(ms)) return invalid;
   const mins = Math.max(0, Math.floor((Date.now() - ms) / 60_000));
   if (mins < 1) return 'à l’instant';
-  if (mins < 60) return `${mins} min`;
+  if (mins < 60) return `${prefix}${mins} min`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} h`;
+  if (hours < 24) return `${prefix}${hours} h`;
   const days = Math.floor(hours / 24);
-  return `${days} j`;
+  if (days < maxDays) return `${prefix}${days} j`;
+  return new Date(ms).toLocaleDateString('fr-FR');
 }

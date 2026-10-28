@@ -21,6 +21,7 @@ import { getDocData, getDocDataSilent, updateInCol, loadCollection, loadCollecti
 import { tryDoc } from '../shared/crud.js';
 import { watch, watchRecent, watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { timeAgo } from '../shared/relative-time.js';
 import { openModal, closeModal, confirmModal, modalSection } from '../shared/modal.js';
 import { _esc, _norm, appSplashHtml, skeletonHtml } from '../shared/html.js';
 import { calcOr, getDefaultCharForUser } from '../shared/char-stats.js';
@@ -3018,14 +3019,10 @@ async function _bastionDeleteHisto(idx) {
 // ══════════════════════════════════════════════════════════════════════════════
 // MUR DES ANNONCES — communication entre joueurs (messages, quêtes, offres, demandes)
 // ══════════════════════════════════════════════════════════════════════════════
+// Délègue au helper partagé (robuste aux horodatages absents/Timestamp).
+// Repli '' pour conserver le comportement « rien si pas d'horodatage ».
 function _annonceTimeAgo(ts) {
-  if (!ts) return '';
-  const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return "à l'instant";
-  const m = Math.floor(s / 60); if (m < 60) return `il y a ${m} min`;
-  const h = Math.floor(m / 60); if (h < 24) return `il y a ${h} h`;
-  const d = Math.floor(h / 24); if (d < 7) return `il y a ${d} j`;
-  return new Date(ts).toLocaleDateString('fr-FR');
+  return timeAgo(ts, { invalid: '', prefix: 'il y a ', maxDays: 7 });
 }
 
 function _wallCharacters() {
