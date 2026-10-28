@@ -30,6 +30,7 @@ import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey } fro
 import { createDashboardWallFeed, dashboardWallView } from '../shared/dashboard-wall-feed.js';
 import { bastionRoomProjects, roomInvestmentContributors } from '../shared/bastion-investments.js';
 import { bastionSignalSnapshot } from '../shared/bastion-signal.js';
+import { timeAgo } from '../shared/relative-time.js';
 import { normalizeEmoteCatalog } from '../shared/emote-admin.js';
 
 import { charSession } from '../shared/char-session.js';
@@ -2956,16 +2957,6 @@ const PAGES = {
       a: { label: 'Après-midi', hours: '14 h – 18 h' },
       s: { label: 'Soir', hours: '19 h – 23 h' },
     }[slot] || { label: 'Créneau', hours: 'à préciser' });
-    const timeAgo = raw => {
-      const ts = typeof raw === 'number' ? raw : (raw?.toMillis?.() ?? Date.parse(raw || '') ?? 0);
-      const mins = Math.max(0, Math.floor((Date.now() - ts) / 60_000));
-      if (mins < 1) return "à l’instant";
-      if (mins < 60) return `${mins} min`;
-      const hours = Math.floor(mins / 60);
-      if (hours < 24) return `${hours} h`;
-      const days = Math.floor(hours / 24);
-      return `${days} j`;
-    };
     const controlledChars = () => STATE.isAdmin
       ? allChars
       : getControlledCharacters(allChars, STATE.user?.uid);
