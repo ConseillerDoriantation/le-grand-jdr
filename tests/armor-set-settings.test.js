@@ -278,3 +278,33 @@ test('armor set : par défaut (ou « tout »), le bonus de dégâts vaut pour ar
     assert.match(getArmorSetChipText(d, { includeNames: false }), /Dégâts \+2(?! \()/);
   }
 });
+
+// ── Mémoïsation de getArmorSetData (optimisation, sans péremption) ────────────
+test('armor set : l’agrégation coûteuse est mémoïsée par (réglages, counts)', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  setArmorSetSettingsForTests(LEGACY_ARMOR_SETS);
+  const cA = { equipement: { 'Tête': { nom: 'Capuche', typeArmure: 'Légère' }, Torse: { nom: 'Robe', typeArmure: 'Légère' } } };
+  const cB = { equipement: { 'Tête': { nom: 'Autre capuche', typeArmure: 'Légère' }, Torse: { nom: 'Autre robe', typeArmure: 'Légère' } } };
+  const a1 = getArmorSetData(cA), a2 = getArmorSetData(cA);
+  // Même perso → objet d'agrégation réutilisé (cache hit).
+  assert.equal(a1.modifiers, a2.modifiers);
+  assert.equal(a1.activeSets, a2.activeSets);
+  // Mêmes types/counts → agrégation partagée (elle ne dépend pas des objets d'inventaire).
+  const b = getArmorSetData(cB);
+  assert.equal(a1.modifiers, b.modifiers);
+  // …mais la partie « slots » reste propre à chaque perso (objets vivants non partagés).
+  assert.notEqual(a1.slots, b.slots);
+  assert.equal(a1.slots.find(s => s.slot === 'Tête')?.item.nom, 'Capuche');
+  assert.equal(b.slots.find(s => s.slot === 'Tête')?.item.nom, 'Autre capuche');
+});
+
+test('armor set : modifier les réglages invalide le cache (nouvel objet _settings)', () => {
+  setEquipmentSlotsForTests(LEGACY_EQUIPMENT_SLOTS);
+  setArmorSetSettingsForTests(LEGACY_ARMOR_SETS);
+  const c = { equipement: { 'Tête': { nom: 'C', typeArmure: 'Légère' }, Torse: { nom: 'R', typeArmure: 'Légère' } } };
+  const before = getArmorSetData(c).modifiers;
+  setArmorSetSettingsForTests(LEGACY_ARMOR_SETS); // remplace _settings → cache périmé abandonné
+  const after = getArmorSetData(c).modifiers;
+  assert.notEqual(before, after, 'nouveaux réglages → agrégation recalculée');
+  assert.deepEqual(before, after, 'mais valeurs identiques (mêmes réglages de fond)');
+});
