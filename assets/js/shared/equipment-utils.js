@@ -369,17 +369,29 @@ export function serializeShopWeaponForCombat(item = {}) {
 
 // ── Normalisation et méta des types d'armure ─────────────────────────────────
 
+// Résolution de type d'armure mémoïsée : dépend du libellé ET des réglages
+// (un type défini par l'aventure prime). Elle reconstruit sinon la liste des
+// options + un normalizeArmorSetKey par option à CHAQUE appel, alors qu'elle
+// tourne ~8× par appel de getArmorSetData (par slot, partie légère non cachée),
+// elle-même appelée par rendu et par token au VTT. Cache par (objet réglages,
+// libellé) via WeakMap : stale-proof (`_settings` est toujours remplacé).
+const _natCache = new WeakMap(); // settings → Map<label, normalized>
 export function normalizeArmorType(type = '') {
   const label = String(type || '').trim();
   if (!label) return '';
+  const settings = getArmorSetSettings();
+  let byLabel = _natCache.get(settings);
+  if (byLabel) { const hit = byLabel.get(label); if (hit !== undefined) return hit; }
+  else { byLabel = new Map(); _natCache.set(settings, byLabel); }
   // 1. Type defini par l'AVENTURE : on renvoie SON libelle exact. Sans ca, un set
   //    nomme « Lourd » etait reecrit en « Lourde » par la table heritee ci-dessous,
   //    ne correspondait plus a aucun set configure, et l'effet ne se declenchait pas.
   const key = normalizeArmorSetKey(label);
   const configure = getArmorTypeOptions({ includeDisabled: true })
     .find(t => normalizeArmorSetKey(t) === key);
-  if (configure) return configure;
-  return _legacyArmorType(label);
+  const result = configure || _legacyArmorType(label);
+  byLabel.set(label, result);
+  return result;
 }
 
 // 2. Repli historique : anciennes fiches stockant « legere », « heavy »…

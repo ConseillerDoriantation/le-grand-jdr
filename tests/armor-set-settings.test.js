@@ -308,3 +308,14 @@ test('armor set : modifier les réglages invalide le cache (nouvel objet _settin
   assert.notEqual(before, after, 'nouveaux réglages → agrégation recalculée');
   assert.deepEqual(before, after, 'mais valeurs identiques (mêmes réglages de fond)');
 });
+
+test('armor set : le cache de normalizeArmorType s’invalide au changement de réglages', () => {
+  setArmorSetSettingsForTests(LEGACY_ARMOR_SETS);
+  const a = normalizeArmorType('legere'); // option configurée « Légère » (clé sans accent)
+  assert.equal(a, 'Légère');
+  // Nouveaux réglages : « legere » devient un type défini par l'aventure → libellé exact.
+  setArmorSetSettingsForTests([{ id: 'x', type: 'legere', label: 'legere', enabled: true, tiers: [] }]);
+  const b = normalizeArmorType('legere');
+  assert.equal(b, 'legere', 'cache invalidé : résolution recalculée sous les nouveaux réglages');
+  assert.notEqual(a, b);
+});
