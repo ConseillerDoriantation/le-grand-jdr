@@ -623,7 +623,11 @@ function _ivBindInventoryKeys() {
   });
 }
 
-export function renderCharInventaire(c, canEdit) {
+// Construit UNIQUEMENT le contenu de la liste (.iv-body). Isolé du cadre (barre
+// de recherche + boutons) pour permettre une mise à jour ciblée à la frappe :
+// on remplace le seul innerHTML de .iv-body sans toucher à l'input (plus de
+// perte de focus/caret ni de reconstruction de tout l'onglet).
+function _ivBuildListHtml(c, canEdit) {
   const inv = Array.isArray(c.inventaire) ? c.inventaire : [];
   const allIndices = inv.map((_, index) => index);
   const equippedMap = getEquippedInventoryIndexMap(c);
@@ -682,7 +686,11 @@ export function renderCharInventaire(c, canEdit) {
   }
   if (listHtml) listHtml += _ivLegendHtml();
   else listHtml = `<div class="iv-empty">${q ? `Rien ne correspond à « ${_esc(_charInvSearch)} ».` : 'Inventaire vide.'}</div>`;
+  return listHtml;
+}
 
+export function renderCharInventaire(c, canEdit) {
+  const listHtml = _ivBuildListHtml(c, canEdit);
   setTimeout(_ivBindInventoryKeys, 0);
   return `<div class="iv">
     <div class="iv-bar">
@@ -1800,6 +1808,22 @@ export async function saveInvItem(idx) {
   _renderInventoryChar(c, 'inventaire');
 }
 
+// Mise à jour CIBLÉE de la liste : ne reconstruit que .iv-body, laisse la barre
+// de recherche (et son input focalisé) intacte. Utilisée à la frappe.
+function _ivUpdateList() {
+  const c = charSession.getCurrentChar?.() || STATE.activeChar;
+  const body = document.querySelector('.iv .iv-body');
+  if (!c || !body) return;
+  body.innerHTML = _ivBuildListHtml(c, charSession.getCanEditChar?.() ?? STATE.isAdmin);
+}
+// Débounce : coalesce les reconstructions pendant une frappe rapide. L'input
+// reste vivant et réactif ; seule la liste filtrée se met à jour après la pause.
+let _ivSearchTimer = null;
+function _ivDebouncedListUpdate() {
+  clearTimeout(_ivSearchTimer);
+  _ivSearchTimer = setTimeout(() => { _ivSearchTimer = null; _ivUpdateList(); }, 120);
+}
+
 function _rerenderInventoryView({ focusSearch = false } = {}) {
   const c = charSession.getCurrentChar?.() || STATE.activeChar;
   if (!c) return;
@@ -1876,7 +1900,7 @@ async function _invConsumeOne(charId, indicesB64) {
 }
 
 registerActions({
-  _charInvSearch:      (el)  => { _charInvSearch = el.value; _invSelected = ''; _rerenderInventoryView({ focusSearch: true }); },
+  _charInvSearch:      (el)  => { _charInvSearch = el.value; _invSelected = ''; _ivDebouncedListUpdate(); },
   _invToggleRow:       (btn) => { const key = btn.dataset.key || ''; _invSelected = _invSelected === key ? '' : key; _rerenderInventoryView(); },
   _sendTargetFilter:   (el)  => _sendTargetFilter(el),
   _sellRefreshTotal:   (el)  => _sellRefreshTotal(el, Number(el.dataset.prix), Number(el.dataset.max)),

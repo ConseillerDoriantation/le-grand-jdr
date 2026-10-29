@@ -89,3 +89,17 @@ test('CSS v10 présent, scopé .cs-v3, responsive et contraste thème clair', ()
 test('le changement d onglet rejoue le fondu (characters.js)', () => {
   assert.match(sheet, /if \(!samePanel\)[\s\S]*?area\.classList\.add\('cs-tab-fadein'\)/);
 });
+
+test('la recherche met à jour la liste de façon ciblée et débouncée (sans re-render total)', () => {
+  // La liste est isolée dans un helper réutilisé par le rendu complet ET la MAJ ciblée.
+  assert.match(feature, /function _ivBuildListHtml\(c, canEdit\)/);
+  assert.match(feature, /const listHtml = _ivBuildListHtml\(c, canEdit\)/);       // rendu complet
+  assert.match(feature, /body\.innerHTML = _ivBuildListHtml\(/);                   // MAJ ciblée .iv-body
+  assert.match(feature, /document\.querySelector\('\.iv \.iv-body'\)/);
+  // Le handler de recherche passe par le débounce ciblé, plus par le re-render total.
+  assert.match(feature, /_charInvSearch:\s*\(el\)\s*=>\s*\{[^}]*_ivDebouncedListUpdate\(\)/);
+  assert.ok(!/_charInvSearch:\s*\(el\)\s*=>\s*\{[^}]*_rerenderInventoryView/.test(feature),
+    'la recherche ne doit plus déclencher un re-render total de l’onglet');
+  // Débounce présent.
+  assert.match(feature, /function _ivDebouncedListUpdate\(\)[\s\S]*?setTimeout\([\s\S]*?120\)/);
+});

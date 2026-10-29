@@ -95,3 +95,18 @@ test('la suppression inline redirige les articles avant de garder l undo', () =>
   assert.match(shop, /confirmDelete\('shopCategories'[\s\S]*confirmed:\s*true/s);
   assert.match(shop, /onRestore:\s*async \(\) => \{ if \(affected\.length\) await _catBatchMove\(affected, catId\)/);
 });
+
+test('la recherche boutique est débouncée (MAJ ciblée déjà en place) et flushée au clavier', () => {
+  // Le handler input passe par shopSearchInput (débouncé), plus par shopFilterSearch (immédiat).
+  assert.match(shop, /search:\s*\(el\)\s*=>\s*shopSearchInput\(el\.value\)/);
+  assert.match(shop, /function shopSearchInput\(val\)[\s\S]*?setTimeout\([\s\S]*?120\)/);
+  // L'état + le chrome restent immédiats (l'input répond tout de suite).
+  assert.match(shop, /function shopSearchInput\(val\)[\s\S]*?_syncShopSearchChrome\(\)[\s\S]*?clearTimeout\(_shSearchTimer\)/);
+  // La reconstruction reste ciblée (pas de renderShop complet à la frappe).
+  assert.match(shop, /_shSearchTimer = setTimeout\(\(\) => \{[^}]*_updateResults\(\)/);
+  // Enter/ArrowDown applique d'abord une recherche en attente.
+  assert.match(shop, /_shFlushSearch\(\);[^\n]*avant de sélectionner/);
+  assert.match(shop, /function _shFlushSearch\(\)[\s\S]*?_updateResults\(\)/);
+  // La version immédiate reste pour les appels programmatiques (effacer, catégorie).
+  assert.match(shop, /function shopClearSearch\(\)[\s\S]*?shopFilterSearch\(''\)/);
+});

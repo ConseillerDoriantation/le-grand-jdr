@@ -2470,6 +2470,27 @@ export function shopFilterSearch(val) {
   _syncShopSearchChrome();
 }
 
+// Frappe dans la recherche : l'état + le bouton « effacer » répondent tout de
+// suite, mais la reconstruction des résultats (déjà ciblée via _updateResults)
+// est débouncée pour coalescer une frappe rapide. Les appels programmatiques
+// (effacer, changement de catégorie) passent par shopFilterSearch, immédiat.
+let _shSearchTimer = null;
+function shopSearchInput(val) {
+  _filterSearch = val;
+  _page = 1;
+  _syncShopSearchChrome();
+  clearTimeout(_shSearchTimer);
+  _shSearchTimer = setTimeout(() => { _shSearchTimer = null; _updateResults(); }, 120);
+}
+// Force l'application immédiate d'une recherche en attente (avant une sélection
+// clavier, pour ne pas agir sur des résultats périmés).
+function _shFlushSearch() {
+  if (_shSearchTimer == null) return;
+  clearTimeout(_shSearchTimer);
+  _shSearchTimer = null;
+  _updateResults();
+}
+
 function _syncShopSearchChrome() {
   const clear = document.querySelector('.shc-search-clear');
   if (clear) clear.hidden = !_filterSearch;
@@ -2497,6 +2518,7 @@ function _shopKeyboardQol(event) {
   }
   const search = event.target?.closest?.('#sh-search');
   if (search && (event.key === 'Enter' || event.key === 'ArrowDown')) {
+    _shFlushSearch(); // applique une recherche débouncée en attente avant de sélectionner
     const first = document.getElementById('sh-items-results')?.querySelector('[data-sh-key-card="item"]');
     if (!first) return;
     event.preventDefault();
@@ -3801,6 +3823,11 @@ async function openItemModal(itemId, seedItem = null) {
   const draft = { ...(item || {}), categorieId: defCatId, template: _normalizeShopTemplate(item?.template || cat?.template), readableTitle: _shopReadableDraft.title, readableContent: _shopReadableDraft.html };
   _siEditorState = {
     itemId: itemId || '', draft, originalDraft: _siClone(draft), dirty: false, quick: '', open: new Set(), saving: false,
+    // Une catégorie ne doit proposer son type que tant que le MJ n'a pas
+    // explicitement choisi « Arme / Armure / Bijou / Classique ». Sans cette
+    // garde, choisir la catégorie après « Arme » pouvait refaire basculer une
+    // création vide en « Classique » et faire disparaître le champ Toucher.
+    templateExplicit: !!item?.template,
     lastFiniteStock: Number.isFinite(Number(draft.dispo)) && Number(draft.dispo) >= 0 ? Math.trunc(Number(draft.dispo)) : 0,
   };
   ['bonus','traits','actions','description','lecture'].forEach(section => { if (_siSectionHasContent(section, draft)) _siEditorState.open.add(section); });
@@ -4273,7 +4300,9 @@ function refreshItemFields(catId) {
   _siEditorState.draft.categorieId = catId || '';
   // Sur un article encore vide, choisir une catégorie adopte naturellement son
   // type. Une fiche déjà renseignée ne change jamais de structure toute seule.
-  if (!_siEditorState.itemId && !_siEditorState.draft.nom && cat?.template) _siEditorState.draft.template = _normalizeShopTemplate(cat.template);
+  if (!_siEditorState.itemId && !_siEditorState.templateExplicit && cat?.template) {
+    _siEditorState.draft.template = _normalizeShopTemplate(cat.template);
+  }
   _siRenderEditorPanels();
 }
 
@@ -4282,6 +4311,7 @@ function refreshTemplateFields(tplKey) {
   if (!_siEditorState || !TEMPLATES[tplKey]) return;
   _siReadDraftFromDom();
   _siEditorState.draft.template = tplKey;
+  _siEditorState.templateExplicit = true;
   _siRenderEditorPanels();
 }
 
@@ -4424,7 +4454,9 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
       else if (data.format) data.sousType = data.format;
       data.toucher = _legacyToucherTextFromData(data);
       data.stats = _legacyStatsTextFromData(data);
-      data.statAttaque = data.degatsStat || data.toucherStat || '';
+      // `statAttaque` reste écrit pour les anciens consommateurs, mais doit
+      // refléter le Toucher choisi — pas le modificateur de dégâts.
+      data.statAttaque = data.toucherStat || data.degatsStat || '';
     } else if (tplKey === 'armure' || tplKey === 'bijou') {
       data.stats = _legacyStatsTextFromData(data);
     }
@@ -5317,7 +5349,7 @@ Object.assign(shHandlers, {
   goHome:         () => shopGoHome(),
   goCat:          (el) => shopGoCat(el.dataset.id),
   setChar:        (el) => shopSetChar(el.dataset.id || el.value),
-  search:         (el) => shopFilterSearch(el.value),
+  search:         (el) => shopSearchInput(el.value),
   clearSearch:    () => shopClearSearch(),
   setSort:        (el) => shopSetSort(el.value),
   resetFilters:   () => shopFilterReset(),

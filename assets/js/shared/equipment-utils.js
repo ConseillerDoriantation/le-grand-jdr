@@ -369,17 +369,29 @@ export function serializeShopWeaponForCombat(item = {}) {
 
 // ── Normalisation et méta des types d'armure ─────────────────────────────────
 
+// Résolution de type d'armure mémoïsée : dépend du libellé ET des réglages
+// (un type défini par l'aventure prime). Elle reconstruit sinon la liste des
+// options + un normalizeArmorSetKey par option à CHAQUE appel, alors qu'elle
+// tourne ~8× par appel de getArmorSetData (par slot, partie légère non cachée),
+// elle-même appelée par rendu et par token au VTT. Cache par (objet réglages,
+// libellé) via WeakMap : stale-proof (`_settings` est toujours remplacé).
+const _natCache = new WeakMap(); // settings → Map<label, normalized>
 export function normalizeArmorType(type = '') {
   const label = String(type || '').trim();
   if (!label) return '';
+  const settings = getArmorSetSettings();
+  let byLabel = _natCache.get(settings);
+  if (byLabel) { const hit = byLabel.get(label); if (hit !== undefined) return hit; }
+  else { byLabel = new Map(); _natCache.set(settings, byLabel); }
   // 1. Type defini par l'AVENTURE : on renvoie SON libelle exact. Sans ca, un set
   //    nomme « Lourd » etait reecrit en « Lourde » par la table heritee ci-dessous,
   //    ne correspondait plus a aucun set configure, et l'effet ne se declenchait pas.
   const key = normalizeArmorSetKey(label);
   const configure = getArmorTypeOptions({ includeDisabled: true })
     .find(t => normalizeArmorSetKey(t) === key);
-  if (configure) return configure;
-  return _legacyArmorType(label);
+  const result = configure || _legacyArmorType(label);
+  byLabel.set(label, result);
+  return result;
 }
 
 // 2. Repli historique : anciennes fiches stockant « legere », « heavy »…
@@ -460,24 +472,25 @@ function _combineArmorModifiers(list = []) {
 // casse plus le set : elle ne compte simplement pas. Chaque type atteint ses
 // paliers selon son nombre de pièces portées ; les effets de tous les sets
 // actifs s'agrègent. Les champs historiques restent renseignés (compat).
-export function getArmorSetData(c = {}) {
-  const equip = c?.equipement || {};
-  const trackedSlots = getEquipmentSlotsByKind('armor').map(slot => slot.id);
-  const max = trackedSlots.length;
-  const slots = trackedSlots.map(slot => {
-    const item = equip?.[slot] || {};
-    return { slot, item, type: normalizeArmorType(item?.typeArmure), equipped: Boolean(item?.nom) };
-  });
+// Mémoïsation de la partie COÛTEUSE (sets actifs + modifiers combinés). Elle ne
+// dépend QUE du décompte par type (counts), du nb de slots armure (max) et des
+// réglages de sets — jamais de l'identité des objets d'inventaire. On la met donc
+// en cache par (objet réglages, signature de counts). Sûr sans péremption :
+// `_settings` est toujours REMPLACÉ (jamais muté en place) à chaque chargement/
+// sauvegarde, donc un changement de réglages = nouvel objet = WeakMap vidée pour
+// l'ancien ; un changement d'équipement = nouvelle signature. getArmorSetData est
+// appelée ~6-10× par rendu de fiche et par token au VTT → gain réel, répétable.
+const _asdAggCache = new WeakMap(); // settings → Map<countsSig@max, agg>
+function _armorSetAggregate(counts, max) {
+  const settings = getArmorSetSettings();
+  const sig = Object.keys(counts).sort().map(t => `${t}:${counts[t]}`).join('|') + `@${max}`;
+  let byKey = _asdAggCache.get(settings);
+  if (byKey) { const hit = byKey.get(sig); if (hit) return hit; }
+  else { byKey = new Map(); _asdAggCache.set(settings, byKey); }
 
-  const equippedCount = slots.filter(entry => entry.equipped).length;
-  const typedSlots    = slots.filter(entry => entry.type);
-  const counts        = typedSlots.reduce((acc, entry) => { acc[entry.type] = (acc[entry.type] || 0) + 1; return acc; }, {});
-  const dominantType  = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
-  const setsByKey     = new Map((getArmorSetSettings().sets || [])
+  const setsByKey = new Map((settings.sets || [])
     .filter(set => set.enabled !== false)
     .map(set => [normalizeArmorSetKey(set.type), set]));
-
-  // Sets actifs : un type porté dont au moins un palier est atteint.
   const activeSets = [];
   Object.entries(counts).forEach(([type, count]) => {
     const set = setsByKey.get(normalizeArmorSetKey(type));
@@ -488,19 +501,41 @@ export function getArmorSetData(c = {}) {
   });
   // fullType / activeEffect = le set actif avec le plus de pièces (compat).
   activeSets.sort((a, b) => b.count - a.count || b.applied.length - a.applied.length);
-  const dominantActive = activeSets[0] || null;
-  const fullType       = dominantActive?.type || '';
-  const activeEffect   = fullType ? getArmorTypeMeta(fullType) : null;
-  const mixed          = Object.keys(counts).length > 1;
-  const modifiers      = activeSets.length ? _combineArmorModifiers(activeSets.map(s => s.modifiers)) : getEmptyArmorSetModifiers();
+  const fullType = activeSets[0]?.type || '';
+  const agg = {
+    activeSets,
+    fullType,
+    activeEffect: fullType ? getArmorTypeMeta(fullType) : null,
+    modifiers: activeSets.length ? _combineArmorModifiers(activeSets.map(s => s.modifiers)) : getEmptyArmorSetModifiers(),
+  };
+  byKey.set(sig, agg);
+  return agg;
+}
+
+export function getArmorSetData(c = {}) {
+  const equip = c?.equipement || {};
+  const trackedSlots = getEquipmentSlotsByKind('armor').map(slot => slot.id);
+  const max = trackedSlots.length;
+  // Partie LÉGÈRE recalculée à chaque appel (dépend des objets d'inventaire vivants).
+  const slots = trackedSlots.map(slot => {
+    const item = equip?.[slot] || {};
+    return { slot, item, type: normalizeArmorType(item?.typeArmure), equipped: Boolean(item?.nom) };
+  });
+  const equippedCount = slots.filter(entry => entry.equipped).length;
+  const typedSlots    = slots.filter(entry => entry.type);
+  const counts        = typedSlots.reduce((acc, entry) => { acc[entry.type] = (acc[entry.type] || 0) + 1; return acc; }, {});
+  const dominantType  = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+  const mixed         = Object.keys(counts).length > 1;
+
+  const agg = _armorSetAggregate(counts, max);
 
   return {
-    trackedSlots, slots, counts, equippedCount, fullType, dominantType, mixed,
-    activeSets,
+    trackedSlots, slots, counts, equippedCount, fullType: agg.fullType, dominantType, mixed,
+    activeSets: agg.activeSets,
     isComplete: max > 0 && equippedCount === max,
-    isActive:   activeSets.length > 0,
-    activeEffect,
-    modifiers,
+    isActive:   agg.activeSets.length > 0,
+    activeEffect: agg.activeEffect,
+    modifiers:  agg.modifiers,
   };
 }
 

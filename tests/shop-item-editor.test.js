@@ -43,6 +43,12 @@ test('l’éditeur remplace les onglets par une page structurée et un aperçu l
   assert.match(shop, /data-sh-action="saveItemNew"/);
   assert.match(shop, /current === clicked \? 0 : clicked/);
   assert.match(shop, /function _siWeaponCombatHtml/);
+  assert.match(shop, /class="si-field si-combat-touch"><span>Toucher<\/span>/);
+  assert.match(shop, /data-field="\$\{single \? 'toucherStat' : ''\}"/);
+  assert.match(shop, /templateExplicit: !!item\?\.template/);
+  assert.match(shop, /!_siEditorState\.templateExplicit && cat\?\.template/);
+  assert.match(shop, /_siEditorState\.templateExplicit = true/);
+  assert.match(shop, /data\.statAttaque = data\.toucherStat \|\| data\.degatsStat \|\| ''/);
   assert.match(shop, /function _siBonusHtml/);
   assert.match(shop, /const _SHOP_EDITOR_RELATION_COLORS/);
   assert.match(shop, /id="si-trait-new"/);
@@ -86,5 +92,6 @@ test('l’éditeur remplace les onglets par une page structurée et un aperçu l
   assert.match(css, /\.si-action-new\s*\{[^}]*height:\s*38px[^}]*font-size:\s*12\.5px !important/s);
   assert.match(css, /\.si-consumable-toggle\s*\{[^}]*height:\s*34px[^}]*font-size:\s*12\.5px !important/s);
   assert.match(css, /@media \(max-width: 1120px\)/);
+  assert.match(css, /@media \(max-width: 950px\)[^{]*\{[^}]*\.si-combat-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s);
   assert.match(css, /@media \(max-width: 820px\)/);
 });
