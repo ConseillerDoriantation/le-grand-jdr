@@ -91,6 +91,8 @@ test('l’éditeur remplace les onglets par une page structurée et un aperçu l
   assert.match(css, /\.si-action-edit\s*\{[^}]*height:\s*28px[^}]*font-size:\s*12px !important/s);
   assert.match(css, /\.si-action-new\s*\{[^}]*height:\s*38px[^}]*font-size:\s*12\.5px !important/s);
   assert.match(css, /\.si-consumable-toggle\s*\{[^}]*height:\s*34px[^}]*font-size:\s*12\.5px !important/s);
+  assert.match(css, /\.si-combat-touch \.si-segment--stats\s*\{[^}]*flex-wrap:\s*nowrap/s);
+  assert.match(css, /\.si-combat-touch \.si-segment--stats button\s*\{[^}]*min-width:\s*0/s);
   assert.match(css, /@media \(max-width: 1120px\)/);
   assert.match(css, /@media \(max-width: 950px\)[^{]*\{[^}]*\.si-combat-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/s);
   assert.match(css, /@media \(max-width: 820px\)/);
