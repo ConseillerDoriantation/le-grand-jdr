@@ -2470,6 +2470,27 @@ export function shopFilterSearch(val) {
   _syncShopSearchChrome();
 }
 
+// Frappe dans la recherche : l'état + le bouton « effacer » répondent tout de
+// suite, mais la reconstruction des résultats (déjà ciblée via _updateResults)
+// est débouncée pour coalescer une frappe rapide. Les appels programmatiques
+// (effacer, changement de catégorie) passent par shopFilterSearch, immédiat.
+let _shSearchTimer = null;
+function shopSearchInput(val) {
+  _filterSearch = val;
+  _page = 1;
+  _syncShopSearchChrome();
+  clearTimeout(_shSearchTimer);
+  _shSearchTimer = setTimeout(() => { _shSearchTimer = null; _updateResults(); }, 120);
+}
+// Force l'application immédiate d'une recherche en attente (avant une sélection
+// clavier, pour ne pas agir sur des résultats périmés).
+function _shFlushSearch() {
+  if (_shSearchTimer == null) return;
+  clearTimeout(_shSearchTimer);
+  _shSearchTimer = null;
+  _updateResults();
+}
+
 function _syncShopSearchChrome() {
   const clear = document.querySelector('.shc-search-clear');
   if (clear) clear.hidden = !_filterSearch;
@@ -2497,6 +2518,7 @@ function _shopKeyboardQol(event) {
   }
   const search = event.target?.closest?.('#sh-search');
   if (search && (event.key === 'Enter' || event.key === 'ArrowDown')) {
+    _shFlushSearch(); // applique une recherche débouncée en attente avant de sélectionner
     const first = document.getElementById('sh-items-results')?.querySelector('[data-sh-key-card="item"]');
     if (!first) return;
     event.preventDefault();
@@ -5317,7 +5339,7 @@ Object.assign(shHandlers, {
   goHome:         () => shopGoHome(),
   goCat:          (el) => shopGoCat(el.dataset.id),
   setChar:        (el) => shopSetChar(el.dataset.id || el.value),
-  search:         (el) => shopFilterSearch(el.value),
+  search:         (el) => shopSearchInput(el.value),
   clearSearch:    () => shopClearSearch(),
   setSort:        (el) => shopSetSort(el.value),
   resetFilters:   () => shopFilterReset(),
