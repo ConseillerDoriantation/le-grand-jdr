@@ -2957,18 +2957,28 @@ const PAGES = {
       a: { label: 'Après-midi', hours: '14 h – 18 h' },
       s: { label: 'Soir', hours: '19 h – 23 h' },
     }[slot] || { label: 'Créneau', hours: 'à préciser' });
-    const controlledChars = () => STATE.isAdmin
-      ? allChars
-      : getControlledCharacters(allChars, STATE.user?.uid);
+    // Mémos par paint : controlledChars() et liveUids() sont appelés plusieurs
+    // fois par rendu (par groupe, par avatar) alors que leur résultat est
+    // constant pendant un paint. On calcule une fois et on réinitialise au début
+    // de chaque paint → données fraîches à chaque rendu, aucune péremption, moins
+    // d'allocations répétées dans le rendu le plus fréquent de l'app.
+    let _ctrlMemo = null, _liveMemo = null;
+    const controlledChars = () => {
+      if (_ctrlMemo) return _ctrlMemo;
+      _ctrlMemo = STATE.isAdmin ? allChars : getControlledCharacters(allChars, STATE.user?.uid);
+      return _ctrlMemo;
+    };
     const liveUids = () => {
+      if (_liveMemo) return _liveMemo;
       const now = Date.now();
-      return new Set((presence || [])
+      _liveMemo = new Set((presence || [])
         .filter(item => item?.uid && item.uid !== STATE.user?.uid)
         .filter(item => {
           const ts = item.lastSeen?.toMillis?.() ?? 0;
           return ts > 0 && now - ts < PRESENCE_TTL_MS;
         })
         .map(item => item.uid));
+      return _liveMemo;
     };
     const groups = () => {
       const base = STATE.isAdmin
@@ -3135,6 +3145,7 @@ const PAGES = {
 
     function paint() {
       paintQueued = false;
+      _ctrlMemo = null; _liveMemo = null; // données fraîches pour ce paint
       const root = document.getElementById('dash-root');
       if (!root || STATE.currentPage !== 'dashboard') return;
       STATE.characters = allChars;
