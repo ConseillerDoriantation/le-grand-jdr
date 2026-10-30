@@ -2229,9 +2229,14 @@ export function selectNpc(id, { syncRoute = true, replace = false } = {}) {
   _refreshActivePanel();
 }
 
+// Frappe dans la recherche PNJ : l'état répond tout de suite, la reconstruction
+// de la liste (déjà ciblée sur #npc-list-items, input intact) est débouncée pour
+// coalescer une frappe rapide sur un gros casting.
+let _npcSearchTimer = null;
 function _npcSearch(val) {
   _filterSearch = val;
-  _refreshList({ keepScroll: false });
+  clearTimeout(_npcSearchTimer);
+  _npcSearchTimer = setTimeout(() => { _npcSearchTimer = null; _refreshList({ keepScroll: false }); }, 120);
 }
 
 function _refreshList({ keepScroll = true } = {}) {

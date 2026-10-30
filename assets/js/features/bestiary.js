@@ -2204,10 +2204,11 @@ function _bstSelectRang(rang) {
 function _bstSearchInput(val) {
   STORE.searchVal = val;
   let visible = 0;
-  // Filtrer en live sans reconstruire toute la page
+  // Filtrer en live sans reconstruire toute la page. Index par id construit une
+  // fois (O(n)) plutôt qu'un .find par carte (O(cartes × créatures)) à la frappe.
+  const byId = new Map((STORE.creatures || []).map(c => [c.id, c]));
   document.querySelectorAll('.bst-card').forEach(card => {
-    const id = card.dataset.beastId;
-    const c  = STORE.creatures.find(x => x.id === id);
+    const c = byId.get(card.dataset.beastId);
     if (!c) return;
     const match = _beastMatchesFilters(c, { search: val });
     card.style.display = match ? '' : 'none';

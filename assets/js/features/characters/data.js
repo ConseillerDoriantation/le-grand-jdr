@@ -2000,16 +2000,6 @@ export function getWeaponDegatsParts(c, item = {}, fallbackKey = 'force') {
   };
 }
 
-// Compatibilité — conservées pour les autres appelants
-export function getToucherDisplay(c, item = {}, fallbackKey = 'force') {
-  return getWeaponToucherParts(c, item, fallbackKey).roll;
-}
-
-export function getDegatsDisplay(c, item = {}, fallbackKey = 'force') {
-  const p = getWeaponDegatsParts(c, item, fallbackKey);
-  return p ? p.roll : '—';
-}
-
 registerActions({
   _setSpellMatrixCAMod:        (el) => _setSpellMatrixCAMod(el.dataset.tid, el.value),
   _setSpellMatrixRedStep:      (el) => _setSpellMatrixRedStep(el.dataset.tid, el.value),

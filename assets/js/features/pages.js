@@ -2928,6 +2928,9 @@ const PAGES = {
       return Math.max(local, Number(wallRead?.seenAt) || 0);
     };
     const schedulePaint = () => {
+      // Toute donnée a pu changer : on invalide les mémos par paint pour que les
+      // handlers lus entre deux paints (toggleQuest…) recalculent sur l'état frais.
+      _ctrlMemo = _liveMemo = _groupsMemo = _sessionsMemo = null;
       if (paintQueued) return;
       paintQueued = true;
       requestAnimationFrame(paint);
@@ -2958,44 +2961,55 @@ const PAGES = {
       a: { label: 'Après-midi', hours: '14 h – 18 h' },
       s: { label: 'Soir', hours: '19 h – 23 h' },
     }[slot] || { label: 'Créneau', hours: 'à préciser' });
-    const controlledChars = () => STATE.isAdmin
-      ? allChars
-      : getControlledCharacters(allChars, STATE.user?.uid);
+    // Mémos par paint : controlledChars() et liveUids() sont appelés plusieurs
+    // fois par rendu (par groupe, par avatar) alors que leur résultat est
+    // constant pendant un paint. On calcule une fois et on réinitialise au début
+    // de chaque paint → données fraîches à chaque rendu, aucune péremption, moins
+    // d'allocations répétées dans le rendu le plus fréquent de l'app.
+    let _ctrlMemo = null, _liveMemo = null, _groupsMemo = null, _sessionsMemo = null;
+    const controlledChars = () => {
+      if (_ctrlMemo) return _ctrlMemo;
+      _ctrlMemo = STATE.isAdmin ? allChars : getControlledCharacters(allChars, STATE.user?.uid);
+      return _ctrlMemo;
+    };
     const liveUids = () => {
+      if (_liveMemo) return _liveMemo;
       const now = Date.now();
-      return new Set((presence || [])
+      _liveMemo = new Set((presence || [])
         .filter(item => item?.uid && item.uid !== STATE.user?.uid)
         .filter(item => {
           const ts = item.lastSeen?.toMillis?.() ?? 0;
           return ts > 0 && now - ts < PRESENCE_TTL_MS;
         })
         .map(item => item.uid));
+      return _liveMemo;
     };
     const groups = () => {
+      if (_groupsMemo) return _groupsMemo;
       const base = STATE.isAdmin
         ? activeGroupsFromSources(story, quests)
         : (isUsableSummary(summary) ? summary.groups : []);
-      return base.map(group => ({
+      _groupsMemo = base.map(group => ({
         ...group,
         participants: groupOverrides.get(group.id) || group.participants || [],
       }));
+      return _groupsMemo;
     };
     const sessions = () => {
+      if (_sessionsMemo) return _sessionsMemo;
       const base = STATE.isAdmin
         ? compactDashboardSessions(agenda, quests)
         : (isUsableSummary(summary) ? summary.sessions : []);
       const order = { m: 0, a: 1, s: 2 };
-      return base
+      _sessionsMemo = base
         .filter(session => isAgendaSessionUpcoming(session, todayIso()))
         .filter(session => STATE.isAdmin
           || !session.participantUids?.length
           || session.participantUids.some(uid => aliasSet.has(uid)))
         .sort((a, b) => String(a.date).localeCompare(String(b.date))
           || (order[a.slot] ?? 9) - (order[b.slot] ?? 9));
+      return _sessionsMemo;
     };
-    const charForParticipant = participant => allChars.find(char => char.id === participant?.charId)
-      || allChars.find(char => char.uid === participant?.uid)
-      || { nom: participant?.nom || 'Personnage', uid: participant?.uid || '' };
     const avatar = (entity, className = '', live = false) => {
       const sizes = { sm: 24, lg: 46, xl: 56 };
       const sizeClass = className.split(/\s+/).find(value => sizes[value]);
@@ -3136,6 +3150,7 @@ const PAGES = {
 
     function paint() {
       paintQueued = false;
+      _ctrlMemo = null; _liveMemo = null; _groupsMemo = null; _sessionsMemo = null; // données fraîches pour ce paint
       const root = document.getElementById('dash-root');
       if (!root || STATE.currentPage !== 'dashboard') return;
       STATE.characters = allChars;

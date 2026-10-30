@@ -492,7 +492,14 @@ function _bumpBonus(val, upgrade) {
 }
 
 /** Agrège les bonus dérivés de tous les items équipés (avec amélioration Artisan). */
+// Mémo : fonction PURE de `equip` (ne lit que des champs des items) et
+// `c.equipement` est toujours REMPLACÉ (jamais muté en place) à chaque
+// changement d'équipement → cache par identité de l'objet equip, stale-proof.
+// Appelée 5× par rendu de fiche (CA/PV/PM/vitesse/init) et par token au VTT.
+const _edbCache = new WeakMap(); // equip → bonus dérivés (lecture seule)
 export function computeEquipDerivedBonus(equip = {}) {
+  const cached = _edbCache.get(equip);
+  if (cached) return cached;
   const out = { pvMaxBonus: 0, pmMaxBonus: 0, vitesseBonus: 0, initiativeBonus: 0, caBonus: 0 };
   Object.values(equip || {}).forEach(it => {
     if (!it) return;
@@ -502,6 +509,7 @@ export function computeEquipDerivedBonus(equip = {}) {
       if (Number.isFinite(v)) out[k] += _bumpBonus(v, up);
     });
   });
+  _edbCache.set(equip, out);
   return out;
 }
 
