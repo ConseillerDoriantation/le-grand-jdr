@@ -191,7 +191,7 @@ export async function toggleSort(idx, btn = null) {
     if (!btn) return;
     btn.classList.toggle('on', active);
     btn.setAttribute('aria-checked', active ? 'true' : 'false');
-    btn.closest('.cs-spellcard')?.classList.toggle('is-actif', active);
+    btn.closest('.cs-spellcard, .cs-grim-row')?.classList.toggle('is-actif', active);
   };
 
   s.actif=nextActif;
@@ -326,6 +326,7 @@ export async function duplicateSort(idx) {
   clone.alwaysPrepared = false;
   clone.mjValidation = 'pending';
   clone.mjValidated = false;
+  delete clone.mjReviewed;   // une copie est un sort neuf : aucune version relue par le MJ
   sorts.splice(idx + 1, 0, clone);
   c.deck_sorts = sorts;
   if (await trySave(spellHostCollection(c), c.id, {deck_sorts: sorts})) {
@@ -337,13 +338,17 @@ export async function duplicateSort(idx) {
   }
 }
 
-export async function setSortValidation(idx, status) {
+// note : consigne MJ facultative (undefined = inchangée), affichée au joueur.
+export async function setSortValidation(idx, status, note) {
   if (!STATE.isAdmin) return;
   const c=_getCurrentSpellChar(); if(!c) return;
   const sorts = [...(c.deck_sorts||[])];
   const s = sorts[idx]; if (!s) return;
   const nextStatus = ['ok', 'pending', 'no'].includes(status) ? status : 'pending';
   const next = { ...s, mjValidation: nextStatus, mjValidated: nextStatus === 'ok' };
+  if (note !== undefined) next.mjNotes = String(note || '').trim();
+  // Le MJ a tranché : la version de référence du diff n'a plus lieu d'être.
+  if (nextStatus !== 'pending') delete next.mjReviewed;
   if (nextStatus !== 'ok') next.actif = false;
   else if (isAlwaysPreparedSpell(next)) next.actif = true;
   sorts[idx] = next;

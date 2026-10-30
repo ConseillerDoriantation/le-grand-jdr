@@ -4388,13 +4388,13 @@ const PAGES = {
         </span>`,
         `data-action="_goToChar" data-id="${_esc(c.id)}"`,
         'is-danger')),
-      ...pendingSpells.slice(0, 4).map(({ c, s }) => actionCard(`
+      ...pendingSpells.slice(0, 4).map(({ c, s, idx }) => actionCard(`
         <span class="adm-action-ico">✨</span>
         <span class="adm-action-body">
           <span class="adm-action-title">Sort à valider</span>
           <span class="adm-action-text">${_esc(s.nom || 'Sort')} · ${_esc(c.nom || 'Personnage')}</span>
         </span>`,
-        `data-action="_goToChar" data-id="${_esc(c.id)}" data-tab="sorts"`,
+        `data-action="_openSpellReview" data-char-id="${_esc(c.id)}" data-spell-id="${_esc(s.id || '')}" data-idx="${idx}"`,
         'is-info')),
       ...playersWithoutChar.slice(0, 3).map(uid => actionCard(`
         <span class="adm-action-ico">📜</span>
@@ -5365,6 +5365,12 @@ registerActions({
     const proxy = document.createElement('button');
     proxy.dataset.action = fn;
     dispatchAction(proxy, new Event('click'));
+  },
+  // File de validation des sorts (tous les persos) : styles de la fiche perso + module à la demande.
+  _openSpellReview: async (btn) => {
+    try { const { _ensureFeatureCss } = await import('../core/navigation.js'); await _ensureFeatureCss('characters'); } catch {}
+    const { openSpellReview } = await import('./characters/spell-review.js');
+    openSpellReview({ charId: btn.dataset.charId, spellId: btn.dataset.spellId, idx: Number(btn.dataset.idx) });
   },
   _adminRelinkPlayer: (btn) => _adminRelinkPlayer(btn.dataset.oldUid, btn.dataset.newUid, btn.dataset.name),
   _adminMergeDuplicate: (btn) => _adminMergeDuplicate(btn.dataset.uids, btn.dataset.email),
