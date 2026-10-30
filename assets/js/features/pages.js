@@ -2927,6 +2927,9 @@ const PAGES = {
       return Math.max(local, Number(wallRead?.seenAt) || 0);
     };
     const schedulePaint = () => {
+      // Toute donnée a pu changer : on invalide les mémos par paint pour que les
+      // handlers lus entre deux paints (toggleQuest…) recalculent sur l'état frais.
+      _ctrlMemo = _liveMemo = _groupsMemo = _sessionsMemo = null;
       if (paintQueued) return;
       paintQueued = true;
       requestAnimationFrame(paint);
@@ -2962,7 +2965,7 @@ const PAGES = {
     // constant pendant un paint. On calcule une fois et on réinitialise au début
     // de chaque paint → données fraîches à chaque rendu, aucune péremption, moins
     // d'allocations répétées dans le rendu le plus fréquent de l'app.
-    let _ctrlMemo = null, _liveMemo = null;
+    let _ctrlMemo = null, _liveMemo = null, _groupsMemo = null, _sessionsMemo = null;
     const controlledChars = () => {
       if (_ctrlMemo) return _ctrlMemo;
       _ctrlMemo = STATE.isAdmin ? allChars : getControlledCharacters(allChars, STATE.user?.uid);
@@ -2981,26 +2984,30 @@ const PAGES = {
       return _liveMemo;
     };
     const groups = () => {
+      if (_groupsMemo) return _groupsMemo;
       const base = STATE.isAdmin
         ? activeGroupsFromSources(story, quests)
         : (isUsableSummary(summary) ? summary.groups : []);
-      return base.map(group => ({
+      _groupsMemo = base.map(group => ({
         ...group,
         participants: groupOverrides.get(group.id) || group.participants || [],
       }));
+      return _groupsMemo;
     };
     const sessions = () => {
+      if (_sessionsMemo) return _sessionsMemo;
       const base = STATE.isAdmin
         ? compactDashboardSessions(agenda, quests)
         : (isUsableSummary(summary) ? summary.sessions : []);
       const order = { m: 0, a: 1, s: 2 };
-      return base
+      _sessionsMemo = base
         .filter(session => isAgendaSessionUpcoming(session, todayIso()))
         .filter(session => STATE.isAdmin
           || !session.participantUids?.length
           || session.participantUids.some(uid => aliasSet.has(uid)))
         .sort((a, b) => String(a.date).localeCompare(String(b.date))
           || (order[a.slot] ?? 9) - (order[b.slot] ?? 9));
+      return _sessionsMemo;
     };
     const charForParticipant = participant => allChars.find(char => char.id === participant?.charId)
       || allChars.find(char => char.uid === participant?.uid)
@@ -3145,7 +3152,7 @@ const PAGES = {
 
     function paint() {
       paintQueued = false;
-      _ctrlMemo = null; _liveMemo = null; // données fraîches pour ce paint
+      _ctrlMemo = null; _liveMemo = null; _groupsMemo = null; _sessionsMemo = null; // données fraîches pour ce paint
       const root = document.getElementById('dash-root');
       if (!root || STATE.currentPage !== 'dashboard') return;
       STATE.characters = allChars;
