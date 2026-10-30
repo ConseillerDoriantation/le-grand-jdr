@@ -3,7 +3,7 @@
 // âœ“ Admin : CRUD crÃ©atures, image+crop, attaques/traits/butins dynamiques
 // âœ“ Joueur : galerie + suivi personnel (PV/PM live, notes)
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, getDocData, saveDoc } from '../data/firestore.js';
+import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, getDocData, saveDoc, batchUpdateInCol } from '../data/firestore.js';
 import { trySave, confirmDelete, tryDoc } from '../shared/crud.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, popModal, confirmModal, promptModal } from '../shared/modal.js';
@@ -25,6 +25,9 @@ import { makeSortable } from '../shared/sortable-helper.js';
 import { spellActionCardHtml } from '../shared/spell-action-card.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
 import { naturalWeaponDamageFormula } from '../shared/bestiary-combat.js';
+import { openCatalogAdmin } from '../shared/catalog-admin.js';
+import { catalogAutoPlural, catalogReplacementFor } from '../shared/catalog-admin-utils.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // DÃ‰LÃ‰GATION D'Ã‰VÃ‰NEMENTS â€” remplace les onclick/oninput/onchange inline
@@ -61,6 +64,15 @@ let _bstDragBlockClick = false;
 let _bstClickGuardInstalled = false;
 let _bstReordering = false;
 let _pendingTargetBeastId = null;
+let _pendingRouteBeastId = null;
+
+function _bstRouteId() {
+  return String(getRouteSub('bestiaire') || '').split('/')[0] || '';
+}
+
+function _bstSyncRoute({ replace = false } = {}) {
+  setRouteSub('bestiaire', STORE.activeId || '', { replace });
+}
 
 // ── Refonte fiche MJ (v2) — état local des sections éditables ─────────────────
 let _bstDmgEdit  = false;         // Profil de dégâts : mode édition (segments) vs lecture
@@ -148,7 +160,7 @@ function _normalizeBestiaryRank(raw = {}, index = 0) {
   return {
     id: _rankId(raw.id || label),
     label,
-    plural: String(raw.plural || raw.labelPlural || `${label}s`).trim(),
+    plural: String(raw.plural || raw.labelPlural || catalogAutoPlural(label)).trim(),
     color,
     glow: raw.glow || `${color}2e`,
     border: raw.border || `${color}66`,
@@ -1127,6 +1139,7 @@ export async function renderBestiary() {
   const content = document.getElementById('main-content');
   content.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text-dim)"><div style="font-size:2rem">...</div></div>`;
   const target = consumeTargetEntity('bestiary');
+  const targetId = target?.id || '';
   _pendingTargetBeastId = target?.id || _pendingTargetBeastId;
 
   // SÃ‰CURITÃ‰ : la vue "bestiaire d'un joueur" (viewAsUid) ne doit JAMAIS persister
@@ -1189,6 +1202,14 @@ export async function renderBestiary() {
 
   const cachedCreatures = getCachedCollection(col);
   _bstApplyData(cachedCreatures || []);
+  if (targetId && STORE.activeId === targetId) {
+    _bstSyncRoute({ replace: true });
+  } else if (!targetId) {
+    const routeId = _bstRouteId();
+    _pendingRouteBeastId = routeId || null;
+    STORE.activeId = routeId && STORE.creatures.some(creature => creature.id === routeId) ? routeId : null;
+    if (STORE.activeId) _pendingRouteBeastId = null;
+  }
   _render();
 
   const trackerUid = (STATE.isAdmin && STORE.viewAsUid) || STATE.user?.uid;
@@ -1232,6 +1253,11 @@ function _bstApplyData(all) {
     STORE.filterType = '';
     STORE.filterRang = '';
     _pendingTargetBeastId = null;
+    _bstSyncRoute({ replace: true });
+  }
+  if (!_pendingTargetBeastId && _pendingRouteBeastId && STORE.creatures.some(c => c.id === _pendingRouteBeastId)) {
+    STORE.activeId = _pendingRouteBeastId;
+    _pendingRouteBeastId = null;
   }
 }
 
@@ -1399,6 +1425,7 @@ async function _bstCreateDraft() {
     const newId = await addToCol(col, data);
     await _bstHydrate();
     STORE.activeId = newId;
+    _bstSyncRoute();
     _render();
     setTimeout(() => {
       const nameInput = document.querySelector('.bst-panel-name-input');
@@ -1577,13 +1604,17 @@ function _bstInstallInput() {
       e.preventDefault();
       _bstFocusIdx = Math.max(0, Math.min(cards.length - 1, _bstFocusIdx + step));
       const t = cards[_bstFocusIdx];
-      STORE.activeId = t.dataset.id; _syncActivePanel();
+      STORE.activeId = t.dataset.id;
+      _bstSyncRoute({ replace: true });
+      _syncActivePanel();
       document.querySelectorAll('.bst-bc')[_bstFocusIdx]?.focus({ preventScroll: false });
       return;
     }
     if (e.key === 'Enter' && _bstFocusIdx >= 0 && !inField) {
       e.preventDefault();
-      STORE.activeId = cards[_bstFocusIdx].dataset.id; _syncActivePanel();
+      STORE.activeId = cards[_bstFocusIdx].dataset.id;
+      _bstSyncRoute();
+      _syncActivePanel();
     }
   });
 }
@@ -1771,7 +1802,8 @@ function _renderCard(c, sortable = _canReorderBestiary()) {
   const sub = [c.type, c.environnement].filter(Boolean).join(' · ') || 'Sans classification';
   const isActive = c.id === STORE.activeId;
   return `<button class="bst-bc${isActive ? ' on' : ''}${c.hidden && admin ? ' hid' : ''}${sortable ? ' bst-sortable-item' : ''}"
-    style="--rc:${rs.color}" data-beast-id="${_esc(c.id)}" data-bst-action="open" data-id="${_esc(c.id)}">
+    style="--rc:${rs.color}" data-beast-id="${_esc(c.id)}" data-bst-action="open" data-id="${_esc(c.id)}"
+    data-nav-page="bestiaire" data-nav-sub="${_esc(c.id)}">
     <span class="bst-bc-r"></span>
     <span class="bst-bc-m">
       ${c.imageUrl ? `<img src="${_esc(c.imageUrl)}" alt="" loading="lazy">` : `<span class="bst-bc-e">${_esc(c.emoji || '❓')}</span>`}
@@ -2079,92 +2111,78 @@ export function openBestiaryEntry(id) {
   _bstOpen(id);
 }
 
-function _bstOpen(id) {
+function _bstOpen(id, { syncRoute = true, replace = false } = {}) {
   if (_bstDragBlockClick) return;
   STORE.activeId = STORE.activeId === id ? null : id;
+  if (syncRoute) _bstSyncRoute({ replace });
   _syncActivePanel();
 }
-function _bstClose() {
+function _bstClose({ syncRoute = true, replace = false } = {}) {
   STORE.activeId = null;
+  if (syncRoute) _bstSyncRoute({ replace });
   _syncActivePanel();
 }
 
-let _bstRankDraft = [];
+let _bstCatalogUsage = [];
 
-function _renderBestiaryRanksAdmin() {
-  const rows = _bstRankDraft.map((rank, index) => `
-    <article class="bst-rank-admin-card" style="--rank-color:${_esc(rank.color || '#94a3b8')};--rank-glow:${_esc(rank.glow || 'rgba(148,163,184,.18)')}" data-index="${index}">
-      <div class="bst-rank-admin-preview">
-        <span class="bst-rank-admin-badge">${_esc(rank.label || 'Rang')}</span>
-        <div class="bst-rank-admin-name">
-          <strong>${_esc(rank.label || 'Rang')}</strong>
-          <small>Apparaît sur les cartes et la fiche créature</small>
-        </div>
-      </div>
+async function _loadBestiaryRankUsage(ranks, defaultId) {
+  const meta = await getDocData('bestiary_meta', 'list').catch(() => null);
+  const lists = Array.isArray(meta?.list) ? meta.list : STORE.bestiaireList;
+  const ids = new Set(['main', ...(lists || []).map(entry => entry.id).filter(Boolean)]);
+  const collections = [...ids].map(id => ({ id, col: id === 'main' ? 'bestiary' : `bestiary_${id}` }));
+  const loaded = await Promise.all(collections.map(async entry => ({ ...entry, items: await loadCollection(entry.col).catch(() => []) })));
+  _bstCatalogUsage = loaded.flatMap(entry => entry.items.map(item => ({ item, col: entry.col, effectiveId: item.rang || defaultId })));
+  const counts = Object.fromEntries(ranks.map(rank => [rank.id, 0]));
+  _bstCatalogUsage.forEach(({ effectiveId }) => { if (effectiveId in counts) counts[effectiveId] += 1; });
+  return counts;
+}
 
-      <label class="bst-rank-admin-field">
-        <span>Nom du rang</span>
-        <input class="input-field" value="${_esc(rank.label || '')}" data-input="_bstRankField" data-index="${index}" data-field="label" placeholder="Ex. Elite">
-      </label>
-
-      <label class="bst-rank-admin-field">
-        <span>Libellé des filtres</span>
-        <input class="input-field" value="${_esc(rank.plural || '')}" data-input="_bstRankField" data-index="${index}" data-field="plural" placeholder="Ex. Elites">
-      </label>
-
-      <div class="bst-rank-admin-color">
-        <label class="bst-rank-color-picker">
-          <span>Couleur</span>
-          <input type="color" value="${_esc(rank.color || '#94a3b8')}" data-change="_bstRankField" data-index="${index}" data-field="color">
-        </label>
-        <div class="bst-rank-swatches" aria-label="Couleurs rapides">
-          ${BESTIARY_RANK_PALETTE.map(color => `
-            <button type="button" class="bst-rank-swatch${(rank.color || '').toLowerCase() === color.toLowerCase() ? ' is-active' : ''}"
-              style="--sw:${color}" data-action="_bstRankColor" data-index="${index}" data-color="${color}" aria-label="Couleur ${color}"></button>`).join('')}
-        </div>
-      </div>
-
-      <div class="bst-rank-admin-actions">
-        <button type="button" class="btn btn-outline btn-sm" data-action="_bstRankMove" data-index="${index}" data-dir="-1" title="Monter" ${index === 0 ? 'disabled' : ''}>↑</button>
-        <button type="button" class="btn btn-outline btn-sm" data-action="_bstRankMove" data-index="${index}" data-dir="1" title="Descendre" ${index === _bstRankDraft.length - 1 ? 'disabled' : ''}>↓</button>
-        <button type="button" class="btn btn-outline btn-sm is-danger" data-action="_bstRankDelete" data-index="${index}" title="Supprimer">×</button>
-      </div>
-    </article>`).join('');
-
-  openModal('', `
-    <div class="sh-admin-modal is-bestiary-ranks">
-      <div class="sh-admin-head">
-        <div class="sh-admin-head-ico">👹</div>
-        <div class="sh-admin-head-title">
-          <h2>Rangs du bestiaire</h2>
-          <small>Ces rangs alimentent les filtres, les cartes, la fiche des créatures et les exports de cette aventure.</small>
-        </div>
-        <button class="sh-admin-close" data-action="_bstRankClose" aria-label="Fermer">×</button>
-      </div>
-      <div class="sh-admin-body bst-rank-admin-body">
-        <div class="bst-rank-admin-guide">
-          <div><b>Rang tactique</b><small>Le nom est affiché sur chaque créature et dans les exports.</small></div>
-          <div><b>Filtre de galerie</b><small>Le libellé pluriel sert aux boutons de filtre du bestiaire.</small></div>
-        </div>
-        <div class="bst-rank-admin-list">
-        ${rows || '<div class="eqs-admin-empty">Aucun rang. Ajoute au moins un rang pour classer les créatures.</div>'}
-        </div>
-        <button class="bst-rank-admin-add" data-action="_bstRankAdd">+ Ajouter un rang</button>
-      </div>
-      <div class="sh-admin-footer">
-        <button class="btn btn-outline btn-sm" data-action="_bstRankClose">Annuler</button>
-        <button class="btn btn-gold btn-sm" data-action="_bstRankSave">Enregistrer</button>
-      </div>
-    </div>`);
+async function _reassignBestiaryRanks(changes) {
+  const affected = _bstCatalogUsage
+    .map(entry => ({ entry, to: catalogReplacementFor(entry.effectiveId, changes) }))
+    .filter(change => change.to);
+  const updates = affected.map(({ entry, to }) => ({ col: entry.col, id: entry.item.id, data: { rang: to } }));
+  for (let index = 0; index < updates.length; index += 450) await batchUpdateInCol(updates.slice(index, index + 450));
+  affected.forEach(({ entry, to }) => {
+    entry.item.rang = to;
+    entry.effectiveId = to;
+  });
+  STORE.filterRang = catalogReplacementFor(STORE.filterRang, changes) || STORE.filterRang;
+  const localRanks = new Map(affected
+    .filter(({ entry }) => entry.col === STORE.currentCol)
+    .map(({ entry, to }) => [entry.item.id, to]));
+  STORE.creatures.forEach(creature => { if (localRanks.has(creature.id)) creature.rang = localRanks.get(creature.id); });
 }
 
 export async function openBestiaryRanksAdmin() {
   if (!STATE.isAdmin) return;
-  await _ensureFeatureCss('shop');
-  await _ensureFeatureCss('bestiaire');
   await _loadBestiaryRanks();
-  _bstRankDraft = BESTIARY_RANKS.map(r => ({ ...r }));
-  _renderBestiaryRanksAdmin();
+  return openCatalogAdmin({
+    kind: 'bestiary', icon: '👹', accent: '#ff5a7e',
+    title: 'Rangs du bestiaire',
+    sub: 'Filtres, cartes, fiches de créatures et exports de cette aventure.',
+    noun: ['rang', 'rangs'], fem: false,
+    item: ['créature', 'créatures'], itemFem: true, all: 'Toutes',
+    emoji: false, plural: true, idPrefix: 'rang_',
+    defaultNote: 'Le premier rang est attribué aux créatures sans rang et aux nouvelles créatures.',
+    palette: BESTIARY_RANK_PALETTE,
+    load: () => BESTIARY_RANKS,
+    count: _loadBestiaryRankUsage,
+    setColor: (rank, color) => { rank.glow = `${color}2e`; rank.border = `${color}66`; rank.bg = `${color}1a`; },
+    save: _saveBestiaryRanks,
+    reassign: _reassignBestiaryRanks,
+    sample: () => {
+      const creature = _bstCatalogUsage[0]?.item || STORE.creatures[0] || {};
+      return {
+        title: creature.nom || 'Chef gobelin',
+        subtitle: [creature.type, creature.environnement].filter(Boolean).join(' · ') || 'Humanoïde · Forêt',
+        meta: [`PV ${creature.pvMax ?? '—'}`, `CA ${creature.ca ?? '—'}`, creature.dangerositeXp != null ? `${creature.dangerositeXp} XP` : 'FP —'].join(' · '),
+        image: creature.imageUrl || '',
+      };
+    },
+    afterSave: () => { if (document.querySelector('.bst-page-v2')) _render(); },
+    onError: notifySaveError,
+  });
 }
 
 function _bstSetRang(rang) { STORE.filterRang = rang; _render(); }
@@ -2255,6 +2273,7 @@ async function _bstSwitchBestiaire(id) {
   STORE.filterType  = '';
   STORE.filterRang  = '';
   STORE.filterPrep  = '';
+  _bstSyncRoute({ replace: true });
   await renderBestiary();
 }
 
@@ -2264,6 +2283,7 @@ async function _bstViewAs(uid) {
   if (!STATE.isAdmin) return;
   STORE.viewAsUid = (uid && uid !== STATE.user?.uid) ? uid : null;
   STORE.activeId  = null;
+  _bstSyncRoute({ replace: true });
   await renderBestiary();
 }
 
@@ -2279,6 +2299,7 @@ async function _bstCreateBestiaire() {
   STORE.activeId    = null;
   STORE.filterRang  = '';
   STORE.filterPrep  = '';
+  _bstSyncRoute({ replace: true });
   await renderBestiary();
 }
 
@@ -2447,6 +2468,18 @@ function _bstReset(id) {
 
 // â”€â”€ Override PAGES.bestiaire + exports â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 PAGES.bestiaire = renderBestiary;
+
+// La fiche ouverte appartient à l'historique de navigation, mais sa restauration
+// reste purement locale : les créatures et le tracker déjà abonnés sont réutilisés.
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'bestiaire' || !document.getElementById('bst-root')) return;
+  const id = String(event.detail.sub || '').split('/')[0] || '';
+  if (id && !STORE.creatures.some(creature => creature.id === id)) return;
+  event.preventDefault();
+  _pendingRouteBeastId = null;
+  STORE.activeId = id || null;
+  _syncActivePanel();
+});
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // MODAL IMAGE â€” Ã©diteur d'image dÃ©diÃ© de la crÃ©ature (depuis le panneau)
@@ -2752,56 +2785,4 @@ Object.assign(bstHandlers, {
 
 registerActions({
   openBestiaryRanksAdmin: () => openBestiaryRanksAdmin(),
-  _bstRankClose: () => closeModal(),
-  _bstRankField: el => {
-    const rank = _bstRankDraft[Number(el.dataset.index)];
-    if (!rank) return;
-    rank[el.dataset.field] = el.value;
-    if (el.dataset.field === 'label' && !rank.plural) rank.plural = `${el.value}s`;
-    if (el.dataset.field === 'color') {
-      rank.glow = `${el.value}2e`;
-      rank.border = `${el.value}66`;
-      rank.bg = `${el.value}1a`;
-    }
-  },
-  _bstRankColor: btn => {
-    const rank = _bstRankDraft[Number(btn.dataset.index)];
-    if (!rank) return;
-    rank.color = btn.dataset.color || rank.color;
-    rank.glow = `${rank.color}2e`;
-    rank.border = `${rank.color}66`;
-    rank.bg = `${rank.color}1a`;
-    _renderBestiaryRanksAdmin();
-  },
-  _bstRankMove: btn => {
-    const from = Number(btn.dataset.index);
-    const to = from + Number(btn.dataset.dir);
-    if (!_bstRankDraft[from] || to < 0 || to >= _bstRankDraft.length) return;
-    [_bstRankDraft[from], _bstRankDraft[to]] = [_bstRankDraft[to], _bstRankDraft[from]];
-    _renderBestiaryRanksAdmin();
-  },
-  _bstRankDelete: btn => {
-    const index = Number(btn.dataset.index);
-    if (!_bstRankDraft[index]) return;
-    _bstRankDraft.splice(index, 1);
-    _renderBestiaryRanksAdmin();
-  },
-  _bstRankAdd: () => {
-    _bstRankDraft.push(_normalizeBestiaryRank({ id: `rang_${Date.now()}`, label: 'Nouveau rang', plural: 'Nouveaux rangs', color: '#94a3b8' }, _bstRankDraft.length));
-    _renderBestiaryRanksAdmin();
-  },
-  _bstRankSave: async () => {
-    if (!_bstRankDraft.some(r => String(r.label || '').trim())) {
-      showNotif('Ajoute au moins un rang.', 'error');
-      return;
-    }
-    try {
-      await _saveBestiaryRanks(_bstRankDraft);
-      showNotif('Rangs du bestiaire enregistrés.', 'success');
-      closeModal();
-      _render();
-    } catch (error) {
-      notifySaveError(error);
-    }
-  },
 });

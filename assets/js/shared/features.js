@@ -36,7 +36,11 @@ const _ALL_KEYS = TOGGLEABLE_FEATURES.map(f => f.key);
 // (fiches, missions, séances, créatures, PNJ, table virtuelle). Le reste s'active
 // via Gérer l'aventure. Décision produit 2026-07-16 (D&D-first).
 export const DEFAULT_ENABLED = ['characters', 'story', 'agenda', 'bestiaire', 'npcs', 'vtt'];
-export const FREE_FEATURES = new Set(DEFAULT_ENABLED);
+// Features gratuites = socle par défaut + extras non premium. `recettes` est
+// gratuite mais reste OPT-IN (hors DEFAULT_ENABLED) : son unique accès est le
+// bouton 📖 de l'inventaire (retirée du menu à dessein), donc inutile de la
+// verrouiller derrière le premium sous peine de la rendre introuvable.
+export const FREE_FEATURES = new Set([...DEFAULT_ENABLED, 'recettes']);
 
 // Pages toujours disponibles (jamais togglables). `admin` = Console MJ, gardée
 // via son propre gating admin-only ; le reste = socle de navigation.

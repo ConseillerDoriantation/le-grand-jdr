@@ -72,6 +72,7 @@ function _spellLightsFor(page, tokens) {
 }
 
 const EDIT_COLOR  = { wall:'#ef4444', door:'#fb923c', window:'#67e8f9', light:'#fbbf24', hide:'#1e293b', reveal:'#fde047' };
+const _isFogTool = tool => tool === 'hide' || tool === 'reveal';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MATH
@@ -419,6 +420,10 @@ export function fogUpdate(page, tokens, isAdmin) {
   _playerFogCanvas = isAdmin ? null : canvas;
   _playerFogContext = isAdmin ? null : canvas.getContext('2d', { willReadFrequently: true });
   _fogGeometryKey = geometryKey;
+  // La page est généralement rendue avant que ce canvas asynchrone soit prêt.
+  // Reconstruire alors les seules cibles d'interaction évite que les portes
+  // restent non cliquables côté joueur jusqu'à la prochaine écriture de page.
+  if (!isAdmin) fogRenderWalls(page, false);
   const worldWidth = (page.cols || 24) * _CELL;
   const worldHeight = (page.rows || 18) * _CELL;
   // Réutilise un unique nœud image : on remplace juste son canvas au lieu de
@@ -510,9 +515,10 @@ function _addOpenDoorVisual(K, group, g, k) {
   _addStructureLine(K, group, [...hinge,...thresholdEnd], {
     stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:1.5*k, dash:[3*k,5*k], opacity:.55,
   });
-  const leafEnd = [hinge[0] + g.nx*leafLength, hinge[1] + g.ny*leafLength];
-  _addStructureLine(K, group, [...hinge,...leafEnd], { stroke:VTT_STRUCTURE_STYLE.casing, strokeWidth:11.2*k });
-  _addStructureLine(K, group, [...hinge,...leafEnd], { stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:8*k });
+  const leafPoints = _openDoorLeafPoints(g, k);
+  const leafEnd = leafPoints.slice(2);
+  _addStructureLine(K, group, leafPoints, { stroke:VTT_STRUCTURE_STYLE.casing, strokeWidth:11.2*k });
+  _addStructureLine(K, group, leafPoints, { stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:8*k });
   const start = Math.atan2(g.uy, g.ux);
   const arc = [];
   for (let i=0; i<=12; i++) {
@@ -522,6 +528,37 @@ function _addOpenDoorVisual(K, group, g, k) {
   _addStructureLine(K, group, arc, {
     stroke:VTT_STRUCTURE_STYLE.wood, strokeWidth:1.4*k, dash:[3*k,4*k], opacity:.7,
   });
+}
+
+function _openDoorLeafPoints(g, k) {
+  const inset = Math.min(5*k, g.length*.2);
+  const leafLength = Math.max(4*k, g.length - inset*2);
+  const hinge = _structurePoint(g, inset);
+  return [...hinge, hinge[0] + g.nx*leafLength, hinge[1] + g.ny*leafLength];
+}
+
+function _structureHitStrokeWidth(k) {
+  const scale = Math.max(.15, Number(_stage?.scaleX?.()) || 1);
+  const coarsePointer = globalThis.matchMedia?.('(pointer: coarse)')?.matches === true;
+  // Cible assez tolérante pour rester utilisable en dézoomant, sans déborder
+  // largement sur les tokens et les cases voisines. Le tactile conserve une
+  // marge légèrement supérieure au pointeur précis d'une souris.
+  return Math.max(14*k, (coarsePointer ? 28 : 18) / scale);
+}
+
+function _playerStructureIsVisible(g, page = _page) {
+  if (!page?.fogEnabled && !(page?.fogOps || []).length) return true;
+  // Une porte fermée constitue précisément la frontière de vision : son milieu
+  // peut être classé sombre alors que sa face côté joueur est visible. On sonde
+  // plusieurs points des deux côtés, sans rendre cliquable une structure distante.
+  const offset = Math.max(2, _CELL*.12);
+  for (const along of [g.length*.2, g.length*.5, g.length*.8]) {
+    for (const normal of [0, -offset, offset]) {
+      const [x, y] = _structurePoint(g, along, normal);
+      if (_playerPointIsVisible(x, y, page)) return true;
+    }
+  }
+  return false;
 }
 
 function _windowPanelPoints(g, from, to, offset, halfThickness) {
@@ -646,6 +683,29 @@ function _shakeStructure(id) {
   step(0);
 }
 
+function _tokenGroupAtPointer() {
+  const pointer = _stage?.getPointerPosition?.();
+  if (!pointer) return null;
+  let node = _tokenLayer?.getIntersection?.(pointer) || null;
+  while (node && node !== _tokenLayer) {
+    if (String(node.id?.() || '').startsWith('tok-')) return node;
+    node = node.getParent?.() || null;
+  }
+  return null;
+}
+
+/** Le calque des structures est visuellement au-dessus des tokens afin que le
+ * brouillard reste correct. Son hit-test ne doit toutefois jamais voler une
+ * interaction à un token placé au même endroit. */
+function _forwardStructureEventToToken(event, type) {
+  const token = _tokenGroupAtPointer();
+  if (!token) return false;
+  event.cancelBubble = true;
+  _hideStructureTip();
+  token.fire(type, { evt:event.evt }, false);
+  return true;
+}
+
 function _bindObstacleNode(node, halo, wall, state, isAdmin) {
   if (!node) return;
   node.on('mouseenter', event => {
@@ -664,9 +724,19 @@ function _bindObstacleNode(node, halo, wall, state, isAdmin) {
     _wallsLayer?.batchDraw?.();
   });
   node.on('click tap', event => {
+    const button = event.evt?.button;
+    if (button != null && button !== 0) return;
+    if (_forwardStructureEventToToken(event, 'click')) return;
     event.cancelBubble = true;
     _hideStructureTip();
     if (state.canOpen) _toggleDoor(wall, isAdmin, event);
+  });
+  node.on('contextmenu', event => {
+    event.evt?.preventDefault?.();
+    if (_forwardStructureEventToToken(event, 'contextmenu')) return;
+    event.cancelBubble = true;
+    _hideStructureTip();
+    if (isAdmin) _selectItem(wall.id);
   });
 }
 
@@ -689,10 +759,11 @@ export function fogRenderWalls(page, isAdmin) {
     const k = C/64;
     const group = new K.Group({ id:`vtt-structure-${w.id}`, name:'vtt-structure' });
     let halo = null;
+    const hitStrokeWidth = _structureHitStrokeWidth(k);
 
     if (state.canOpen && !_editMode) {
       halo = _addStructureLine(K, group, points, {
-        stroke:'rgba(126,176,255,.45)', strokeWidth:20*k, opacity:0,
+        stroke:'rgba(126,176,255,.45)', strokeWidth:hitStrokeWidth, opacity:0,
       });
     }
 
@@ -704,20 +775,36 @@ export function fogRenderWalls(page, isAdmin) {
 
     if (_lockIsVisible(w, isAdmin, page)) _addLockMedallion(K, group, w, g);
 
-    const canInteract = isAdmin || _playerPointIsVisible(g.mx, g.my, page);
-    if (!_editMode) {
-      const hitLine = new K.Line({
-        points, stroke:'rgba(0,0,0,0.001)', strokeWidth:22*k,
-        lineCap:'round', listening:canInteract,
-      });
-      _bindObstacleNode(hitLine, halo, w, state, isAdmin);
-      group.add(hitLine);
-    } else if (isAdmin) {
+    const canInteract = isAdmin || _playerStructureIsVisible(g, page);
+    if (!_editMode && state.canOpen) {
+      const hitPaths = [points];
+      // Quand la porte est ouverte, son battant visible devient lui aussi une
+      // vraie cible ; le joueur n'a plus à deviner l'ancien seuil fermé.
+      if (state.type === 'door' && state.open) hitPaths.push(_openDoorLeafPoints(g, k));
+      for (const hitPoints of hitPaths) {
+        const hitLine = new K.Line({
+          points:hitPoints, stroke:'rgba(0,0,0,0.001)', strokeWidth:hitStrokeWidth,
+          lineCap:'round', listening:canInteract,
+        });
+        _bindObstacleNode(hitLine, halo, w, state, isAdmin);
+        group.add(hitLine);
+      }
+    } else if (_editMode && isAdmin) {
       const hitLine = new K.Line({
         points, stroke:'rgba(0,0,0,0.001)', strokeWidth:14*k,
         lineCap:'round', listening:true,
       });
-      hitLine.on('click tap', event => { event.cancelBubble = true; _selectItem(w.id); });
+      hitLine.on('click tap', event => {
+        const button = event.evt?.button;
+        if (button != null && button !== 0) return;
+        event.cancelBubble = true;
+        _selectItem(w.id);
+      });
+      hitLine.on('contextmenu', event => {
+        event.evt?.preventDefault?.();
+        event.cancelBubble = true;
+        _selectItem(w.id);
+      });
       group.add(hitLine);
       if (_selectedId === w.id) {
         _addStructureLine(K, group, points, {
@@ -732,6 +819,9 @@ export function fogRenderWalls(page, isAdmin) {
   // Les zones révélées restent volontairement très lisibles : en mode
   // Structure, leur contour pointillé ne doit pas se confondre avec la carte.
   if (_editMode && isAdmin) {
+    // Les zones restent visibles avec les outils de structure, mais ne doivent
+    // pas recouvrir leur zone de clic ni empêcher le tracé sur la carte.
+    const canSelectFogOp = _isFogTool(_editTool);
     for (const op of (page.fogOps || [])) {
       const sel = _selectedId === op.id;
       const revealed = op.type === 'reveal';
@@ -746,9 +836,11 @@ export function fogRenderWalls(page, isAdmin) {
         strokeWidth: sel ? 3 : (revealed ? 2.25 : 1.25),
         dash: revealed ? [10, 6] : [4, 5],
         opacity: sel ? 1 : (revealed ? 0.95 : 0.65),
-        listening: true,
+        listening: canSelectFogOp,
       });
-      rect.on('click tap', e => { e.cancelBubble = true; _selectItem(op.id); });
+      if (canSelectFogOp) {
+        rect.on('click tap', e => { e.cancelBubble = true; _selectItem(op.id); });
+      }
       _wallsLayer.add(rect);
     }
   }
@@ -912,7 +1004,7 @@ export function fogToggleEditMode(enabled, page) {
   const _snapStep = ev => {
     const e = ev?.evt || ev || {};
     if (e.shiftKey) return 0.1;
-    const rect = _editTool === 'hide' || _editTool === 'reveal';
+    const rect = _isFogTool(_editTool);
     if (e.altKey) return rect ? 0.25 : 0.5;
     return rect ? 0.5 : 1;
   };
@@ -947,12 +1039,17 @@ export function fogToggleEditMode(enabled, page) {
   const _hideSnapDot = () => { if (_snapDot) _snapDot.visible(false); };
 
   let _currentStep = 1; // mis à jour à mousedown, conservé pendant le drag
+  let _rightDown = null;
 
   const _isLineTool = t => t === 'wall' || t === 'door' || t === 'window';
-  const _isRectTool = t => t === 'hide' || t === 'reveal';
+  const _isRectTool = _isFogTool;
 
   const onDown = e => {
-    if (e.evt?.button === 2 || e.evt?.button === 1) return; // clic-droit / molette = pan, jamais de pose
+    if (e.evt?.button === 2) {
+      _rightDown = { x:e.evt.clientX, y:e.evt.clientY };
+      return; // clic-droit = pan ou menu contextuel, jamais de pose
+    }
+    if (e.evt?.button === 1) return; // molette = pan, jamais de pose
     const pos = _worldPos(); if (!pos) return;
     const K = window.Konva;
 
@@ -1057,9 +1154,24 @@ export function fogToggleEditMode(enabled, page) {
     _wallsLayer?.batchDraw();
   };
 
+  const onContextMenu = e => {
+    const moved = _rightDown
+      ? Math.hypot(e.evt.clientX - _rightDown.x, e.evt.clientY - _rightDown.y) > 6
+      : false;
+    _rightDown = null;
+    if (moved) return;
+    const pos = _worldPos();
+    const fogOp = pos ? _fogOpAtPos(pos) : null;
+    if (!fogOp) return;
+    e.evt.preventDefault();
+    e.cancelBubble = true;
+    _selectItem(fogOp.id);
+  };
+
   _stageEvts = {
     mousedown: onDown, mousemove: onMove, mouseup: onUp,
     touchstart: onDown, touchmove: onMove, touchend: onUp,
+    contextmenu: onContextMenu,
   };
   Object.entries(_stageEvts).forEach(([ev, fn]) => _stage.on(ev, fn));
 }
@@ -1139,6 +1251,16 @@ export function fogRedo() {
   return false;
 }
 
+function _fogOpAtPos(pos) {
+  if (!_page || !pos) return null;
+  const fogOps = _page.fogOps || [];
+  for (let i = fogOps.length - 1; i >= 0; i--) {
+    const r = fogOps[i];
+    if (pos.x >= r.x*_CELL && pos.x <= (r.x+r.w)*_CELL && pos.y >= r.y*_CELL && pos.y <= (r.y+r.h)*_CELL) return r;
+  }
+  return null;
+}
+
 function _deleteAtPos(pos) {
   if (!_page) return;
   const C = _CELL, THRESH = C * 0.25;
@@ -1166,14 +1288,10 @@ function _deleteAtPos(pos) {
     }
   }
   // Cherche un rectangle de brouillard sous le curseur (dernier ajouté en priorité)
-  const fogOps = _page.fogOps || [];
-  for (let i = fogOps.length - 1; i >= 0; i--) {
-    const r = fogOps[i];
-    if (pos.x >= r.x*C && pos.x <= (r.x+r.w)*C && pos.y >= r.y*C && pos.y <= (r.y+r.h)*C) {
-      const ref = _pgRef(_page.id); if (!ref) return;
-      updateDoc(ref, { fogOps: fogOps.filter(o => o.id !== r.id) }).catch(() => {});
-      return;
-    }
+  const fogOp = _fogOpAtPos(pos);
+  if (fogOp) {
+    const ref = _pgRef(_page.id); if (!ref) return;
+    updateDoc(ref, { fogOps: (_page.fogOps || []).filter(o => o.id !== fogOp.id) }).catch(() => {});
   }
 }
 

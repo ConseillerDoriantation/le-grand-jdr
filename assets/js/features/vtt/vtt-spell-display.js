@@ -7,9 +7,9 @@
 // Miroirs locaux de _calcSortDegats / _calcSortSoin (spells.js) pour éviter le
 // cross-import features/characters.
 // ══════════════════════════════════════════════════════════════════════════════
-import { getMainWeapon, DEFAULT_UNARMED } from '../../shared/equipment-utils.js';
+import { getMainWeapon, DEFAULT_UNARMED, getArmorSetData } from '../../shared/equipment-utils.js';
 import { getMaitriseBonus, getMod } from '../../shared/char-stats.js';
-import { protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { protectionRunesFor, resolveSpellModifierStat, usesArmorSetBonuses, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { VS } from './vtt-state.js';
 
 // Rune virtuelle d'action (Réaction / Action Bonus condensées à l'affichage).
@@ -22,6 +22,18 @@ export function _parseDice(formula) {
   const cleaned = String(formula).replace(/\s+/g, '');
   const m = cleaned.match(/^(\d+)[dD](\d+)([+-]\d+)?$/);
   return m ? { n:+m[1], sides:+m[2], mod:+(m[3]||0) } : null;
+}
+
+// Fusionne un bonus plat dans une formule de soin sans créer de double suffixe
+// ("2d8 +3" + 2 → "2d8 +5"). Nombre fixe → additionné ; texte libre → suffixe.
+function _mergeHealFlat(formula, delta) {
+  const d = Number(delta) || 0;
+  const str = String(formula || '').trim();
+  if (!d) return str;
+  const p = _parseDice(str);
+  if (p) { const k = p.mod + d; return `${p.n}d${p.sides}${k > 0 ? ` +${k}` : k < 0 ? ` ${k}` : ''}`; }
+  if (/^-?\d+$/.test(str)) return String(parseInt(str, 10) + d);
+  return `${str}${d > 0 ? ` +${d}` : ` ${d}`}`;
 }
 
 /** Valeur maximale possible d'une formule de dés (ex: "2d6+3" → 15). */
@@ -84,8 +96,12 @@ export function _vttSortDmgFormula(s, c, opts = {}) {
  *  - Noyau magique sans arme (Poings) → Intelligence
  *  - Noyau physique / pas de noyau → Constitution
  */
-export function _vttSortSoinFormula(s, c) {
-  if (s?.designMode === 'classic' && s?.classicFormulaFinal) return (s?.soin || '').trim();
+export function _vttSortSoinFormula(s, c, { source = 'spell' } = {}) {
+  // Bonus de soin du set d'armure complet (effet de palier « Soin »).
+  const healB = c && usesArmorSetBonuses(s, { source })
+    ? (getArmorSetData(c)?.modifiers?.healBonus || 0)
+    : 0;
+  if (s?.designMode === 'classic' && s?.classicFormulaFinal) return _mergeHealFlat((s?.soin || '').trim(), healB);
   // Aligne sur le sheet : getMainWeapon retourne Poings par défaut si vide.
   const mainP    = c ? getMainWeapon(c) : null;
   // Multi-modes : seules les runes Protection attribuées au Soin ajoutent des dés.
@@ -118,7 +134,7 @@ export function _vttSortSoinFormula(s, c) {
     ? getMaitriseBonus(c, mainP || {})
     : 0;
 
-  const totalFlat = effectiveMaitrise + statMod;
+  const totalFlat = effectiveMaitrise + statMod + healB;
   const flatStr = totalFlat > 0 ? ` +${totalFlat}` : totalFlat < 0 ? ` ${totalFlat}` : '';
   if (!base || base.toLowerCase() === '= base') {
     return `${1 + nbProt}d4${flatStr}`;

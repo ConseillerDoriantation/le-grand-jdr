@@ -4,6 +4,7 @@ import { deleteField } from '../config/firebase.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 import { openModal, updateModalContent, closeModalDirect, confirmModal, promptModal, setModalCloseGuard, clearModalCloseGuard } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
+import { timeAgo } from '../shared/relative-time.js';
 import { RARETE_NAMES, _rareteColor, buildRaretePicker, pickRarete, loadRarities, getRarities, openRaritiesAdmin } from '../shared/rarity.js';
 import { _esc, _norm, _searchIncludes, loadingHtml, eyeIcon } from '../shared/html.js';
 import { lsJson } from '../shared/local-storage.js';
@@ -46,6 +47,7 @@ import { compressDataUrl } from '../shared/image-upload.js';
 import { shopAffinityScore, shopCartTotals, shopItemBuyState, shopUpgradeGain } from '../shared/shop-cart.js';
 import { atelierApplyBuild, atelierCompactSlots, atelierGainScore, atelierNetCost } from '../shared/shop-atelier.js';
 import { damageProfileToRelations, parseShopItemQuickEntry, relationsToDamageProfile } from '../shared/shop-item-editor.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 import {
   equipmentSlotAcceptsItem, getEquipmentItemOptions, getEquipmentSlot,
   getEquipmentSlots, resolveEquipmentSlotForItem,
@@ -409,6 +411,10 @@ function _renderManageMenu() {
 
 export async function renderShop() {
   await Promise.all([loadShopData(), loadShopCharacters()]);
+  const routeSection = getRouteSub('shop').split('/')[0];
+  if (routeSection === 'atelier') _shopSection = _prepareAtelier() ? 'atelier' : 'shop';
+  else if (routeSection === 'artisan' && STATE.isAdmin) _shopSection = 'artisan';
+  else if (routeSection === 'shop') _shopSection = 'shop';
   const target = consumeTargetEntity('shop');
   const targetItemId = target?.id || _pendingTargetShopItemId;
   const targetMode = target?.meta?.mode || _pendingTargetShopMode || 'detail';
@@ -439,6 +445,7 @@ export async function renderShop() {
     const cat = _cats.find(c => c.id === _activeCat);
     if (!cat || (!STATE.isAdmin && cat.masquee)) { _view = 'home'; _activeCat = null; }
   }
+  if (routeSection !== _shopSection) setRouteSub('shop', _shopSection, { replace: true });
   const content = document.getElementById('main-content');
   if (!content) return;
 
@@ -521,15 +528,15 @@ export async function renderShop() {
   html += `
       <nav class="sh-page-tabs" role="tablist" aria-label="Sections de la boutique">
         <button type="button" class="sh-page-tab ${_shopSection === 'shop' ? 'active' : ''}"
-          data-sh-action="setSection" data-section="shop" role="tab" aria-selected="${_shopSection === 'shop'}">
+          data-sh-action="setSection" data-section="shop" data-nav-page="shop" data-nav-sub="shop" role="tab" aria-selected="${_shopSection === 'shop'}">
           ${_shopIcon('bag')} Boutique${_cartTotals(activeChar).count ? `<span class="sh-page-tab-count">${_cartTotals(activeChar).count}</span>` : ''}
         </button>
         <button type="button" class="sh-page-tab ${_shopSection === 'atelier' ? 'active' : ''}"
-          data-sh-action="setSection" data-section="atelier" role="tab" aria-selected="${_shopSection === 'atelier'}">
+          data-sh-action="setSection" data-section="atelier" data-nav-page="shop" data-nav-sub="atelier" role="tab" aria-selected="${_shopSection === 'atelier'}">
           ${_shopIcon('wand')} Atelier
         </button>
         ${STATE.isAdmin ? `<button type="button" class="sh-page-tab ${_shopSection === 'artisan' ? 'active' : ''}"
-          data-sh-action="setSection" data-section="artisan" role="tab" aria-selected="${_shopSection === 'artisan'}">
+          data-sh-action="setSection" data-section="artisan" data-nav-page="shop" data-nav-sub="artisan" role="tab" aria-selected="${_shopSection === 'artisan'}">
           ${_shopIcon('hammer')} Artisan
         </button>` : '' /* Artisan masqué aux joueurs — refonte du craft en cours */}
       </nav>
@@ -2220,13 +2227,9 @@ async function confirmBuyItem(itemId, directQty) {
 // ── Historique boutique : achats & ventes du personnage courant ──────────────
 // Source : c.inventoryHistory (déjà alimenté par l'achat `add` et la vente
 // `sell`). Chaque ligne rouvre la fiche de l'objet si l'article existe encore.
+// Délègue au helper partagé (robuste aux horodatages absents/Timestamp).
 function _shHistoryTimeAgo(ts) {
-  const s = Math.floor((Date.now() - (Number(ts) || 0)) / 1000);
-  if (s < 60) return "à l'instant";
-  const m = Math.floor(s / 60); if (m < 60) return `il y a ${m} min`;
-  const h = Math.floor(m / 60); if (h < 24) return `il y a ${h} h`;
-  const d = Math.floor(h / 24); if (d < 30) return `il y a ${d} j`;
-  return new Date(Number(ts)).toLocaleDateString('fr-FR');
+  return timeAgo(ts, { prefix: 'il y a ', maxDays: 30 });
 }
 
 const _SH_HIST_KINDS = {
@@ -2467,6 +2470,27 @@ export function shopFilterSearch(val) {
   _syncShopSearchChrome();
 }
 
+// Frappe dans la recherche : l'état + le bouton « effacer » répondent tout de
+// suite, mais la reconstruction des résultats (déjà ciblée via _updateResults)
+// est débouncée pour coalescer une frappe rapide. Les appels programmatiques
+// (effacer, changement de catégorie) passent par shopFilterSearch, immédiat.
+let _shSearchTimer = null;
+function shopSearchInput(val) {
+  _filterSearch = val;
+  _page = 1;
+  _syncShopSearchChrome();
+  clearTimeout(_shSearchTimer);
+  _shSearchTimer = setTimeout(() => { _shSearchTimer = null; _updateResults(); }, 120);
+}
+// Force l'application immédiate d'une recherche en attente (avant une sélection
+// clavier, pour ne pas agir sur des résultats périmés).
+function _shFlushSearch() {
+  if (_shSearchTimer == null) return;
+  clearTimeout(_shSearchTimer);
+  _shSearchTimer = null;
+  _updateResults();
+}
+
 function _syncShopSearchChrome() {
   const clear = document.querySelector('.shc-search-clear');
   if (clear) clear.hidden = !_filterSearch;
@@ -2494,6 +2518,7 @@ function _shopKeyboardQol(event) {
   }
   const search = event.target?.closest?.('#sh-search');
   if (search && (event.key === 'Enter' || event.key === 'ArrowDown')) {
+    _shFlushSearch(); // applique une recherche débouncée en attente avant de sélectionner
     const first = document.getElementById('sh-items-results')?.querySelector('[data-sh-key-card="item"]');
     if (!first) return;
     event.preventDefault();
@@ -3389,7 +3414,7 @@ function _siWeaponCombatHtml(item) {
     <div class="si-field"><span>Maniement</span>${segment('mains', hands, [['1 main','1 main'],['2 mains','2 mains'],['Polyvalente','Polyvalente']])}</div>
     <div class="si-field"><span>Nature</span>${segment('nature', nature, [['','Auto'],['Physique','Physique'],['Magique','Magique']])}</div>
     <div class="si-field si-combat-damage"><span>Dégâts</span><div class="si-damage-line"><input class="input-field" id="si-degats" value="${_esc(item?.degats || '')}" placeholder="1d8"><b>＋</b><input type="hidden" id="si-degats-stats-data" value="${_esc(JSON.stringify(damageStats))}">${statButtons(damageStats, 'editorDamageStat')}</div></div>
-    <div class="si-field si-combat-touch"><span>Toucher</span>${statButtons(toucher ? [toucher] : [], 'editorSelect', true)}</div>
+    <div class="si-field si-combat-touch"><span>Toucher</span><input type="hidden" id="si-toucherStat" value="${_esc(toucher)}">${statButtons(toucher ? [toucher] : [], 'editorSelect', true)}</div>
     <label class="si-field si-combat-range"><span>Portée</span><input class="input-field" id="si-portee" value="${_esc(item?.portee || '')}" placeholder="Contact"></label>
   </div>`;
 }
@@ -3798,6 +3823,11 @@ async function openItemModal(itemId, seedItem = null) {
   const draft = { ...(item || {}), categorieId: defCatId, template: _normalizeShopTemplate(item?.template || cat?.template), readableTitle: _shopReadableDraft.title, readableContent: _shopReadableDraft.html };
   _siEditorState = {
     itemId: itemId || '', draft, originalDraft: _siClone(draft), dirty: false, quick: '', open: new Set(), saving: false,
+    // Une catégorie ne doit proposer son type que tant que le MJ n'a pas
+    // explicitement choisi « Arme / Armure / Bijou / Classique ». Sans cette
+    // garde, choisir la catégorie après « Arme » pouvait refaire basculer une
+    // création vide en « Classique » et faire disparaître le champ Toucher.
+    templateExplicit: !!item?.template,
     lastFiniteStock: Number.isFinite(Number(draft.dispo)) && Number(draft.dispo) >= 0 ? Math.trunc(Number(draft.dispo)) : 0,
   };
   ['bonus','traits','actions','description','lecture'].forEach(section => { if (_siSectionHasContent(section, draft)) _siEditorState.open.add(section); });
@@ -4270,7 +4300,9 @@ function refreshItemFields(catId) {
   _siEditorState.draft.categorieId = catId || '';
   // Sur un article encore vide, choisir une catégorie adopte naturellement son
   // type. Une fiche déjà renseignée ne change jamais de structure toute seule.
-  if (!_siEditorState.itemId && !_siEditorState.draft.nom && cat?.template) _siEditorState.draft.template = _normalizeShopTemplate(cat.template);
+  if (!_siEditorState.itemId && !_siEditorState.templateExplicit && cat?.template) {
+    _siEditorState.draft.template = _normalizeShopTemplate(cat.template);
+  }
   _siRenderEditorPanels();
 }
 
@@ -4279,6 +4311,7 @@ function refreshTemplateFields(tplKey) {
   if (!_siEditorState || !TEMPLATES[tplKey]) return;
   _siReadDraftFromDom();
   _siEditorState.draft.template = tplKey;
+  _siEditorState.templateExplicit = true;
   _siRenderEditorPanels();
 }
 
@@ -4421,7 +4454,9 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
       else if (data.format) data.sousType = data.format;
       data.toucher = _legacyToucherTextFromData(data);
       data.stats = _legacyStatsTextFromData(data);
-      data.statAttaque = data.degatsStat || data.toucherStat || '';
+      // `statAttaque` reste écrit pour les anciens consommateurs, mais doit
+      // refléter le Toucher choisi — pas le modificateur de dégâts.
+      data.statAttaque = data.toucherStat || data.degatsStat || '';
     } else if (tplKey === 'armure' || tplKey === 'bijou') {
       data.stats = _legacyStatsTextFromData(data);
     }
@@ -5108,6 +5143,7 @@ function _renderAtelierPage() {
 function shopOpenAtelier(prefillItemId = '') {
   if (!_prepareAtelier(prefillItemId)) { showNotif('Sélectionne d’abord un personnage.', 'error'); return; }
   _shopSection = 'atelier';
+  setRouteSub('shop', 'atelier');
   renderShop();
 }
 
@@ -5117,8 +5153,21 @@ function shopSetSection(section) {
   if (section === 'artisan') _artisanNeedsReset = true;
   else unmountArtisanPage();
   _shopSection = section;
+  setRouteSub('shop', section);
   renderShop();
 }
+
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'shop') return;
+  const section = String(event.detail.sub || '').split('/')[0];
+  if (!['shop', 'atelier', 'artisan'].includes(section) || (section === 'artisan' && !STATE.isAdmin)) return;
+  if (section === 'atelier' && !_prepareAtelier()) return;
+  event.preventDefault();
+  if (section === 'artisan') _artisanNeedsReset = true;
+  else unmountArtisanPage();
+  _shopSection = section;
+  renderShop();
+});
 
 function _atelierPointerOver(event) {
   if (_shopSection !== 'atelier') return;
@@ -5300,7 +5349,7 @@ Object.assign(shHandlers, {
   goHome:         () => shopGoHome(),
   goCat:          (el) => shopGoCat(el.dataset.id),
   setChar:        (el) => shopSetChar(el.dataset.id || el.value),
-  search:         (el) => shopFilterSearch(el.value),
+  search:         (el) => shopSearchInput(el.value),
   clearSearch:    () => shopClearSearch(),
   setSort:        (el) => shopSetSort(el.value),
   resetFilters:   () => shopFilterReset(),

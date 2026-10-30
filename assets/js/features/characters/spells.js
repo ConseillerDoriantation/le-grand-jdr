@@ -12,21 +12,34 @@ import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary, conditionSpellRunes } from '../../shared/conditions.js';
 import { loadSpellMatrices, getMatrixSuggestions, getComboConfig, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { getArmorSetData, getMainWeapon } from './data.js';
-import { getSpellSystemMode, loadSpellSystem, spellRuneCost, spellSetCostDelta } from '../../shared/spell-system.js';
+import { getEnabledSpellResources, getSpellSystemMode, loadSpellSystem, spellRuneCost, spellSetCostDelta } from '../../shared/spell-system.js';
 import { makeSortable } from '../../shared/sortable-helper.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { pickImageFile } from '../../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../../shared/image-crop.js';
-import { resolveSpellModifierStat, usesSpellMastery, lightSpellRadius, getAfflictionMode, spellConditionId, getProtectionModes, getProtectionRestoreMode, protectionSplitAllowed, isProtectionMultiMode, protectionRunesFor } from '../../shared/spell-runes.js';
+import { resolveSpellModifierStat, usesArmorSetBonuses, usesSpellMastery, lightSpellRadius, getAfflictionMode, spellConditionId, getProtectionModes, getProtectionRestoreMode, protectionSplitAllowed, isProtectionMultiMode, protectionRunesFor } from '../../shared/spell-runes.js';
 import { calculateInvocationDerivedStats, getPreparedInvocationActions, INVOCATION_ABILITIES, INVOCATION_DEFAULT_STATS, invocationStatModifier, normalizeInvocationSelection, normalizeInvocationStats } from '../../shared/invocation-stats.js';
 import { setSpellCaches, setConditionsLibCache, getSpellMatricesCache, _SPELL_STAT_OPTIONS, _activeCombos, _runeCounts, _ampDispDim, _ampCrossDim, _ampLength, _zoneDims, _zoneCount, _zoneCellCount, ZONE_SHAPES, _autoSourceAfflictionDot, _autoSourceCA, _autoSourceDegats, _autoSourceDuree, _autoSourceEnchantDeg, _autoSourceSoin, _autoValHtml, _buildSortResume, _calcAfflictionDD, _calcAfflictionDot, _calcDrainPct, _calcEnchantDegats, _calcInvocationStats, _calcLaceration, _hasLaceration, _calcSortCibles, _calcSortDegats, _calcSortDeplacement, _calcSortDuree, _calcSortSoin, _calcSortMana, _calcSortZone, _isLightSpell, _calcSortReduction, _autoSourceReduction, _getCurrentSpellChar, setSpellEntity, _getSortAction, _getSortCA, _getSortProtectionMode, _getSortTypes, _needsDureeBase, _readVisibleStatOverride, noyauTypesFor, spellVM, spellUid, ensureSpellIds, SPELL_COST_RESOURCES, spellCostRes, spellCostMult } from './spells-calc.js';
 import { computeSheetLines, renderSheetLines } from '../../shared/spell-sheet-lines.js';
 import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 import { spellPlayChanges, spellPlayDiff, spellPlaySnapshot } from '../../shared/spell-validation.js';
 import { spellFacts, spellEffectLines } from './spell-facts.js';
+import { getRouteSub, setRouteSub } from '../../shared/route.js';
 
 // Ressource de coût lisible d'un sort (label court : PM / PV / Or / —).
 const _sortResLabel = (s) => spellCostRes(s).label;
+
+// Le système MJ limite les ressources proposées aux nouveaux sorts. Une
+// ressource désactivée reste néanmoins visible sur un ancien sort qui l'utilise.
+function _sortCostResourceId(spell = {}, idx = -1) {
+  const current = idx >= 0 ? (spell.costResource || 'pm') : '';
+  return current || getEnabledSpellResources()[0] || 'pm';
+}
+
+function _sortCostResourceOptions(current = '') {
+  const enabled = new Set(getEnabledSpellResources(current));
+  return SPELL_COST_RESOURCES.filter(resource => enabled.has(resource.id));
+}
 
 // ── Refonte « lire = régler » : la fiche (colonne de droite) affiche une ligne par
 // effet, calculée par computeSheetLines (pur) + rendue par renderSheetLines. En mode
@@ -602,6 +615,16 @@ export function renderCharDeck(c, canEdit) {
   _ensureSpellRenderCaches();
   _sortsLoadUiFor(c.id);   // état UI par personnage (vue/pliage) + reset des filtres transitoires
   _sortsLastCanEdit = !!canEdit;
+  // Vue dans l'URL (#characters/<id>/sorts/<vue>) : lien partageable et rechargeable.
+  // Anciennes vues « grimoire » / « prepare » reprises en « all » / « deck ».
+  if (!_spellRerenderOverride) {
+    const [routeCharId, routeTab, routeView] = getRouteSub('characters').split('/');
+    if (routeCharId === c.id && routeTab === 'sorts') {
+      const view = { grimoire: 'all', prepare: 'deck' }[routeView] || routeView;
+      if (['all', 'deck', 'todo'].includes(view)) _sortsView = view;
+      else setRouteSub('characters', `${c.id}/sorts/${_sortsView}`, { replace: true });
+    }
+  }
   const allSorts = c.deck_sorts || [];
   const cats     = c.sort_cats  || [];
   const pmDelta  = getArmorSetData(c).modifiers?.spellPmDelta || 0;
@@ -948,6 +971,8 @@ function _sortsSetView(v) {
   _sortsView = view;
   if (view !== 'deck') _sortsReplaceIdx = null;
   _sortsPersistUi();
+  const c = _getCurrentSpellChar();
+  if (!_spellRerenderOverride && c?.id) setRouteSub('characters', `${c.id}/sorts/${view}`);
   _sortsRerender();
 }
 
@@ -1732,6 +1757,16 @@ function _readSpellStatsChoice(previous = {}) {
   return input ? !!input.checked : _spellStatsChecked(previous);
 }
 
+function _armorSetBonusesChecked(spell = {}) {
+  return usesArmorSetBonuses(spell, { source: _modalStatsSource() });
+}
+
+function _readArmorSetBonusesChoice(previous = {}) {
+  const input = document.getElementById('s-apply-armor-set-bonuses')
+    || document.getElementById('s-classic-apply-armor-set-bonuses');
+  return input ? !!input.checked : _armorSetBonusesChecked(previous);
+}
+
 export function addSort() { _itemEditCtx = null; openSortModal(-1, {}); }
 export function editSort(idx) { _itemEditCtx = null; openSortModal(idx, (_getCurrentSpellChar()?.deck_sorts||[])[idx]); }
 
@@ -1744,7 +1779,11 @@ export function editItemSpell(item, idx, onSave, charForCalc = null) {
   // Le perso de calcul est porté par le contexte (_itemEditCtx.charForCalc) et
   // résolu via _modalChar() : aucune mutation de STATE.activeChar.
   _itemEditCtx = { item, idx, onSave, charForCalc };
-  const action = idx >= 0 ? (item.actions || [])[idx] || {} : {};
+  const rawAction = idx >= 0 ? (item.actions || [])[idx] || {} : {};
+  const action = {
+    ...rawAction,
+    applyArmorSetBonuses: usesArmorSetBonuses(rawAction, { source: 'item' }),
+  };
   openSortModal(idx, action);
 }
 
@@ -2286,6 +2325,7 @@ function _buildClassicSortFromDOM(idx = -1, prevList = []) {
           image: prev.invocation?.image || '',
         }
       : null,
+    applyArmorSetBonuses: _readArmorSetBonusesChoice(prev),
     countInStats: _readSpellStatsChoice(prev),
     mjAutoHit: !!document.getElementById('s-classic-auto-hit')?.checked,
     mjAlwaysMax: STATE.isAdmin
@@ -2492,6 +2532,7 @@ async function _openClassicSortModal(idx, s, allTypes) {
   const invocationMax = Math.max(1, parseInt(s?.invocation?.max ?? s?.classicInvocationCount) || 1);
   const invocationSelection = normalizeInvocationSelection(s?.invocation);
   const validation = _sortValidationState(s);
+  const selectedCostResource = _sortCostResourceId(s, idx);
   const _modalOpen = _itemEditCtx ? pushModal : openModal;
   _modalOpen('', `
     <div class="sh-admin-modal is-spell is-classic-spell" id="s-classic-form">
@@ -2571,8 +2612,8 @@ async function _openClassicSortModal(idx, s, allTypes) {
             <section class="classic-spell-section">
               <div class="classic-spell-section-head"><span>5</span><div><b>Coût et rythme</b><small>Valeurs directement utilisées dans le VTT.</small></div></div>
               <div class="classic-spell-grid is-compact">
-                <label><span>Coût</span><div class="classic-spell-unit"><input type="number" id="s-classic-pm" class="input-field" min="0" max="99" value="${s?.pmOverride ?? s?.pm ?? 0}"><span id="s-classic-pm-unit">${_esc(spellCostRes(s).label)}</span></div></label>
-                <label><span>Ressource</span><select id="s-classic-cost-resource" class="input-field">${SPELL_COST_RESOURCES.map(r => `<option value="${r.id}" ${(s?.costResource||'pm')===r.id?'selected':''}>${r.icon} ${r.full}</option>`).join('')}</select></label>
+                <label><span>Coût</span><div class="classic-spell-unit"><input type="number" id="s-classic-pm" class="input-field" min="0" max="99" value="${s?.pmOverride ?? s?.pm ?? 0}"><span id="s-classic-pm-unit">${_esc(spellCostRes({ costResource: selectedCostResource }).label)}</span></div></label>
+                <label><span>Ressource</span><select id="s-classic-cost-resource" class="input-field">${_sortCostResourceOptions(selectedCostResource).map(r => `<option value="${r.id}" ${selectedCostResource===r.id?'selected':''}>${r.icon} ${r.full}</option>`).join('')}</select></label>
                 <label><span>Action</span><select id="s-classic-action" class="input-field">${_classicSelectOptions([['action','Action'],['action_bonus','Action Bonus'],['reaction','Réaction']], s?.actionMode || 'action')}</select></label>
                 <label><span>Durée</span><div class="classic-spell-unit"><input type="number" id="s-classic-duration" class="input-field" min="0" max="99" value="${s?.classicDuration ?? s?.dureeBase ?? 0}"><span>tours</span></div></label>
                 <label><span>Recharge</span><div class="classic-spell-unit"><input type="number" id="s-classic-cooldown" class="input-field" min="0" max="99" value="${s?.cooldownTurns ?? 0}"><span>tours</span></div></label>
@@ -2585,6 +2626,7 @@ async function _openClassicSortModal(idx, s, allTypes) {
                 <label><span>Statut</span><select id="s-classic-validation" class="input-field">${_classicSelectOptions([['ok','Validé'],['pending','En attente'],['no','Refusé']], validation)}</select></label>
                 ${!_itemEditCtx ? `<label class="classic-spell-check classic-spell-always"><input type="checkbox" id="s-classic-always-prepared" ${s?.alwaysPrepared ? 'checked' : ''}><span><b>∞ Toujours prêt</b><small>Reste dans le Deck sans utiliser d’emplacement. Idéal pour Rage et les aptitudes de classe.</small></span></label>` : ''}
                 <label class="classic-spell-check"><input type="checkbox" id="s-classic-always-max" ${s?.mjAlwaysMax ? 'checked' : ''}><span><b>Toujours valeur maximum</b><small>Les dés prennent leur valeur maximale.</small></span></label>
+                <label class="classic-spell-check"><input type="checkbox" id="s-classic-apply-armor-set-bonuses" ${_armorSetBonusesChecked(s) ? 'checked' : ''}><span><b>Bonus de set du porteur</b><small>${_itemEditCtx ? 'Ajoute aux dégâts et soins les bonus de son armure. Laisse désactivé pour une potion ou un objet autonome.' : 'Applique aux dégâts et soins les bonus accordés par l’armure du lanceur.'}</small></span></label>
                 <label class="classic-spell-check"><input type="checkbox" id="s-classic-count-in-stats" ${_spellStatsChecked(s) ? 'checked' : ''}><span><b>Compter dans les statistiques</b><small>${_itemEditCtx ? 'Désactivé par défaut pour les actions d’objet : une potion ne crédite pas son utilisateur comme soigneur.' : 'Décoche pour une action narrative ou technique qui ne doit pas influencer les classements.'}</small></span></label>
                 <label><span>Notes MJ</span><textarea id="s-classic-mj-notes" class="input-field" rows="2">${_esc(s?.mjNotes || '')}</textarea></label>`
               : `<div class="classic-spell-readonly">${validation === 'ok' ? '✓ Validé' : validation === 'no' ? '✕ Refusé' : '◷ En attente de validation'}</div>${s?.alwaysPrepared ? '<div class="classic-spell-readonly is-always">∞ Toujours prêt · hors capacité du Deck</div>' : ''}${!_spellStatsChecked(s) ? '<div class="classic-spell-readonly">◌ Hors statistiques</div>' : ''}`}
@@ -2667,6 +2709,7 @@ export async function openSortModal(idx, s) {
   const useClassic = s?.designMode === 'classic'
     || (idx < 0 && getSpellSystemMode() === 'classic');
   if (useClassic) return _openClassicSortModal(idx, s || {}, allTypes);
+  const selectedCostResource = _sortCostResourceId(s || {}, idx);
   // Tous les types de dégâts restent la source globale des noyaux.
   // L'accès joueur aux noyaux magiques est ensuite filtré par personnage (c.elements).
   const RUNES = RUNE_META; // alias local pour compat ascendante
@@ -3175,17 +3218,17 @@ export async function openSortModal(idx, s) {
     <!-- Colonne droite : la fiche (lire = régler) -->
     <aside class="sheet" aria-label="Fiche jouable du sort">
       <div class="cost">
-        <div class="cost-t"><b id="s-pm-display">0</b><s id="s-pm-unit">${_esc(spellCostRes(s).label)}</s><span class="pl" id="s-playline"></span></div>
+        <div class="cost-t"><b id="s-pm-display">0</b><s id="s-pm-unit">${_esc(spellCostRes({ costResource: selectedCostResource }).label)}</s><span class="pl" id="s-playline"></span></div>
         <div class="res" role="group" aria-label="Ressource dépensée par le lanceur">
-          ${SPELL_COST_RESOURCES.map(r => {
-            const on = (s?.costResource || 'pm') === r.id;
+          ${_sortCostResourceOptions(selectedCostResource).map(r => {
+            const on = selectedCostResource === r.id;
             const tip = r.mult ? `${r.full} · ×${r.mult} par rune` : r.full;
             return `<button type="button" class="rs${on ? ' on' : ''}" style="--c:${r.color}"
               data-action="_selectCostRes" data-res="${r.id}" aria-pressed="${on ? 'true' : 'false'}" title="${_esc(tip)}">
               ${r.icon} ${r.id === 'none' ? 'Gratuit' : _esc(r.label)}</button>`;
           }).join('')}
         </div>
-        <input type="hidden" id="s-cost-resource" value="${s?.costResource || 'pm'}">
+        <input type="hidden" id="s-cost-resource" value="${selectedCostResource}">
         <div id="s-pm-breakdown" class="bd"></div>
       </div>
       <div id="s-preview-body" class="lines"></div>
@@ -3217,6 +3260,7 @@ export async function openSortModal(idx, s) {
           ${!_itemEditCtx ? `<label class="sw"><input type="checkbox" id="s-always-prepared" ${s?.alwaysPrepared ? 'checked' : ''}> <span>∞ Toujours prêt <em>(hors emplacement du Deck)</em></span></label>` : ''}
           <label class="sw"><input type="checkbox" id="s-mj-always-max" ${s?.mjAlwaysMax ? 'checked' : ''}> <span>🎲 Toujours valeur maximum</span></label>
           <label class="sw"><input type="checkbox" id="s-mj-auto-hit" ${s?.mjAutoHit ? 'checked' : ''}> <span>✅ Réussite automatique <em>(sans jet)</em></span></label>
+          <label class="sw"><input type="checkbox" id="s-apply-armor-set-bonuses" ${_armorSetBonusesChecked(s) ? 'checked' : ''}> <span>🛡 Bonus de set du porteur <em>(${_itemEditCtx ? 'désactivé par défaut pour les objets autonomes' : 'dégâts et soins'})</em></span></label>
           <label class="sw"><input type="checkbox" id="s-count-in-stats" ${_spellStatsChecked(s) ? 'checked' : ''}> <span>📊 Compter dans les statistiques <em>(${_itemEditCtx ? 'désactivé par défaut pour les objets' : 'soins, dégâts et soutien'})</em></span></label>
           <textarea class="note" id="s-mj-notes" placeholder="Notes / restrictions (ex : soin uniquement au lanceur)…">${s?.mjNotes || ''}</textarea>
           <span class="fld"><span>Coût imposé</span><input type="number" id="s-pm-override" min="0" max="50" value="${s?.pmOverride ?? ''}" placeholder="auto"></span>
@@ -3275,11 +3319,9 @@ export async function openSortModal(idx, s) {
       });
       modal.addEventListener('change', (event) => {
         const t = event.target;
-        // Proxy de stat (toucher / dégâts) : recopie dans le vrai select du store.
+        // Les proxys de stat passent par le registre data-change central. Ne pas
+        // re-rendre ici avant que leur valeur ait été recopiée dans le store.
         if (t?.dataset?.statproxy != null) {
-          const sel = document.getElementById(t.dataset.statproxy);
-          if (sel) sel.value = t.value;
-          _updateSortPreview();
           return;
         }
         if (t?.classList?.contains('s-maitrise-active-toggle')) {
@@ -4921,6 +4963,7 @@ function _buildSortFromDOM() {
     mjValidation: mjVal, mjValidated: mjVal === 'ok',
     alwaysPrepared: !!document.getElementById('s-always-prepared')?.checked,
     countInStats: _readSpellStatsChoice(),
+    applyArmorSetBonuses: _readArmorSetBonusesChoice(),
     noyau, noyauTypeId, noyauTypeIds: [..._noyauIdsEdit], runes, types,
     actionMode: (_runeCountsEdit?.[ACTION_RUNE] || 0) > 0
       ? (document.getElementById('s-action-mode')?.value || _actionModeEdit || 'reaction')
@@ -4965,12 +5008,33 @@ function _buildSortFromDOM() {
       const n = parseInt(raw);
       return Number.isFinite(n) && n >= 0 ? n : null;
     })(),
-    toucherStat: _readVisibleStatOverride('s-toucher-stat'),
-    degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
+    toucherStat: _readSpellStatOverride('s-toucher-stat'),
+    degatsStat:  _readSpellStatOverride('s-degats-stat', 's-degats-stat-soin'),
     invocation:  _buildInvocationFromDOM(),
     consumable:  _readConsumableFromDOM(),
     mjNotes: document.getElementById('s-mj-notes')?.value || '',
   };
+}
+
+// La fiche « lire = régler » affiche des selects proxy tandis que les vrais
+// champs restent dans le store caché. La valeur visible est la source de vérité
+// tant que le tiroir est ouvert ; cela évite qu'un ancien défaut d'arme soit
+// relu entre le changement du select et l'enregistrement.
+function _readSpellStatOverride(...ids) {
+  const proxies = [...document.querySelectorAll('[data-statproxy]')];
+  for (const id of ids) {
+    const proxy = proxies.find(el => el.dataset.statproxy === id);
+    if (proxy) return proxy.value || '';
+  }
+  return _readVisibleStatOverride(...ids);
+}
+
+function _syncSpellStatProxy(el) {
+  const targetId = el?.dataset?.statproxy;
+  if (!targetId) return;
+  const target = document.getElementById(targetId);
+  if (target) target.value = el.value;
+  _updateSortPreview();
 }
 
 /** Rafraîchit la preview live dans l'éditeur de sort */
@@ -5529,6 +5593,7 @@ export async function saveSort(idx, btn = null) {
       mjValidation, mjValidated,
       alwaysPrepared,
       countInStats: _readSpellStatsChoice(idx >= 0 ? sorts[idx] : {}),
+      applyArmorSetBonuses: _readArmorSetBonusesChoice(idx >= 0 ? sorts[idx] : {}),
       mjAlwaysMax: STATE.isAdmin
         ? !!document.getElementById('s-mj-always-max')?.checked
         : (idx >= 0 ? !!sorts[idx]?.mjAlwaysMax : false),
@@ -5596,11 +5661,10 @@ export async function saveSort(idx, btn = null) {
         const n = parseInt(raw);
         return Number.isFinite(n) && n >= 0 ? n : null;
       })(),
-      // Stats overrides : '' = suit l'arme principale (auto).
-      // On lit uniquement les sélecteurs VISIBLES (helper _readVisibleStatOverride)
-      // → évite que le sélecteur d'une section cachée n'écrase la sélection utilisateur.
-      toucherStat: _readVisibleStatOverride('s-toucher-stat'),
-      degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
+      // Stats overrides : '' = suit l'arme principale (auto). Le proxy visible
+      // est prioritaire afin que le choix courant soit bien celui enregistré.
+      toucherStat: _readSpellStatOverride('s-toucher-stat'),
+      degatsStat:  _readSpellStatOverride('s-degats-stat', 's-degats-stat-soin'),
       invocation:   _buildInvocationFromDOM(),
       // Note MJ : VERROUILLÉE côté joueur — un joueur ne peut ni la modifier ni
       // l'effacer, elle est reconduite telle quelle (le champ de la forge n'est
@@ -5703,6 +5767,7 @@ function _buildSortFromForm(idx, prevList = []) {
     icon:     (document.getElementById('s-icon')?.value || '').trim() || '',
     mjValidation, mjValidated,
     countInStats: _readSpellStatsChoice(idx >= 0 ? prevList[idx] : {}),
+    applyArmorSetBonuses: _readArmorSetBonusesChoice(idx >= 0 ? prevList[idx] : {}),
     nom:      document.getElementById('s-nom')?.value?.trim() || '',
     pm:       autoPm,
     pmOverride,
@@ -5756,8 +5821,8 @@ function _buildSortFromForm(idx, prevList = []) {
       const n = parseInt(raw);
       return Number.isFinite(n) && n >= 0 ? n : null;
     })(),
-    toucherStat: _readVisibleStatOverride('s-toucher-stat'),
-    degatsStat:  _readVisibleStatOverride('s-degats-stat', 's-degats-stat-soin'),
+    toucherStat: _readSpellStatOverride('s-toucher-stat'),
+    degatsStat:  _readSpellStatOverride('s-degats-stat', 's-degats-stat-soin'),
     mjNotes:      document.getElementById('s-mj-notes')?.value?.trim() || '',
   });
 }
@@ -5800,6 +5865,7 @@ registerActions({
   _classicStateChanged:   ()    => _classicStateChanged(),
   _sortsSearchInput:      (el)  => _sortsSetSearch(el.value),
   _refreshAutoValChips:   ()    => _refreshAutoValChips(),
+  _syncSpellStatProxy:    (el)  => _syncSpellStatProxy(el),
   _csMjValToggle:         (el)  => el.closest('.cs-mj-validation')?.classList.toggle('is-on', el.checked),
   _csSetMjVal:            (btn) => {
     const val = btn.dataset.mjval;

@@ -135,7 +135,7 @@ const FEATURE_CSS = {
   world:      ['histoire.css'],
   diapo:      ['diapo.css'],
   collection: ['histoire.css'],
-  players:    ['histoire.css'],
+  players:    ['histoire.css', 'players.css'],
   // agenda.css : le bandeau du Bastion est construit avec les classes partagées
   // `.ag-top`/`.ag-scope`/`.ag-menu`/`.ag-tabs` (entièrement scopées `.ag-*`) →
   // sinon le bandeau s'affiche sans mise en forme. bastion.css garde ses ajouts `bs-*`.
@@ -450,10 +450,22 @@ export function initEventDelegation() {
 
   // Deep-link modifié à la main (URL éditée, lien collé dans l'onglet courant).
   // Ignoré tant qu'aucune aventure n'est active : le boot s'en charge déjà.
-  // On re-navigue même à page égale : la feature relira sa sous-route au rendu.
+  // À page égale, une feature moderne peut restaurer la sous-route sur place ;
+  // les pages legacy repassent encore par leur rendu complet.
   const navigateFromHistory = () => {
-    const { page } = parseRoute();
+    const { page, sub } = parseRoute();
     if (!STATE.adventure || !isKnownPage(page)) return;
+    // Une feature à onglets peut restaurer sa sous-vue sur place. Cela évite le
+    // loader, un démontage des listeners et surtout tout réabonnement Firestore
+    // quand Retour/Avance reste dans la page courante. preventDefault() signifie
+    // « sous-route prise en charge » ; sinon on conserve le rendu complet legacy.
+    if (page === STATE.currentPage) {
+      const handled = !document.dispatchEvent(new CustomEvent('app:route-sub-changed', {
+        cancelable: true,
+        detail: { page, sub },
+      }));
+      if (handled) return;
+    }
     navigate(page, { historyMode: 'none' });
   };
   window.addEventListener('popstate', () => {

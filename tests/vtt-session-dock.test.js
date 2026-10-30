@@ -58,6 +58,16 @@ test('le badge de butin compte les entrées non vues et se réinitialise à l’
   assert.match(loot, /_refreshLootDockTrigger\(\{ markSeen: true \}\)/);
 });
 
+test('la quantité du butin accepte une saisie directe sans écrire à chaque touche', () => {
+  assert.match(loot, /class="vtt-loot-qinput"[\s\S]*?data-loot-qty-input[\s\S]*?type="number"/);
+  assert.match(loot, /data-loot-basket-input="\$\{_esc\(id\)\}"[\s\S]*?type="number"/);
+  assert.match(loot, /qty\.onchange = \(\) => _vttLootQtySet/);
+  assert.match(loot, /input\.oninput = \(\) => \{[\s\S]*?_basket\[itemId\] = _lootQtyValue/);
+  assert.doesNotMatch(loot, /qty\.oninput\s*=[\s\S]{0,120}_saveLoot/);
+  assert.match(loot, /if \(e\.key === 'Enter'\)[\s\S]*?qty\.blur\(\)/);
+  assert.match(css, /\.vtt-loot-qinput\s*\{/);
+});
+
 test('une musique active reprend après actualisation sans recréer son lecteur', () => {
   assert.match(music, /Même son déjà chargé[\s\S]*?_audioEl\.paused[\s\S]*?_audioEl\.play\(\)/);
   assert.match(music, /_AUTOPLAY_RESUME_EVENTS = \['pointerdown', 'click', 'keydown', 'touchstart'\]/);
@@ -69,6 +79,15 @@ test('une musique active reprend après actualisation sans recréer son lecteur'
 test('les commandes musicales répondent avant le retour Firestore', () => {
   assert.match(music, /function _setMusicState\(patch\) \{[\s\S]*?_syncMusicPlayback\(\{ \.\.\._musicState, \.\.\.patch \}\);[\s\S]*?setDoc\(_musicStateRef\(\), patch/);
   assert.match(music, /sound\.hideTitle = hideTitle;[\s\S]*?_setMusicState\(\{ currentTitleHidden: hideTitle \}\);[\s\S]*?updateDoc\(_sonRef\(soundId\), \{ hideTitle \}\)\.catch/);
+});
+
+test('un effet sonore ponctuel se superpose sans remplacer la musique ni l’ambiance', () => {
+  assert.match(music, /function _vttPlayOneShot\(soundId\)[\s\S]*?void _playOneShotById\(soundId\);[\s\S]*?_setMusicState\(\{ oneShot \}\)/);
+  assert.match(music, /function _syncOneShot\(ms\)[\s\S]*?_lastOneShotRequestId[\s\S]*?_playOneShotById\(request\.soundId\)/);
+  assert.match(music, /const el = new Audio\(sound\.url\);[\s\S]*?el\.loop = false/);
+  assert.match(music, /_syncOneShot\(ms\);[\s\S]*?_syncAmbience\(ms\)/);
+  assert.match(music, /data-vtt-fn="_vttPlayOneShot"[\s\S]*?Jouer une fois par-dessus/);
+  assert.match(vtt, /_vttPlayAmbience, _vttPlayOneShot, _vttStopAmbience/);
 });
 
 test('les catégories et les titres musicaux ont un tri précis par poignée', () => {
@@ -93,9 +112,19 @@ test('les catégories et les titres musicaux ont un tri précis par poignée', (
 test('le sélecteur d’émetteur des émotes affiche les portraits avec repli sur l’initiale', () => {
   assert.match(emotes, /const live = _live\(t\)/);
   assert.match(emotes, /live\?\.displayImage \|\| t\?\.imageUrl/);
+  assert.match(emotes, /function _emoteTokenName\(t, fallback = 'Token'\)[\s\S]*_live\(t\)\?\.displayName/);
+  assert.match(emotes, /_esc\(_emoteTokenName\(emitter\)\)/);
+  assert.match(emotes, /_esc\(_emoteTokenName\(x\.data\)\)/);
+  assert.doesNotMatch(emotes, /_esc\(emitter\.name \|\| 'Token'\)/);
   assert.match(emotes, /vtt-emote-av-initial/);
   assert.match(emotes, /<img src=/);
   assert.match(css, /\.vtt-emote-av img \{ width:100%; height:100%; object-fit:cover; \}/);
+});
+
+test('la recherche d’émotes conserve son input et son curseur pendant la saisie', () => {
+  assert.match(emotes, /function _refreshEmoteSearchResults\(\)[\s\S]*?tabs\.innerHTML[\s\S]*?grid\.innerHTML/);
+  assert.match(emotes, /q\.oninput = e => \{ _emoteQuery = e\.target\.value; _refreshEmoteSearchResults\(\); \}/);
+  assert.doesNotMatch(emotes, /q\.oninput = e => \{[^}]*_renderEmotePicker\(\)/);
 });
 
 test('les émotes ne révèlent aucune identité de compte et montrent clairement les favoris', () => {

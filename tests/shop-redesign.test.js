@@ -29,6 +29,7 @@ test('la fiche article est un panneau latéral et propose la reprise', () => {
   assert.match(detail, /_buyBtnHtml\(item, !!ctx\.char, st, \{ detail: true \}\)/);
   assert.doesNotMatch(detail, /pushModal/);
   assert.match(css, /\.shc-detail-sheet\s*\{[^}]*position:\s*fixed;[^}]*width:\s*min\(440px, 100vw\)/s);
+  assert.match(css, /\.shc-detail-pills \.shc-trait\s*\{[^}]*height:\s*auto[^}]*white-space:\s*normal[^}]*overflow-wrap:\s*anywhere/s);
 });
 
 test('les onglets utilisent des icônes SVG et le portefeuille affiche le solde projeté', () => {
@@ -94,4 +95,19 @@ test('la suppression inline redirige les articles avant de garder l undo', () =>
   assert.match(shop, /await _catBatchMove\(affected, validDestination\)/);
   assert.match(shop, /confirmDelete\('shopCategories'[\s\S]*confirmed:\s*true/s);
   assert.match(shop, /onRestore:\s*async \(\) => \{ if \(affected\.length\) await _catBatchMove\(affected, catId\)/);
+});
+
+test('la recherche boutique est débouncée (MAJ ciblée déjà en place) et flushée au clavier', () => {
+  // Le handler input passe par shopSearchInput (débouncé), plus par shopFilterSearch (immédiat).
+  assert.match(shop, /search:\s*\(el\)\s*=>\s*shopSearchInput\(el\.value\)/);
+  assert.match(shop, /function shopSearchInput\(val\)[\s\S]*?setTimeout\([\s\S]*?120\)/);
+  // L'état + le chrome restent immédiats (l'input répond tout de suite).
+  assert.match(shop, /function shopSearchInput\(val\)[\s\S]*?_syncShopSearchChrome\(\)[\s\S]*?clearTimeout\(_shSearchTimer\)/);
+  // La reconstruction reste ciblée (pas de renderShop complet à la frappe).
+  assert.match(shop, /_shSearchTimer = setTimeout\(\(\) => \{[^}]*_updateResults\(\)/);
+  // Enter/ArrowDown applique d'abord une recherche en attente.
+  assert.match(shop, /_shFlushSearch\(\);[^\n]*avant de sélectionner/);
+  assert.match(shop, /function _shFlushSearch\(\)[\s\S]*?_updateResults\(\)/);
+  // La version immédiate reste pour les appels programmatiques (effacer, catégorie).
+  assert.match(shop, /function shopClearSearch\(\)[\s\S]*?shopFilterSearch\(''\)/);
 });

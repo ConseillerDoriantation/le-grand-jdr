@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+
+const readSource = url => readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
 import {
   WALL_FEED_RECENT, WALL_FEED_UNREAD_MAX, WALL_FEED_LEGACY_MAX,
   mergeWallFeeds, dashboardWallView, createDashboardWallFeed,
@@ -37,11 +39,9 @@ test('trois flux bornés donnent le même panneau que les 80 dernières', () => 
   }
 });
 
-test('les non-lus des autres passent devant, puis l\'ordre du mur (épinglés d\'abord)', () => {
+test('les publications épinglées restent devant les non-lus récents', () => {
   const view = dashboardWallView({ docs: wall(), seenAt: 97, uid: ME });
-  // Non lus des autres : 100 et 99 (98 est à moi, l'événement « evt » est filtré),
-  // puis l'ordre du mur : épinglés 95 et 40.
-  assert.deepEqual(ids(view), ['p100', 'p99', 'p95', 'p40']);
+  assert.deepEqual(ids(view), ['p95', 'p40', 'p100', 'p99']);
   assert.equal(view.unread, 2);
 });
 
@@ -138,12 +138,12 @@ test('une requête ciblée qui lève (module data/ périmé) se rabat sans casse
 });
 
 test('subscribeRecentWhere accepte un filtre sans tri serveur', () => {
-  const src = readFileSync(new URL('../assets/js/data/firestore-queries.js', import.meta.url), 'utf8');
+  const src = readSource(new URL('../assets/js/data/firestore-queries.js', import.meta.url));
   assert.match(src, /\.\.\.\(orderField \? \[orderBy\(orderField, 'desc'\)\] : \[\]\)/);
 });
 
 test('le tableau de bord passe par le flux borné et ne s\'abonne plus au mur si Bastion est désactivé', () => {
-  const pages = readFileSync(new URL('../assets/js/features/pages.js', import.meta.url), 'utf8');
+  const pages = readSource(new URL('../assets/js/features/pages.js', import.meta.url));
   assert.doesNotMatch(pages, /watchRecent\('dash-bastion-wall'/);
   assert.match(pages, /if \(isFeatureEnabled\('bastion'\)\) \{\n\s*_dashWallFeed\?\.stop\(\);/);
   assert.match(pages, /document\.addEventListener\('app:page-changed', \(\) => \{\n\s*wallFeed\.stop\(\);/);

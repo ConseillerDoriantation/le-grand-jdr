@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+
+const readSource = url => readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
 import {
   TURN_EPOCH_ENABLED, TURN_FLAG_KEYS, TURN_FLAG_RESET,
   sessionTurnEpoch, nextTurnEpoch, hasTurnFlags, turnFlagsStale,
@@ -11,7 +13,7 @@ const moved = { id: 't', col: 3, row: 2, movedThisTurn: true, movedCells: 3, mov
 
 test('activé seulement si les règles autorisent turnEpoch sur les tokens', () => {
   if (!TURN_EPOCH_ENABLED) return;
-  const rules = readFileSync(new URL('../docs/firestore-rules.md', import.meta.url), 'utf8');
+  const rules = readSource(new URL('../docs/firestore-rules.md', import.meta.url));
   assert.match(rules, /'reactionThisTurn', 'turnEpoch'/);
 });
 
@@ -102,8 +104,8 @@ test('scénario : 3 rounds, aucune écriture de remise à zéro une fois les tok
 });
 
 test('vtt.js et vtt-combat-turns.js passent par l\'époque confirmée et datent chaque écrivain', () => {
-  const vtt = readFileSync(new URL('../assets/js/features/vtt/vtt.js', import.meta.url), 'utf8');
-  const turns = readFileSync(new URL('../assets/js/features/vtt/vtt-combat-turns.js', import.meta.url), 'utf8');
+  const vtt = readSource(new URL('../assets/js/features/vtt/vtt.js', import.meta.url));
+  const turns = readSource(new URL('../assets/js/features/vtt/vtt-combat-turns.js', import.meta.url));
   // Époque appliquée seulement si confirmée, et monotone.
   assert.match(vtt, /if \(!snap\.metadata\.hasPendingWrites\) _applyTurnEpoch\(sessionTurnEpoch\(VS\.session\)\);/);
   assert.match(vtt, /if \(_turnEpochApplied != null && epoch <= _turnEpochApplied\) return;/);
@@ -122,12 +124,12 @@ test('vtt.js et vtt-combat-turns.js passent par l\'époque confirmée et datent 
   assert.match(turns, /stampTurnPatch\(token, \{ \.\.\.TURN_FLAG_RESET \}, _turnEpoch\(\)\)/);
   assert.match(turns, /stampTurnPatch\(token, \{ \[field\]: !token\[field\] \}, _turnEpoch\(\)\)/);
   // Règle : le propriétaire/délégué peut dater ses drapeaux.
-  const rules = readFileSync(new URL('../docs/firestore-rules.md', import.meta.url), 'utf8');
+  const rules = readSource(new URL('../docs/firestore-rules.md', import.meta.url));
   assert.match(rules, /'attackedThisTurn', 'bonusActionThisTurn', 'reactionThisTurn', 'turnEpoch',/);
 });
 
 test('aucun autre écrivain ne pose un drapeau de tour sans passer par la datation', () => {
-  const vtt = readFileSync(new URL('../assets/js/features/vtt/vtt.js', import.meta.url), 'utf8');
+  const vtt = readSource(new URL('../assets/js/features/vtt/vtt.js', import.meta.url));
   // Toute écriture Firestore directe d'un patch littéral contenant un drapeau de tour
   // (hors créations de token, où ils valent false) est interdite.
   const offenders = [...vtt.matchAll(/updateDoc\(_tokRef\([^)]*\),\s*\{([^}]*)\}/g)]

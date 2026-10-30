@@ -40,7 +40,7 @@ import { combatStyleAttackModifiers, defaultCombatStyles, detectCombatStyle, nea
 import { playSigil, playImpact, playProjectile, playSlash, playTechniqueArea } from './vtt-rune-sigil.js';
 import { DAMAGE_INTERACTIONS, applyDamageTypeInteraction, previewDamageInteraction } from '../../shared/damage-profile.js';
 import { runeBadges, spellTypeBadges } from '../../shared/spell-action-card.js';
-import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, spellConditionId, affordableSpellConditionId, enchantStatesWithinRunes, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
+import { calcSpellDuration, calcSpellTargets, isLightSpell, lightSpellRadius, getAfflictionMode, getAfflictionEtatId, spellConditionId, affordableSpellConditionId, enchantStatesWithinRunes, getProtectionRestoreMode, protectionHasMode, withElementWeaknesses, protectionRunesFor, resolveSpellModifierStat, usesArmorSetBonuses, usesHealingMastery, usesSpellMastery } from '../../shared/spell-runes.js';
 import { calculateSummonStats, getPreparedInvocationActions, INVOCATION_ABILITIES, invocationStatModifier, invocationStatShort, invocationsAllowedForSpell, normalizeInvocationSelection, normalizeInvocationStats, toggleInvocationChoice } from '../../shared/invocation-stats.js';
 import { loadSpellMatrices, getInvokedArm, getProtectionCAOverride, getProtectionReductionStep } from '../../shared/spell-matrices.js';
 import { CONDITION_DEFAULT_LIBRARY, CONDITION_DEFAULT_IDS, loadConditionLibrary, conditionSpellRunes } from '../../shared/conditions.js';
@@ -57,7 +57,7 @@ import {
 import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal, setModalCloseGuard } from '../../shared/modal.js';
 import { _esc, _norm, _searchIncludes, appSplashHtml, loadingHtml, normalizeImageUrl } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
-import { githubPagesUrl } from '../../shared/github-folder.js';
+import { endBastionSessionGoldReminder, refreshBastionSessionGoldReminder } from '../../shared/bastion-session-reminder.js';
 import { DICE_SKILLS_DEFAULT, DICE_SKILLS_STORAGE_KEY } from '../../shared/dice-skills.js';
 import { hasAdventurePremiumAccess } from '../../shared/premium.js';
 import PAGES from '../pages.js';
@@ -100,7 +100,7 @@ import {
 } from './vtt-emotes.js';
 import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
-  _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf,
+  _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf, _armorSetCritRangeBonusOf,
 } from './vtt-effective.js';
 import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttInsFilterConditionPicker, _vttBuildJetsBody, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
 import {
@@ -108,13 +108,13 @@ import {
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
   _vttLibMoveToAndClose, _mapLibRef, _saveMapLib, _vttLibImportGithub, _vttLibCleanDuplicates, _vttLibSearch, _vttLibSearchClear,
 } from './vtt-maplib.js';
-import { dedupeMapLibraryImages } from './vtt-map-library-utils.js';
+import { dedupeMapLibraryImages, resolveMapImageUrl } from './vtt-map-library-utils.js';
 import { _markCharsReady, _markNpcsReady, _markToksReady, _resetAutoSync, _charsReady, _cleanupReserveDuplicates } from './vtt-autosync.js';
 import { _vttPanelError, _showCtxMenu, _hideCtxMenu, _tokenEntityKey } from './vtt-utils.js';
 import { sceneGridSizeForImages } from './vtt-scene-utils.js';
+import { annotationPositionPatch, VTT_POINT_ANNOTATION_TYPES } from './vtt-annotation-utils.js';
 import {
-  _vttConditionConfig, _vttConditionConfigSelect, _vttConditionConfigSave, _vttConditionConfigReset,
-  _vttConditionConfigAddNew, _vttConditionConfigDelete, _vttCcTriSet, _vttCcFlagToggle,
+  _vttConditionConfig, _vttConditionConfigDo, _vttConditionConfigInput,
 } from './vtt-conditions-config.js';
 import {
   _vttConditionAdd, _vttConditionApply, _vttConditionRemove, _vttConditionSave,
@@ -149,7 +149,7 @@ import {
   _vttPlayPlaylist, _vttMusicNext, _vttMusicPrev, _vttToggleLoop, _vttToggleMusicPause, _vttStopMusic,
   _vttSoundCtxMenu, _vttDeleteSound, _vttCreatePlaylist, _vttCreatePlaylistConfirm,
   _vttDeletePlaylist, _vttAddSoundToPlaylist, _vttRemoveSoundFromPlaylist, _vttCleanMissingSounds,
-  _vttPlayAmbience, _vttStopAmbience, _vttPlaylistCtxMenu, _vttMusicAddMenu, _vttMusicToolsMenu,
+  _vttPlayAmbience, _vttPlayOneShot, _vttStopAmbience, _vttPlaylistCtxMenu, _vttMusicAddMenu, _vttMusicToolsMenu,
   _vttPlColorSelect, _vttPreview, _vttSeek, _vttAddSonUrl, _vttImportGithubRelease,
   _vttMusicToggleHideTitle, _vttMusicToggleSoundTitle, _vttRenamePlaylistConfirm,
   _vttMusicSelectRail,
@@ -199,7 +199,7 @@ import {
   _renderMiniSheet, _vttToggleMiniSheet, _vttSelectMiniChar, _msCanEdit, _msCanEditVitals, _msFlushNoteDrafts,
   _vttMsTab, _vttMsToggleCollapsed, _vttMsAttackSlot, _vttMsAddNote, _vttMsToggleNote,
   _vttMsDeleteNote, _vttMsEquip, _vttMsUnequip, _vttMsUnequipAll, _vttMsEquipPicker,
-  _vttMsSlotChange, _vttMsDeleteItem, _vttMsSendPicker, _vttMsConfirmSend,
+  _vttMsSlotChange, _vttMsDeleteItem, _vttMsRecycle, _vttMsSendPicker, _vttMsConfirmSend,
   _vttMsInvSearch, _vttMsInvCat, _vttMsInvClear, _vttMsSortSearch, _vttMsSortCat,
   _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft, _vttMsCraftAsk, _vttMsCraftCancel, _vttForgeOpen,
   _vttMsCraftSearch, _vttMsCraftClear,
@@ -333,21 +333,6 @@ function _vttMoveTokenAndReset(sel, tid) {
   _vttMoveTokenToPage(tid, input.value);
   input.value = '';
 }
-function _vttSetEmoteAlbum(v) {
-  const t = (v || '').trim();
-  if (t) localStorage.setItem('vtt-emote-folder', t);
-  else localStorage.removeItem('vtt-emote-folder');
-}
-function _vttPreviewEmoteFile(input, previewId) {
-  const f = input.files?.[0]; if (!f) return;
-  const u = URL.createObjectURL(f);
-  const p = document.getElementById(previewId); if (p) p.src = u;
-}
-function _vttCancelEmoteEdit() {
-  document.getElementById('emote-edit-zone').innerHTML = '';
-  document.querySelectorAll('.vtt-emote-card').forEach(c => c.classList.remove('is-editing'));
-}
-// [_vttCcTriSet/_vttCcFlagToggle (toggles du modal états) → vtt-conditions-config.js]
 // [_vttLibMoveToAndClose → vtt-maplib.js]
 // [plcolor musique → vtt-music.js]
 // No-op pour les wrappers qui servaient juste à event.stopPropagation() (closest() suffit)
@@ -567,7 +552,7 @@ let _polyPts      = [];      // sommets posés [x,y,…] (world coords)
 let _polyLive     = null;    // ligne Konva fermée (aperçu)
 let _polyActive   = false;   // tracé polygone en cours
 // Types d'annotation « à points » (position via offsetX/Y, pas x/y centre).
-const _ANNOT_PTS_TYPES = new Set(['freehand', 'line', 'polygon']);
+const _ANNOT_PTS_TYPES = VTT_POINT_ANNOTATION_TYPES;
 // [état règle (_rulerActive/_rulerOrigin/_rulerHideTimer/…) → vtt-ruler.js]
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -3637,7 +3622,7 @@ async function _publishCombatLog(payload) {
 
 function _optionFixedBonus(opt) {
   return (opt?.rawDice !== undefined)
-    ? ((opt.formulaFixedBonus || 0) + (opt.dmgStatMod || 0) + (opt.maitriseBonus || 0))
+    ? ((opt.formulaFixedBonus || 0) + (opt.dmgStatMod || 0) + (opt.maitriseBonus || 0) + (opt.dmgSetBonus || 0))
     : 0;
 }
 
@@ -4544,7 +4529,7 @@ async function _vttLightCast(src, opt, targetName, effectLbl) {
   const luck = await _consumeLuckyReroll(src.id, src, d20, d20 === 1);
   if (luck) d20 = luck.d20;
   const fumble = d20 === 1;
-  const crit = !fumble && d20 >= Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+  const crit = !fumble && d20 >= Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src)));
   const statsDelta = _applyCastStatsDelta(src, opt, { natural: d20, result: d20, crit, fumble });
   const lS = _live(src);
   const costLbl = opt.pmCost > 0 ? `, ${opt.pmCost} ${_RES_LABEL[opt.costRes || 'pm'] || 'PM'} perdus` : '';
@@ -4804,7 +4789,10 @@ export async function _persistInvocationState(tokData) {
 // pour son propriétaire. Le nom est résolu sur le perso propriétaire (pas le nom
 // « 🐾 … de X » de l'invocation).
 function _statsActor(t) {
-  if (t?.characterId) return { id: t.characterId, name: t.name || '' };
+  if (t?.characterId) {
+    const character = VS.characters[t.characterId];
+    return { id: t.characterId, name: character?.nom || _live(t)?.displayName || t.name || '' };
+  }
   if (t?.summonOwnerCharId) {
     const oc = VS.characters[t.summonOwnerCharId];
     return { id: t.summonOwnerCharId, name: oc?.nom || t.name || '' };
@@ -5316,6 +5304,8 @@ function _buildSpellOption(s, ctx) {
     : null;
   const abilityWeaponTechniques = Array.isArray(abilityWeaponContext?.format?.techniques)
     ? abilityWeaponContext.format.techniques : [];
+  const actionSource = extras?._itemAction ? 'item' : 'spell';
+  const applyArmorSetBonuses = usesArmorSetBonuses(s, { source: actionSource });
 
   // Bloc de champs communs réutilisé dans chaque variante d'option
   const common = {
@@ -5337,6 +5327,7 @@ function _buildSpellOption(s, ctx) {
     actionDescription: s.designMode === 'classic' ? (s.effet || '') : '',
     mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
     weaponTechniques: abilityWeaponTechniques,
+    applyArmorSetBonuses,
     ...extras,
     // Les actions d'objet legacy sont hors statistiques par défaut. Le choix
     // explicite du MJ sur l'action reste prioritaire.
@@ -5458,6 +5449,9 @@ function _buildSpellOption(s, ctx) {
     const spellMaitrise  = s.designMode !== 'classic' && usesSpellMastery(s)
       ? getMaitriseBonus(c, mainP || {})
       : 0;
+    const spellSetDmgBonus = applyArmorSetBonuses && c
+      ? (getArmorSetData(c).modifiers.damageSpellBonus || 0)
+      : 0;
     const formulaFixedBonus = sFixed - spellMaitrise;
     // Multi-noyau : si le sort a plusieurs éléments, on laisse le joueur choisir
     // au lancement (cf. _vttPickOpt → _showSpellElementPicker). L'élément primaire
@@ -5482,6 +5476,8 @@ function _buildSpellOption(s, ctx) {
       dmgStatLabel: ovrDmgNoMod ? '' : (statShort(ovrDmgStat) || ovrDmgStat),
       formulaFixedBonus,
       maitriseBonus: spellMaitrise,
+      dmgSetBonus: spellSetDmgBonus,
+      dmgSetBonusLabel: 'Set',
       drainBaseFormula: mods?.drain ? _vttSortDmgFormula(s, c, { includePower: false }) : null,
       mjAlwaysMax: !!s.mjAlwaysMax, autoHit: !!s.mjAutoHit,
     };
@@ -5504,7 +5500,9 @@ function _buildSpellOption(s, ctx) {
   if (isClassicHeal || protectionRestoreMode === 'soin' || isManaRegen || isAmpSupportHeal) {
     // Régén PM : formule littérale (pas de scaling Protection ni de stat auto) ;
     // la stat explicite éventuelle est déjà intégrée dans la formule.
-    const soinFormula = isManaRegen ? _calcSortMana(s, c) : _vttSortSoinFormula(s, c);
+    const soinFormula = isManaRegen
+      ? _calcSortMana(s, c)
+      : _vttSortSoinFormula(s, c, { source: actionSource });
     const { rawDice: sRawDice, fixed: soinFormulaFixed } = splitSpellDiceFormula(soinFormula);
     const mainP = c ? getMainWeapon(c) : null;
     const soinIsMagic = !!(VS.damageTypes && s?.noyauTypeId
@@ -5976,6 +5974,7 @@ function _buildAttackOptions(t) {
   const wDmgStatLabel= wDmgStats.map(s => statShort(s) || s).join('+');
   const wTchMod      = c ? getMod(c, wTchStat)  : 0;
   const wSetBonus    = c ? (getArmorSetData(c).modifiers.toucherBonus || 0) : 0;
+  const wSetDmgBonus = c ? (getArmorSetData(c).modifiers.damageBonus || 0) : 0;
   const wMaitrise    = c && !wReplace && weapon ? getMaitriseBonus(c, weapon) : 0;
   // Règles de type de dégâts (missEffect, armorPen, dmgBonus)
   const wReplaceTypeId = wReplace?.element || 'physique';
@@ -6039,6 +6038,8 @@ function _buildAttackOptions(t) {
     dmgStatMod:       wDmgMod,
     dmgStatLabel:     wDmgStatLabel,
     maitriseBonus:    wMaitrise,
+    dmgSetBonus:      wSetDmgBonus,
+    dmgSetBonusLabel: 'Set',
     typeRules,
     damageTypeId:     _wDefaultTypeId,
     damageTypeIcon:   _wFinalTypeObj?.icon || (wReplace ? '✨' : ''),
@@ -6097,6 +6098,8 @@ function _buildAttackOptions(t) {
       dmgStatMod: secondaryDmgMod,
       dmgStatLabel: secondaryDmgStats.map(stat => statShort(stat) || stat).join('+'),
       maitriseBonus: secondaryMastery,
+      dmgSetBonus: wSetDmgBonus,
+      dmgSetBonusLabel: 'Set',
       typeRules: getDamageTypeRules(VS.damageTypes, secondaryTypeId),
       damageTypeId: secondaryTypeId,
       damageTypeIcon: secondaryType?.icon || '',
@@ -7845,6 +7848,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
     if (opt.formulaFixedBonus) { tot += opt.formulaFixedBonus; parts.push(`Formule ${sn(opt.formulaFixedBonus)}`); }
     if (opt.dmgStatMod)        { tot += opt.dmgStatMod;     parts.push(`${opt.dmgStatLabel} ${sn(opt.dmgStatMod)}`); }
     if (opt.maitriseBonus>0)   { tot += opt.maitriseBonus;  parts.push(`Maîtrise +${opt.maitriseBonus}`); }
+    if (opt.dmgSetBonus)       { tot += opt.dmgSetBonus;    parts.push(`${opt.dmgSetBonusLabel || 'Set'} ${sn(opt.dmgSetBonus)}`); }
     if (opt.mjAlwaysMax) {
       const maxVal = _maxEffectDisplay(opt.rawDice, tot);
       degatsFormula = _mkCell(`${_dmgIcon} <code style="font-size:.88rem;color:${dmgAccent}">${_esc(maxVal)}</code>`, 0, [`effet max de ${opt.rawDice}${tot ? ` ${sn(tot)}` : ''}`], dmgAccent);
@@ -7885,7 +7889,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
         ${hint ? `<span class="vtt-atk-hint">${hint}</span>` : ''}
       </span>
       ${(mode || fields) ? `<span class="vtt-atk-rend">${mode}${fields ? `<button type="button" class="vtt-atk-adjbtn" data-atk-adj aria-expanded="false">Ajuster <s>▾</s></button>` : ''}</span>` : ''}
-      ${fields ? `<div class="vtt-atk-drawer">${fields}<button type="button" class="vtt-atk-reset" data-vtt-fn="_vttAtkBonusReset" data-vtt-blur hidden>Réinitialiser</button></div>` : ''}
+      ${fields ? `<div class="vtt-atk-drawer">${fields}<button type="button" class="vtt-atk-reset" data-vtt-fn="_vttAtkBonusReset" data-vtt-blur aria-hidden="true" tabindex="-1">Réinitialiser</button></div>` : ''}
     </div>`;
 
   // ── Preview d'interaction (immunité / résistance / faiblesse / absorption) ──
@@ -8209,7 +8213,7 @@ function _vttActionSimulationSpec(ctx = _atkCtx) {
     hitCount,
     extraHitCount: bonusHitDice,
     effect,
-    critThreshold: Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(VS.tokens[ctx.srcId]?.data))),
+    critThreshold: Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(VS.tokens[ctx.srcId]?.data) - _armorSetCritRangeBonusOf(VS.tokens[ctx.srcId]?.data))),
     maximizeCritical: !!opt.mods?.chance,
   };
 }
@@ -8340,7 +8344,13 @@ function _vttAtkBindResolve(root) {
     const adjBtn = row.querySelector('[data-atk-adj]');
     if (adjBtn) adjBtn.classList.toggle('is-on', active || row.classList.contains('open'));
     const reset = row.querySelector('.vtt-atk-reset');
-    if (reset) reset.hidden = !active;
+    if (reset) {
+      // Le bouton garde toujours sa ligne dans la grille : seule sa visibilité
+      // change. Le stepper ne saute donc plus sous la souris au premier clic.
+      reset.classList.toggle('is-visible', active);
+      reset.setAttribute('aria-hidden', active ? 'false' : 'true');
+      reset.tabIndex = active ? 0 : -1;
+    }
   };
   const syncAll = () => root.querySelectorAll('.vtt-atk-row').forEach(syncRow);
 
@@ -10047,7 +10057,7 @@ async function _vttRollAttack() {
       _enchD20 = eMode === 'adv' ? Math.max(eR1, eR2) : eMode === 'dis' ? Math.min(eR1, eR2) : eR1;
       const eLuck = actionSimulation ? null : await _consumeLuckyReroll(srcId, src, _enchD20, _enchD20 === 1);
       if (eLuck) _enchD20 = eLuck.d20;
-      const eCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+      const eCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src)));
       _enchRC = _enchD20 >= eCritThreshold;
 
       if (_enchD20 === 1) {
@@ -10259,7 +10269,7 @@ async function _vttRollAttack() {
         hHitTotal = hD20 + hTouchMod + hSetBon + bonusHit + hExtraHitSum;
       }
       // Combo Chance : élargit la plage critique (RC abaissé sur le sort)
-      const hCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src)));
+      const hCritThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src)));
       // Réussite automatique (mjAutoHit) : le soin réussit toujours — ni échec
       // critique (potion consommée pour rien) ni réussite critique.
       const hIsCrit   = !opt.autoHit && hD20 >= hCritThreshold;
@@ -10574,7 +10584,7 @@ async function _vttRollAttack() {
     // le double-max n'est pas appliqué ici.
     // Technique d'arme (Élan total) : abaisse aussi le seuil de critique.
     const critThreshold = Math.max(2, Math.min(20, (opt.mods?.chance?.rc ?? 20)
-      - _conditionCritRangeBonusOf(src) - techniqueCritRangeBonus(selectedTechniques)));
+      - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src) - techniqueCritRangeBonus(selectedTechniques)));
     let isCrit   = d20 >= critThreshold;
     let isFumble = d20 === 1;
 
@@ -11210,7 +11220,9 @@ async function _vttRollAttack() {
             const d1 = Math.floor(Math.random() * 20) + 1;
             const d2 = rollMode === 'advantage' || rollMode === 'disadvantage' ? Math.floor(Math.random() * 20) + 1 : null;
             const d20 = rollMode === 'advantage' ? Math.max(d1, d2) : rollMode === 'disadvantage' ? Math.min(d1, d2) : d1;
-            const mod = _tokenStatMod(curTgtData, saveStat);
+            // Bonus de sauvegarde accordé par un set d'armure actif (effet « save »).
+            const setSaveBonus = char ? (getArmorSetData(char).modifiers.saveBonus?.[saveStat] || 0) : 0;
+            const mod = _tokenStatMod(curTgtData, saveStat) + setSaveBonus;
             const total = d20 + mod;
             passed = d20 === 20 || (d20 !== 1 && total >= saveDC);
             saveResult = { saveStat, saveDC, d20, d20rolls: d2 == null ? null : [d1, d2], mod, total, rollMode };
@@ -11596,6 +11608,7 @@ async function _vttRollAttack() {
         dmgFormulaBonus: opt.formulaFixedBonus??0,
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
+        dmgSetBonus: opt.dmgSetBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
         dmgFull: cleanResults.find(result => !result.techniqueSplash)?.dmgPre ?? sharedDmgTotalHit,
         dmgFullHalf: sharedDmgTotalHalf,
@@ -11659,6 +11672,7 @@ async function _vttRollAttack() {
         dmgFormulaBonus: opt.formulaFixedBonus??0,
         dmgStatMod: opt.dmgStatMod??null, dmgStatLabel: opt.dmgStatLabel??null,
         dmgMaitriseBonus: opt.maitriseBonus??0,
+        dmgSetBonus: opt.dmgSetBonus??0,
         dmgRaw: sharedDmgRaw, dmgBonus: bonusDmg, dmgBonusDice: bonusDmgDice||null,
         dmgTotal: r.dmgTotal, dmgApplied: r.dmgApplied, dmgFull: r.dmgPre ?? sharedDmgTotalHit, dmgPre: r.dmgPre ?? r.dmgTotal, dmgReduction: r.dmgReduction || 0, dmgReductionLabel: r.dmgReductionLabel || null,
         bonusHitDice: bonusHitDice||null, extraHitRolls: extraHitRolls.length ? extraHitRolls : null,
@@ -11866,13 +11880,8 @@ function _buildAnnotShape(K, data) {
         if (!s || !ann) continue;
         // Marquer skip rebuild pour éviter le saut visuel au retour onSnapshot
         _skipAnnotRebuild.add(id);
-        const isPts = _ANNOT_PTS_TYPES.has(ann.type);
-        const update = isPts
-          ? { offsetX: s.x(), offsetY: s.y() }
-          : { x: s.x(), y: s.y() };
-        if (!isPts) {
-          ann.x = s.x(); ann.y = s.y();
-        }
+        const update = annotationPositionPatch(ann, s.x(), s.y());
+        Object.assign(ann, update);
         updateDoc(_annotRef(id), update).catch(() => {});
       }
       _annotGroupDragOrigins = null;
@@ -11899,7 +11908,7 @@ function _buildAnnotShape(K, data) {
       const patch = {
         rotation: shape.rotation(),
         scaleX: shape.scaleX(), scaleY: shape.scaleY(),
-        x: shape.x(), y: shape.y(),
+        ...annotationPositionPatch(data, shape.x(), shape.y()),
         ...(data.centered ? { centered: true, w: data.w, h: data.h } : {}),
       };
       updateDoc(_annotRef(data.id), patch).catch(() => {});
@@ -12499,10 +12508,15 @@ function _initListeners() {
     return onSnapshot(_sesRef(), STATE.isAdmin ? {} : { includeMetadataChanges: true }, onSessionSnapshot, () => {});
   }, { pausable: !STATE.isAdmin });
   function onSessionSnapshot(snap) {
+    const previousSession = VS.session;
     const previousCombatActive = !!VS.session?.combat?.active;
     const previousRound = VS.session?.combat?.round ?? 0;
     const previousActiveTokenId = VS.session?.combat?.activeTokenId ?? null;
     VS.session=snap.exists()?snap.data():{};
+    refreshBastionSessionGoldReminder(VS.session, Object.values(VS.characters || {}));
+    if (previousSession?.live && !VS.session.live) {
+      endBastionSessionGoldReminder(previousSession, Object.values(VS.characters || {}));
+    }
     if (!snap.metadata.hasPendingWrites) _applyTurnEpoch(sessionTurnEpoch(VS.session));
     setActiveStatsSession(VS.session.live && VS.session.statsSessionKey
       ? { key: VS.session.statsSessionKey, date: VS.session.statsSessionDate }
@@ -12575,6 +12589,7 @@ function _initListeners() {
 
     VS.characters = next;
     _vttRefreshChatPortraits();
+    refreshBastionSessionGoldReminder(VS.session, Object.values(next));
     for (const [id, e] of Object.entries(VS.tokens)) {
       if (e.data.characterId && changed.has(e.data.characterId)) {
         _patchShape(id); if (VS.selected === id) _renderInspectorSoon();
@@ -13599,12 +13614,7 @@ const _PG_PRESETS = [
   { icon:'🌍', lb:'Grande carte', c:60, r:40, desc:'Exploration vaste' },
 ];
 function _pgPreviewImageUrl(image) {
-  const source = String(image?.sourcePath || image?.url || '').trim();
-  if (!source) return '';
-  if (/^\.?\/?images\/maps\//i.test(source) || /(?:raw\.githubusercontent\.com|github\.com\/[^/]+\/[^/]+\/(?:blob|tree))\//i.test(source)) {
-    return githubPagesUrl(source);
-  }
-  return normalizeImageUrl(String(image?.url || source).trim());
+  return resolveMapImageUrl(image);
 }
 function _pgModalBody(pfx, { name='', folder='', cols=30, rows=20, fog=null, visionUnlimited=false, mapImages=[] } = {}) {
   const canUseAdvancedVtt = _vttAdvancedPremium();
@@ -14474,6 +14484,7 @@ async function _vttUndoAction(logId) {
 async function _vttAddBuffPrompt(tokenId) {
   if (!STATE.isAdmin) return;
   const t = VS.tokens[tokenId]?.data; if (!t) return;
+  const tokenName = _live(t)?.displayName || t.name || 'Token';
   const TYPES = [
     { v:'ca',          ic:'🛡', lbl:'Bonus CA',         needsBonus:true },
     { v:'dot',         ic:'🩸', lbl:'DoT (dégâts/tour)', needsFormula:true },
@@ -14485,7 +14496,7 @@ async function _vttAddBuffPrompt(tokenId) {
     { v:'affliction',  ic:'💀', lbl:'Affliction (libre)',   needsEffect:true },
   ];
   const opts = TYPES.map(t => `<option value="${t.v}">${t.ic} ${t.lbl}</option>`).join('');
-  openModal(`✨ Ajouter un effet sur ${t.name}`, `
+  openModal(`✨ Ajouter un effet sur ${_esc(tokenName)}`, `
     <div class="vtt-form" style="display:flex;flex-direction:column;gap:.7rem">
       <div class="form-group">
         <label>Type d'effet</label>
@@ -16458,6 +16469,7 @@ export const VTT_ACTIONS = {
   _vttAddSoundToPlaylist,
   _vttCleanMissingSounds,
   _vttPlayAmbience,
+  _vttPlayOneShot,
   _vttStopAmbience,
   _vttPlaylistCtxMenu,
   _vttMusicAddMenu,
@@ -16480,9 +16492,6 @@ export const VTT_ACTIONS = {
   _vttBstDed,
   _vttBstNotes,
   _vttCancelAtk,
-  _vttCancelEmoteEdit,
-  _vttCcFlagToggle,
-  _vttCcTriSet,
   _vttCleanGhostMembers,
   _vttClearAnnots,
   _vttClearAoptSearch,
@@ -16493,11 +16502,8 @@ export const VTT_ACTIONS = {
   _vttConditionAdd,
   _vttConditionApply,
   _vttConditionConfig,
-  _vttConditionConfigAddNew,
-  _vttConditionConfigDelete,
-  _vttConditionConfigReset,
-  _vttConditionConfigSave,
-  _vttConditionConfigSelect,
+  _vttConditionConfigDo,
+  _vttConditionConfigInput,
   _vttConditionEdit,
   _vttConditionEditSave,
   _vttConditionGlossary,
@@ -16631,6 +16637,7 @@ export const VTT_ACTIONS = {
   _vttMsCraftSearch,
   _vttMsCraftClear,
   _vttMsDeleteItem,
+  _vttMsRecycle,
   _vttMsDeleteNote,
   _vttMsEquip,
   _vttMsEquipPicker,
@@ -16686,7 +16693,6 @@ export const VTT_ACTIONS = {
   _vttPlayPlaylist,
   _vttPlaySound,
   _vttPreview,
-  _vttPreviewEmoteFile,
   _vttRemoveBuff,
   _vttRemoveSoundFromPlaylist,
   _vttRemoveTokenDelegate,
@@ -16712,7 +16718,6 @@ export const VTT_ACTIONS = {
   _vttSelectFromTray,
   _vttSelectMiniChar,
   _vttSendToPage,
-  _vttSetEmoteAlbum,
   _vttAdjustVital,
   _vttSetHp,
   _vttSetImgbbKey,

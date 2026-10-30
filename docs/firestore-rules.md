@@ -745,6 +745,19 @@ match /adventures/{adventureId} {
        get(/databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId)).data.get('bioLocked', false) != true)
     );
   }
+  // Image source avant cadrage : document séparé par personnage + build afin
+  // que le document `characters` reste toujours sous la limite de 1 Mio.
+  match /characterMedia/{mediaId} {
+    allow read: if inAdventure(adventureId);
+    allow create: if inAdventure(adventureId) &&
+      request.resource.data.get('charId', '') != '' &&
+      canControlAdventureCharacter(adventureId, request.resource.data.charId);
+    allow update: if inAdventure(adventureId) &&
+      request.resource.data.get('charId', '') == resource.data.get('charId', '') &&
+      canControlAdventureCharacter(adventureId, resource.data.charId);
+    allow delete: if inAdventure(adventureId) &&
+      canControlAdventureCharacter(adventureId, resource.data.charId);
+  }
   // Quêtes : lecture tous, création/suppression MJ, mise à jour participants par les joueurs
   match /quests/{id} {
     allow read:           if inAdventure(adventureId);

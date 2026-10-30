@@ -137,16 +137,43 @@ function _imageToBase64(img, w, h, format = 'image/jpeg', quality = 0.72) {
  * par les joueurs) sans exploser la taille du document Firestore.
  * @returns {Promise<string>} dataURL JPEG (ou l'original si le décodage échoue).
  */
-export function compressDataUrl(dataUrl, { max = 1280, quality = 0.82 } = {}) {
+export function compressDataUrl(dataUrl, {
+  max = 1280,
+  quality = 0.82,
+  maxBytes = 0,
+  minSide = 320,
+} = {}) {
   return new Promise((resolve) => {
     if (!dataUrl) { resolve(dataUrl); return; }
     const img = new Image();
     img.onload = () => {
-      const { w, h } = _resizeDimensions(img.width, img.height, max);
-      try { resolve(_imageToBase64(img, w, h, 'image/jpeg', quality)); }
+      let { w, h } = _resizeDimensions(img.width, img.height, max);
+      let output = '';
+      let currentQuality = quality;
+      try {
+        // Les data URLs sont des chaînes ASCII : leur longueur correspond à
+        // leur poids UTF-8 dans Firestore. On baisse d'abord la qualité, puis
+        // les dimensions si nécessaire, afin de garantir un budget de stockage
+        // plutôt que de seulement borner la résolution.
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          output = _imageToBase64(img, w, h, 'image/jpeg', currentQuality);
+          if (!maxBytes || output.length <= maxBytes) break;
+          if (currentQuality > 0.5) {
+            currentQuality = Math.max(0.5, currentQuality - 0.08);
+          } else {
+            const scale = Math.max(0.72, Math.sqrt(maxBytes / output.length) * 0.94);
+            w = Math.max(minSide, Math.round(w * scale));
+            h = Math.max(minSide, Math.round(h * scale));
+            currentQuality = Math.max(0.46, quality - 0.18);
+          }
+        }
+        resolve(output);
+      }
       catch { resolve(dataUrl); }
     };
-    img.onerror = () => resolve(dataUrl);
+    // Avec un budget explicite, ne jamais réinjecter silencieusement l'image
+    // source potentiellement gigantesque. Le caller peut utiliser sa miniature.
+    img.onerror = () => resolve(maxBytes ? '' : dataUrl);
     img.src = dataUrl;
   });
 }

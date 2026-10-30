@@ -8,8 +8,9 @@ import { loadChars, loadCollection, loadCollectionAfter, loadCollectionWhere, ge
 import { subscribeRecentWhere } from '../data/firestore-queries.js';
 import { _esc, _norm, appSplashHtml, pageHeaderHtml, loadingHtml} from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
-import { isFeatureEnabled, isFeatureAllowedByPlan } from '../shared/features.js';
-import { isUsableSummary, storyItemsFromSummary, summarizeAchievements, summarizeCollection } from '../shared/dashboard-summary.js';
+import { isFeatureEnabled } from '../shared/features.js';
+import { activeGroupsFromSources, compactDashboardSessions, isUsableSummary } from '../shared/dashboard-summary.js';
+import { isAgendaSessionUpcoming } from '../shared/agenda-sessions.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { loadStats, peekStats, applyStatsLegacyRollup, resetStats, deleteCharStats, deleteCharDateStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
 import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, mergeVttRollDetails, normalizeSkillStats, topStatTies, vttLogTimeMs } from '../shared/stats-analysis.js';
@@ -20,41 +21,22 @@ import { confirmModal, openModal, promptModal, closeModalDirect } from '../share
 import { watch, watchDoc } from '../shared/realtime.js';
 import { setDashboardPartyChars, setDashboardQuests } from '../shared/dashboard-session.js';
 import { setTargetCharacter, consumeTargetCharacter } from '../shared/character-navigation.js';
-import { getRouteSub } from '../shared/route.js';
-import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
+import { characterAvatarHtml, characterColor, characterPortraitContent } from '../shared/portraits.js';
+import { resolveAvatarUrl } from '../shared/avatar.js';
 import { canControlCharacter, getControlledCharacters } from '../shared/character-state.js';
-import { dedupeQuestParticipants, questParticipantFromChar, toggleQuestParticipant } from '../shared/participants.js';
+import { dedupeQuestParticipants, questParticipantFromChar } from '../shared/participants.js';
 import { BASTION_WALL_TYPES, bastionWallReactionCounts, bastionWallSeenKey } from '../shared/bastion-wall.js';
 import { createDashboardWallFeed, dashboardWallView } from '../shared/dashboard-wall-feed.js';
+import { bastionRoomProjects, roomInvestmentContributors } from '../shared/bastion-investments.js';
+import { bastionSignalSnapshot } from '../shared/bastion-signal.js';
+import { timeAgo } from '../shared/relative-time.js';
+import { normalizeEmoteCatalog } from '../shared/emote-admin.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
 import { loadAllUsers, relinkPlayerAccount } from '../core/adventure.js';
 const renderCharSheet   = (...args) => charSession.renderSheet(...args);
-
-// Masque les blocs du dashboard liés à une fonctionnalité désactivée pour l'aventure
-// courante, puis les sections/labels devenus orphelins (plus aucun contenu visible).
-// Appelé après le rendu (vue joueur ET MJ partagent #dash-root).
-function _hideDisabledDashboardBlocks(root) {
-  if (!root) return;
-  // 1. Cartes/CTA/boutons ciblant une feature off (la plupart ont data-navigate racine).
-  root.querySelectorAll('[data-navigate]').forEach(el => {
-    if (!isFeatureEnabled(el.getAttribute('data-navigate'))) el.style.display = 'none';
-  });
-  // 2. Wrappers connus sans titre (action/héros) devenus vides → masqués.
-  const _visibleContent = (el, skipLabel = false) => [...el.children].some(c =>
-    (!skipLabel || !c.classList.contains('dv2-section-label')) &&
-    c.style.display !== 'none' &&
-    (c.children.length > 0 || c.textContent.trim() !== ''));
-  root.querySelectorAll('.dv2-player-action, .dv2-player-hero').forEach(w => {
-    if (w.children.length && !_visibleContent(w)) w.style.display = 'none';
-  });
-  // 3. Sections à titre (dv2-section-label) sans plus aucun contenu visible → masquées.
-  root.querySelectorAll('.dv2-section-label').forEach(label => {
-    const section = label.parentElement;
-    if (section && !_visibleContent(section, true)) section.style.display = 'none';
-  });
-}
 
 // ── Statistiques : état léger pour la vue « par séance » (évite une relecture) ──
 let _statsData = null;                 // dernier doc stats chargé (pour la modale par date)
@@ -77,6 +59,7 @@ let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
 let _statsEvoMetric = 'dmgDealt';      // métrique du comparatif missions/groupes
 let _statsAnalysisMode = 'overview';   // 'overview' | 'compare'
 let _statsTab = 'overview';            // onglet actif : overview|ranking|players|rolls|audit
+const _STATS_TABS = ['overview', 'ranking', 'players', 'rolls', 'audit'];
 let _statsPopOpen = false;             // popover « joueurs ciblés » ouvert (persisté entre rendus)
 let _statsMissionPopOpen = false;      // popover « Mission » (avec images) ouvert
 let _statsRankSort = { key: 'dmg', dir: -1 }; // tri du tableau de classement (dir : -1 desc, 1 asc)
@@ -753,6 +736,276 @@ async function _adminRepairVttData() {
   await PAGES.admin();
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// CONSOLE MJ v2 — contrôleur (3 onglets : À traiter · Joueurs · Réglages)
+// Rendu + interactions séparés du calcul des données (admin() fournit le vm) :
+// les changements d'UI (onglet, filtre, recherche, tri, dépli) re-rendent SANS
+// relire Firestore ; seules les actions correctives relancent PAGES.admin().
+// ══════════════════════════════════════════════════════════════════════════════
+const _CMJ_TAB_KEY = 'admin-tab';
+const _CMJ_SECTIONS = [
+  { id: 'comptes', label: 'Comptes',            ic: 'users'   },
+  { id: 'persos',  label: 'Personnages',        ic: 'user-x'  },
+  { id: 'sorts',   label: 'Sorts à valider',    ic: 'sparkle', bulk: 'Tout valider' },
+  { id: 'quetes',  label: 'Groupes de mission', ic: 'flag',    bulk: 'Réparer', auto: true },
+  { id: 'vtt',     label: 'Table VTT',          ic: 'hex',     bulk: 'Réparer', auto: true },
+];
+const _cmjState = { tab: '', sec: 'all', cur: 0, open: new Set(), pq: '', pf: 'all', psort: 'pseudo', sq: '', refocus: null, vm: null };
+let _cmjMounted = false;
+const _CMJ_PALETTE = ['#e8b84b', '#4f8cff', '#f4c430', '#22c38e', '#9d6fff', '#ff9544', '#5bc0eb', '#ff5a7e'];
+
+// Sprite d'icônes (traits 1,8) — ids préfixés cmj- pour éviter toute collision.
+const _CMJ_SPRITE = `<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<symbol id="cmj-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+<symbol id="cmj-user-x" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M17 8l5 5M22 8l-5 5"/></symbol>
+<symbol id="cmj-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></symbol>
+<symbol id="cmj-flag" viewBox="0 0 24 24"><path d="M4 22V4M4 4h12l-2 4 2 4H4"/></symbol>
+<symbol id="cmj-hex" viewBox="0 0 24 24"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="cmj-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+<symbol id="cmj-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+<symbol id="cmj-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="cmj-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="cmj-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></symbol>
+<symbol id="cmj-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+<symbol id="cmj-sigma" viewBox="0 0 24 24"><path d="M18 7V4H6l6 8-6 8h12v-3"/></symbol>
+<symbol id="cmj-bag" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/></symbol>
+<symbol id="cmj-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z"/></symbol>
+<symbol id="cmj-sword" viewBox="0 0 24 24"><path d="M14.5 17.5L3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2"/></symbol>
+<symbol id="cmj-swords" viewBox="0 0 24 24"><path d="M14.5 17.5L3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M9.5 17.5L21 6V3h-3L6.5 14.5M11 19l-6-6M8 16l-4 4"/></symbol>
+<symbol id="cmj-zap" viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+<symbol id="cmj-star" viewBox="0 0 24 24"><path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8L3.6 9.7l5.8-.8z"/></symbol>
+<symbol id="cmj-layers" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></symbol>
+<symbol id="cmj-dice" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="16" cy="8" r=".9" fill="currentColor"/><circle cx="12" cy="12" r=".9" fill="currentColor"/><circle cx="8" cy="16" r=".9" fill="currentColor"/><circle cx="16" cy="16" r=".9" fill="currentColor"/></symbol>
+<symbol id="cmj-drop" viewBox="0 0 24 24"><path d="M12 2.7l5.66 5.66a8 8 0 1 1-11.31 0z"/></symbol>
+<symbol id="cmj-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></symbol>
+<symbol id="cmj-trophy" viewBox="0 0 24 24"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM7 5H4a2 2 0 0 0 0 4h3M17 5h3a2 2 0 0 1 0 4h-3"/></symbol>
+<symbol id="cmj-skull" viewBox="0 0 24 24"><path d="M12 3a8 8 0 0 0-8 8c0 2.6 1.2 4.4 3 5.5V20h10v-3.5c1.8-1.1 3-2.9 3-5.5a8 8 0 0 0-8-8z"/><circle cx="9" cy="11" r="1.5"/><circle cx="15" cy="11" r="1.5"/><path d="M10 20v-2M14 20v-2"/></symbol>
+</defs></svg>`;
+
+const _cmjIc = (id, cls = '') => `<svg class="cmj-ic ${cls}" aria-hidden="true"><use href="#cmj-${id}"></use></svg>`;
+const _cmjVisible = () => (_cmjState.vm?.items || []).filter(i => _cmjState.sec === 'all' || i.sec === _cmjState.sec);
+
+// ── Validation de sort depuis la console (même logique que spells.js) ──
+async function _adminValidateSpell(charId, idx) {
+  if (!STATE.isAdmin) return;
+  const c = (STATE.characters || []).find(x => x.id === charId); if (!c) return;
+  const i = parseInt(idx); const sorts = (c.deck_sorts || []).map(s => ({ ...s }));
+  if (!sorts[i]) return;
+  sorts[i].mjValidation = 'ok'; sorts[i].mjValidated = true;
+  delete sorts[i].mjReviewed;   // le MJ a tranché : plus de diff à montrer
+  try {
+    await saveDoc('characters', c.id, { deck_sorts: sorts });
+    c.deck_sorts = sorts;
+    showNotif(`« ${sorts[i].nom || 'Sort'} » validé.`, 'success');
+  } catch (e) { notifySaveError(e); return; }
+  await PAGES.admin();
+}
+async function _adminValidateAllSpells() {
+  if (!STATE.isAdmin) return;
+  const pending = (_cmjState.vm?.items || []).filter(i => i.sec === 'sorts');
+  if (!pending.length) return;
+  const byChar = new Map();
+  pending.forEach(it => {
+    const [, cid, idx] = it.id.split(':');
+    if (!byChar.has(cid)) byChar.set(cid, new Set());
+    byChar.get(cid).add(parseInt(idx));
+  });
+  let total = 0;
+  for (const [cid, idxs] of byChar) {
+    const c = (STATE.characters || []).find(x => x.id === cid); if (!c) continue;
+    const sorts = (c.deck_sorts || []).map(s => ({ ...s }));
+    idxs.forEach(i => { if (sorts[i]) { sorts[i].mjValidation = 'ok'; sorts[i].mjValidated = true; delete sorts[i].mjReviewed; total++; } });
+    try { await saveDoc('characters', c.id, { deck_sorts: sorts }); c.deck_sorts = sorts; }
+    catch (e) { notifySaveError(e); }
+  }
+  if (total) showNotif(`${total} sort${total > 1 ? 's validés' : ' validé'}.`, 'success');
+  await PAGES.admin();
+}
+
+// ── Rendu ──
+function _cmjOpen(vm) {
+  _cmjState.vm = vm;
+  const routeTab = getRouteSub('admin');
+  if (['todo', 'players', 'settings'].includes(routeTab)) {
+    _cmjState.tab = routeTab;
+  } else if (!_cmjState.tab) {
+    const stored = (() => { try { return localStorage.getItem(_CMJ_TAB_KEY) || ''; } catch { return ''; } })();
+    _cmjState.tab = ['todo', 'players', 'settings'].includes(stored) ? stored : (vm.items.length ? 'todo' : 'settings');
+  }
+  if (_cmjState.tab === 'todo' && !vm.items.length) _cmjState.tab = 'settings';
+  if (routeTab !== _cmjState.tab) setRouteSub('admin', _cmjState.tab, { replace: true });
+  if (_cmjState.cur >= _cmjVisible().length) _cmjState.cur = Math.max(0, _cmjVisible().length - 1);
+  _cmjRender();
+  _cmjMount();
+}
+function _cmjSetTab(id, { syncRoute = true } = {}) {
+  if (!['todo', 'players', 'settings'].includes(id)) return;
+  _cmjState.tab = id; try { localStorage.setItem(_CMJ_TAB_KEY, id); } catch {}
+  if (syncRoute) setRouteSub('admin', id);
+  _cmjState.refocus = null; _cmjRender(); window.scrollTo(0, 0);
+}
+function _cmjRender() {
+  const root = document.getElementById('main-content'); if (!root) return;
+  const vm = _cmjState.vm || { items: [], players: [], settings: [] };
+  const n = vm.items.length;
+  const tabs = [
+    { id: 'todo', l: 'À traiter', badge: n, hot: n > 0 },
+    { id: 'players', l: 'Joueurs', badge: vm.players.length },
+    { id: 'settings', l: 'Réglages' },
+  ];
+  const tabsHtml = tabs.map((t, i) => `<button type="button" role="tab" class="cmj-tab${_cmjState.tab === t.id ? ' on' : ''}" data-cmj-tab="${t.id}" data-nav-page="admin" data-nav-sub="${t.id}" aria-selected="${_cmjState.tab === t.id}" title="${t.l} (${i + 1})">${_esc(t.l)}${t.badge != null ? `<span class="cmj-n${t.hot ? ' hot' : ''}">${t.badge}</span>` : ''}</button>`).join('');
+  const view = _cmjState.tab === 'players' ? _cmjRenderPlayers() : _cmjState.tab === 'settings' ? _cmjRenderSettings() : _cmjRenderTodo();
+  root.innerHTML = `<div class="cmj">${_CMJ_SPRITE}
+    <div class="cmj-head">
+      <div class="cmj-brand"><h1>Console MJ</h1><small>${_esc(vm.adventure || 'Aventure')} · ${vm.players.length} membre${vm.players.length > 1 ? 's' : ''}</small></div>
+      <div class="cmj-tabs" role="tablist">${tabsHtml}</div>
+    </div>
+    <div class="cmj-body">${view}</div>
+  </div>`;
+  _cmjAfterRender();
+}
+function _cmjRow(i) {
+  const idx = _cmjVisible().indexOf(i);
+  const sp = i.spell;
+  const tag = i.tone === 'danger' ? '<span class="cmj-pill red">Bloquant</span>' : '';
+  const pri = i.act === 'Valider' ? 'cmj-btn ok' : (i.auto || /Ouvrir|Créer/.test(i.act)) ? 'cmj-btn gh' : 'cmj-btn pri';
+  return `<div class="cmj-row${_cmjState.open.has(i.id) ? ' open' : ''}${idx === _cmjState.cur ? ' cur' : ''}" data-id="${_esc(i.id)}">
+    <div class="cmj-rw" tabindex="-1" data-cmj-idx="${idx}"><span class="cmj-mk ${i.tone}" aria-hidden="true"></span>
+      <div class="cmj-rt"><b>${_esc(i.title)}${i.who ? `<span class="cmj-who">${_esc(i.who)}</span>` : ''}${tag}</b><small>${sp ? `${_esc(sp.cout)} · ${_esc(sp.portee)}` : _esc(i.detail || '')}</small></div>
+      <div class="cmj-ra">${sp ? `<button type="button" class="cmj-btn gh" ${i.secondary || ''}>${_esc(i.secondaryLabel || 'Ouvrir la fiche')}</button>` : ''}<button type="button" class="${pri}" ${i.attrs || ''}>${i.act === 'Valider' ? _cmjIc('check') : ''}${_esc(i.act)}</button>${sp ? `<button type="button" class="cmj-exp" data-cmj-exp="${_esc(i.id)}" aria-label="Détail du sort" aria-expanded="${_cmjState.open.has(i.id)}">${_cmjIc('chev')}</button>` : ''}</div>
+    </div>
+    ${sp ? `<div class="cmj-spell"><div><div class="cmj-facts"><span>Coût <b>${_esc(sp.cout)}</b></span><span>Portée <b>${_esc(sp.portee)}</b></span></div>${sp.effet ? `<p>${_esc(sp.effet)}</p>` : '<p class="cmj-dim">Pas de description.</p>'}${sp.runes.length ? `<div class="cmj-runes">${sp.runes.map(r => `<span>${_esc(r)}</span>`).join('')}</div>` : ''}</div></div>` : ''}
+  </div>`;
+}
+function _cmjRenderTodo() {
+  const vm = _cmjState.vm;
+  if (!vm.items.length) return `<div class="cmj-empty"><span class="cmj-ok">${_cmjIc('check')}</span><h3>Rien à traiter</h3><p>Comptes, personnages, sorts, groupes et tokens sont alignés. Les nouveaux points apparaîtront ici.</p></div>`;
+  const count = s => vm.items.filter(i => i.sec === s).length;
+  const autos = vm.items.filter(i => i.auto);
+  const autoOps = new Set(autos.map(i => i.attrs)).size;
+  const nav = [{ id: 'all', label: 'Tout', ic: 'inbox' }, ..._CMJ_SECTIONS].map(s => {
+    const c = s.id === 'all' ? vm.items.length : count(s.id);
+    return `<button type="button" class="cmj-nv${_cmjState.sec === s.id ? ' on' : ''}${c ? '' : ' zero'}" data-cmj-sec="${s.id}">${_cmjIc(s.ic)}<span>${_esc(s.label)}</span><b>${c}</b></button>`;
+  }).join('');
+  const vis = _cmjVisible();
+  if (_cmjState.cur >= vis.length) _cmjState.cur = Math.max(0, vis.length - 1);
+  const secs = _CMJ_SECTIONS.filter(s => _cmjState.sec === 'all' || _cmjState.sec === s.id).map(s => {
+    const rows = vis.filter(i => i.sec === s.id);
+    if (!rows.length) return '';
+    const bulk = s.bulk && rows.length > 1 ? `<button type="button" class="cmj-btn gh" data-cmj-bulk="${s.id}">${_cmjIc(s.id === 'sorts' ? 'check' : 'wrench')}${_esc(s.bulk)} (${rows.length})</button>` : '';
+    return `<section class="cmj-sec"><div class="cmj-sh">${_cmjIc(s.ic)}<h3>${_esc(s.label)}</h3><span class="cmj-c">${rows.length}</span><span class="cmj-sp"></span>${s.auto ? '<span class="cmj-tagauto">Réparable automatiquement</span>' : ''}${bulk}</div><div class="cmj-rows">${rows.map(_cmjRow).join('')}</div></section>`;
+  }).join('');
+  return `<div class="cmj-inbox">
+    <aside class="cmj-side"><nav class="cmj-nav" aria-label="Filtrer par sujet">${nav}</nav>
+      ${autos.length ? `<div class="cmj-auto"><span class="cmj-lbl">Correction automatique</span><p><b>${autos.length} point${autos.length > 1 ? 's' : ''}</b> se corrigent sans décision de ta part : participants de groupes et tokens VTT.</p><button type="button" class="cmj-btn pri" data-cmj-autoall>${_cmjIc('wrench')}Tout réparer</button></div>` : ''}
+      <div class="cmj-keys"><span><kbd>↑</kbd><kbd>↓</kbd> naviguer</span><span><kbd>Entrée</kbd> action</span><span><kbd>Espace</kbd> détail du sort</span></div>
+    </aside>
+    <div><div class="cmj-ihead"><h2>${vm.items.length} point${vm.items.length > 1 ? 's' : ''} à traiter</h2><small>${autos.length ? `dont ${autos.length} réparable${autos.length > 1 ? 's' : ''} en ${autoOps} opération${autoOps > 1 ? 's' : ''}` : 'chacun demande une décision'}</small></div>${secs}</div>
+  </div>`;
+}
+function _cmjRenderPlayers() {
+  const vm = _cmjState.vm;
+  const issues = vm.players.filter(p => p.issue).length;
+  const q = _cmjState.pq.trim().toLowerCase();
+  let list = vm.players.filter(p => (_cmjState.pf === 'all' || p.issue) && (!q || [p.pseudo, p.email, ...p.chars].join(' ').toLowerCase().includes(q)));
+  const k = _cmjState.psort;
+  list = list.slice().sort((a, b) => k === 'since' ? String(b.since).localeCompare(String(a.since)) : k === 'role' ? (a.role === 'mj' ? -1 : b.role === 'mj' ? 1 : a.pseudo.localeCompare(b.pseudo, 'fr')) : a.pseudo.localeCompare(b.pseudo, 'fr'));
+  const hb = (id, l) => `<button type="button" data-cmj-psort="${id}" class="${k === id ? 'on' : ''}">${_esc(l)}${k === id ? ' ↓' : ''}</button>`;
+  const prow = p => {
+    const live = p.issue && vm.items.some(i => i.id === p.issueItem);
+    const avatar = p.avatar
+      ? `<img src="${_esc(p.avatar)}" alt="" loading="lazy" decoding="async">`
+      : _esc((p.pseudo[0] || '?').toUpperCase());
+    return `<div class="cmj-pr"><div class="cmj-pl"><span class="cmj-av" style="--c:${p.color}">${avatar}</span><div><b>${_esc(p.pseudo)}</b><small>${_esc(p.email || '')}</small></div></div>
+      <span class="cmj-rl">${p.role === 'mj' ? '<span class="cmj-pill blu">MJ</span>' : '<span class="cmj-dt">Joueur</span>'}</span>
+      <div class="cmj-chars">${p.chars.length ? p.chars.map(c => `<span>${_esc(c)}</span>`).join('') : `<em>${p.role === 'mj' ? '—' : 'Aucun'}</em>`}</div>
+      <span class="cmj-dt">${_esc(p.sinceLabel || '—')}</span>
+      <span class="cmj-st">${p.issue ? (live ? `<button type="button" class="cmj-pill ${p.issueTone}" data-cmj-goto="${p.issueItem}" title="Voir dans À traiter">${_esc(p.issueLabel)} →</button>` : `<span class="cmj-pill ${p.issueTone}">${_esc(p.issueLabel)}</span>`) : ''}</span>
+      <div class="cmj-pa">${p.issue && p.issueAct && live ? `<button type="button" class="cmj-btn gh" ${p.issueAttrs}>${_esc(p.issueAct)}</button>` : ''}</div></div>`;
+  };
+  return `<div class="cmj-tool"><label class="cmj-search">${_cmjIc('search')}<input type="search" id="cmj-pq" placeholder="Pseudo, e-mail ou personnage…" value="${_esc(_cmjState.pq)}" aria-label="Rechercher un joueur"><kbd>/</kbd></label><span class="cmj-sp"></span>
+    <div class="cmj-seg" role="group" aria-label="Filtre"><button type="button" data-cmj-pf="all" class="${_cmjState.pf === 'all' ? 'on' : ''}">Tous <em>${vm.players.length}</em></button><button type="button" data-cmj-pf="issue" class="${_cmjState.pf === 'issue' ? 'on' : ''}">À vérifier <em>${issues}</em></button></div></div>
+    <div class="cmj-ptab"><div class="cmj-pr hd">${hb('pseudo', 'Joueur')}${hb('role', 'Rôle')}<span>Personnages</span>${hb('since', 'Inscription')}<span>État</span><span></span></div>
+    ${list.length ? list.map(prow).join('') : `<div class="cmj-nores">Aucun joueur ne correspond.</div>`}</div>`;
+}
+function _cmjRenderSettings() {
+  const vm = _cmjState.vm;
+  const q = _cmjState.sq.trim().toLowerCase();
+  const hl = s => { const e = _esc(s); if (!q) return e; const i = s.toLowerCase().indexOf(q); return i < 0 ? e : _esc(s.slice(0, i)) + '<mark>' + _esc(s.slice(i, i + q.length)) + '</mark>' + _esc(s.slice(i + q.length)); };
+  const groups = vm.settings.map(g => ({ ...g, items: g.items.filter(x => !q || (x.t + ' ' + x.s + ' ' + g.label).toLowerCase().includes(q)) })).filter(g => g.items.length);
+  return `<div class="cmj-tool"><label class="cmj-search">${_cmjIc('search')}<input type="search" id="cmj-sq" placeholder="Rechercher un réglage…" value="${_esc(_cmjState.sq)}" aria-label="Rechercher un réglage"><kbd>/</kbd></label></div>
+    ${groups.length ? `<div class="cmj-sgrid">${groups.map(g => `<section class="cmj-grp"><h3 class="cmj-lbl">${_esc(g.label)}</h3><div class="cmj-list">${g.items.map(x => `<button type="button" class="cmj-strow" data-action="_adminLazyOpen" data-fn="${_esc(x.fn)}" data-module="${_esc(x.mod)}"><span class="cmj-sic" style="--a:${x.a}">${_cmjIc(x.ic)}</span><span class="cmj-strow-txt"><b>${hl(x.t)}</b><small>${hl(x.s)}</small></span>${_cmjIc('right', 'go')}</button>`).join('')}</div></section>`).join('')}</div>`
+      : `<div class="cmj-empty"><h3>Aucun réglage trouvé</h3><p>Essaie « dégâts », « runes » ou « émotes ».</p></div>`}`;
+}
+function _cmjAfterRender() {
+  if (_cmjState.refocus) {
+    const el = document.getElementById(_cmjState.refocus);
+    if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch {} }
+    _cmjState.refocus = null;
+  }
+}
+function _cmjMoveCur(d) {
+  const vis = _cmjVisible(); if (!vis.length) return;
+  _cmjState.cur = Math.max(0, Math.min(vis.length - 1, _cmjState.cur + d));
+  document.querySelectorAll('.cmj-row.cur').forEach(r => r.classList.remove('cur'));
+  const el = document.querySelector(`.cmj-rw[data-cmj-idx="${_cmjState.cur}"]`);
+  if (el) { el.parentElement.classList.add('cur'); el.focus(); const r = el.getBoundingClientRect(); if (r.top < 100 || r.bottom > innerHeight - 20) window.scrollBy({ top: r.top - innerHeight / 2, behavior: 'smooth' }); }
+}
+function _cmjToggle(id) {
+  _cmjState.open.has(id) ? _cmjState.open.delete(id) : _cmjState.open.add(id);
+  const r = document.querySelector(`.cmj-row[data-id="${CSS.escape(id)}"]`);
+  if (r) { r.classList.toggle('open', _cmjState.open.has(id)); r.querySelector('.cmj-exp')?.setAttribute('aria-expanded', _cmjState.open.has(id)); }
+}
+// Déclenche l'action principale de la ligne courante (dernier bouton d'action,
+// hors chevron) — réutilise le câblage du bouton (registre data-action ou nav).
+function _cmjActivateCur() {
+  const cur = _cmjVisible()[_cmjState.cur]; if (!cur) return;
+  const row = document.querySelector(`.cmj-row[data-id="${CSS.escape(cur.id)}"]`); if (!row) return;
+  const btns = row.querySelectorAll('.cmj-ra .cmj-btn');
+  btns[btns.length - 1]?.click();
+}
+async function _cmjRepairAll() {
+  try { await _adminRepairQuestParticipants(); } catch (e) { console.error('[cmj] repair quests', e); }
+  try { await _adminRepairVttData(); } catch (e) { console.error('[cmj] repair vtt', e); }
+}
+function _cmjMount() {
+  if (_cmjMounted) return; _cmjMounted = true;
+  document.addEventListener('click', e => {
+    if (!document.querySelector('.cmj')) return;
+    const t = e.target.closest('[data-cmj-tab],[data-cmj-sec],[data-cmj-exp],[data-cmj-bulk],[data-cmj-autoall],[data-cmj-pf],[data-cmj-psort],[data-cmj-goto],.cmj-rw');
+    if (!t) return;
+    if ((e.ctrlKey || e.metaKey) && t.matches('[data-nav-sub]')) return;
+    if (t.dataset.cmjTab) return _cmjSetTab(t.dataset.cmjTab);
+    if (t.dataset.cmjSec) { _cmjState.sec = t.dataset.cmjSec; _cmjState.cur = 0; return _cmjRender(); }
+    if (t.dataset.cmjExp) return _cmjToggle(t.dataset.cmjExp);
+    if (t.dataset.cmjBulk) { const s = t.dataset.cmjBulk; return s === 'sorts' ? _adminValidateAllSpells() : s === 'quetes' ? _adminRepairQuestParticipants() : _adminRepairVttData(); }
+    if (t.hasAttribute('data-cmj-autoall')) { return _cmjRepairAll(); }
+    if (t.dataset.cmjPf) { _cmjState.pf = t.dataset.cmjPf; return _cmjRender(); }
+    if (t.dataset.cmjPsort) { _cmjState.psort = t.dataset.cmjPsort; return _cmjRender(); }
+    if (t.dataset.cmjGoto) { _cmjState.sec = 'all'; _cmjState.tab = 'todo'; try { localStorage.setItem(_CMJ_TAB_KEY, 'todo'); } catch {} setRouteSub('admin', 'todo'); _cmjState.cur = _cmjVisible().findIndex(i => i.id === t.dataset.cmjGoto); _cmjRender(); const r = document.querySelector(`.cmj-row[data-id="${CSS.escape(t.dataset.cmjGoto)}"]`); if (r) { r.classList.add('flash'); r.querySelector('.cmj-rw')?.focus({ preventScroll: false }); } return; }
+    if (t.classList.contains('cmj-rw') && !e.target.closest('button')) { _cmjState.cur = +t.dataset.cmjIdx; _cmjMoveCur(0); const id = t.parentElement.dataset.id; if (_cmjVisible().find(i => i.id === id)?.spell) _cmjToggle(id); }
+  });
+  document.addEventListener('input', e => {
+    if (!document.querySelector('.cmj')) return;
+    if (e.target.id === 'cmj-pq') { _cmjState.pq = e.target.value; _cmjState.refocus = 'cmj-pq'; _cmjRender(); }
+    if (e.target.id === 'cmj-sq') { _cmjState.sq = e.target.value; _cmjState.refocus = 'cmj-sq'; _cmjRender(); }
+  });
+  document.addEventListener('keydown', e => {
+    if (!document.querySelector('.cmj')) return;
+    const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
+    if (typing) { if (e.key === 'Escape') document.activeElement.blur(); return; }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (['1', '2', '3'].includes(e.key)) return _cmjSetTab(['todo', 'players', 'settings'][+e.key - 1]);
+    if (e.key === '/') { const i = document.getElementById('cmj-pq') || document.getElementById('cmj-sq'); if (_cmjState.tab !== 'todo' && i) { e.preventDefault(); i.focus(); } return; }
+    if (_cmjState.tab !== 'todo') return;
+    const vis = _cmjVisible(); const cur = vis[_cmjState.cur];
+    if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); _cmjMoveCur(1); }
+    else if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); _cmjMoveCur(-1); }
+    else if (e.key === 'Enter' && cur && !e.target.closest('button')) { e.preventDefault(); _cmjActivateCur(); }
+    else if (e.key === ' ' && cur?.spell && !e.target.closest('button')) { e.preventDefault(); _cmjToggle(cur.id); }
+  });
+}
+
 function _statsNormCombat(cm = {}) {
   const n = _statsNum;
   return {
@@ -1392,7 +1645,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   </div>` : '';
   const tabDefs = [['overview', 'Vue d’ensemble'], ['ranking', 'Classement'], ['players', 'Joueurs'], ['rolls', 'Jets & moyennes'], ['audit', 'Audit']];
   const tabCounts = { ranking: rows.length, players: rows.length };
-  const tabsBar = `<div class="stats-tabs">${tabDefs.map(([k, l]) => `<button class="stats-tab${_statsTab === k ? ' on' : ''}" data-action="_statsSetTab" data-tab="${k}">${l}${tabCounts[k] ? `<span class="stats-tab-cnt">${tabCounts[k]}</span>` : ''}</button>`).join('')}</div>`;
+  const tabsBar = `<div class="stats-tabs">${tabDefs.map(([k, l]) => `<button class="stats-tab${_statsTab === k ? ' on' : ''}" data-action="_statsSetTab" data-tab="${k}" data-nav-page="statistiques" data-nav-sub="${k}">${l}${tabCounts[k] ? `<span class="stats-tab-cnt">${tabCounts[k]}</span>` : ''}</button>`).join('')}</div>`;
   const controls = `<div class="stats-topbar"><div class="stats-topbar-in">
     <div class="stats-topbar-row">
       <div class="stats-brand"><h1>Statistiques</h1><small>${_esc(scopeKicker)}</small></div>
@@ -2631,1294 +2884,387 @@ function _statsOpenManageModal() {
 
 // Flux du mur du tableau de bord en cours (un seul à la fois, cf. dashboard()).
 let _dashWallFeed = null;
+let _dashUi = null;
 
 const PAGES = {
 
-  // ─── DASHBOARD ──────────────────────────────────────────────────────────────
+  // ─── DASHBOARD V3 ───────────────────────────────────────────────────────────
   async dashboard() {
     const content = document.getElementById('main-content');
+    content.innerHTML = `<div class="db" id="dash-root">${appSplashHtml()}</div>`;
 
-    // Loader splash visible tant que les données ne sont pas chargées.
-    // Le wrapper #dash-root est conservé : le rendu final l'utilise pour s'y injecter.
-    content.innerHTML = `<div class="dash-root" id="dash-root">${appSplashHtml()}</div>`;
+    let allChars = sortCharactersForDisplay(getCachedCollection('characters') || []);
+    let story = STATE.isAdmin ? (getCachedCollection('story') || []) : [];
+    let quests = STATE.isAdmin ? (getCachedCollection('quests') || []) : [];
+    let agenda = null;
+    let summary = null;
+    let presence = [];
+    let wallDocs = [];
+    let wallRead = null;
+    let { bastion, investments: bastionInvestments } = bastionSignalSnapshot();
+    let pickGroupId = '';
+    let paintQueued = false;
+    const groupOverrides = new Map();
+    const uidAliases = _uidAliasesForCurrentUser();
+    const aliasSet = new Set(uidAliases);
 
-    const uid = STATE.isAdmin ? null : STATE.user.uid;
-
-    // ── Données RÉACTIVES (rendu NON-bloquant) ─────────────────────────
-    // Le dashboard ne bloque plus sur le réseau : 1er rendu immédiat depuis le
-    // cache (instantané sur cache chaud, squelette vide sinon), puis re-rendu à
-    // l'arrivée de chaque source via les abonnements en bas de fonction. Ces
-    // watch() se branchent sur les listeners session-live (0 lecture en plus)
-    // et sont nettoyés par unwatchAll() à la navigation.
-    let allChars        = sortCharactersForDisplay(getCachedCollection('characters') || []);
-    let storyItems      = getCachedCollection('story')        || [];
-    let achievementsRaw = getCachedCollection('achievements') || [];
-    let quests          = getCachedCollection('quests')       || [];
-    let collectionItems = getCachedCollection('collection')   || [];
-    // Joueur : résumé tenu par le MJ (settings/dashboardSummary). Tant qu'il est
-    // utilisable, Trame / Hauts-faits / Collection complètes ne sont pas lus.
-    let dashSummary     = null;
-    let wallDocs        = [];
-    let wallLegacy      = [];
-    let wallRead        = null;
+    const iconPaths = {
+      calendar: '<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>',
+      clock: '<circle cx="8" cy="8" r="5.8"/><path d="M8 5v3.2l2 1.3"/>',
+      'map-pin': '<path d="M8 14s4.5-4.2 4.5-7.5a4.5 4.5 0 00-9 0C3.5 9.8 8 14 8 14z"/><circle cx="8" cy="6.5" r="1.6"/>',
+      flag: '<path d="M3.5 14V2.5M3.5 3h8.5l-2 3 2 3H3.5"/>',
+      play: '<path d="M5 3.2v9.6c0 .5.5.8 1 .5l7.3-4.8a.6.6 0 000-1L6 2.7c-.5-.3-1 0-1 .5z" fill="currentColor" stroke="none"/>',
+      shield: '<path d="M8 1.8l5 2v4c0 3.2-2.2 5.3-5 6.4-2.8-1.1-5-3.2-5-6.4v-4z"/>',
+      coin: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5.5v5"/>',
+      plus: '<path d="M8 3v10M3 8h10"/>',
+      edit: '<path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/>',
+      'arrow-right': '<path d="M3 8h10M9 4l4 4-4 4"/>',
+      'refresh-cw': '<path d="M13 5V2l-2 2a5.5 5.5 0 10.8 7.3M3 11v3l2-2"/>',
+    };
+    const icon = (id, size = 13) => `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[id] || ''}</svg>`;
     const wallSeenAt = () => {
-      let seenAt = 0;
-      try { seenAt = Number(localStorage.getItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid)) || 0); } catch { /* stockage privé indisponible */ }
-      return Math.max(seenAt, Number(wallRead?.seenAt) || 0);
+      let local = 0;
+      try { local = Number(localStorage.getItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid))) || 0; } catch { /* stockage privé */ }
+      return Math.max(local, Number(wallRead?.seenAt) || 0);
     };
-    let bastionDoc      = null;
-    let nextSession     = null;
-    let nextSessionReady = false;
-    let sessionStats     = null;
-    let sessionAvails    = [];
-
-    let _presenceWatched = false;  // abonnement présence MJ : 1 seule fois
-    let _paintQueued     = false;
-    let _sessionCenterModulePromise = null;
-    let _sessionCenterRenderPromise = null;
-    let _sessionCenterDirty = false;
-    let _sessionCenterNeedsMount = true;
-
-    const mountSessionCenter = () => {
-      _sessionCenterDirty = true;
-      if (_sessionCenterRenderPromise) return;
-      _sessionCenterModulePromise ||= import('./session-center.js');
-      _sessionCenterRenderPromise = _sessionCenterModulePromise
-        .then(async ({ renderSessionCenterInto }) => {
-          // Une seule hydratation à la fois. Les sources arrivées pendant le
-          // chargement sont reprises au tour suivant au lieu d'annuler sans
-          // cesse le rendu en cours.
-          do {
-            _sessionCenterDirty = false;
-            const context = {
-              quests,
-              story: storyItems,
-              chars: allChars,
-              // Stats et disponibilités enrichissent la séance, mais ne doivent
-              // jamais retarder l'affichage de sa date et de son groupe.
-              stats: sessionStats,
-              avails: sessionAvails,
-            };
-            // Tant que le listener agenda n'a pas répondu, laisser le centre
-            // utiliser directement le doc session-live déjà amorcé.
-            if (nextSessionReady) context.agendaDoc = nextSession;
-            await renderSessionCenterInto('dashboard-session-center', context);
-          } while (_sessionCenterDirty
-            && STATE.currentPage === 'dashboard'
-            && document.getElementById('dashboard-session-center'));
-        })
-        .catch(err => console.error('[dashboard] centre de session indisponible', err))
-        .finally(() => {
-          _sessionCenterRenderPromise = null;
-          if (_sessionCenterDirty && STATE.currentPage === 'dashboard') mountSessionCenter();
-        });
+    const schedulePaint = () => {
+      if (paintQueued) return;
+      paintQueued = true;
+      requestAnimationFrame(paint);
     };
-
-    const paint = () => {
-      _paintQueued = false;
-      if (STATE.currentPage !== 'dashboard' || !document.getElementById('dash-root')) return;
-      // Les autres blocs du dashboard se reconstruisent lorsque leurs données
-      // arrivent. Conserver le centre de session évite de réafficher son loader
-      // et de perdre son état à chacun de ces rafraîchissements indépendants.
-      const preservedSessionCenter = document.getElementById('dashboard-session-center');
-
-      // Les personnages délégués sont utilisables comme les personnages du
-      // compte et ne doivent pas réapparaître dans le bloc « autres membres ».
-      const chars = uid ? getControlledCharacters(allChars, uid) : allChars;
-      const controlledIds = new Set(chars.map(c => c.id));
-      const allPartyChars = uid ? allChars.filter(c => !controlledIds.has(c.id)) : [];
-      // Hauts-faits : compteur + 5 plus récents, secrets invisibles aux joueurs.
-      // Même helper pour le résumé MJ et les données complètes → rendu identique.
-      const achievementsView = dashSummary
-        ? (dashSummary.achievements || { count: 0, top: [] })
-        : summarizeAchievements(achievementsRaw, { isAdmin: STATE.isAdmin });
-      // STATE.characters est le cache global de l'aventure. Les vues filtrent
-      // localement ce qu'elles affichent, sinon les pages liées aux personnages
-      // perdent les portraits/participants après un passage par le dashboard.
-      STATE.characters = allChars;
-
-    // Formate la prochaine séance pour affichage (date FR + créneau)
-    const _SLOT_LABELS = { m: '🌞 Matin', a: '☀️ Aprem', s: '🌙 Soir' };
-    function _formatNextSession(sess) {
-      if (!sess || !sess.date) return null;
-      const d = new Date(sess.date + 'T12:00:00');
-      const dateFr = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-      return { dateFr, slotLabel: _SLOT_LABELS[sess.slot] || '', questTitle: sess.questTitle || '' };
-    }
-    // agenda_session/next contient une LISTE de séances validées (rétro-compat :
-    // ancien doc à plat = liste de 1). On affiche la plus proche visible par le
-    // joueur (membres du groupe concerné + MJ).
-    const _isSessVisible = (s) => {
-      const u = s?.participantUids;
-      return STATE.isAdmin || !Array.isArray(u) || !u.length || u.includes(uid);
+    const todayIso = () => {
+      const date = new Date();
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     };
-    const _allSessions = Array.isArray(nextSession?.sessions)
-      ? nextSession.sessions
-      : (nextSession?.date ? [nextSession] : []);
-    const _visibleSessions = _allSessions
-      .filter(_isSessVisible)
-      .sort((a, b) => (a?.date || '').localeCompare(b?.date || ''));
-    const nextSessionFmt = _formatNextSession(_visibleSessions[0]);
-    const _otherSessions = Math.max(0, _visibleSessions.length - 1);
-
-    // Icône SVG inline (jeu d'icônes maison) — rendu homogène cross-OS vs émoji.
-    const _svg = (id, color) => `<svg class="dv2-svg-ico"${color ? ` style="color:${color}"` : ''} aria-hidden="true"><use href="./assets/img/icons.svg#icon-${id}"/></svg>`;
-
-    // ── Action du moment : bloc primaire promu en haut du hub (MJ & joueur) ──
-    // Le « jouer » est l'action n°1 : on l'élève au-dessus du reste et on y
-    // greffe la prochaine séance validée (contexte immédiatement utile).
-    const primaryBlock = `
-      <div class="dash-vtt-cta dash-vtt-cta--primary" data-navigate="vtt">
-        <span class="dash-vtt-icon">${_svg('dice', '#6aa7ff')}</span>
-        <div class="dash-vtt-text">
-          <span class="dash-vtt-label">Entrer dans la table</span>
-          <span class="dash-vtt-sub">${nextSessionFmt
-            ? `Prochaine séance : ${_esc(nextSessionFmt.dateFr)} · ${nextSessionFmt.slotLabel}${_otherSessions ? ` · +${_otherSessions} autre${_otherSessions > 1 ? 's' : ''}` : ''}`
-            : 'Lancer ou rejoindre la session de jeu'}</span>
-        </div>
-        <span class="dash-vtt-arrow">→</span>
-      </div>`;
-
-    const pseudo = STATE.profile?.pseudo || 'Aventurier';
-
-    // Mission active
-    const mission = storyItems
-      .filter(i => i.type === 'mission' && i.statut === 'En cours')
-      .sort((a,b) => (b.ordre||0) - (a.ordre||0))[0] || null;
-
-    // Progression trame
-    const totalMissions = storyItems.filter(i => i.type === 'mission').length;
-    const doneMissions  = storyItems.filter(i => i.type === 'mission' && i.statut === 'Terminée').length;
-
-    // Bastion — compatibilité ancien & nouveau modèle
-    function _bastionLevel(d) {
-      if (!d) return null;
-      // Nouveau modèle : niveau = nb salles construites + 1
-      if (d.salles && typeof d.salles === 'object' && !Array.isArray(d.salles)) {
-        return 1 + Object.values(d.salles).filter(s => (s?.niveau || 0) > 0).length;
-      }
-      // Ancien modèle : niveau = nb améliorations débloquées + 1
-      return 1 + (d.ameliorationsCustom || []).filter(a => (a.fondsActuels||0) >= (a.cout||1) && (a.cout||1) > 0).length;
-    }
-    function _bastionSallesArr(d) {
-      if (!d?.salles) return [];
-      if (Array.isArray(d.salles)) return d.salles.filter(s => s?.nom);
-      // Nouveau modèle : { [slug]: {niveau, ...} }
-      return Object.entries(d.salles)
-        .filter(([_, s]) => (s?.niveau || 0) > 0)
-        .map(([slug, s]) => ({ nom: slug.charAt(0).toUpperCase() + slug.slice(1), niveau: s.niveau }));
-    }
-    const bastionLevel  = _bastionLevel(bastionDoc);
-    const bastionNom    = bastionDoc?.nom || 'Le Bastion';
-
-    // ── Carte mini personnage ─────────────────────────────────────────
-    function _charMini(c) {
-      const pvMax   = calcPVMax(c) || c.pvBase || 10;
-      const pmMax   = calcPMMax(c) || c.pmBase || 10;
-      const pvCur   = c.pvActuel ?? pvMax;
-      const pmCur   = c.pmActuel ?? pmMax;
-      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = calcCA(c) || 10;
-      const or      = calcOr(c) || 0;
-      const portrait = characterPortraitContent(c, { imgStyle: 'width:100%;height:100%;object-fit:cover;display:block', fallbackStyle: "font-family:'Cinzel',serif;font-size:1.3rem;font-weight:700;color:var(--gold)" });
-      return `
-      <div class="dash-char-mini" data-action="_goToChar" data-id="${c.id}">
-        <div class="dash-char-mini-portrait">
-          ${portrait}
-          <div class="dash-char-mini-portrait-fade"></div>
-        </div>
-        <div class="dash-char-mini-body">
-          <div class="dash-cm-namerow">
-            <span class="dash-cm-name">${_esc(c.nom||'?')}</span>
-            <span class="dash-hero-badge">Niv.&nbsp;${c.niveau||1}</span>
-          </div>
-          ${c.classe ? `<div class="dash-cm-sub">${_esc(c.classe)}${c.race?` · ${_esc(c.race)}`:''}</div>` : ''}
-          <div class="dash-cm-bars">
-            <div class="dash-bar-row">
-              <span class="dash-bar-icon">${_svg('heart', '#ff6b6b')}</span>
-              <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
-              <span class="dash-bar-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
-            </div>
-            <div class="dash-bar-row">
-              <span class="dash-bar-icon">${_svg('sparkles', '#4adbf7')}</span>
-              <div class="dash-bar-track"><div class="dash-bar-fill dash-bar-fill--pm" style="width:${pmPct}%"></div></div>
-              <span class="dash-bar-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
-            </div>
-          </div>
-          <div class="dash-cm-chips">
-            <span class="dash-chip">${_svg('shield')} ${ca}</span>
-            <span class="dash-chip dash-chip--gold">${_svg('coin')} ${or}</span>
-          </div>
-        </div>
-        <div class="dash-hero-arrow">→</div>
-      </div>`;
-    }
-
-    // ── Carte héros principale (1 seul perso joueur) ──────────────────
-    function _charFeatured(c) {
-      const pvMax   = calcPVMax(c) || c.pvBase || 10;
-      const pmMax   = calcPMMax(c) || c.pmBase || 10;
-      const pvCur   = c.pvActuel ?? pvMax;
-      const pmCur   = c.pmActuel ?? pmMax;
-      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = calcCA(c) || 10;
-      const or      = calcOr(c) || 0;
-      const portrait = characterPortraitContent(c, { fallbackStyle: "font-family:'Cinzel',serif;font-size:1.6rem;font-weight:700;color:var(--gold)" });
-      return `
-      <div class="dash-hero" data-action="_goToChar" data-id="${c.id}">
-        <div class="dash-hero-glow"></div>
-        <div class="dash-hero-portrait">
-          <div class="dash-hero-portrait-inner">${portrait}</div>
-          <div class="dash-hero-portrait-fade"></div>
-        </div>
-        <div class="dash-hero-body">
-          <div>
-            <div class="dash-hero-name">${_esc(c.nom||'Mon personnage')}</div>
-            <div class="dash-hero-meta">
-              <span class="dash-hero-badge">Niv. ${c.niveau||1}</span>
-              ${c.classe ? `<span class="dash-hero-badge">${_esc(c.classe)}</span>` : ''}
-            </div>
-            ${c.titre ? `<div class="dash-hero-titre">${_esc(c.titre)}</div>` : ''}
-          </div>
-          <div>
-            <div class="dash-hero-bars">
-              <div class="dash-bar-row">
-                <span class="dash-bar-icon">${_svg('heart', '#ff6b6b')}</span>
-                <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
-                <span class="dash-bar-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
-              </div>
-              <div class="dash-bar-row">
-                <span class="dash-bar-icon">${_svg('sparkles', '#4adbf7')}</span>
-                <div class="dash-bar-track"><div class="dash-bar-fill dash-bar-fill--pm" style="width:${pmPct}%"></div></div>
-                <span class="dash-bar-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
-              </div>
-            </div>
-            <div class="dash-hero-chips">
-              <span class="dash-chip">${_svg('shield')} CA <strong>${ca}</strong></span>
-              <span class="dash-chip dash-chip--gold">${_svg('coin')} <strong>${or}</strong> or</span>
-            </div>
-          </div>
-        </div>
-        <div class="dash-hero-arrow">→</div>
-      </div>`;
-    }
-
-    // ── Carte admin ultra-compacte (ligne de tableau) ────────────────
-    function _charRow(c) {
-      const pvMax   = calcPVMax(c) || c.pvBase || 10;
-      const pmMax   = calcPMMax(c) || c.pmBase || 10;
-      const pvCur   = c.pvActuel ?? pvMax;
-      const pmCur   = c.pmActuel ?? pmMax;
-      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const pvColor = pvPct < 25 ? '#ff6b6b' : pvPct < 50 ? '#f59e0b' : '#22c38e';
-      const ca      = calcCA(c) || 10;
-      const or      = calcOr(c) || 0;
-      const avatar = characterPortraitContent(c, { imgStyle: 'width:100%;height:100%;object-fit:cover;display:block', fallbackStyle: "font-family:'Cinzel',serif;font-size:.8rem;font-weight:700;color:var(--gold)" });
-      // Couleur par joueur (hash sur le pseudo)
-      const PCOLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#22d3ee'];
-      const pcol  = PCOLS[(c.ownerPseudo||'?').split('').reduce((a,x)=>a+x.charCodeAt(0),0) % PCOLS.length];
-      return `
-      <div class="dv2-char-row" data-action="_goToChar" data-id="${c.id}" style="--pcol:${pcol}">
-
-        <div class="dv2-cr-top">
-          <div class="dv2-cr-avatar">${avatar}</div>
-          <div class="dv2-flex1">
-            <div class="dv2-cr-namerow">
-              <span class="dv2-cr-name">${_esc(c.nom||'?')}</span>
-              <span class="dv2-cr-badge">Niv.${c.niveau||1}</span>
-            </div>
-            <div class="dv2-cr-sub">${c.classe||''}${c.race?` · ${c.race}`:''}</div>
-          </div>
-          <div class="dv2-cr-tag" style="color:${pcol};background:${pcol}18;border:1px solid ${pcol}44">${_esc(c.ownerPseudo||'?')}</div>
-        </div>
-
-        <div class="dv2-cr-bottom">
-          <div class="dv2-cr-bars">
-            <div class="dv2-cr-barrow">
-              <span class="dv2-cr-icon">${_svg('heart', '#ff6b6b')}</span>
-              <div class="dv2-cr-track"><div class="dv2-cr-fill" style="width:${pvPct}%;background:${pvColor}"></div></div>
-              <span class="dv2-cr-val" style="color:${pvColor}">${pvCur}/${pvMax}</span>
-            </div>
-            <div class="dv2-cr-barrow">
-              <span class="dv2-cr-icon">${_svg('sparkles', '#4adbf7')}</span>
-              <div class="dv2-cr-track"><div class="dv2-cr-fill dv2-cr-fill--pm" style="width:${pmPct}%"></div></div>
-              <span class="dv2-cr-val" style="color:#4adbf7">${pmCur}/${pmMax}</span>
-            </div>
-          </div>
-          <div class="dv2-cr-side">
-            <span class="dv2-cr-side-row dv2-cr-ca">${_svg('shield')} <strong>${ca}</strong></span>
-            <span class="dv2-cr-side-row dv2-cr-or">${_svg('coin')} ${or}</span>
-          </div>
-        </div>
-
-      </div>`;
-    }
-
-    // ── Section personnages ───────────────────────────────────────────
-    let charsHtml = '';
-    if (STATE.isAdmin) {
-      if (chars.length === 0) {
-        charsHtml = `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.2rem;text-align:center;color:var(--text-dim);font-size:.85rem">
-          <div style="font-size:1.5rem;margin-bottom:.4rem;opacity:.35">📜</div>Aucun personnage dans cette aventure</div>`;
-      } else {
-        // Tri : ordre alphabétique du nom du personnage (cohérent avec le reste de l'app).
-        const sorted = sortCharactersForDisplay(chars);
-        charsHtml = `
-        <div class="dash-grid-charlist">
-          ${sorted.map(c => _charRow(c)).join('')}
-        </div>`;
-      }
-    } else {
-      if (chars.length === 0) {
-        charsHtml = `
-        <div class="dash-hero" data-navigate="characters">
-          <div class="dash-hero-body" style="flex-direction:row;align-items:center;gap:1rem;padding:1.3rem 1.5rem">
-            <div style="width:48px;height:48px;border-radius:50%;background:rgba(232,184,75,.08);
-              border:1px dashed rgba(232,184,75,.3);display:flex;align-items:center;justify-content:center;
-              font-size:1.3rem;flex-shrink:0">⚔️</div>
-            <div style="flex:1">
-              <div class="dash-hero-name" style="font-size:.95rem">Créer mon personnage</div>
-              <div style="font-size:.78rem;color:var(--text-dim);margin-top:2px">Bienvenue ${_esc(pseudo)} ! Commence par créer ta fiche de héros.</div>
-            </div>
-            <div class="dash-hero-arrow">→</div>
-          </div>
-        </div>`;
-      } else if (chars.length === 1) {
-        charsHtml = _charFeatured(chars[0]);
-      } else {
-        charsHtml = `
-        <div class="dash-grid-charmini">
-          ${chars.map(c => _charMini(c)).join('')}
-        </div>`;
-      }
-    }
-
-    // ── Render ────────────────────────────────────────────────────────
-    const dash = document.getElementById('dash-root');
-    if (!dash) return;
-
-    const _myUid           = STATE.user?.uid;
-    const _myUidAliases    = [
-      _myUid,
-      ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
-      ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
-    ].filter(Boolean);
-    const { total: collectionTotal, unlocked: collectionUnlocked } = dashSummary
-      ? (dashSummary.collection || { total: 0, unlocked: 0 })
-      : summarizeCollection(collectionItems);
-    const collectionPct    = collectionTotal > 0 ? Math.round((collectionUnlocked / collectionTotal) * 100) : 0;
-    // Groupes « En cours » de la Trame (quêtes liées à une mission). L'ancien
-    // modèle de quêtes autonomes est abandonné — le hub reflète la Trame.
-    // Missions clôturées (Terminée/Échouée) → leurs groupes ne doivent plus
-    // compter comme « en cours », même si le statut du groupe n'a pas été basculé.
-    const _doneMissionIds = new Set(
-      storyItems.filter(i => i.statut === 'Terminée' || i.statut === 'Échouée').map(i => i.id)
-    );
-    const activeGroups     = quests
-      .filter(q => q.missionId && (q.statut || 'active') === 'active' && !_doneMissionIds.has(q.missionId))
-      .sort((a, b) => (b.createdAt||'') > (a.createdAt||'') ? 1 : -1);
-    const _missionTitleById = new Map(storyItems.map(i => [i.id, i.titre || 'Mission']));
-
-    setDashboardQuests(quests);
-
-    // ── Helpers ────────────────────────────────────────────────────────
-
-    // Mini-portrait
-    const _portMini = (p, size = 26) => characterAvatarHtml(p, { size, border: '2px solid var(--bg-card)', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
-
-    // Carte d'un groupe de la Trame (lecture seule → on rejoint/gère dans la Trame).
-    const _dashGroupCard = q => {
-      const parts        = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases });
-      const missionTitle = _missionTitleById.get(q.missionId) || 'Mission';
-      const joined       = parts.some(p => _myUidAliases.includes(p.uid));
-      const portHtml     = parts.slice(0, 5).map(p => _portMini(p, 24)).join('');
-      return `
-      <div class="quest-card quest-card--active" data-navigate="story">
-        <div class="quest-card-hd">
-          <span class="quest-badge" style="background:rgba(79,140,255,.13);color:#7aa7ff;border-color:rgba(79,140,255,.3)">🎯 ${_esc(missionTitle)}</span>
-          ${joined ? `<span style="margin-left:auto;font-size:.7rem;color:#22c38e;font-weight:700">✓ Rejoint</span>` : ''}
-        </div>
-        <div class="quest-card-title">${_esc(q.titre || 'Groupe')}</div>
-        ${q.recompense ? `<div class="quest-reward">🎁 ${_esc(q.recompense)}</div>` : ''}
-        <div class="quest-parts">${portHtml}${parts.length > 5 ? `<span class="quest-parts-count">+${parts.length - 5}</span>` : ''}<span class="quest-parts-count">${parts.length} membre${parts.length > 1 ? 's' : ''}</span></div>
-      </div>`;
+    const parseIso = value => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+      return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
     };
-
-    // Barre progression trame (v2)
-    const _progBar = () => {
-      if (totalMissions === 0) return '';
-      const pct = Math.round(doneMissions / totalMissions * 100);
-      return `
-      <div class="dv2-panel-card dv2-progress-card" data-navigate="story">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim)">📖 Progression aventure</span>
-          <span style="font-size:.72rem;color:var(--arcane);font-weight:700;font-family:var(--font-display)">${doneMissions}/${totalMissions} missions</span>
-        </div>
-        <div class="dv2-mission-prog-track">
-          <div class="dv2-mission-prog-fill" data-w="${pct}%"><div class="dv2-mission-shimmer"></div></div>
-        </div>
-      </div>`;
-    };
-
-    // ── Helpers joueur v2 ─────────────────────────────────────────────
-
-    function _heroCardV2(c) {
-      const pvMax   = calcPVMax(c) || c.pvBase || 10;
-      const pmMax   = calcPMMax(c) || c.pmBase || 10;
-      const pvCur   = c.pvActuel ?? pvMax;
-      const pmCur   = c.pmActuel ?? pmMax;
-      const pvPct   = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-      const pmPct   = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const xpCur   = c.exp || 0;
-      const xpNext  = calcPalier(c.niveau || 1);
-      const xpPct   = Math.min(100, Math.round(xpCur / xpNext * 100));
-      const ca      = calcCA(c) || 10;
-      const or      = calcOr(c) || 0;
-      const portrait = characterPortraitContent(c);
-      return `
-      <div class="dv2-hero-card" data-action="_goToChar" data-id="${c.id}">
-        <div class="dv2-hero-inner">
-          <div class="dv2-portrait-wrap">
-            <div class="dv2-portrait">${portrait}</div>
-            <div class="dv2-portrait-level">NIV.&nbsp;${c.niveau||1}</div>
-          </div>
-          <div class="dv2-hero-info">
-            <div>
-              <div class="dv2-chips">
-                ${c.classe ? `<span class="dv2-chip dv2-chip-blue">${_esc(c.classe)}</span>` : ''}
-                ${c.race   ? `<span class="dv2-chip dv2-chip-purple">${_esc(c.race)}</span>` : ''}
-              </div>
-              <div class="dv2-hero-name">${_esc(c.nom||'Mon Héros')}</div>
-              ${c.titre ? `<div class="dv2-hero-title">${_esc(c.titre)}</div>` : ''}
-            </div>
-            <div class="dv2-stat-bars">
-              <div class="dv2-bar-row">
-                <span class="dv2-bar-label" style="color:#22c38e">PV</span>
-                <div class="dv2-bar-track"><div class="dv2-bar-fill dv2-bar-hp" data-w="${pvPct}%"></div></div>
-                <span class="dv2-bar-val">${pvCur}/${pvMax}</span>
-              </div>
-              <div class="dv2-bar-row">
-                <span class="dv2-bar-label" style="color:#6aa7ff">PM</span>
-                <div class="dv2-bar-track"><div class="dv2-bar-fill dv2-bar-mp" data-w="${pmPct}%"></div></div>
-                <span class="dv2-bar-val">${pmCur}/${pmMax}</span>
-              </div>
-              <div class="dv2-bar-row">
-                <span class="dv2-bar-label" style="color:#c084fc">XP</span>
-                <div class="dv2-bar-track"><div class="dv2-bar-fill dv2-bar-xp" data-w="${xpPct}%"><div class="dv2-bar-xp-shimmer"></div></div></div>
-                <span class="dv2-bar-val">${xpCur}/${xpNext}</span>
-              </div>
-            </div>
-            <div class="dv2-stats-row">
-              <div class="dv2-stat-pill">
-                <div class="dv2-stat-pill-val" style="color:#f4c430">${_svg('coin')} ${or}</div>
-                <div class="dv2-stat-pill-lbl">Or</div>
-              </div>
-              <div class="dv2-stat-pill">
-                <div class="dv2-stat-pill-val" style="color:var(--gold-2)">${_svg('shield')} ${ca}</div>
-                <div class="dv2-stat-pill-lbl">CA</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    }
-
-    function _partyCardV2(partyChars) {
-      const byPlayer = {};
-      partyChars.forEach(c => {
-        const key = c.uid || c.ownerPseudo || c.id;
-        if (!byPlayer[key] || (c.niveau||1) > (byPlayer[key].niveau||1)) byPlayer[key] = c;
-      });
-      const members = Object.values(byPlayer).slice(0, 5);
-      setDashboardPartyChars(partyChars);
-      return `
-      <div class="dv2-party-card">
-        <div class="dv2-panel-header">
-          <div class="dv2-panel-title">⚔️ Groupe <span class="dv2-panel-count">${members.length}</span></div>
-        </div>
-        ${members.length > 0 ? members.map(c => {
-          const av = characterPortraitContent(c, { fallbackTag: 'span' });
-          const isOwn = canControlCharacter(c);
-          return `
-          <div class="dv2-party-member" data-action="_openQuickView" data-id="${c.id}"
-            title="Cliquer pour aperçu rapide">
-            <div class="dv2-party-avatar">${av}</div>
-            <div class="dv2-flex1">
-              <div class="dv2-party-name">${_esc(c.nom||'?')}</div>
-              <div class="dv2-party-sub">Niv.${c.niveau||1}${c.classe?` · ${_esc(c.classe)}`:''}</div>
-            </div>
-            ${isOwn ? `<button class="dv2-party-fullopen" data-action="_goToChar" data-id="${c.id}" data-stop-propagation
-              title="Ouvrir la fiche complète">→</button>` : ''}
-            <div class="dv2-party-dot"></div>
-          </div>`;
-        }).join('') : `<div class="dv2-empty-sm dv2-party-empty">
-          <span class="dv2-presence-empty-ico">${_svg('users')}</span>
-          <span>Les membres de ton groupe apparaîtront ici dès que vous partagez une aventure.</span>
-        </div>`}
-        ${nextSessionFmt ? `
-        <div class="dv2-party-footer dv2-party-footer--session">
-          <div class="dv2-party-session-label">Prochaine séance prévue pour :</div>
-          <div class="dv2-party-session-chip dv2-party-session-chip--validated">
-            <span class="dv2-pss-date">${_esc(nextSessionFmt.dateFr)}</span>
-            <span class="dv2-pss-slot">${nextSessionFmt.slotLabel}</span>
-            ${nextSessionFmt.questTitle ? `<span class="dv2-pss-quest">${_esc(nextSessionFmt.questTitle)}</span>` : ''}
-          </div>
-          ${_otherSessions ? `<div class="dv2-party-session-more">+${_otherSessions} autre${_otherSessions > 1 ? 's' : ''} créneau${_otherSessions > 1 ? 'x' : ''} validé${_otherSessions > 1 ? 's' : ''}</div>` : ''}
-        </div>`
-        : STATE.adventure ? `
-        <div class="dv2-party-footer">
-          <div class="dv2-party-session-label">Aventure en cours</div>
-          <div class="dv2-party-session-chip">${STATE.adventure.emoji||'⚔️'} ${_esc(STATE.adventure.nom||'Aventure')}</div>
-        </div>` : ''}
-      </div>`;
-    }
-
-    function _missionCardV2() {
-      if (!mission) return '';
-      const pct = totalMissions > 0 ? Math.round(doneMissions / totalMissions * 100) : 0;
-      return `
-      <div class="dv2-mission-card" data-navigate="story">
-        <div class="dv2-mission-header">
-          <div class="dv2-mission-icon">${mission.imageUrl
-            ? `<img src="${mission.imageUrl}" alt="${_esc(mission.nom || mission.titre || '')}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`
-            : '⚔️'}</div>
-          <div class="dv2-mission-info">
-            <div class="dv2-mission-type">Mission active${mission.acte ? ` · ${_esc(mission.acte)}` : ''}</div>
-            <div class="dv2-mission-name">${_esc(mission.titre||'Mission')}</div>
-            ${mission.lieu ? `<div style="font-size:.72rem;color:var(--text-dim);margin-top:3px">📍 ${_esc(mission.lieu)}</div>` : ''}
-          </div>
-          <div class="dv2-mission-status"><span style="opacity:.7">●</span>&nbsp;En cours</div>
-        </div>
-        ${mission.description ? `<div class="dv2-mission-desc">${_esc(mission.description)}</div>` : ''}
-        ${totalMissions > 0 ? `
-        <div class="dv2-mission-progress">
-          <div class="dv2-mission-prog-labels">
-            <span>Progression de l'aventure</span>
-            <span class="dv2-mission-prog-val">${doneMissions}/${totalMissions}</span>
-          </div>
-          <div class="dv2-mission-prog-track">
-            <div class="dv2-mission-prog-fill" data-w="${pct}%"><div class="dv2-mission-shimmer"></div></div>
-          </div>
-        </div>` : ''}
-      </div>`;
-    }
-
-    function _statsGridV2(c) {
-      const pvMax = calcPVMax(c) || c.pvBase || 10;
-      const pmMax = calcPMMax(c) || c.pmBase || 10;
-      const pvCur = c.pvActuel ?? pvMax;
-      const pmCur = c.pmActuel ?? pmMax;
-      const pvPct = pvMax > 0 ? Math.round(pvCur / pvMax * 100) : 0;
-      const pmPct = pmMax > 0 ? Math.round(pmCur / pmMax * 100) : 0;
-      const ca = calcCA(c) || 10;
-      const or = calcOr(c) || 0;
-      return `
-      <div class="dv2-stats-grid">
-        <div class="dv2-stat-card dv2-sc-gold" data-action="_goToChar" data-id="${c.id}">
-          <span class="dv2-stat-card-icon">${_svg('coin', '#f4c430')}</span>
-          <div class="dv2-stat-card-val" style="color:#f4c430">${or}</div>
-          <div class="dv2-stat-card-lbl">Or</div>
-        </div>
-        <div class="dv2-stat-card dv2-sc-shield" data-action="_goToChar" data-id="${c.id}">
-          <span class="dv2-stat-card-icon">${_svg('shield', 'var(--gold-2)')}</span>
-          <div class="dv2-stat-card-val" style="color:var(--gold-2)">${ca}</div>
-          <div class="dv2-stat-card-lbl">Classe d'armure</div>
-        </div>
-        <div class="dv2-stat-card dv2-sc-hp" data-action="_goToChar" data-id="${c.id}">
-          <span class="dv2-stat-card-icon">${_svg('heart', '#22c38e')}</span>
-          <div class="dv2-stat-card-val" style="color:#22c38e">${pvCur}<span style="font-size:.65em;opacity:.55">/${pvMax}</span></div>
-          <div class="dv2-stat-card-lbl">Points de vie</div>
-          <div class="dv2-stat-card-sub">${pvPct}% restants</div>
-        </div>
-        <div class="dv2-stat-card dv2-sc-mp" data-action="_goToChar" data-id="${c.id}">
-          <span class="dv2-stat-card-icon">${_svg('sparkles', '#b99fff')}</span>
-          <div class="dv2-stat-card-val" style="color:#b99fff">${pmCur}<span style="font-size:.65em;opacity:.55">/${pmMax}</span></div>
-          <div class="dv2-stat-card-lbl">Points de magie</div>
-          <div class="dv2-stat-card-sub">${pmPct}% restants</div>
-        </div>
-      </div>`;
-    }
-
-    function _shortcutsV2() {
-      const S = [
-        { page:'bestiaire',  icon:'🐉', label:'Bestiaire',  bg:'rgba(255,90,126,.15)',  bc:'rgba(255,90,126,.3)',  col:'#ff5a7e' },
-        { page:'recettes',   icon:'🍳', label:'Recettes',   bg:'rgba(34,195,142,.15)',  bc:'rgba(34,195,142,.3)',  col:'#22c38e' },
-        { page:'shop',       icon:'🛍️', label:'Boutique',   bg:'rgba(244,196,48,.15)',  bc:'rgba(244,196,48,.3)',  col:'#f4c430' },
-        { page:'map',        icon:'🗺️', label:'Carte',      bg:'rgba(79,140,255,.15)',  bc:'rgba(79,140,255,.3)',  col:'#4f8cff' },
-        { page:'collection', icon:'🃏', label:'Collection', bg:'rgba(34,211,238,.15)',  bc:'rgba(34,211,238,.3)',  col:'#22d3ee' },
-        { page:'vtt',        icon:'🎲', label:'Table VTT',  bg:'rgba(157,111,255,.15)', bc:'rgba(157,111,255,.3)', col:'#9d6fff' },
-        { page:'bastion',    icon:'🏰', label:'Bastion',    bg:'rgba(255,149,68,.15)',  bc:'rgba(255,149,68,.3)',  col:'#ff9544' },
-        { page:'characters', icon:'⚔️', label:'Personnage', bg:'rgba(232,184,75,.15)',  bc:'rgba(232,184,75,.3)',  col:'#e8b84b' },
-      ].filter(s => isFeatureEnabled(s.page));
-      if (!S.length) return '';
-      return `<div class="dv2-shortcuts-grid">${S.map(s => `
-        <button class="dv2-shortcut" data-navigate="${s.page}">
-          <div class="dv2-shortcut-icon" style="background:${s.bg};border-color:${s.bc};color:${s.col}">${s.icon}</div>
-          <span class="dv2-shortcut-label">${s.label}</span>
-        </button>`).join('')}</div>`;
-    }
-
-    function _groupsPanelV2() {
-      if (!isFeatureEnabled('story')) return ''; // Trame désactivée
-      // Mes groupes « En cours » (ceux que j'ai rejoints), sinon tous les groupes actifs.
-      const mine = activeGroups.filter(q => (q.participants || []).some(p => _myUidAliases.includes(p.uid)));
-      const list = (mine.length ? mine : activeGroups).slice(0, 5);
-      return `
-      <div class="dv2-panel-card">
-        <div class="dv2-panel-header">
-          <div class="dv2-panel-title">👥 Mes groupes <span class="dv2-panel-count">${mine.length || activeGroups.length}</span></div>
-          <button class="dv2-section-action" data-navigate="story">Trame →</button>
-        </div>
-        ${list.length ? list.map(q => {
-          const joined = (q.participants || []).some(p => _myUidAliases.includes(p.uid));
-          const missionTitle = _missionTitleById.get(q.missionId) || 'Mission';
-          const count = dedupeQuestParticipants(q.participants, { uidAliases: _myUidAliases }).length;
-          return `
-          <div class="dv2-quest-item" data-navigate="story">
-            <div class="dv2-quest-icon dv2-qi-main">🎯</div>
-            <div class="dv2-flex1">
-              <div class="dv2-quest-name">${_esc(q.titre || 'Groupe')}</div>
-              <div class="dv2-quest-sub">${_esc(missionTitle)}${joined ? ' · ✓ Rejoint' : ''}</div>
-            </div>
-            <div class="dv2-quest-rarity dv2-rarity-rare">${count} 👤</div>
-          </div>`;
-        }).join('') : `<div class="dv2-empty-sm">Aucun groupe en cours. Rejoins-en un dans la <strong>Trame</strong>.</div>`}
-      </div>`;
-    }
-
-    function _achievementsPanelV2() {
-      if (!isFeatureEnabled('achievements')) return ''; // Hauts-Faits désactivés
-      return `
-      <div class="dv2-panel-card">
-        <div class="dv2-panel-header">
-          <div class="dv2-panel-title">🏆 Hauts-faits <span class="dv2-panel-count">${achievementsView.count}</span></div>
-          <button class="dv2-section-action" data-navigate="achievements">Voir tout →</button>
-        </div>
-        ${achievementsView.top.length > 0 ? achievementsView.top.map(a => `
-        <div class="dv2-ach-item">
-          <div class="dv2-ach-icon">${a.icone||'🏆'}</div>
-          <div class="dv2-flex1">
-            <div class="dv2-ach-name">${_esc(a.titre||a.nom||'Haut-fait')}</div>
-            <div class="dv2-ach-desc">${_esc(a.description||'')}</div>
-          </div>
-          ${a.xp ? `<div class="dv2-ach-xp">+${a.xp}&nbsp;XP</div>` : ''}
-        </div>`).join('') : `<div class="dv2-empty-sm">Aucun haut-fait.</div>`}
-      </div>`;
-    }
-
-    function _bastionCardV2() {
-      // Détection du nouveau modèle (salles = objet) vs ancien (array)
-      const isNewModel = bastionDoc?.salles && typeof bastionDoc.salles === 'object' && !Array.isArray(bastionDoc.salles);
-      const emoji   = bastionDoc?.emoji || '🏰';
-      const semaine = bastionDoc?.semaine;
-      const or      = bastionDoc?.or || 0;
-      const salles  = _bastionSallesArr(bastionDoc).slice(0, 6);
-
-      // Constructions en cours (nouveau modèle uniquement)
-      let buildingCount = 0;
-      if (isNewModel) {
-        buildingCount = Object.values(bastionDoc.salles || {})
-          .filter(s => s?.weeksLeftToBuild > 0).length;
-      }
-
-      const ev = bastionDoc?.evenementCourant;
-      return `
-      <div class="dv2-bastion-card" data-navigate="bastion">
-        <div class="dv2-bastion-header">
-          <div class="dv2-bastion-icon">${_esc(emoji)}</div>
-          <div class="dv2-flex1">
-            <div class="dv2-bastion-name">${_esc(bastionNom)}</div>
-            <div class="dv2-bastion-level">${semaine ? `Période ${semaine}` : `Niveau ${bastionLevel}`}${bastionDoc?.lieu ? ` · ${_esc(bastionDoc.lieu)}` : ''}</div>
-          </div>
-          <button class="dv2-section-action" data-navigate="bastion" data-stop-propagation>Gérer →</button>
-        </div>
-
-        ${isNewModel ? `
-        <div class="dv2-bastion-stats">
-          <div class="dv2-bs-stat"><span class="dv2-bs-stat-ico">💰</span><span class="dv2-bs-stat-val">${or}</span><span class="dv2-bs-stat-lbl">or</span></div>
-          ${buildingCount > 0 ? `<div class="dv2-bs-stat dv2-bs-stat--build"><span class="dv2-bs-stat-ico">🏗</span><span class="dv2-bs-stat-val">${buildingCount}</span><span class="dv2-bs-stat-lbl">en construction</span></div>` : ''}
-        </div>` : ''}
-
-        ${salles.length > 0 ? `
-        <div class="dv2-bastion-rooms">${salles.map(s=>`
-          <div class="dv2-bastion-room"><div class="dv2-bastion-room-dot"></div>${_esc(s.nom)}${s.niveau ? ` <span style="font-size:.62rem;opacity:.7">Niv.${s.niveau}</span>` : ''}</div>`).join('')}
-        </div>` : `<div class="dv2-bastion-note" style="background:none;border:none;color:var(--text-dim);font-style:italic">Aucune salle construite</div>`}
-        ${ev && ev !== 'calme' ? `<div class="dv2-bastion-note">⚠️ ${_esc(ev)}</div>` : ''}
-      </div>`;
-    }
-
-    // ── Render ──────────────────────────────────────────────────────────
-    function _dashboardMetric({ page, icon, value, label, tone = '#7fb0ff', sub = '' }) {
-      if (page && !isFeatureEnabled(page)) return '';
-      return `
-      <button type="button" class="dv2-dash-metric" data-navigate="${page}">
-        <span class="dv2-dash-metric-ico" style="color:${tone}">${icon}</span>
-        <span class="dv2-dash-metric-main">
-          <strong style="color:${tone}">${value}</strong>
-          <span>${label}</span>
-          ${sub ? `<small>${sub}</small>` : ''}
-        </span>
-      </button>`;
-    }
-
-    function _quickActionButton({ page, icon, label, note, tone = '#7fb0ff' }) {
-      if (!isFeatureEnabled(page)) return '';
-      return `
-      <button type="button" class="dv2-dash-action" data-navigate="${page}">
-        <span class="dv2-dash-action-ico" style="color:${tone}">${icon}</span>
-        <span class="dv2-dash-action-copy">
-          <strong>${label}</strong>
-          <small>${note}</small>
-        </span>
-      </button>`;
-    }
-
-    function _gmPilotPanel() {
-      const visibleSessionCount = _visibleSessions.length;
-      const activeMissionCount = storyItems.filter(i => i.type === 'mission' && i.statut === 'En cours').length;
-      return `
-      <section class="dv2-dash-panel dv2-dash-panel--pilot">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Pilotage</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div class="dv2-dash-metrics">
-          ${_dashboardMetric({ page: 'characters', icon: _svg('users'), value: chars.length, label: 'personnages' })}
-          ${_dashboardMetric({ page: 'story', icon: _svg('scroll'), value: activeGroups.length, label: 'groupes actifs', tone: '#b99fff', sub: `${activeMissionCount} mission${activeMissionCount > 1 ? 's' : ''}` })}
-          ${_dashboardMetric({ page: 'agenda', icon: _svg('calendar'), value: visibleSessionCount, label: 'seances calees', tone: '#22c38e' })}
-          ${_dashboardMetric({ page: 'collection', icon: _svg('layers'), value: `${collectionUnlocked}/${collectionTotal}`, label: 'collection', tone: '#f4c430', sub: collectionTotal ? `${collectionPct}% debloque` : 'vide' })}
-        </div>
-      </section>`;
-    }
-
-    function _gmAttentionPanel() {
-      const statusRows = chars
-        .map(c => {
-          const pvMax = calcPVMax(c) || c.pvBase || 10;
-          const pmMax = calcPMMax(c) || c.pmBase || 10;
-          const pvCur = c.pvActuel ?? pvMax;
-          const pmCur = c.pmActuel ?? pmMax;
-          const pvPct = pvMax > 0 ? Math.round((pvCur / pvMax) * 100) : 100;
-          const pmPct = pmMax > 0 ? Math.round((pmCur / pmMax) * 100) : 100;
-          const reasons = [];
-          if (pvPct <= 35) reasons.push(`PV ${pvCur}/${pvMax}`);
-          if (pmPct <= 25) reasons.push(`PM ${pmCur}/${pmMax}`);
-          return { c, pvPct, pmPct, reasons };
-        })
-        .filter(row => row.reasons.length)
-        .sort((a, b) => (a.pvPct - b.pvPct) || (a.pmPct - b.pmPct))
-        .slice(0, 5);
-      if (!statusRows.length) return '';
-      return `
-      <section class="dv2-dash-panel">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">PV / PM bas</span>
-          <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" data-navigate="characters">Fiches -></button>
-        </div>
-        <div class="dv2-dash-watchlist">
-          ${statusRows.map(({ c, reasons }) => {
-            const avatar = characterAvatarHtml(c, { size: 34, border: '2px solid rgba(255,90,126,.4)', background: 'rgba(255,90,126,.12)' });
-            return `
-            <button type="button" class="dv2-dash-watch" data-action="_goToChar" data-id="${c.id}">
-              ${avatar}
-              <span class="dv2-dash-watch-copy">
-                <strong>${_esc(c.nom || '?')}</strong>
-                <small>${_esc(reasons.join(' · '))}</small>
-              </span>
-            </button>`;
-          }).join('')}
-        </div>
-      </section>`;
-    }
-
-    function _gmActionsPanel() {
-      const actions = [
-        { page: 'vtt', icon: _svg('dice'), label: 'Ouvrir la table', note: 'jouer, tokens, combats', tone: '#7fb0ff' },
-        { page: 'story', icon: _svg('scroll'), label: 'Preparer la trame', note: 'missions et groupes', tone: '#22d3ee' },
-        { page: 'statistiques', icon: _svg('trophy'), label: 'Lire les stats', note: 'recaps de session', tone: '#a78bfa' },
-        { page: 'bestiaire', icon: _svg('sword'), label: 'Bestiaire', note: 'creatures et rencontres', tone: '#ff5a7e' },
-        { page: 'shop', icon: _svg('coin'), label: 'Boutique', note: 'objets et economie', tone: '#f4c430' },
-        { page: 'admin', icon: _svg('cog'), label: 'Reglages', note: 'outils MJ', tone: '#ff9544' },
-      ];
-      return `
-      <section class="dv2-dash-panel">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Actions MJ</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div class="dv2-dash-actions">${actions.map(_quickActionButton).join('')}</div>
-      </section>`;
-    }
-
-    function _playerActionsPanel() {
-      const actions = [
-        { page: 'characters', icon: _svg('scroll'), label: 'Ouvrir la fiche', note: 'profil, combat, inventaire', tone: '#e8b84b' },
-        { page: 'collection', icon: _svg('layers'), label: 'Collection', note: 'cartes debloquees', tone: '#22d3ee' },
-        { page: 'map', icon: _svg('map'), label: 'Carte', note: 'monde et reperes', tone: '#4f8cff' },
-      ];
-      return `
-      <section class="dv2-dash-panel">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Reprendre</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div class="dv2-dash-actions">${actions.map(_quickActionButton).join('')}</div>
-      </section>`;
-    }
-
-    function _playerJoinableGroupsPanel() {
-      if (!isFeatureEnabled('story') || STATE.isAdmin) return '';
-      const charById = new Map(allChars.map(c => [c.id, c]));
-      const playerHasChar = allChars.some(c => _myUidAliases.includes(c.uid));
-      const rows = activeGroups
-        .map(q => {
-          const parts = dedupeQuestParticipants(q.participants || [], { uidAliases: _myUidAliases });
-          const joined = parts.some(p => _myUidAliases.includes(p.uid));
-          return { q, parts, joined, missionTitle: _missionTitleById.get(q.missionId) || 'Mission' };
-        })
-        .sort((a, b) => Number(a.joined) - Number(b.joined) || (b.q.createdAt || '').localeCompare(a.q.createdAt || ''))
-        .slice(0, 5);
-      return `
-      <section class="dv2-dash-panel dv2-groups-panel">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Groupes ouverts</span>
-          <div class="dv2-section-label-line"></div>
-          <button class="dv2-section-action" data-navigate="story">Trame -></button>
-        </div>
-        <div class="dv2-groups-list">
-          ${rows.length ? rows.map(({ q, parts, joined, missionTitle }) => {
-            const members = parts.map(p => {
-              const c = p.charId ? charById.get(p.charId) : null;
-              const person = c ? { ...p, ...c } : p;
-              return { raw: p, char: c, html: characterAvatarHtml(person, {
-                size: 30,
-                className: 'dv2-group-avatar',
-                title: c?.nom || p.nom || '?',
-                border: joined && _myUidAliases.includes(p.uid) ? '2px solid rgba(34,195,142,.8)' : '2px solid var(--bg-panel)',
-                background: 'rgba(79,140,255,.14)',
-              }) };
-            });
-            return `
-            <article class="dv2-group-card${joined ? ' is-joined' : ''}">
-              <div class="dv2-group-top">
-                <span class="dv2-group-state">${joined ? 'Rejoint' : 'Ouvert'}</span>
-                <span class="dv2-group-mission">${_esc(missionTitle)}</span>
-              </div>
-              <div class="dv2-group-name">${_esc(q.titre || 'Groupe')}</div>
-              <div class="dv2-group-members">
-                ${members.length ? members.slice(0, 6).map(m => m.char
-                  ? `<button type="button" class="dv2-group-avatar-btn" data-action="_dashQuickChar" data-id="${m.char.id}" title="${_esc(m.char.nom || '?')}">${m.html}</button>`
-                  : `<span class="dv2-group-avatar-btn is-static" title="${_esc(m.raw.nom || '?')}">${m.html}</span>`).join('')
-                  : `<span class="dv2-group-none">Aucun membre</span>`}
-                ${members.length > 6 ? `<span class="dv2-group-more">+${members.length - 6}</span>` : ''}
-              </div>
-              <div class="dv2-group-foot">
-                <span>${members.length} membre${members.length > 1 ? 's' : ''}</span>
-                <button type="button" class="dv2-group-join${joined ? ' is-leave' : ''}" data-action="_dashToggleQuest" data-id="${_esc(q.id)}" ${playerHasChar || joined ? '' : 'disabled'}>
-                  ${joined ? 'Quitter' : playerHasChar ? 'Rejoindre' : 'Créer une fiche'}
-                </button>
-              </div>
-            </article>`;
-          }).join('') : `<div class="dv2-dash-empty">Aucun groupe ouvert pour le moment.</div>`}
-        </div>
-      </section>`;
-    }
-
-    function _playerProgressPanel() {
-      const achievementCount = achievementsView.count;
-      return `
-      <section class="dv2-dash-panel dv2-dash-panel--pilot">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Mes reperes</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div class="dv2-dash-metrics">
-          ${_dashboardMetric({ page: 'characters', icon: _svg('users'), value: chars.length, label: 'personnage' + (chars.length > 1 ? 's' : '') })}
-          ${_dashboardMetric({ page: 'collection', icon: _svg('layers'), value: `${collectionUnlocked}/${collectionTotal}`, label: 'cartes', tone: '#22d3ee', sub: collectionTotal ? `${collectionPct}%` : 'vide' })}
-          ${_dashboardMetric({ page: 'achievements', icon: _svg('trophy'), value: achievementCount, label: 'hauts-faits', tone: '#22c38e' })}
-          ${bastionDoc ? _dashboardMetric({ page: 'bastion', icon: _svg('shield'), value: bastionLevel || 1, label: 'bastion', tone: '#f4c430' }) : ''}
-        </div>
-      </section>`;
-    }
-
-    const advBanner = STATE.adventure ? `
-    <div class="dash-adv-banner" data-action="openAdventureSwitcher" style="cursor:${(STATE.adventures?.length||0)>1?'pointer':'default'}">
-      <span style="font-size:1.1rem">${STATE.adventure.emoji||'⚔️'}</span>
-      <span class="dash-adv-name">${_esc(STATE.adventure.nom)}</span>
-      ${(STATE.adventures?.length||0)>1?`<span style="font-size:.7rem;color:var(--text-dim);border:1px solid var(--border);border-radius:6px;padding:1px 6px">⇄ Changer</span>`:''}
-      <span class="dash-adv-tag">Aventure active</span>
-    </div>` : '';
-    const sessionHub = `
-      <section class="dv2-session-hub">
-        <div class="dv2-section-label">
-          <span class="dv2-section-label-text">Session</span>
-          <div class="dv2-section-label-line"></div>
-        </div>
-        <div id="dashboard-session-center" class="sc-root">${appSplashHtml('Chargement des séances…')}</div>
-      </section>`;
-
-    function _dashboardWallPanel() {
-      if (!isFeatureEnabled('bastion')) return '';
-      const seenAt = wallSeenAt();
-      const { unread, shown } = dashboardWallView({ docs: wallDocs, legacyItems: wallLegacy, seenAt, uid: STATE.user?.uid });
-      const timeAgo = ts => {
-        const minutes = Math.max(0, Math.floor((Date.now() - Number(ts || 0)) / 60000));
-        if (minutes < 1) return "à l'instant";
-        if (minutes < 60) return `il y a ${minutes} min`;
-        if (minutes < 1440) return `il y a ${Math.floor(minutes / 60)} h`;
-        return `il y a ${Math.floor(minutes / 1440)} j`;
+    const dateInfo = value => {
+      const date = parseIso(value);
+      if (!date) return { day: '--', month: '', weekday: '', short: 'Date à définir', when: '' };
+      const base = parseIso(todayIso());
+      const days = Math.round((date - base) / 86_400_000);
+      return {
+        day: String(date.getDate()).padStart(2, '0'),
+        month: new Intl.DateTimeFormat('fr-FR', { month: 'short' }).format(date).replace('.', ''),
+        weekday: new Intl.DateTimeFormat('fr-FR', { weekday: 'long' }).format(date),
+        short: new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).format(date).replace('.', ''),
+        when: days === 0 ? "aujourd’hui" : days === 1 ? 'demain' : days > 1 ? `dans ${days} jours` : '',
       };
+    };
+    const slotMeta = slot => ({
+      m: { label: 'Matin', hours: '9 h – 13 h' },
+      a: { label: 'Après-midi', hours: '14 h – 18 h' },
+      s: { label: 'Soir', hours: '19 h – 23 h' },
+    }[slot] || { label: 'Créneau', hours: 'à préciser' });
+    const controlledChars = () => STATE.isAdmin
+      ? allChars
+      : getControlledCharacters(allChars, STATE.user?.uid);
+    const liveUids = () => {
+      const now = Date.now();
+      return new Set((presence || [])
+        .filter(item => item?.uid && item.uid !== STATE.user?.uid)
+        .filter(item => {
+          const ts = item.lastSeen?.toMillis?.() ?? 0;
+          return ts > 0 && now - ts < PRESENCE_TTL_MS;
+        })
+        .map(item => item.uid));
+    };
+    const groups = () => {
+      const base = STATE.isAdmin
+        ? activeGroupsFromSources(story, quests)
+        : (isUsableSummary(summary) ? summary.groups : []);
+      return base.map(group => ({
+        ...group,
+        participants: groupOverrides.get(group.id) || group.participants || [],
+      }));
+    };
+    const sessions = () => {
+      const base = STATE.isAdmin
+        ? compactDashboardSessions(agenda, quests)
+        : (isUsableSummary(summary) ? summary.sessions : []);
+      const order = { m: 0, a: 1, s: 2 };
+      return base
+        .filter(session => isAgendaSessionUpcoming(session, todayIso()))
+        .filter(session => STATE.isAdmin
+          || !session.participantUids?.length
+          || session.participantUids.some(uid => aliasSet.has(uid)))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date))
+          || (order[a.slot] ?? 9) - (order[b.slot] ?? 9));
+    };
+    const charForParticipant = participant => allChars.find(char => char.id === participant?.charId)
+      || allChars.find(char => char.uid === participant?.uid)
+      || { nom: participant?.nom || 'Personnage', uid: participant?.uid || '' };
+    const avatar = (entity, className = '', live = false) => {
+      const sizes = { sm: 24, lg: 46, xl: 56 };
+      const sizeClass = className.split(/\s+/).find(value => sizes[value]);
+      return characterAvatarHtml(entity, {
+        size: sizes[sizeClass] || 32,
+        className: `db-av ${className}${live ? ' live' : ''}`.trim(),
+        border: 'none',
+        background: 'var(--surface-2)',
+      });
+    };
+    const groupJoined = group => (group?.participants || []).some(participant =>
+      aliasSet.has(participant?.uid)
+      || controlledChars().some(char => char.id && char.id === participant?.charId));
+    const groupForChar = (char, list = groups()) => list.find(group =>
+      (group.participants || []).some(participant => participant?.charId === char.id
+        || (!participant?.charId && participant?.uid === char.uid)));
+    const freeChars = list => {
+      const busy = new Set(list.flatMap(group => (group.participants || []).map(participant => participant?.charId).filter(Boolean)));
+      return controlledChars().filter(char => !busy.has(char.id));
+    };
+    const bars = char => {
+      const pvMax = calcPVMax(char) || char.pvBase || 10;
+      const pmMax = calcPMMax(char) || char.pmBase || 10;
+      const pv = char.hp ?? char.pvActuel ?? pvMax;
+      const pm = char.pmActuel ?? pmMax;
+      const pvPct = pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pv / pvMax * 100))) : 0;
+      const pmPct = pmMax > 0 ? Math.max(0, Math.min(100, Math.round(pm / pmMax * 100))) : 0;
+      return `<span class="db-bars">
+        <span class="db-bar${pvPct < 30 ? ' low' : ''}">PV<i><u style="width:${pvPct}%;--c:${pvPct < 30 ? 'var(--crimson)' : pvPct < 55 ? 'var(--amber)' : 'var(--emerald)'}"></u></i><b>${pv}/${pvMax}</b></span>
+        <span class="db-bar">PM<i><u style="width:${pmPct}%;--c:var(--gold)"></u></i><b>${pm}/${pmMax}</b></span>
+      </span>`;
+    };
+
+    const sessionSection = (list, groupList) => {
+      if (!list.length) return `<section class="db-ses"><div class="db-none">
+        <div><b>Aucune séance prévue${STATE.isAdmin ? '' : ' pour tes groupes'}</b><p>${STATE.isAdmin ? 'Planifie une date pour un groupe de la Trame.' : 'Rejoins un groupe ci-dessous ou indique tes disponibilités au MJ.'}</p></div>
+        <button type="button" class="db-btn" data-navigate="agenda">${icon('calendar')} ${STATE.isAdmin ? 'Planifier une séance' : 'Mes disponibilités'}</button>
+        <button type="button" class="db-go" data-navigate="vtt">${icon('play', 15)} Entrer dans la table</button>
+      </div></section>`;
+      const first = list[0];
+      const group = groupList.find(item => item.id === first.questId) || {};
+      const date = dateInfo(first.date);
+      const slot = slotMeta(first.slot);
+      const participants = (group.participants || []).map(charForParticipant);
+      return `<section class="db-ses"><div class="db-ses-in">
+        <div class="db-cal"><span>${_esc(date.month)}</span><b>${date.day}</b><small>${_esc(date.weekday)}</small></div>
+        <div class="db-ses-t"><span class="db-ses-k">Prochaine séance${date.when ? ` <em>${_esc(date.when)}</em>` : ''}</span>
+          <h1>${_esc(group.missionTitle || 'Séance de l’aventure')}</h1>
+          <div class="db-ses-m"><span>${icon('clock')}${_esc(slot.label)} · ${_esc(slot.hours)}</span>${group.location ? `<span>${icon('map-pin')}${_esc(group.location)}</span>` : ''}${group.title ? `<span>${icon('flag')}${_esc(group.title)}${group.act ? ` · ${_esc(group.act)}` : ''}</span>` : ''}</div>
+          <div class="db-ses-p">${participants.length ? `<span class="db-stack">${participants.slice(0, 6).map(char => avatar(char, 'sm', liveUids().has(char.uid))).join('')}</span>` : ''}${participants.length} personnage${participants.length > 1 ? 's' : ''}</div>
+        </div>
+        <div class="db-ses-a"><button type="button" class="db-go" data-navigate="vtt">${icon('play', 15)} Entrer dans la table</button><button type="button" class="db-link" data-navigate="story">Voir la mission ${icon('arrow-right')}</button></div>
+      </div>${list.length > 1 ? `<div class="db-more">${list.slice(1).map(item => {
+        const itemGroup = groupList.find(groupItem => groupItem.id === item.questId) || {};
+        const itemDate = dateInfo(item.date);
+        const itemChars = (itemGroup.participants || []).map(charForParticipant);
+        return `<button type="button" class="db-mr" data-navigate="agenda"><b>${_esc(itemDate.short)}</b><span>${_esc(itemGroup.title || 'Groupe')} <em>· ${_esc(itemGroup.missionTitle || 'Mission')}</em></span>${itemChars.length ? `<span class="db-stack">${itemChars.slice(0, 5).map(char => avatar(char, 'sm', liveUids().has(char.uid))).join('')}</span>` : ''}</button>`;
+      }).join('')}</div>` : ''}</section>`;
+    };
+
+    const playerCharactersSection = groupList => {
+      const chars = controlledChars();
+      const card = char => {
+        const pvMax = calcPVMax(char) || char.pvBase || 10;
+        const low = pvMax > 0 && (char.hp ?? char.pvActuel ?? pvMax) / pvMax < .3;
+        const group = groupForChar(char, groupList);
+        return `<button type="button" class="db-ch" data-action="_dashQuickChar" data-id="${_esc(char.id)}"><span class="db-ch-h">${avatar(char, 'lg')}<span><b>${_esc(char.nom || '?')}</b><small>${_esc([char.classe, char.race].filter(Boolean).join(' · '))}</small></span><span class="db-lv">Niv. ${char.niveau || 1}</span></span>${bars(char)}<span class="db-ch-f"><span class="db-chip">${icon('shield')} CA <b>${calcCA(char) || 10}</b></span><span class="db-chip">${icon('coin')} <b>${calcOr(char) || 0}</b> or</span>${group ? `<span class="db-chip grp">${icon('flag')}${_esc(group.title)}</span>` : ''}${low ? '<span class="db-chip warn">PV bas</span>' : ''}</span></button>`;
+      };
+      return `<section class="db-sec"><div class="db-sh"><h2>${chars.length > 1 ? 'Mes personnages' : 'Mon personnage'}</h2>${chars.length > 1 ? `<span class="n">${chars.length}</span>` : ''}</div><div class="db-chars">${chars.length ? chars.map(card).join('') : `<button type="button" class="db-new" data-navigate="characters">${icon('plus')} Créer mon personnage</button>`}</div></section>`;
+    };
+
+    const gmCharactersSection = groupList => {
+      const online = liveUids();
+      return `<section class="db-sec"><div class="db-sh"><h2>Personnages</h2><span class="n">${allChars.length}</span><span class="sp"></span><button type="button" class="db-link" data-navigate="characters">Toutes les fiches ${icon('arrow-right')}</button></div><div class="db-card">${allChars.length ? allChars.map(char => {
+        const group = groupForChar(char, groupList);
+        const connected = online.has(char.uid);
+        const owner = char.ownerPseudo || char.joueur || char.playerName || 'Joueur';
+        return `<button type="button" class="db-tr" data-action="_dashQuickChar" data-id="${_esc(char.id)}"><span class="db-who">${avatar(char, '', connected)}<span><b>${_esc(char.nom || '?')}</b><small>${connected ? '<em>Connecté</em> · ' : ''}${_esc(owner)}${char.classe ? ` · ${_esc(char.classe)} niv. ${char.niveau || 1}` : ''}</small></span></span>${bars(char)}${group ? `<span class="db-chip grp">${_esc(group.title)}</span>` : '<span class="db-chip">Sans groupe</span>'}</button>`;
+      }).join('') : '<div class="db-empty"><b>Aucun personnage</b>Les fiches de l’aventure apparaîtront ici.</div>'}</div></section>`;
+    };
+
+    const groupsSection = groupList => {
+      const available = freeChars(groupList);
+      const sorted = STATE.isAdmin ? groupList : [...groupList].sort((a, b) => Number(groupJoined(a)) - Number(groupJoined(b)));
+      const openCount = groupList.filter(group => !groupJoined(group)).length;
+      const card = group => {
+        const joined = !STATE.isAdmin && groupJoined(group);
+        const members = (group.participants || []).map(charForParticipant);
+        const session = sessions().find(item => item.questId === group.id);
+        const picker = pickGroupId === group.id ? `<div class="db-pick"><small>Avec quel personnage ?</small><div>${available.length ? available.map(char => `<button type="button" class="c" data-action="_dashPickQuestChar" data-id="${_esc(group.id)}" data-char="${_esc(char.id)}">${avatar(char, 'sm')}${_esc(char.nom || '?')}</button>`).join('') : '<small>Tous tes personnages sont déjà dans un groupe.</small>'}</div></div>` : '';
+        const action = STATE.isAdmin
+          ? `<button type="button" class="db-link" data-navigate="story">Gérer ${icon('arrow-right')}</button>`
+          : joined
+            ? `<button type="button" class="db-btn ghost" data-action="_dashToggleQuest" data-id="${_esc(group.id)}">Quitter</button>`
+            : available.length
+              ? `<button type="button" class="db-btn pri" data-action="_dashToggleQuest" data-id="${_esc(group.id)}">Rejoindre</button>`
+              : `<button type="button" class="db-btn" disabled>Aucun personnage libre</button>`;
+        return `<article class="db-g${joined ? ' in' : ''}"><div class="db-g-k"><span>${_esc([group.act, group.missionTitle].filter(Boolean).join(' · ') || 'Mission')}</span><em>${joined ? 'Rejoint' : STATE.isAdmin ? `${members.length} membre${members.length > 1 ? 's' : ''}` : 'Ouvert'}</em></div><h3>${_esc(group.title || 'Groupe')}</h3><p>${icon('calendar')}${session ? `Séance ${_esc(dateInfo(session.date).short.toLowerCase())}` : 'Pas encore de date'}</p>${picker}<div class="db-g-f">${members.length ? `<span class="db-stack">${members.slice(0, 5).map(char => avatar(char, 'sm', liveUids().has(char.uid))).join('')}</span>` : ''}<small>${members.length ? `${members.length} membre${members.length > 1 ? 's' : ''}` : 'Aucun membre'}</small>${action}</div></article>`;
+      };
+      return `<section class="db-sec"><div class="db-sh"><h2>${STATE.isAdmin ? 'Groupes actifs' : 'Groupes ouverts'}</h2><span class="n">${STATE.isAdmin ? groupList.length : openCount}</span><span class="sp"></span><button type="button" class="db-link" data-navigate="story">Trame ${icon('arrow-right')}</button></div><div class="db-groups">${sorted.length ? sorted.map(card).join('') : '<div class="db-card db-empty"><b>Aucun groupe actif</b>Les groupes ouverts de la Trame apparaîtront ici.</div>'}</div></section>`;
+    };
+
+    const wallSection = () => {
+      const seenAt = wallSeenAt();
+      const { unread, shown } = dashboardWallView({ docs: wallDocs, seenAt, uid: STATE.user?.uid });
       const card = post => {
         const char = allChars.find(item => item.id === post.charId) || { nom: post.charName || post.author || 'Personnage', photo: post.charImage || '' };
         const type = BASTION_WALL_TYPES[post.type] || BASTION_WALL_TYPES.message;
-        const counts = bastionWallReactionCounts(post);
-        const reactionCount = Object.values(counts).reduce((sum, count) => sum + count, 0);
-        const plain = String(post.text || '').replace(/\s+/g, ' ').trim();
-        const snippet = plain.length > 150 ? `${plain.slice(0, 147)}…` : plain;
+        const reactions = Object.values(bastionWallReactionCounts(post)).reduce((sum, value) => sum + value, 0);
+        const replies = Number(post.commentCount) || (post.comments || []).length;
         const isUnread = post.ts > seenAt && post.uid !== STATE.user?.uid;
-        const status = post.status && post.status !== 'active' ? (post.status === 'resolved' ? ' · Résolue' : ' · Annulée') : '';
-        const commentCount = Math.max(Number(post.commentCount) || 0, (post.comments || []).length);
-        return `<button type="button" class="dv2-wall-post${isUnread ? ' is-unread' : ''}" data-navigate="bastion" data-nav-sub="post:${_esc(post.id)}">
-          ${characterAvatarHtml(char, { size: 36, className: 'dv2-wall-avatar' })}
-          <span class="dv2-wall-post-copy"><span class="dv2-wall-post-meta"><strong>${_esc(post.charName || post.author || char.nom || 'Personnage')}</strong><b class="dv2-wall-type" style="--wall-type:${type.color}">${type.icon} ${type.label}${status}</b><small>${timeAgo(post.ts)}</small>${isUnread ? '<i>Nouveau</i>' : ''}</span><span class="dv2-wall-post-text">${_esc(snippet || ((post.imageCount || post.images?.length) ? `A partagé ${post.imageCount || post.images.length} image${(post.imageCount || post.images.length) > 1 ? 's' : ''}` : 'Nouvelle publication'))}</span><span class="dv2-wall-post-stats">${reactionCount ? `${reactionCount} réaction${reactionCount > 1 ? 's' : ''}` : 'Aucune réaction'} · ${commentCount} réponse${commentCount > 1 ? 's' : ''}</span></span>
-          ${post.imagePreview || post.images?.[0] ? `<img class="dv2-wall-thumb" src="${_esc(post.imagePreview || post.images[0])}" alt="">` : '<span class="dv2-wall-arrow">→</span>'}
-        </button>`;
+        return `<button type="button" class="db-w${isUnread ? ' unread' : ''}" data-navigate="bastion" data-nav-sub="post:${_esc(post.id)}">${avatar(char)}<span class="db-w-b"><span class="db-w-h"><b>${_esc(post.charName || post.author || char.nom || 'Personnage')}</b><span class="db-ty" style="--t:${_esc(type.color)}">${_esc(type.label)}</span>${post.pinned ? '<span class="db-pin">Épinglé</span>' : ''}<span>· ${timeAgo(post.ts)}</span></span><p>${_esc(post.text || 'Nouvelle publication')}</p><span class="db-w-s">${reactions} réaction${reactions > 1 ? 's' : ''} · ${replies} réponse${replies > 1 ? 's' : ''}</span></span></button>`;
       };
-      return `<section class="dv2-dash-panel dv2-wall-panel">
-        <div class="dv2-section-label"><span class="dv2-section-label-text">Mur du Bastion</span>${unread ? `<span class="dv2-wall-unread">${unread} non ${unread > 1 ? 'lus' : 'lu'}</span>` : ''}<div class="dv2-section-label-line"></div><button class="dv2-section-action" data-navigate="bastion">Ouvrir →</button></div>
-        <div class="dv2-wall-list">${shown.length ? shown.map(card).join('') : '<button class="dv2-wall-empty" data-navigate="bastion"><span>📌</span><strong>Le mur est prêt</strong><small>Publie la première nouvelle du Bastion.</small></button>'}</div>
-      </section>`;
+      return `<section class="db-sec db-wall"><div class="db-sh"><h2>Mur du Bastion</h2>${unread ? `<span class="new">${unread} nouveau${unread > 1 ? 'x' : ''}</span>` : ''}<span class="sp"></span><button type="button" class="db-link" data-navigate="bastion">Ouvrir ${icon('arrow-right')}</button></div><div class="db-card">${shown.length ? shown.map(card).join('') : '<div class="db-empty"><b>Le mur est prêt</b>Publiez la première nouvelle du Bastion.</div>'}<div class="db-wf"><button type="button" class="db-btn" data-navigate="bastion">${icon('edit')} Publier</button>${unread ? '<button type="button" class="db-btn ghost" data-action="_dashMarkWallRead">Tout marquer lu</button>' : ''}</div></div></section>`;
+    };
+
+    const bastionSection = () => {
+      const projects = bastionRoomProjects(bastion || {}, bastionInvestments);
+      const catalog = Array.isArray(bastion?.roomCatalog) ? bastion.roomCatalog : [];
+      const buildings = catalog.filter(room => Number(bastion?.salles?.[room.slug]?.weeksLeftToBuild) > 0);
+      const contributorRows = slug => {
+        return roomInvestmentContributors(bastion || {}, bastionInvestments, slug)
+          .map(row => ({ ...row, name: row.charName }));
+      };
+      const projectRow = project => {
+        const rows = contributorRows(project.slug);
+        const segments = rows.map(row => {
+          const char = allChars.find(item => item.id === row.charId) || { nom: row.name };
+          const color = /^#[0-9a-f]{6}$/i.test(char.auraColor || '') ? char.auraColor : characterColor(char);
+          return `<i style="--segment:${color};width:${project.cost ? Math.min(100, row.amount / project.cost * 100) : 0}%"></i>`;
+        }).join('');
+        return `<div class="db-bs-project" style="--room:${_esc(project.def.color || '#7eb0ff')}"><span class="db-bs-icon">${_esc(project.def.emoji || '🏠')}</span><span><b>${_esc(project.name)} ${project.def.unlimited ? project.target : ['','I','II','III'][project.target] || project.target}</b><small>Il manque ${project.remaining} or</small><span class="db-bs-bar">${segments}</span></span></div>`;
+      };
+      const closest = projects[0];
+      const note = closest?.next?.bonus ? String(closest.next.bonus) : '';
+      return `<section class="db-sec db-bastion"><div class="db-sh"><h2>🏰 Bastion</h2><span class="sp"></span><button type="button" class="db-link" data-navigate="bastion" data-nav-sub="salles">Voir les salles ${icon('arrow-right')}</button></div><div class="db-card db-bs-card">${projects.length ? projects.slice(0, 2).map(projectRow).join('') : '<div class="db-empty"><b>Aucun chantier ouvert</b>Une cotisation depuis les salles fera apparaître l’objectif commun ici.</div>'}${closest ? `<div class="db-bs-footer"><span>${_esc(note.length > 76 ? `${note.slice(0, 74)}…` : note)}</span>${closest.remaining > 0 ? `<button type="button" class="db-btn pri" data-navigate="bastion" data-nav-sub="room:${_esc(closest.slug)}">Cotiser ${Math.min(50, closest.remaining)} or</button>` : `<button type="button" class="db-btn pri" data-navigate="bastion" data-nav-sub="room:${_esc(closest.slug)}">Financé</button>`}</div>` : ''}${buildings.length ? `<div class="db-bs-building">${buildings.map(room => `<b>${_esc(room.emoji || '🏗')} ${_esc(room.nom)}</b> ouvre dans ${Number(bastion.salles[room.slug].weeksLeftToBuild)} période${Number(bastion.salles[room.slug].weeksLeftToBuild) > 1 ? 's' : ''}`).join(' · ')}</div>` : ''}</div></section>`;
+    };
+
+    function paint() {
+      paintQueued = false;
+      const root = document.getElementById('dash-root');
+      if (!root || STATE.currentPage !== 'dashboard') return;
+      STATE.characters = allChars;
+      setDashboardPartyChars(allChars);
+      setDashboardQuests(quests);
+      const groupList = groups();
+      const sessionList = sessions();
+      const hasJoinedGroup = groupList.some(groupJoined);
+      const characterSection = STATE.isAdmin ? gmCharactersSection(groupList) : playerCharactersSection(groupList);
+      const groupSection = groupsSection(groupList);
+      // La séance occupe toute la largeur en tête ; les autres sections se
+      // répartissent dans la grille 2 colonnes dessous (évite le couloir étroit).
+      const sessionBanner = sessionSection(sessionList, groupList);
+      const main = STATE.isAdmin || hasJoinedGroup
+        ? [characterSection, groupSection]
+        : [groupSection, characterSection];
+      const pseudo = STATE.profile?.pseudo || STATE.profile?.displayName || STATE.user?.displayName || String(STATE.user?.email || '').split('@')[0] || 'aventurier';
+      const adventure = STATE.adventure?.nom || 'Aventure';
+      const initials = adventure.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toUpperCase() || 'A';
+      const online = liveUids().size;
+      const wall = isFeatureEnabled('bastion') ? wallSection() : '';
+      const bastionCard = isFeatureEnabled('bastion') ? bastionSection() : '';
+      root.innerHTML = `<div class="db-top"><button type="button" class="db-adv" data-action="openAdventureSwitcher"><span class="sig">${_esc(initials)}</span><b>${_esc(adventure)}</b><small>${icon('refresh-cw')}Changer</small></button><span class="db-hello">${STATE.isAdmin ? `<span class="db-on"><i></i>${online} joueur${online > 1 ? 's' : ''} connecté${online > 1 ? 's' : ''}</span>` : ''}<span>Bonsoir, <b>${_esc(pseudo)}</b>${STATE.isAdmin ? ' · Maître de jeu' : ''}</span></span></div>${sessionBanner}<div class="db-grid${wall || bastionCard ? '' : ' solo'}"><div class="db-col">${main.join('')}</div>${wall || bastionCard ? `<div class="db-col">${bastionCard}${wall}</div>` : ''}</div>`;
     }
 
-    if (STATE.isAdmin) {
-
-      // ── VUE MJ v2 ─────────────────────────────────────────────────────
-      dash.className = 'dv2-root';
-      dash.innerHTML = `
-      ${advBanner}
-
-      <!-- En-tête MJ -->
-      <div class="dv2-header">
-        <div>
-          <div class="dv2-greeting-label">Console Maître du Jeu</div>
-          <div class="dv2-greeting-title">Bonjour, ${_esc(pseudo)}</div>
-        </div>
-        <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Aventure active</div>
-      </div>
-
-      ${sessionHub}
-
-      <section class="dv2-dashboard-grid dv2-dashboard-grid--admin">
-        <aside class="dv2-dashboard-side">
-          ${_gmPilotPanel()}
-          ${_gmAttentionPanel()}
-          <div id="dash-presence"></div>
-          ${_gmActionsPanel()}
-          ${totalMissions > 0 ? `
-          <section class="dv2-dash-panel">
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Progression aventure</span>
-              <div class="dv2-section-label-line"></div>
-              <button class="dv2-section-action" data-navigate="story">Ouvrir -></button>
-            </div>
-            ${_progBar()}
-          </section>` : ''}
-        </aside>
-        <div class="dv2-dashboard-main">
-          ${_dashboardWallPanel()}
-          <section class="dv2-dash-panel">
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Personnages</span>
-              <div class="dv2-section-label-line"></div>
-              <button class="dv2-section-action" data-navigate="characters">Voir tous -></button>
-            </div>
-            <div class="dv2-panel-card">${charsHtml
-              ? `<div style="padding:12px">${charsHtml}</div>`
-              : `<div class="dv2-empty-md">Aucun personnage dans cette aventure.</div>`}
-            </div>
-          </section>
-        </div>
-      </section>`;
-
-      // ── Présence temps réel (MJ uniquement) ─────────────────────────
-      // Filtre : actif si lastSeen < PRESENCE_TTL_MS (cohérent avec la présence VTT)
-      // Exclut le MJ lui-même. Cleanup auto via unwatchAll au prochain navigate.
-      const _renderPresence = (list) => {
-        const slot = document.getElementById('dash-presence');
-        if (!slot) return;
-        const now = Date.now();
-        const active = (list || [])
-          .filter(p => p.uid && p.uid !== _myUid)
-          .map(p => ({ ...p, ts: p.lastSeen?.toMillis?.() ?? 0 }))
-          .filter(p => p.ts > 0 && (now - p.ts) < PRESENCE_TTL_MS)
-          .sort((a, b) => (a.pseudo || '').localeCompare(b.pseudo || '', 'fr'));
-        if (!active.length) {
-          slot.innerHTML = `
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Joueurs connectés</span>
-              <div class="dv2-section-label-line"></div>
-            </div>
-            <div class="dv2-panel-card">
-              <div class="dv2-presence-empty">
-                <span class="dv2-presence-empty-ico">${_svg('users')}</span>
-                <div class="dv2-presence-empty-txt">
-                  <span class="dv2-presence-empty-title">Personne autour de la table</span>
-                  <span class="dv2-presence-empty-sub">Les joueurs connectés apparaîtront ici en temps réel.</span>
-                </div>
-              </div>
-            </div>`;
+    const replaceParticipants = (groupId, participants) => {
+      groupOverrides.set(groupId, participants);
+      if (STATE.isAdmin) quests = quests.map(quest => quest.id === groupId ? { ...quest, participants } : quest);
+      schedulePaint();
+    };
+    const persistParticipants = async (group, participants, leaving) => {
+      const previous = group.participants || [];
+      replaceParticipants(group.id, participants);
+      const enriched = participants.map(participant => {
+        const char = allChars.find(item => item.id === participant?.charId);
+        return char ? questParticipantFromChar(char, participant.uid || char.uid) : participant;
+      });
+      const saved = await _dashSaveQuestParticipants(group.id, enriched, { leaving });
+      if (!saved) replaceParticipants(group.id, previous);
+      return saved;
+    };
+    _dashUi = {
+      characterIds: () => (STATE.isAdmin ? allChars : controlledChars()).map(char => char.id),
+      async toggleQuest(groupId) {
+        const groupList = groups();
+        const group = groupList.find(item => item.id === groupId);
+        if (!group) { showNotif('Groupe introuvable.', 'error'); return; }
+        if (groupJoined(group)) {
+          const next = (group.participants || []).filter(participant => !aliasSet.has(participant?.uid));
+          await persistParticipants(group, next, true);
+          pickGroupId = '';
           return;
         }
-        const pills = active.map(p => {
-          const ch = (STATE.characters || []).find(c => c.uid === p.uid) || null;
-          const portrait = characterAvatarHtml(ch || p, { size: 30, border: '2px solid rgba(34,195,142,.55)', background: 'rgba(34,195,142,.15)', color: 'var(--gold)' });
-          return `
-          <div class="dv2-presence-pill">
-            ${portrait}
-            <div class="dv2-presence-meta">
-              <span class="dv2-presence-name">${_esc(p.pseudo||'?')}</span>
-              ${ch ? `<span class="dv2-presence-char">${_esc(ch.nom||'?')}</span>` : ''}
-            </div>
-          </div>`;
-        }).join('');
-        slot.innerHTML = `
-          <div class="dv2-section-label">
-            <span class="dv2-section-label-text">Joueurs connectés (${active.length})</span>
-            <div class="dv2-section-label-line"></div>
-          </div>
-          <div class="dv2-panel-card">
-            <div class="dv2-presence-list">${pills}</div>
-          </div>`;
-      };
-      // Abonnement présence une seule fois (sinon chaque paint recrée un listener
-      // éphémère → lectures inutiles). _renderPresence lit STATE.characters (à jour).
-      if (!_presenceWatched) { _presenceWatched = true; watch('presence', 'presence', _renderPresence); }
-
-    } else {
-
-      // ── VUE JOUEUR v2 ─────────────────────────────────────────────────
-
-      // Groupe : co-membres des groupes (Trame) que j'ai rejoints
-      const _joinedGroups = activeGroups.filter(q =>
-        Array.isArray(q.participants) && q.participants.some(p => _myUidAliases.includes(p.uid))
-      );
-      const _missionUids = new Set(
-        _joinedGroups.flatMap(q => (q.participants || []).map(p => p.uid)).filter(u => !_myUidAliases.includes(u))
-      );
-      const partyMembers = _joinedGroups.length > 0
-        ? [...chars, ...allPartyChars.filter(c => _missionUids.has(c.uid))]
-        : [];
-
-      // Bloc héros : une carte par personnage du joueur + carte groupe à côté du premier
-      let heroBlock = '';
-      if (chars.length === 0) {
-        heroBlock = `
-        <div class="dv2-hero-card" data-navigate="characters">
-          <div class="dv2-hero-inner" style="padding:2rem;justify-content:center;text-align:center">
-            <div>
-              <div style="font-size:2rem;margin-bottom:.75rem">⚔️</div>
-              <div class="dv2-hero-name" style="font-size:1.1rem;margin-bottom:.4rem">Créer mon personnage</div>
-              <div style="font-size:.8rem;color:var(--text-dim)">Bienvenue ${_esc(pseudo)} ! Commence par créer ta fiche de héros.</div>
-            </div>
-          </div>
-        </div>`;
-      } else if (chars.length === 1) {
-        heroBlock = `
-        <div class="dash-grid-herocards dash-grid-herocards--single">
-          ${_heroCardV2(chars[0])}
-        </div>`;
-      } else {
-        // Plusieurs personnages : grille adaptative.
-        // auto-fit (vs auto-fill) étire les colonnes pour utiliser toute la largeur
-        heroBlock = `
-        <div class="dash-grid-herocards">
-          ${chars.map(c => _heroCardV2(c)).join('')}
-        </div>`;
-      }
-
-      dash.className = 'dv2-root';
-      dash.innerHTML = `
-      ${advBanner}
-
-      <div class="dv2-header">
-        <div>
-          <div class="dv2-greeting-label">Bonjour, aventurier</div>
-          <div class="dv2-greeting-title">Bienvenue, ${_esc(pseudo)}</div>
-        </div>
-        <div class="dv2-session-badge"><div class="dv2-session-dot"></div>Aventure active</div>
-      </div>
-
-      ${sessionHub}
-
-      <section class="dv2-dashboard-grid dv2-dashboard-grid--player">
-        <aside class="dv2-dashboard-side">
-          ${_playerActionsPanel()}
-          ${_playerProgressPanel()}
-          ${bastionDoc ? `
-          <div>
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Bastion</span>
-              <div class="dv2-section-label-line"></div>
-            </div>
-            ${_bastionCardV2()}
-          </div>` : ''}
-        </aside>
-        <div class="dv2-dashboard-main">
-          ${_dashboardWallPanel()}
-          <div class="dv2-player-hero">
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Mon personnage</span>
-              <div class="dv2-section-label-line"></div>
-              <button class="dv2-section-action" data-navigate="characters">Ouvrir la fiche -></button>
-            </div>
-            ${heroBlock}
-          </div>
-          ${_playerJoinableGroupsPanel()}
-          <div class="dv2-player-adventure">
-            <div class="dv2-section-label">
-              <span class="dv2-section-label-text">Aventure</span>
-              <div class="dv2-section-label-line"></div>
-            </div>
-            ${_achievementsPanelV2()}
-          </div>
-        </div>
-      </section>`;
-    }
-
-    // ── Fonctionnalités désactivées : masquer les blocs + sections orphelines ──
-    const sessionPlaceholder = document.getElementById('dashboard-session-center');
-    if (preservedSessionCenter && sessionPlaceholder && preservedSessionCenter !== sessionPlaceholder) {
-      sessionPlaceholder.replaceWith(preservedSessionCenter);
-    }
-    if (_sessionCenterNeedsMount) {
-      _sessionCenterNeedsMount = false;
-      mountSessionCenter();
-    }
-    _hideDisabledDashboardBlocks(dash);
-
-    // ── Navigation personnage ──────────────────────────────────────────
-
-    // ── Toast RPG (injecter une seule fois) ───────────────────────────
-    if (!document.getElementById('dv2-toast-container')) {
-      const tc = document.createElement('div');
-      tc.id = 'dv2-toast-container';
-      tc.className = 'dv2-toast-container';
-      document.body.appendChild(tc);
-    }
-    let _showRPGToast = (type = 'xp', title = '', sub = '', badge = '') => {
-      const tc = document.getElementById('dv2-toast-container');
-      if (!tc) return;
-      const el = document.createElement('div');
-      el.className = `dv2-toast dv2-toast-${type}`;
-      const icons = { xp:'✨', gold:'💰', achievement:'🏆' };
-      const cols  = { xp:'#c084fc', gold:'#f4c430', achievement:'#22c38e' };
-      el.innerHTML = `<div class="dv2-toast-icon">${icons[type]||'✨'}</div><div class="dv2-toast-body"><div class="dv2-toast-title">${title}</div>${sub?`<div class="dv2-toast-sub">${sub}</div>`:''}</div>${badge?`<div class="dv2-toast-badge" style="color:${cols[type]||'#fff'}">${badge}</div>`:''}`;
-      tc.appendChild(el);
-      setTimeout(() => { el.classList.add('dv2-leaving'); setTimeout(() => el.remove(), 350); }, 3500);
-    };
-
-      // ── Largeurs de barres — à CHAQUE paint (le DOM est reconstruit) ──
-      requestAnimationFrame(() => {
-        document.querySelectorAll('.dv2-bar-fill[data-w], .dv2-mission-prog-fill[data-w]').forEach(el => {
-          el.style.width = el.dataset.w;
-        });
-      });
-
-    }; // ── fin paint() ────────────────────────────────────────────────────
-
-    // Coalescing : plusieurs sources qui arrivent dans la même frame → 1 paint.
-    const schedulePaint = () => {
-      if (_paintQueued) return;
-      _paintQueued = true;
-      requestAnimationFrame(paint);
-    };
-
-    // ── Rendu initial (cache / squelette) puis abonnements réactifs ────────
-    // Les watch()/watchDoc() se branchent sur les listeners session-live
-    // (0 lecture facturée en plus) ou lazy-priment à la demande ; tous nettoyés
-    // par unwatchAll() à la navigation. Le 1er snapshot cache vide est ignoré
-    // côté firestore (gate trustworthy) → pas de flash "0" figé.
-    paint();
-    watch('dash-characters',   'characters',   d => { allChars = sortCharactersForDisplay(d || []); _sessionCenterNeedsMount = true; schedulePaint(); });
-    watch('dash-quests',       'quests',       d => { quests = d || []; _sessionCenterNeedsMount = true; schedulePaint(); });
-    const watchFullSources = () => {
-      watch('dash-story',        'story',        d => { storyItems = d || []; _sessionCenterNeedsMount = true; schedulePaint(); });
-      watch('dash-achievements', 'achievements', d => { achievementsRaw = d || []; schedulePaint(); });
-      watch('dash-collection',   'collection',   d => { collectionItems = d || []; schedulePaint(); });
-    };
-    if (STATE.isAdmin) {
-      watchFullSources();
-    } else {
-      // Quota : le résumé tenu par le MJ (1 document) remplace la lecture complète
-      // de Trame + Hauts-faits + Collection (base64 compris). Absent ou incomplet
-      // (MJ pas encore repassé après le déploiement) → repli sur la lecture complète.
-      let fullSourcesWatched = false;
-      watchDoc('dash-summary', 'settings', 'dashboardSummary', summary => {
-        if (fullSourcesWatched) return;
-        const usable = isUsableSummary(summary, {
-          achievements: isFeatureAllowedByPlan('achievements'),
-          collection: isFeatureAllowedByPlan('collection'),
-        });
-        if (!usable) {
-          fullSourcesWatched = true;
-          dashSummary = null;
-          storyItems = getCachedCollection('story') || [];
-          watchFullSources();
+        const available = freeChars(groupList);
+        if (!available.length) {
+          if (!controlledChars().length) {
+            showNotif('Crée d’abord un personnage pour rejoindre un groupe.', 'info');
+            goToChar('');
+          } else showNotif('Tous tes personnages sont déjà dans un groupe.', 'info');
+          return;
+        }
+        if (available.length > 1) {
+          pickGroupId = pickGroupId === groupId ? '' : groupId;
           schedulePaint();
           return;
         }
-        dashSummary = summary;
-        storyItems = storyItemsFromSummary(summary);
-        _sessionCenterNeedsMount = true;
+        await this.pickQuestChar(groupId, available[0].id);
+      },
+      async pickQuestChar(groupId, charId) {
+        const group = groups().find(item => item.id === groupId);
+        const char = controlledChars().find(item => item.id === charId);
+        if (!group || !char) { showNotif('Groupe ou personnage introuvable.', 'error'); return; }
+        const next = [
+          ...(group.participants || []).filter(participant => !aliasSet.has(participant?.uid)),
+          questParticipantFromChar(char, STATE.user?.uid || char.uid),
+        ];
+        pickGroupId = '';
+        await persistParticipants(group, next, false);
+      },
+      async markWallRead() {
+        const seenAt = Date.now();
+        wallRead = { ...(wallRead || {}), seenAt, updatedAt: seenAt };
+        try { localStorage.setItem(bastionWallSeenKey(STATE.adventure?.id, STATE.user?.uid), String(seenAt)); } catch { /* stockage privé */ }
+        _dashWallFeed?.setSeenAt(seenAt);
         schedulePaint();
-      });
+        if (STATE.user?.uid) await saveDoc('bastionWallReads', STATE.user.uid, { seenAt, updatedAt: seenAt }, { silent: true }).catch(() => {});
+      },
+    };
+    const uiRef = _dashUi;
+
+    paint();
+    watch('dash-characters', 'characters', data => { allChars = sortCharactersForDisplay(data || []); schedulePaint(); });
+    if (STATE.isAdmin) {
+      watch('dash-story', 'story', data => { story = data || []; schedulePaint(); });
+      watch('dash-quests', 'quests', data => { quests = data || []; schedulePaint(); });
+      watchDoc('dash-agenda', 'agenda_session', 'next', data => { agenda = data; schedulePaint(); });
+      watch('dash-presence', 'presence', data => { presence = data || []; schedulePaint(); });
+    } else {
+      watchDoc('dash-summary', 'settings', 'dashboardSummary', data => { summary = isUsableSummary(data) ? data : null; schedulePaint(); }, { silent: true });
     }
-    // Mur du Bastion (4 publications + non-lus) : flux bornés au lieu des 80
-    // dernières (shared/dashboard-wall-feed.js), arrêtés à la navigation comme
-    // les watch*. Bastion désactivé → panneau absent, aucun abonnement.
     if (isFeatureEnabled('bastion')) {
       _dashWallFeed?.stop();
+      const syncBastionCard = () => {
+        ({ bastion, investments: bastionInvestments } = bastionSignalSnapshot());
+        schedulePaint();
+      };
+      document.addEventListener('app:bastion-signal-changed', syncBastionCard);
       const wallFeed = createDashboardWallFeed(
         { subscribeRecent: subscribeRecentCollection, subscribeWhere: subscribeRecentWhere },
         docs => { wallDocs = docs || []; schedulePaint(); },
       );
       _dashWallFeed = wallFeed;
       wallFeed.start(wallSeenAt());
-      document.addEventListener('app:page-changed', () => {
-        wallFeed.stop();
-        if (_dashWallFeed === wallFeed) _dashWallFeed = null;
-      }, { once: true });
-      watchDoc('dash-bastion-wall-legacy', 'bastionAnnonces', 'main', d => { wallLegacy = Array.isArray(d?.items) ? d.items : []; schedulePaint(); });
-      if (STATE.user?.uid) watchDoc('dash-bastion-wall-read', 'bastionWallReads', STATE.user.uid, d => {
-        wallRead = d;
+      if (STATE.user?.uid) watchDoc('dash-bastion-wall-read', 'bastionWallReads', STATE.user.uid, data => {
+        wallRead = data;
         wallFeed.setSeenAt(wallSeenAt());
         schedulePaint();
       }, { silent: true });
+      document.addEventListener('app:page-changed', () => {
+        wallFeed.stop();
+        document.removeEventListener('app:bastion-signal-changed', syncBastionCard);
+        if (_dashWallFeed === wallFeed) _dashWallFeed = null;
+        if (_dashUi === uiRef) _dashUi = null;
+      }, { once: true });
+    } else {
+      document.addEventListener('app:page-changed', () => {
+        if (_dashUi === uiRef) _dashUi = null;
+      }, { once: true });
     }
-    watchDoc('dash-bastion',   'bastion',        'main', d => { bastionDoc  = d; schedulePaint(); });
-    watchDoc('dash-agenda',    'agenda_session', 'next', d => {
-      nextSession = d;
-      nextSessionReady = true;
-      _sessionCenterNeedsMount = true;
-      schedulePaint();
-    });
-    // Ces deux sources peuvent être nettement plus lourdes que le planning.
-    // Elles complètent le centre en arrière-plan sans bloquer son premier rendu.
-    void Promise.all([
-      loadStats().catch(() => null),
-      loadCollection('availabilities').catch(() => []),
-    ]).then(([stats, avails]) => {
-      if (STATE.currentPage !== 'dashboard') return;
-      sessionStats = stats;
-      sessionAvails = avails || [];
-      mountSessionCenter();
-    });
   },
 
   // ─── CHARACTERS ─────────────────────────────────────────────────────────────
@@ -4101,9 +3447,9 @@ const PAGES = {
           </div>
         </div>
         <div class="view-toggle" role="tablist" aria-label="Mode d'affichage des hauts-faits">
-          <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie" role="tab" aria-selected="${activeView === 'galerie'}">▦ Galerie</button>
-          <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline" role="tab" aria-selected="${activeView === 'timeline'}">⋮ Chronologie</button>
-          <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions" role="tab" aria-selected="${activeView === 'missions'}">🎯 Missions</button>
+          <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie" data-nav-page="achievements" data-nav-sub="galerie" role="tab" aria-selected="${activeView === 'galerie'}">▦ Galerie</button>
+          <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline" data-nav-page="achievements" data-nav-sub="timeline" role="tab" aria-selected="${activeView === 'timeline'}">⋮ Chronologie</button>
+          <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions" data-nav-page="achievements" data-nav-sub="missions" role="tab" aria-selected="${activeView === 'missions'}">🎯 Missions</button>
         </div>
       </div>
     </section>
@@ -4131,32 +3477,6 @@ const PAGES = {
       loadCollectionWhere('vttTokens', 'type', 'in', ['player', 'npc']).catch(() => []),
     ]);
     const content = document.getElementById('main-content');
-
-    // Réglages du jeu : seules fonctions propres à cette page (le reste — boutique,
-    // trame, PNJ… — est déjà accessible via la navigation, d'où la suppression des
-    // « actions rapides » redondantes). Chaque tuile ouvre sa modale (lazy CSS+JS).
-    const SETTINGS = [
-      { g:'combat', ic:'⚔️', t:"Formats d'arme",     s:'Physique / magique par format',   a:'#ff8b6b', fn:'openWeaponFormatsAdmin', mod:'characters' },
-      { g:'combat', ic:'⚡', t:'Types de dégâts',     s:'Éléments, résistances, couleurs', a:'#f4c430', fn:'openDamageTypesAdmin',   mod:'characters' },
-      { g:'combat', ic:'🗡️', t:'Styles de combat',    s:"Bonus selon l'arme équipée",      a:'#9d8cff', fn:'openCombatStylesAdmin',  mod:'characters' },
-      { g:'combat', ic:'🔮', t:'Matrices de sorts',   s:'Runes, noyaux, combinaisons',     a:'#bca0ff', fn:'openSpellMatricesAdmin', mod:'characters' },
-      { g:'combat', ic:'∑',  t:'Règles de personnage', s:'Modificateurs, PV, PM, CA, deck', a:'#5bc0eb', fn:'openCharacterRulesAdmin', mod:'characters' },
-      { g:'combat', ic:'🎒', t:"Slots d'équipement", s:'Emplacements utilisés sur les fiches', a:'#22c38e', fn:'openEquipmentSlotsAdmin', mod:'characters' },
-      { g:'combat', ic:'🧩', t:"Types d'armure", s:'Types boutique et bonus de set', a:'#7eb0ff', fn:'openArmorSetsAdmin', mod:'characters' },
-      { g:'combat', ic:'✦',  t:'Système de sorts', s:'Forge de runes ou création classique', a:'#e8b84b', fn:'openSpellSystemAdmin', mod:'characters' },
-      { g:'table',  ic:'🏆', t:'Catégories de hauts-faits', s:'Galerie, filtres et couleurs', a:'#e8b84b', fn:'openAchievementCategoriesAdmin', mod:'achievements', requires:'achievements' },
-      { g:'table',  ic:'👹', t:'Rangs du bestiaire', s:'Menaces, filtres et couleurs', a:'#ff5a7e', fn:'openBestiaryRanksAdmin', mod:'bestiary', requires:'bestiaire' },
-      { g:'table',  ic:'🎲', t:'Compétences de dés',  s:'Jets personnalisés',              a:'#4f8cff', fn:'_ouvrirGestionDes',      mod:'histoire' },
-      { g:'table',  ic:'😄', t:'Émotes VTT',          s:'Réactions sur la table',          a:'#22c38e', fn:'_ouvrirGestionEmotes',   mod:'vtt/vtt' },
-      { g:'table',  ic:'🎭', t:'États & conditions',  s:'Effets appliqués aux tokens',     a:'#f97316', fn:'_vttConditionConfig',    mod:'vtt/vtt' },
-    ];
-    const tile = (x) => `
-      <button class="adm-tile" style="--a:${x.a}" data-action="_adminLazyOpen" data-fn="${x.fn}" data-module="${x.mod}" title="${_esc(x.t)}">
-        <span class="adm-tile-ic">${x.ic}</span>
-        <span class="adm-tile-txt"><span class="adm-tile-t">${_esc(x.t)}</span><span class="adm-tile-s">${_esc(x.s)}</span></span>
-        <span class="adm-tile-arrow">→</span>
-      </button>`;
-    const grid = (g) => `<div class="adm-tiles">${SETTINGS.filter(x => x.g === g && (!x.requires || isFeatureEnabled(x.requires))).map(tile).join('')}</div>`;
 
     const adv = STATE.adventure || {};
     const memberUids = new Set([...(adv.accessList || []), ...(adv.players || []), ...(adv.admins || [])]);
@@ -4331,181 +3651,132 @@ const PAGES = {
         });
       }
     });
-    const healthIssues = [
-      ...duplicateEmailGroups.map(g => ({
-        icon: '🪪',
-        title: 'Compte doublonné probable',
-        text: `${g.email} · ${g.uids.length} comptes actifs`,
-        tone: 'is-warn',
-        attrs: `data-action="_adminMergeDuplicate" data-uids="${_esc(g.uids.join(','))}" data-email="${_esc(g.email)}"`,
-        action: 'Fusionner',
-      })),
-      ...invalidOwnerChars.map(c => ({
-        icon: '👤',
-        title: 'Personnage sans propriétaire fiable',
-        text: `${c.nom || 'Personnage'} · ${c.ownerPseudo || userLabel(c.uid)}`,
-        tone: 'is-danger',
-        attrs: `data-action="_goToChar" data-id="${_esc(c.id)}"`,
-      })),
-      ...questParticipantIssues.map(i => ({
-        icon: '📌',
-        title: i.title,
-        text: i.text,
-        tone: 'is-warn',
-        attrs: 'data-action="_adminRepairQuestParticipants"',
-        action: 'Réparer',
-      })),
-      ...tokenIssues.map(i => ({
-        icon: '🎲',
-        title: i.title,
-        text: i.text,
-        tone: 'is-info',
-        attrs: i.repairable
-          ? 'data-action="_adminRepairVttData"'
-          : i.charId
-            ? `data-action="_goToChar" data-id="${_esc(i.charId)}"`
-            : 'data-navigate="vtt"',
-        action: i.repairable ? 'Réparer' : 'Ouvrir',
-      })),
-    ];
-    const actionTotal = relinkItems.length + invalidOwnerChars.length + playersWithoutChar.length + pendingSpells.length;
-    const actionCard = (html, attrs = '', tone = '') =>
-      `<button type="button" class="adm-action-card ${tone}" ${attrs}>${html}<span class="adm-action-arrow">→</span></button>`;
-    const actionCenterItems = [
-      ...relinkItems.slice(0, 4).map(({ user, uid, oldUid }) => actionCard(`
-        <span class="adm-action-ico">🔗</span>
-        <span class="adm-action-body">
-          <span class="adm-action-title">Compte à relier</span>
-          <span class="adm-action-text">${_esc(user.pseudo || user.email || uid)}</span>
-        </span>`,
-        `data-action="_adminRelinkPlayer" data-old-uid="${_esc(oldUid)}" data-new-uid="${_esc(uid)}" data-name="${_esc(user.pseudo || user.email || uid)}"`,
-        'is-warn')),
-      ...invalidOwnerChars.slice(0, 4).map(c => actionCard(`
-        <span class="adm-action-ico">👤</span>
-        <span class="adm-action-body">
-          <span class="adm-action-title">Personnage sans compte actif</span>
-          <span class="adm-action-text">${_esc(c.nom || 'Personnage')} · ${_esc(c.ownerPseudo || 'propriétaire inconnu')}</span>
-        </span>`,
-        `data-action="_goToChar" data-id="${_esc(c.id)}"`,
-        'is-danger')),
-      ...pendingSpells.slice(0, 4).map(({ c, s, idx }) => actionCard(`
-        <span class="adm-action-ico">✨</span>
-        <span class="adm-action-body">
-          <span class="adm-action-title">Sort à valider</span>
-          <span class="adm-action-text">${_esc(s.nom || 'Sort')} · ${_esc(c.nom || 'Personnage')}</span>
-        </span>`,
-        `data-action="_openSpellReview" data-char-id="${_esc(c.id)}" data-spell-id="${_esc(s.id || '')}" data-idx="${idx}"`,
-        'is-info')),
-      ...playersWithoutChar.slice(0, 3).map(uid => actionCard(`
-        <span class="adm-action-ico">📜</span>
-        <span class="adm-action-body">
-          <span class="adm-action-title">Joueur sans personnage</span>
-          <span class="adm-action-text">${_esc(userLabel(uid))}</span>
-        </span>`,
-        `data-navigate="characters"`,
-        'is-muted')),
-    ];
-    const hiddenActionCount = Math.max(0, actionTotal - actionCenterItems.length);
-    const actionCenter = `
-      <section class="adm-action-center">
-        <div class="adm-action-head">
-          <div>
-            <div class="adm-action-kicker">À traiter</div>
-            <h2>Centre d'action MJ</h2>
-          </div>
-          <div class="adm-action-score ${actionTotal ? 'is-hot' : 'is-ok'}">
-            <strong>${actionTotal}</strong>
-            <span>${actionTotal > 1 ? 'points' : 'point'}</span>
-          </div>
-        </div>
-        <div class="adm-action-metrics">
-          <span><b>${relinkItems.length}</b> relink</span>
-          <span><b>${invalidOwnerChars.length}</b> persos</span>
-          <span><b>${pendingSpells.length}</b> sorts</span>
-          <span><b>${playersWithoutChar.length}</b> joueurs</span>
-        </div>
-        ${actionTotal
-          ? `<div class="adm-action-list">${actionCenterItems.join('')}${hiddenActionCount ? `<div class="adm-action-more">+${hiddenActionCount} autre${hiddenActionCount>1?'s':''} point${hiddenActionCount>1?'s':''}</div>` : ''}</div>`
-          : `<div class="adm-action-empty"><b>Tout est propre.</b><span>Aucun compte, personnage ou sort ne demande ton attention.</span></div>`}
-      </section>`;
-    const healthCard = (issue) => {
-      const tag = issue.attrs ? 'button' : 'div';
-      const type = tag === 'button' ? ' type="button"' : '';
-      return `<${tag}${type} class="adm-health-card ${issue.tone || ''}" ${issue.attrs || ''}>
-        <span class="adm-health-ico">${issue.icon || '•'}</span>
-        <span class="adm-health-body">
-          <span class="adm-health-title">${_esc(issue.title || 'Diagnostic')}</span>
-          <span class="adm-health-text">${_esc(issue.text || '')}</span>
-        </span>
-        ${tag === 'button' ? `<span class="adm-health-action">${_esc(issue.action || 'Ouvrir')}</span>` : ''}
-      </${tag}>`;
-    };
-    const healthPreview = healthIssues.slice(0, 10);
-    const hiddenHealthCount = Math.max(0, healthIssues.length - healthPreview.length);
-    const dataHealth = `
-      <section class="adm-health">
-        <div class="adm-health-head">
-          <div>
-            <div class="adm-action-kicker">Diagnostic</div>
-            <h2>Santé des données</h2>
-          </div>
-          <div class="adm-health-state ${healthIssues.length ? 'is-warn' : 'is-ok'}">${healthIssues.length ? `${healthIssues.length} alerte${healthIssues.length > 1 ? 's' : ''}` : 'OK'}</div>
-        </div>
-        <div class="adm-health-metrics">
-          <span><b>${duplicateEmailGroups.length}</b> doublons</span>
-          <span><b>${invalidOwnerChars.length}</b> propriétaires</span>
-          <span><b>${questParticipantIssues.length}</b> quêtes</span>
-          <span><b>${tokenIssues.length}</b> VTT</span>
-        </div>
-        ${healthIssues.length
-          ? `<div class="adm-health-grid">${healthPreview.map(healthCard).join('')}${hiddenHealthCount ? `<div class="adm-action-more">+${hiddenHealthCount} autre${hiddenHealthCount > 1 ? 's' : ''} alerte${hiddenHealthCount > 1 ? 's' : ''}</div>` : ''}</div>`
-          : `<div class="adm-action-empty"><b>Aucune incohérence détectée.</b><span>Comptes, personnages, quêtes et tokens semblent alignés.</span></div>`}
-      </section>`;
-    const pRow = (u) => {
-      const uid = u.id || u.uid || '';
-      const oldUid = relinkSourceFor(u);
-      const initial = ((u.pseudo || '?').trim().charAt(0) || '?').toUpperCase();
-      const date = u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr') : '—';
-      return `
-        <div class="adm-prow">
-          <span class="adm-pav">${_esc(initial)}</span>
-          <span class="adm-pmeta">
-            <span class="adm-pname">${_esc(u.pseudo || '-')}</span>
-            <span class="adm-pmail">${_esc(u.email || '-')}</span>
-          </span>
-          <span class="adm-pdate">${date}</span>
-          ${oldUid ? `<span class="adm-pactions">
-            <button type="button" class="btn-icon adm-relink-btn"
-              data-action="_adminRelinkPlayer"
-              data-old-uid="${_esc(oldUid)}"
-              data-new-uid="${_esc(uid)}"
-              data-name="${_esc(u.pseudo || u.email || uid)}"
-              title="Compte non relié détecté : réassocier automatiquement"
-              aria-label="Réassocier ${_esc(u.pseudo || u.email || uid)} automatiquement">🔗</button>
-          </span>` : ''}
-        </div>`;
-    };
+    // ── File unifiée « À traiter » (une entrée par source, zéro doublon) ──
+    const items = [];
+    relinkItems.forEach(({ user, uid, oldUid }) => items.push({
+      id: `relink:${uid}`, sec: 'comptes', tone: 'warn', title: 'Compte à relier',
+      detail: `${user.pseudo || user.email || uid} · ancien compte à réassocier`,
+      act: 'Relier',
+      attrs: `data-action="_adminRelinkPlayer" data-old-uid="${_esc(oldUid)}" data-new-uid="${_esc(uid)}" data-name="${_esc(user.pseudo || user.email || uid)}"`,
+    }));
+    duplicateEmailGroups.forEach(g => items.push({
+      id: `dup:${g.email}`, sec: 'comptes', tone: 'warn', title: 'Comptes en double',
+      detail: `${g.email} · ${g.uids.length} comptes actifs`,
+      act: 'Fusionner',
+      attrs: `data-action="_adminMergeDuplicate" data-uids="${_esc(g.uids.join(','))}" data-email="${_esc(g.email)}"`,
+    }));
+    playersWithoutChar.forEach(uid => items.push({
+      id: `nochar:${uid}`, sec: 'comptes', tone: 'info', title: 'Joueur sans personnage',
+      detail: `${userLabel(uid)} · aucun personnage créé`,
+      act: 'Créer', attrs: 'data-navigate="characters"',
+    }));
+    invalidOwnerChars.forEach(c => items.push({
+      id: `char:${c.id}`, sec: 'persos', tone: 'danger',
+      title: `${c.nom || 'Personnage'} n’a pas de propriétaire actif`,
+      detail: `Rattaché à ${c.ownerPseudo || userLabel(c.uid)} · invisible pour son joueur`,
+      act: 'Ouvrir la fiche', attrs: `data-action="_goToChar" data-id="${_esc(c.id)}"`,
+    }));
+    pendingSpells.forEach(({ c, s, idx }) => {
+      const pm = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
+      const owner = c.ownerPseudo || userLabel(c.uid);
+      items.push({
+        id: `spell:${c.id}:${idx}`, sec: 'sorts', tone: 'info', title: s.nom || 'Sort sans nom',
+        who: `${c.nom || 'Personnage'}${owner ? ` · ${owner}` : ''}`,
+        act: 'Valider',
+        attrs: `data-action="_adminValidateSpell" data-id="${_esc(c.id)}" data-idx="${idx}"`,
+        // File de validation : diff avant → après, composition, note au joueur.
+        secondary: `data-action="_openSpellReview" data-char-id="${_esc(c.id)}" data-spell-id="${_esc(s.id || '')}" data-idx="${idx}"`,
+        secondaryLabel: 'Relire',
+        spell: { cout: `${pm} PM`, portee: s.portee || '—', effet: s.effet || '', runes: (Array.isArray(s.runes) ? s.runes.filter(Boolean) : []) },
+      });
+    });
+    questParticipantIssues.forEach((i, n) => items.push({
+      id: `quest:${n}`, sec: 'quetes', tone: 'warn', title: i.title, detail: i.text,
+      act: 'Réparer', auto: true, attrs: 'data-action="_adminRepairQuestParticipants"',
+    }));
+    tokenIssues.forEach((i, n) => {
+      const danger = /sans personnage/i.test(i.title || '');
+      items.push({
+        id: `token:${n}`, sec: 'vtt', tone: danger ? 'danger' : 'warn', title: i.title, detail: i.text,
+        act: i.repairable ? 'Réparer' : (i.charId ? 'Ouvrir la fiche' : 'Ouvrir la table'),
+        auto: !!i.repairable,
+        attrs: i.repairable ? 'data-action="_adminRepairVttData"' : (i.charId ? `data-action="_goToChar" data-id="${_esc(i.charId)}"` : 'data-navigate="vtt"'),
+      });
+    });
 
-    content.innerHTML = `
-      ${pageHeaderHtml('⚙️ Console MJ', "Réglages du jeu & joueurs de l'aventure")}
-      ${actionCenter}
-      ${dataHealth}
-      <section class="adm-block">
-        <div class="adm-label">⚔️ Personnages &amp; combat</div>
-        ${grid('combat')}
-      </section>
-      <section class="adm-block">
-        <div class="adm-label">🎲 Table &amp; VTT</div>
-        ${grid('table')}
-      </section>
-      <section class="adm-block">
-        <div class="adm-label">👥 Joueurs inscrits <span class="adm-count">${visibleUsers.length}</span></div>
-        <div class="adm-players adm-players--grid">${sortedUsers.map(pRow).join('')}</div>
-      </section>`;
+    // ── Tableau Joueurs ──
+    const charNamesByUid = new Map();
+    (STATE.characters || []).forEach(c => { if (c?.uid && c.nom) { if (!charNamesByUid.has(c.uid)) charNamesByUid.set(c.uid, []); charNamesByUid.get(c.uid).push(c.nom); } });
+    const relinkByUid = new Map(relinkItems.map(x => [x.uid, x]));
+    const dupByEmail = new Map(duplicateEmailGroups.map(g => [g.email, g]));
+    const noCharSet = new Set(playersWithoutChar);
+    const vmPlayers = sortedUsers.map((u, n) => {
+      const uid = u.id || u.uid || '';
+      const email = String(u.email || '').trim();
+      const role = (adv.admins || []).includes(uid) ? 'mj' : 'joueur';
+      const memberProfileRaw = profiles[uid];
+      const memberProfile = typeof memberProfileRaw === 'string' ? {} : (memberProfileRaw || {});
+      const avatarRaw = u.avatarIcon || memberProfile.avatarIcon
+        || (uid === STATE.user?.uid ? STATE.profile?.avatarIcon : '')
+        || u.photoURL || u.photo || u.avatar || memberProfile.photoURL || memberProfile.photo || memberProfile.avatar || '';
+      let issue = null, issueItem = '', issueLabel = '', issueTone = 'mut', issueAct = '', issueAttrs = '';
+      if (relinkByUid.has(uid)) {
+        const r = relinkByUid.get(uid);
+        issue = 'relink'; issueItem = `relink:${uid}`; issueLabel = 'Compte à relier'; issueTone = 'amb'; issueAct = 'Relier';
+        issueAttrs = `data-action="_adminRelinkPlayer" data-old-uid="${_esc(r.oldUid)}" data-new-uid="${_esc(uid)}" data-name="${_esc(u.pseudo || email || uid)}"`;
+      } else if (email && dupByEmail.has(email.toLowerCase())) {
+        const g = dupByEmail.get(email.toLowerCase());
+        issue = 'dup'; issueItem = `dup:${g.email}`; issueLabel = 'Compte en double'; issueTone = 'amb'; issueAct = 'Fusionner';
+        issueAttrs = `data-action="_adminMergeDuplicate" data-uids="${_esc(g.uids.join(','))}" data-email="${_esc(g.email)}"`;
+      } else if (noCharSet.has(uid)) {
+        issue = 'nochar'; issueItem = `nochar:${uid}`; issueLabel = 'Sans personnage'; issueTone = 'mut';
+      }
+      return {
+        uid, pseudo: u.pseudo || '—', email, role,
+        avatar: avatarRaw ? resolveAvatarUrl(avatarRaw) : '',
+        since: u.createdAt || '',
+        sinceLabel: u.createdAt ? new Date(u.createdAt).toLocaleDateString('fr', { day: 'numeric', month: 'short', year: 'numeric' }) : '—',
+        chars: charNamesByUid.get(uid) || [],
+        color: _CMJ_PALETTE[n % _CMJ_PALETTE.length],
+        issue, issueItem, issueLabel, issueTone, issueAct, issueAttrs,
+      };
+    });
+
+    // ── Réglages (13 modales, 5 groupes) ──
+    const settingsGroups = [
+      { id: 'fiche', label: 'Fiche de personnage', items: [
+        { t: 'Règles de personnage', s: 'Modificateurs, PV, PM, CA, deck', ic: 'sigma', a: '#5bc0eb', fn: 'openCharacterRulesAdmin', mod: 'characters' },
+        { t: 'Slots d’équipement', s: 'Emplacements visibles sur les fiches', ic: 'bag', a: '#22c38e', fn: 'openEquipmentSlotsAdmin', mod: 'characters' },
+        { t: 'Types d’armure', s: 'Types boutique et bonus de set', ic: 'shield', a: '#7eb0ff', fn: 'openArmorSetsAdmin', mod: 'characters' },
+      ] },
+      { id: 'combat', label: 'Combat', items: [
+        { t: 'Formats d’arme', s: 'Physique ou magique selon le format', ic: 'sword', a: '#ff8b6b', fn: 'openWeaponFormatsAdmin', mod: 'characters' },
+        { t: 'Types de dégâts', s: 'Éléments, résistances, couleurs', ic: 'zap', a: '#f4c430', fn: 'openDamageTypesAdmin', mod: 'characters' },
+        { t: 'Styles de combat', s: 'Bonus selon l’arme équipée', ic: 'swords', a: '#9d8cff', fn: 'openCombatStylesAdmin', mod: 'characters' },
+      ] },
+      { id: 'magie', label: 'Magie', items: [
+        { t: 'Système de sorts', s: 'Forge de runes ou création classique', ic: 'star', a: '#e8b84b', fn: 'openSpellSystemAdmin', mod: 'characters' },
+        { t: 'Matrices de sorts', s: 'Runes, noyaux, combinaisons', ic: 'layers', a: '#bca0ff', fn: 'openSpellMatricesAdmin', mod: 'characters' },
+      ] },
+      { id: 'table', label: 'Table & VTT', items: [
+        { t: 'Compétences de dés', s: 'Jets proposés aux joueurs', ic: 'dice', a: '#4f8cff', fn: '_ouvrirGestionDes', mod: 'histoire' },
+        { t: 'États & conditions', s: 'Effets appliqués aux tokens', ic: 'drop', a: '#f97316', fn: '_vttConditionConfig', mod: 'vtt/vtt' },
+        { t: 'Émotes VTT', s: 'Réactions sur la table', ic: 'smile', a: '#22c38e', fn: '_ouvrirGestionEmotes', mod: 'vtt/vtt' },
+      ] },
+      { id: 'cat', label: 'Catalogues', items: [
+        { t: 'Catégories de hauts-faits', s: 'Galerie, filtres et couleurs', ic: 'trophy', a: '#e8b84b', fn: 'openAchievementCategoriesAdmin', mod: 'achievements', requires: 'achievements' },
+        { t: 'Rangs du bestiaire', s: 'Menaces, filtres et couleurs', ic: 'skull', a: '#ff5a7e', fn: 'openBestiaryRanksAdmin', mod: 'bestiary', requires: 'bestiaire' },
+      ] },
+    ].map(g => ({ ...g, items: g.items.filter(x => !x.requires || isFeatureEnabled(x.requires)) })).filter(g => g.items.length);
+
+    _cmjOpen({ adventure: adv.nom || 'Aventure', items, players: vmPlayers, settings: settingsGroups });
   },
 
   // ─── STATISTIQUES ─────────────────────────────────────────────────────────────
   async statistiques() {
+    const routeTab = getRouteSub('statistiques');
+    if (_STATS_TABS.includes(routeTab)) _statsTab = routeTab;
+    else setRouteSub('statistiques', _statsTab, { replace: true });
     const content = document.getElementById('main-content');
     content.innerHTML = `<div id="stats-root" class="stats-root">${loadingHtml('Chargement des statistiques…')}</div>`;
     const revision = ++_statsLoadRevision;
@@ -4654,7 +3925,7 @@ const PAGES = {
       _statsLegacyRollups = vttLogResult?.rollups || null;
       _statsVttDetailCache = new Map();
       _statsRowsCache = new Map();
-      _statsEmoteUrl = new Map((emoteDoc?.emotes || []).filter(e => e?.name && e?.url).map(e => [e.name, e.url]));
+      _statsEmoteUrl = new Map(normalizeEmoteCatalog(emoteDoc?.emotes).map(e => [e.name, e.url]));
       _statsRefreshEnrichedView(_statsScope);
     }).catch(err => {
       console.warn('[stats] enrichissement secondaire indisponible', err);
@@ -4672,7 +3943,7 @@ async function goToChar(id, tab = null) {
 async function _dashQuickChar(id) {
   if (!id) return;
   const { quickViewChar } = await import('./characters/quick-view.js');
-  quickViewChar(id);
+  quickViewChar(id, { list: _dashUi?.characterIds?.() || [] });
 }
 
 function _uidAliasesForCurrentUser() {
@@ -4681,12 +3952,6 @@ function _uidAliasesForCurrentUser() {
     ...(Array.isArray(STATE.profile?.previousUids) ? STATE.profile.previousUids : []),
     ...(Array.isArray(STATE.profile?.uidAliases) ? STATE.profile.uidAliases : []),
   ].filter(Boolean);
-}
-
-function _charsForUidAliases(chars = [], uidAliases = []) {
-  const aliases = new Set((Array.isArray(uidAliases) ? uidAliases : []).filter(Boolean));
-  if (!aliases.size) return [];
-  return sortCharactersForDisplay((chars || []).filter(c => aliases.has(c?.uid)));
 }
 
 async function _dashSaveQuestParticipants(questId, participants, { leaving = false } = {}) {
@@ -4703,70 +3968,29 @@ async function _dashSaveQuestParticipants(questId, participants, { leaving = fal
 
 async function _dashToggleQuest(btn) {
   const questId = btn?.dataset?.id;
-  if (!questId) return;
-  const quests = getCachedCollection('quests') || await loadCollection('quests');
-  const q = (quests || []).find(x => x.id === questId);
-  if (!q) { showNotif('Groupe introuvable.', 'error'); return; }
-  const uid = STATE.user?.uid || '';
-  const uidAliases = _uidAliasesForCurrentUser();
-  const cur = toggleQuestParticipant(q.participants || [], { uid, uidAliases });
-  if (cur.leaving) {
-    if (btn) btn.disabled = true;
-    await _dashSaveQuestParticipants(questId, cur.participants, { leaving: true });
-    if (btn) btn.disabled = false;
-    return;
-  }
-  const myChars = _charsForUidAliases(getCachedCollection('characters') || [], uidAliases);
-  if (!myChars.length) {
-    showNotif('Crée d’abord un personnage pour rejoindre un groupe.', 'info');
-    goToChar('');
-    return;
-  }
-  if (myChars.length > 1) {
-    const rows = myChars.map(c => {
-      const av = characterAvatarHtml(c, { size: 38, border: 'none', background: 'rgba(79,140,255,.18)', color: 'var(--gold)' });
-      const sub = [c.classe, c.race].filter(Boolean).join(' · ');
-      return `<button class="btn btn-outline" style="display:flex;align-items:center;gap:.75rem;padding:.6rem .9rem;text-align:left;width:100%"
-        data-action="_dashPickQuestChar" data-id="${_esc(questId)}" data-char="${_esc(c.id)}">
-        ${av}
-        <span style="min-width:0">
-          <span style="display:block;font-weight:750;color:var(--text)">${_esc(c.nom || '?')}</span>
-          ${sub ? `<small style="display:block;color:var(--text-dim)">${_esc(sub)}</small>` : ''}
-        </span>
-      </button>`;
-    }).join('');
-    openModal('Rejoindre le groupe', `<div style="display:flex;flex-direction:column;gap:.45rem">${rows}</div>`);
-    return;
-  }
-  const next = toggleQuestParticipant(q.participants || [], { uid, uidAliases, char: myChars[0] });
+  if (!questId || !_dashUi?.toggleQuest) return;
   if (btn) btn.disabled = true;
-  await _dashSaveQuestParticipants(questId, next.participants);
-  if (btn) btn.disabled = false;
+  try { await _dashUi.toggleQuest(questId); }
+  finally { if (btn?.isConnected) btn.disabled = false; }
 }
 
 async function _dashPickQuestChar(btn) {
   const questId = btn?.dataset?.id;
   const charId = btn?.dataset?.char;
-  if (!questId || !charId) return;
-  const quests = getCachedCollection('quests') || await loadCollection('quests');
-  const q = (quests || []).find(x => x.id === questId);
-  const char = (getCachedCollection('characters') || []).find(c => c.id === charId);
-  if (!q || !char) { showNotif('Groupe ou personnage introuvable.', 'error'); return; }
-  const next = toggleQuestParticipant(q.participants || [], {
-    uid: STATE.user?.uid || '',
-    uidAliases: _uidAliasesForCurrentUser(),
-    char,
-  });
-  const saved = await _dashSaveQuestParticipants(questId, next.participants);
-  if (saved) closeModalDirect();
+  if (!questId || !charId || !_dashUi?.pickQuestChar) return;
+  if (btn) btn.disabled = true;
+  try { await _dashUi.pickQuestChar(questId, charId); }
+  finally { if (btn?.isConnected) btn.disabled = false; }
 }
 
 registerActions({
   // Dashboard
   _goToChar:             (btn) => goToChar(btn.dataset.id, btn.dataset.tab),
+  _adminValidateSpell:   (btn) => _adminValidateSpell(btn.dataset.id, btn.dataset.idx),
   _dashQuickChar:        (btn) => _dashQuickChar(btn.dataset.id),
   _dashToggleQuest:      (btn) => _dashToggleQuest(btn),
   _dashPickQuestChar:    (btn) => _dashPickQuestChar(btn),
+  _dashMarkWallRead:     ()    => _dashUi?.markWallRead?.(),
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
   _adminRepairQuestParticipants: () => _adminRepairQuestParticipants(),
   _adminRepairVttData:           () => _adminRepairVttData(),
@@ -5059,8 +4283,9 @@ registerActions({
   // restent en mémoire, donc aucun nouvel accès réseau n'est déclenché.
   _statsSetTab: (btn) => {
     const tab = btn.dataset.tab;
-    if (!tab || tab === _statsTab) return;
+    if (!_STATS_TABS.includes(tab) || tab === _statsTab) return;
     _statsTab = tab;
+    setRouteSub('statistiques', tab);
     _statsRender(_statsScope);
     document.getElementById('stats-root')?.scrollIntoView({ block: 'start' });
   },
@@ -5376,6 +4601,24 @@ registerActions({
   _adminMergeDuplicate: (btn) => _adminMergeDuplicate(btn.dataset.uids, btn.dataset.email),
   _adminMergeDuplicateConfirm: () => _adminMergeDuplicateConfirm(),
   _adminMergeDuplicateCancel: () => closeModalDirect(),
+});
+
+// Retour/Avance entre les onglets lourds sans reconstruire la page ni relancer
+// ses lectures. Le routeur considère la sous-route comme traitée quand
+// preventDefault() est appelé.
+document.addEventListener('app:route-sub-changed', (event) => {
+  const { page, sub } = event.detail || {};
+  if (page === 'admin' && _cmjState.vm && ['todo', 'players', 'settings'].includes(sub)) {
+    event.preventDefault();
+    _cmjSetTab(sub, { syncRoute: false });
+    return;
+  }
+  if (page === 'statistiques' && document.getElementById('stats-root') && _STATS_TABS.includes(sub)) {
+    event.preventDefault();
+    _statsTab = sub;
+    _statsRender(_statsScope);
+    document.getElementById('stats-root')?.scrollIntoView({ block: 'start' });
+  }
 });
 
 export default PAGES;

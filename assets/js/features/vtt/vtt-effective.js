@@ -55,6 +55,13 @@ export function _conditionCritRangeBonusOf(tok) {
     }, 0);
 }
 
+// Réduction du seuil critique apportée par un set d'armure complet (effet de
+// palier « Plage de critique »). Résout le personnage derrière le token.
+export function _armorSetCritRangeBonusOf(tok) {
+  const c = _characterForToken(tok);
+  return c ? (getArmorSetData(c)?.modifiers?.critRangeBonus || 0) : 0;
+}
+
 function _conditionTokenLevel(tok) {
   if (tok?.summonKind === 'invocation') return Math.max(1, parseInt(tok.summonLevel) || 1);
   const c = _characterForToken(tok);

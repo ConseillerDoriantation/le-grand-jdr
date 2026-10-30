@@ -44,10 +44,10 @@ import { openCloudinaryConfigModal } from './shared/upload-cloudinary.js';
 import './features/command-palette.js';
 
 // Quick-view perso accessible depuis le dashboard, VTT, etc. — lazy load au 1er clic
-async function openQuickView(id) {
+async function openQuickView(id, list) {
   try {
     const { quickViewChar } = await import('./features/characters/quick-view.js');
-    quickViewChar(id);
+    quickViewChar(id, Array.isArray(list) ? { list } : undefined);
   } catch (e) {
     console.error('[quick-view] load failed:', e);
   }
@@ -77,7 +77,7 @@ registerActions({
   declineInvitation: (btn) => declineAdventureInvitation(btn.dataset.id),
   _advSwitchPick: (btn) => { closeModal(); pickAdventure(btn.dataset.id); },
   _layoutCloseModal: () => closeModal(),
-  _openQuickView: (btn) => openQuickView(btn.dataset.id),
+  _openQuickView: (btn) => openQuickView(btn.dataset.id, btn.dataset.list?.split(',').filter(Boolean)),
   cloudinaryConfig: () => openCloudinaryConfigModal(),
 });
 

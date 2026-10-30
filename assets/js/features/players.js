@@ -1,11 +1,8 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // PLAYERS.JS — Roster de campagne
 //
-// Présentation narrative des personnages de l'aventure. Deux vues :
-//  • Sommaire (galerie immersive) : cards riches avec portrait, niveau, vitaux
-//    autorisés, joueur, traits, filtrables par recherche/tag/joueur.
-//  • Fiche (présentation détaillée) : hero immersif + 2 colonnes (narratif
-//    + sidebar stats/équipement/compétences/hauts-faits).
+// Registre maître/détail des personnages de l'aventure, complété par une
+// galerie groupée par joueur et une carte des relations d'aventure.
 //
 // Admin : drag pour réordonner, toggle visibilité, modal de création/édition
 // avec illustration cropable et confidentialité des infos de jeu.
@@ -13,7 +10,6 @@
 // Pattern d'événements : data-pp-action="X" + handlers dans `ppHandlers`
 // (cohérent avec bestiary/shop).
 // ══════════════════════════════════════════════════════════════════════════════
-import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { confirmDelete, tryUpsert } from '../shared/crud.js';
 
@@ -23,14 +19,14 @@ import { navigate } from '../core/navigation.js';
 import { charSession } from '../shared/char-session.js';
 import { bioPageFor } from '../shared/character-pages.js';
 import { loadCollection, updateInCol } from '../data/firestore.js';
-import { openModal, closeModal, promptModal } from '../shared/modal.js';
+import { openModal, closeModalDirect, promptModal, setModalCloseGuard, clearModalCloseGuard } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import PAGES from './pages.js';
 import { _esc, _nl2br, _norm, _initials, normalizeImageUrl } from '../shared/html.js';
 import {
-  getMod, calcCA, calcPVMax, calcPMMax, calcOr, calcVitesse, STAT_META, getModFromScore, modStr,
+  getMod, calcCA, calcPVMax, calcPMMax, calcOr, calcVitesse, STAT_META, statShort, getModFromScore, modStr,
 } from '../shared/char-stats.js';
-import { attachDropAndCrop, attachPanZoomCrop, panZoomCropHTML, resizeImageDataUrl } from '../shared/image-crop.js';
+import { attachPanZoomCrop } from '../shared/image-crop.js';
 import { bindImageUploadDropZone, uploadJpeg } from '../shared/image-upload.js';
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../shared/upload-cloudinary.js';
 import { lsJson } from '../shared/local-storage.js';
@@ -40,6 +36,7 @@ import { quillEditorHtml, getQuillHtml, bindQuillEditors } from '../shared/rich-
 import { bindScopedActions } from '../shared/scoped-actions.js';
 import { characterPortraitContent } from '../shared/portraits.js';
 import { getEquipmentSlots } from '../shared/equipment-slots.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // DÉLÉGATION D'ÉVÉNEMENTS (cohérent bestiary/shop, voir shared/scoped-actions.js)
@@ -84,11 +81,14 @@ function _ppIcon(name, className = 'pp-icon') {
     eye: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle>',
     eyeOff: '<path d="m2 2 20 20"></path><path d="M10.6 10.6a3 3 0 0 0 3.8 3.8"></path><path d="M9.9 5.2A10.5 10.5 0 0 1 12 5c6.5 0 10 7 10 7a18.5 18.5 0 0 1-2.3 3.2"></path><path d="M6.1 6.1C3.4 7.9 2 12 2 12s3.5 7 10 7c1.3 0 2.5-.3 3.6-.8"></path>',
     edit: '<path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>',
+    trash: '<path d="M4 7h16"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="m6 7 1 13h10l1-13"></path><path d="M9 7V4h6v3"></path>',
+    link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3A4 4 0 0 0 13 5.3l-1 1"></path><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"></path>',
     grip: '<path d="M9 5h.01"></path><path d="M15 5h.01"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path><path d="M9 19h.01"></path><path d="M15 19h.01"></path>',
     cards: '<rect x="5" y="4" width="12" height="16" rx="2"></rect><path d="M9 8h4"></path><path d="M9 12h4"></path><path d="M7 20h10"></path>',
     relations: '<circle cx="6" cy="7" r="3"></circle><circle cx="18" cy="7" r="3"></circle><circle cx="12" cy="18" r="3"></circle><path d="m8.5 9.5 2 5"></path><path d="m15.5 9.5-2 5"></path><path d="M9 7h6"></path>',
     arrowLeft: '<path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>',
     arrowRight: '<path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>',
+    chevronDown: '<path d="m6 9 6 6 6-6"></path>',
     book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5Z"></path>',
     calendar: '<path d="M8 2v4"></path><path d="M16 2v4"></path><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M3 10h18"></path>',
     flag: '<path d="M4 22V4"></path><path d="M4 4h13l-1.5 4L17 12H4"></path>',
@@ -96,6 +96,7 @@ function _ppIcon(name, className = 'pp-icon') {
     mapPin: '<path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"></path><circle cx="12" cy="10" r="3"></circle>',
     trophy: '<path d="M8 21h8"></path><path d="M12 17v4"></path><path d="M7 4h10v5a5 5 0 0 1-10 0Z"></path><path d="M5 6H3v2a4 4 0 0 0 4 4"></path><path d="M19 6h2v2a4 4 0 0 1-4 4"></path>',
     plus: '<path d="M12 5v14"></path><path d="M5 12h14"></path>',
+    upload: '<path d="M12 16V4"></path><path d="m6 10 6-6 6 6"></path><path d="M4 20h16"></path>',
     reset: '<path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v6h6"></path>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>',
     heart: '<path d="M20.8 8.6c0 5.1-8.8 10.4-8.8 10.4S3.2 13.7 3.2 8.6A4.6 4.6 0 0 1 12 6a4.6 4.6 0 0 1 8.8 2.6Z"></path>',
@@ -104,27 +105,35 @@ function _ppIcon(name, className = 'pp-icon') {
     coin: '<circle cx="12" cy="12" r="8"></circle><path d="M12 8v8"></path><path d="M9.5 10.5c0-1.2 1.1-2 2.5-2 1.3 0 2.5.7 2.5 2 0 1.2-1 1.6-2.5 2s-2.5.8-2.5 2c0 1.3 1.2 2 2.5 2 1.4 0 2.5-.8 2.5-2"></path>',
     user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>',
     users: '<path d="M16 21a6 6 0 0 0-12 0"></path><circle cx="10" cy="8" r="4"></circle><path d="M22 21a5 5 0 0 0-5-5"></path><path d="M17 4a4 4 0 0 1 0 8"></path>',
+    list: '<path d="M9 6h11"></path><path d="M9 12h11"></path><path d="M9 18h11"></path><path d="M4 6h.01"></path><path d="M4 12h.01"></path><path d="M4 18h.01"></path>',
+    external: '<path d="M14 4h6v6"></path><path d="M20 4 10 14"></path><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path>',
+    star: '<path d="m12 3 2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7Z"></path>',
   };
   return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.user}</svg>`;
 }
 
 // ── État module ───────────────────────────────────────────────────────────────
-let _ppCropper = null;             // cropper de l'illustration de la fiche (sélection)
 let _ppCardCropper = null;         // cropper de l'image de la card (pan-zoom 3:4)
 let _ppCardCropParams = null;      // { offX, offY, imgW, imgH } après confirmation
 let _ppGallery = [];               // galerie en cours d'édition (URLs externes uniquement)
+let _ppModalImageUrl = '';
+let _ppModalVisible = true;
+let _ppModalPreview = 'card';
+let _ppModalDirty = false;
+let _ppModalConfirm = '';
+let _ppModalCleanup = null;
 const PP_GALLERY_MAX = 12;         // pas de limite stricte de taille : on stocke des URLs
 const PP_GALLERY_UPLOAD = { max: 1600, quality: 0.88 }; // compression avant upload Cloudinary
 const STORE = {
   items:         [],     // dataset assemblé (perso + presentation)
   activeId:      '',     // id de l'item ouvert en fiche (vide = sommaire)
   filterSearch:  '',
-  filterJoueur:  '',
   sortBy:        'ordre',   // 'ordre' (custom MJ) | 'nom' | 'niveau' | 'joueur' | 'classe'
-  viewMode:      'gallery', // 'gallery' | 'relations'
-  relSelected:   null,      // Set<charId> | null (null = tous visibles)
-  relPositions:  {},        // charId → {x,y} (positions custom après drag, en coords SVG)
-  relPickerOpen: false,
+  viewMode:      'gallery', // 'register' | 'gallery' | 'relations'
+  detailSection: 'presentation',
+  grouped:       true,
+  collapsedGroups: {},
+  mobileDetail:  false,
   chroniqueExpanded: {},
   partenairesExpanded: {},
   presentations: [],
@@ -132,30 +141,99 @@ const STORE = {
   achievements:  [],
   story:         [],     // missions / événements de trame (pour top compagnons)
   quests:        [],     // quêtes-groupes (missionId + participants) → partenaires d'aventure
+  relMode:       'characters',
+  relMin:        1,
+  relSelectedId: '',
+  relTableId:    null,
+  relQuery:      '',
+  relShowNever:  false,
 };
 
 // ── Groupes (quêtes liées aux missions) — source des partenaires d'aventure ───
 // Chaque quête-groupe = un tableau de charIds (ses participants). Deux PJ sont
 // partenaires s'ils figurent dans le MÊME groupe (même quête).
 function _allGroupMemberLists() {
+  const plannedMissionIds = new Set((STORE.story || [])
+    .filter(mission => _missionStatus(mission)[0] === 'planned')
+    .map(mission => mission.id));
   return (STORE.quests || [])
+    .filter(q => !plannedMissionIds.has(q.missionId))
     .map(q => [...new Set((q.participants || []).map(p => p.charId).filter(Boolean))])
     .filter(list => list.length > 1);
 }
-// charIds présents dans au moins un groupe rattaché à une mission donnée.
-function _missionGroupCharIds(missionId) {
-  const s = new Set();
-  (STORE.quests || []).forEach(q => {
-    if (q.missionId !== missionId) return;
-    (q.participants || []).forEach(p => p.charId && s.add(p.charId));
-  });
-  return s;
+// Groupes encore existants auxquels le personnage appartient pour une mission.
+// La liste `story.participants` est un historique cumulatif : elle peut encore
+// contenir les membres d'un groupe supprimé. Elle ne doit donc jamais servir à
+// reconstruire la chronique ni ses compagnons.
+function _missionGroupsForChar(missionId, currentCharId) {
+  if (!missionId || !currentCharId) return [];
+  return (STORE.quests || [])
+    .filter(q => q.missionId === missionId)
+    .map(q => [...new Set((q.participants || []).map(p => p.charId).filter(Boolean))])
+    .filter(members => members.includes(currentCharId));
+}
+
+function _missionGroupMemberIds(missionId, currentCharId) {
+  return new Set(_missionGroupsForChar(missionId, currentCharId).flat());
 }
 
 // localStorage : ordre fallback hors-ligne (admin réordonne)
 const _LS_KEY = 'pp-ordre';
+const _VIEW_LS_KEY = 'pp-view-state-v2';
 const _getLocalOrdre = () => lsJson.get(_LS_KEY, null);
 const _setLocalOrdre = ids => lsJson.set(_LS_KEY, ids);
+const _savedView = lsJson.get(_VIEW_LS_KEY, {}) || {};
+STORE.activeId = String(_savedView.activeId || '');
+STORE.grouped = _savedView.grouped !== false;
+STORE.collapsedGroups = _savedView.collapsedGroups && typeof _savedView.collapsedGroups === 'object'
+  ? _savedView.collapsedGroups
+  : {};
+function _saveViewState() {
+  lsJson.set(_VIEW_LS_KEY, {
+    activeId: STORE.activeId,
+    grouped: STORE.grouped,
+    collapsedGroups: STORE.collapsedGroups,
+  });
+}
+
+const _PLAYER_VIEWS = new Set(['register', 'gallery', 'relations']);
+const _PLAYER_DETAIL_TABS = new Set(['presentation', 'chronicle', 'companions', 'gallery']);
+
+function _playersRouteSub() {
+  if (STORE.viewMode === 'gallery') return 'gallery';
+  if (STORE.viewMode === 'relations') {
+    const selected = STORE.relSelectedId ? `/${encodeURIComponent(STORE.relSelectedId)}` : '';
+    return `relations/${STORE.relMode}${selected}`;
+  }
+  return STORE.activeId ? `register/${STORE.activeId}` : 'register';
+}
+
+function _restorePlayersRoute() {
+  const [view, first = '', second = ''] = getRouteSub('players').split('/');
+  if (!_PLAYER_VIEWS.has(view)) return false;
+  STORE.viewMode = view;
+  STORE.mobileDetail = false;
+  if (view === 'register') {
+    if (first) STORE.activeId = first;
+    if (_PLAYER_DETAIL_TABS.has(second)) STORE.detailSection = second;
+  } else if (view === 'relations') {
+    STORE.relMode = first === 'players' ? 'players' : 'characters';
+    STORE.relSelectedId = second ? decodeURIComponent(second) : '';
+    STORE.relTableId = null;
+  }
+  return true;
+}
+
+function _syncPlayersRoute({ replace = false } = {}) {
+  setRouteSub('players', _playersRouteSub(), { replace });
+}
+
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'players' || !_restorePlayersRoute()) return;
+  event.preventDefault();
+  if (!STORE.items.some(item => item.id === STORE.activeId)) STORE.activeId = STORE.items[0]?.id || '';
+  _refreshView();
+});
 const _chroniqueCollator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
 
 function _chroniqueDateValue(value) {
@@ -217,6 +295,7 @@ function _buildRecord(char = null, pres = null) {
     presentationId: pres?.id || '',
     charId:         pres?.charId || char?.id || '',
     nom, classe, race, joueur,
+    ownerUid:       char?.uid || pres?.uid || '',
     level:          char?.niveau || 1,
     subtitle:       [classe, race].filter(Boolean).join(' · '),
     titles:         char?.titres || [],
@@ -321,18 +400,34 @@ function _buildDataset(presentations = [], characters = []) {
 
 function _applyFilters(items) {
   const s = _norm(STORE.filterSearch);
-  const joueur = STORE.filterJoueur;
   const filtered = items.filter(it => {
     if (s) {
       const hay = _norm([it.nom, it.classe, it.race, it.joueur, (it.tags || []).join(' ')].join(' '));
       if (!hay.includes(s)) return false;
     }
-    if (joueur && it.joueur !== joueur) return false;
     return true;
   });
-  // Tri secondaire (en plus du tri par ordre MJ par défaut)
+  if (STORE.grouped) {
+    filtered.sort((a, b) => {
+      const aMine = a.ownerUid && a.ownerUid === STATE.user?.uid;
+      const bMine = b.ownerUid && b.ownerUid === STATE.user?.uid;
+      if (aMine !== bMine) return aMine ? -1 : 1;
+      const byPlayer = (a.joueur || 'Sans joueur').localeCompare(b.joueur || 'Sans joueur', 'fr', { sensitivity: 'base' });
+      if (byPlayer) return byPlayer;
+      const byMain = Number(Boolean(b.char?.isDefault)) - Number(Boolean(a.char?.isDefault));
+      if (byMain) return byMain;
+      return (Number(b.level) || 0) - (Number(a.level) || 0)
+        || a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
+    });
+    return filtered;
+  }
+
+  // Hors regroupement, le tri alphabétique est le comportement normal. Le tri
+  // manuel reste disponible pour le MJ afin de conserver le drag historique.
   const sortBy = STORE.sortBy;
-  if (sortBy && sortBy !== 'ordre') {
+  if (!sortBy || sortBy === 'nom') {
+    filtered.sort((a, b) => a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }));
+  } else if (sortBy !== 'ordre') {
     const cmp = {
       nom:     (a, b) => a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }),
       niveau:  (a, b) => (b.level || 0) - (a.level || 0) || a.nom.localeCompare(b.nom, 'fr'),
@@ -348,11 +443,10 @@ function _applyFilters(items) {
 function _computeRecentMissions(currentCharId, limit = 5) {
   if (!currentCharId || !STORE.story.length) return [];
   const all = STORE.story
-    .filter(ev => {
-      // Inclut si participant direct OU membre d'un groupe (quête liée à la mission)
-      if ((ev.participants || []).some(p => p.id === currentCharId)) return true;
-      return _missionGroupCharIds(ev.id).has(currentCharId);
-    })
+    // Une mission n'appartient à la chronique que si un groupe encore existant
+    // contient réellement le personnage. Cela écarte les anciennes affectations
+    // conservées dans `story.participants` après suppression d'un groupe.
+    .filter(ev => _missionGroupsForChar(ev.id, currentCharId).length > 0)
     .sort(_compareMissionsChronoDesc);
   return Number.isFinite(limit) ? all.slice(0, limit) : all;
 }
@@ -541,7 +635,7 @@ function _renderSommaire(items) {
   }
 
   if (STORE.viewMode === 'relations') {
-    return _renderRelationsView(filtered);
+    return _renderRelationsScreen(filtered);
   }
 
   return `
@@ -551,270 +645,307 @@ function _renderSommaire(items) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// RENDU — VUE RELATIONS (graph SVG circulaire des co-aventures)
+// RELATIONS — graphe pur, tablées et layout déterministe
 // ══════════════════════════════════════════════════════════════════════════════
-function _computeRelationEdges(items) {
-  // Map charId → item
-  const byCharId = new Map();
-  items.forEach(it => { if (it.charId) byCharId.set(it.charId, it); });
+const RELATION_TABLE_COLORS = [
+  'oklch(.72 .13 250)', 'oklch(.74 .14 160)', 'oklch(.8 .13 80)',
+  'oklch(.7 .15 20)', 'oklch(.72 .13 310)',
+];
+const _relationLayoutCache = new Map();
+const _relationViewports = new Map();
+let _relationPanSuppressUntil = 0;
 
-  // Compteur paire {a, b} (a<b alphabétique) → nb d'aventures partagées.
-  // IMPORTANT : on ne lie QUE les PJ qui étaient dans le MÊME groupe d'une
-  // même mission. Deux groupes différents sur la même mission ne se sont
-  // pas croisés → aucune relation entre eux.
-  const pairCount = new Map();
-  // Lien entre deux PJ = présents dans le MÊME groupe (même quête). Deux groupes
-  // différents (même mission) ne se croisent pas.
-  for (const members of _allGroupMemberLists()) {
-    const present = members.filter(id => byCharId.has(id));
-    for (let i = 0; i < present.length; i++) {
-      for (let j = i + 1; j < present.length; j++) {
-        const [a, b] = [present[i], present[j]].sort();
-        const k = `${a}|${b}`;
-        pairCount.set(k, (pairCount.get(k) || 0) + 1);
+function _relationViewport(mode = STORE.relMode) {
+  if (!_relationViewports.has(mode)) _relationViewports.set(mode, { x: 0, y: 0, width: 1000, height: 680 });
+  return _relationViewports.get(mode);
+}
+
+function _clampRelationViewport(viewport) {
+  const width = Math.max(280, Math.min(1250, Number(viewport.width) || 1000));
+  const height = width * .68;
+  return {
+    x: Math.max(-250, Math.min(1250 - width, Number(viewport.x) || 0)),
+    y: Math.max(-170, Math.min(850 - height, Number(viewport.y) || 0)),
+    width,
+    height,
+  };
+}
+
+function _applyRelationViewport() {
+  const svg = document.getElementById('pp-rel-net');
+  if (!svg) return;
+  const viewport = _relationViewport();
+  svg.setAttribute('viewBox', `${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`);
+  _fitRelationText();
+}
+
+function _zoomRelation(factor, focus = null) {
+  const current = _relationViewport();
+  const nextWidth = Math.max(280, Math.min(1250, current.width * factor));
+  const nextHeight = nextWidth * .68;
+  const point = focus || { x: current.x + current.width / 2, y: current.y + current.height / 2 };
+  const ratioX = (point.x - current.x) / current.width;
+  const ratioY = (point.y - current.y) / current.height;
+  _relationViewports.set(STORE.relMode, _clampRelationViewport({
+    x: point.x - ratioX * nextWidth,
+    y: point.y - ratioY * nextHeight,
+    width: nextWidth,
+  }));
+  _applyRelationViewport();
+}
+
+export function _relationGraph(items = [], mode = 'characters', groupLists = _allGroupMemberLists()) {
+  const visibleItems = items.filter(item => item?.charId);
+  const byCharId = new Map(visibleItems.map(item => [item.charId, item]));
+  const primaryByPlayer = new Map();
+  visibleItems.forEach(item => {
+    const key = _playerKey(item);
+    const current = primaryByPlayer.get(key);
+    if (!current || item.char?.isDefault) primaryByPlayer.set(key, item);
+  });
+
+  const nodesById = new Map();
+  if (mode === 'players') {
+    visibleItems.forEach(item => {
+      const id = _playerKey(item);
+      if (!nodesById.has(id)) {
+        nodesById.set(id, {
+          id,
+          label: item.joueur || 'Sans joueur',
+          sub: '',
+          accent: _accentColor(item.joueur || item.nom),
+          items: [],
+          item: null,
+          deg: 0,
+          w: 0,
+          adv: 0,
+        });
+      }
+      nodesById.get(id).items.push(item);
+    });
+    nodesById.forEach(node => {
+      node.items.sort((a, b) => Number(Boolean(b.char?.isDefault)) - Number(Boolean(a.char?.isDefault))
+        || a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }));
+      node.item = node.items.find(item => item.char?.isDefault) || node.items[0] || null;
+      node.sub = node.items.map(item => item.nom).join(', ');
+    });
+  } else {
+    visibleItems.forEach(item => {
+      const playerKey = _playerKey(item);
+      nodesById.set(item.charId, {
+        id: item.charId,
+        label: item.nom,
+        sub: [item.classe, item.joueur].filter(Boolean).join(' · '),
+        accent: _accentColor(item.nom),
+        item,
+        items: [item],
+        secondary: primaryByPlayer.get(playerKey)?.charId !== item.charId,
+        deg: 0,
+        w: 0,
+        adv: 0,
+      });
+    });
+  }
+
+  const edgeWeights = new Map();
+  const keyForChar = charId => {
+    const item = byCharId.get(charId);
+    return item ? (mode === 'players' ? _playerKey(item) : charId) : '';
+  };
+  for (const members of groupLists) {
+    const ids = [...new Set(members.map(keyForChar).filter(id => id && nodesById.has(id)))].sort();
+    ids.forEach(id => { nodesById.get(id).adv += 1; });
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const key = `${ids[i]}\u0000${ids[j]}`;
+        edgeWeights.set(key, (edgeWeights.get(key) || 0) + 1);
       }
     }
   }
-  return { byCharId, pairCount };
-}
 
-const REL_W = 1000, REL_H = 1000;
-const REL_NODE_R = 36;
-
-function _renderRelationsView(items) {
-  const allPJ = items.filter(i => i.charId);
-  if (!allPJ.length) {
-    return `<div class="pp-empty"><div class="pp-empty-icon">🕸️</div>
-      <p class="pp-empty-title">Pas encore de PJ lié à une fiche.</p></div>`;
-  }
-
-  // Sélection : si `relSelected` est null, tous les PJ sont visibles
-  const selected = STORE.relSelected;
-  const visible = selected ? allPJ.filter(p => selected.has(p.charId)) : allPJ;
-  const nodes = visible.length ? visible : allPJ;   // fallback : jamais vide
-
-  const { pairCount } = _computeRelationEdges(nodes);
-
-  // Layout : positions stockées en priorité, sinon cercle
-  const cx = REL_W / 2, cy = REL_H / 2;
-  const R = Math.min(REL_W, REL_H) * 0.36;
-  const n = nodes.length;
-  const positioned = nodes.map((it, i) => {
-    const stored = STORE.relPositions[it.charId];
-    if (stored) {
-      return { it, x: stored.x, y: stored.y, col: _accentColor(it.nom) };
-    }
-    const a = (-Math.PI / 2) + (i * 2 * Math.PI / n);
-    return { it, x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), col: _accentColor(it.nom) };
+  const edges = [...edgeWeights.entries()].map(([key, n]) => {
+    const [a, b] = key.split('\u0000');
+    return { a, b, n };
+  }).sort((a, b) => a.a.localeCompare(b.a) || a.b.localeCompare(b.b));
+  edges.forEach(edge => {
+    const a = nodesById.get(edge.a);
+    const b = nodesById.get(edge.b);
+    if (!a || !b) return;
+    a.deg += 1; b.deg += 1;
+    a.w += edge.n; b.w += edge.n;
   });
-  const posByCharId = new Map(positioned.map(p => [p.it.charId, p]));
-
-  const maxCount = Math.max(1, ...pairCount.values());
-  const edges = [...pairCount.entries()].map(([k, count]) => {
-    const [a, b] = k.split('|');
-    const pa = posByCharId.get(a); const pb = posByCharId.get(b);
-    if (!pa || !pb) return null;
-    return { pa, pb, count, strength: count / maxCount, a, b };
-  }).filter(Boolean);
-
-  // Defs : un clipPath par node pour clipper l'image en cercle
-  const defsSvg = `<defs>
-    ${positioned.map(p => `<clipPath id="pp-rel-clip-${_esc(p.it.charId)}">
-      <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${REL_NODE_R}"/>
-    </clipPath>`).join('')}
-  </defs>`;
-
-  const edgesSvg = edges.map(e => {
-    const w = 1 + 5 * e.strength;
-    const op = 0.18 + 0.6 * e.strength;
-    return `<line data-edge="${_esc(e.a)}|${_esc(e.b)}"
-                  x1="${e.pa.x.toFixed(1)}" y1="${e.pa.y.toFixed(1)}"
-                  x2="${e.pb.x.toFixed(1)}" y2="${e.pb.y.toFixed(1)}"
-                  stroke="var(--gold)" stroke-width="${w.toFixed(2)}" opacity="${op.toFixed(2)}"
-                  class="pp-rel-edge"><title>${_esc(e.pa.it.nom)} ↔ ${_esc(e.pb.it.nom)} — ${e.count} aventure${e.count>1?'s':''}</title></line>`;
-  }).join('');
-
-  const nodesSvg = positioned.map(p => {
-    const r = REL_NODE_R;
-    const it = p.it;
-    const c = it.char || {};
-    // Comme les tokens VTT : on utilise char.photo avec photoX/photoY
-    const photo = c.photo || it.imageUrl || '';
-    const initials = _esc(it.initials || (it.nom || '?').slice(0,2).toUpperCase());
-
-    let portraitSvg;
-    if (photo) {
-      // photoX/Y dans [-1, 1] : on les traduit en décalage de l'image dans le viewport circulaire
-      // Pour que photoX=photoY=0 soit centré et photoX=1 décale d'un demi-rayon vers la droite
-      const fx = c.photoX || 0, fy = c.photoY || 0;
-      const imgSize = r * 2.4;        // image légèrement plus grande que le cercle (zoom natif)
-      const imgX = p.x - imgSize/2 - fx * r;
-      const imgY = p.y - imgSize/2 - fy * r;
-      portraitSvg = `<image href="${_esc(photo)}"
-        x="${imgX.toFixed(1)}" y="${imgY.toFixed(1)}"
-        width="${imgSize.toFixed(1)}" height="${imgSize.toFixed(1)}"
-        clip-path="url(#pp-rel-clip-${_esc(it.charId)})"
-        preserveAspectRatio="xMidYMid slice"/>`;
-    } else {
-      portraitSvg = `<text x="${p.x}" y="${p.y}" text-anchor="middle" dy=".35em"
-        font-family="Cinzel, serif" font-weight="700" font-size="16"
-        fill="var(--text)">${initials}</text>`;
-    }
-
-    return `<g class="pp-rel-node" data-char-id="${_esc(it.charId)}" data-id="${_esc(it.id)}"
-             style="--node-col:${p.col}" tabindex="0" role="button" aria-label="${_esc(it.nom)}">
-      <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r + 3}" fill="var(--bg-card)" stroke="${p.col}" stroke-width="3" class="pp-rel-ring"/>
-      ${portraitSvg}
-      <text x="${p.x.toFixed(1)}" y="${(p.y + r + 18).toFixed(1)}" text-anchor="middle"
-        font-family="Cinzel, serif" font-size="13" font-weight="600"
-        fill="var(--text)" class="pp-rel-label">${_esc(it.nom)}</text>
-    </g>`;
-  }).join('');
-
-  // Picker des PJ visibles
-  const isAllSelected = !selected;
-  const pickerHtml = `
-    <div class="pp-rel-picker ${STORE.relPickerOpen ? 'is-open' : ''}">
-      <button type="button" class="pp-rel-picker-toggle" data-pp-action="relTogglePicker">
-        👥 ${isAllSelected ? `Tous les PJ (${allPJ.length})` : `${selected.size} / ${allPJ.length} PJ`}
-        <span class="pp-rel-picker-caret">${STORE.relPickerOpen ? '▴' : '▾'}</span>
-      </button>
-      ${STORE.relPickerOpen ? `
-        <div class="pp-rel-picker-panel">
-          <div class="pp-rel-picker-actions">
-            <button type="button" class="btn btn-outline btn-sm" data-pp-action="relSelectAll">Tout sélectionner</button>
-            <button type="button" class="btn btn-outline btn-sm" data-pp-action="relSelectNone">Aucun</button>
-            <button type="button" class="btn btn-outline btn-sm" data-pp-action="relResetPositions" title="Remet les PJ en cercle">↺ Repositionner</button>
-          </div>
-          <div class="pp-rel-picker-list">
-            ${allPJ.map(p => {
-              const checked = !selected || selected.has(p.charId);
-              const c = p.char || {};
-              const photo = c.photo || p.imageUrl || '';
-              const portraitChar = { ...c, photo, nom: p.nom };
-              return `<label class="pp-rel-picker-item">
-                <input type="checkbox" data-pp-action="relToggleChar" data-pp-on="change"
-                  data-char-id="${_esc(p.charId)}" ${checked ? 'checked' : ''}>
-                <span class="pp-rel-picker-portrait">
-                  ${characterPortraitContent(portraitChar, { fallbackClass: 'pp-rel-picker-init' })}
-                </span>
-                <span class="pp-rel-picker-name">${_esc(p.nom)}</span>
-              </label>`;
-            }).join('')}
-          </div>
-        </div>
-      ` : ''}
-    </div>`;
-
-  return `
-    <div class="pp-relations">
-      <div class="pp-relations-header">
-        <div class="pp-relations-hint">
-          Glisse les portraits pour les déplacer · clique pour ouvrir la fiche · les traits or relient les PJ ayant aventuré dans le <strong>même groupe</strong>.
-        </div>
-        ${pickerHtml}
-      </div>
-      <div class="pp-relations-stage">
-        <svg viewBox="0 0 ${REL_W} ${REL_H}" class="pp-relations-svg" preserveAspectRatio="xMidYMid meet">
-          ${defsSvg}
-          ${edgesSvg}
-          ${nodesSvg}
-        </svg>
-      </div>
-    </div>`;
-}
-
-// Drag des nœuds : convertit clientX/Y → coords SVG, met à jour les positions
-// stockées dans STORE.relPositions, et déplace nœud + arêtes liées en live.
-function _bindRelationsDrag() {
-  const svg = document.querySelector('.pp-relations-svg');
-  if (!svg || svg._dragBound) return;
-  svg._dragBound = true;
-
-  const clientToSvg = (clientX, clientY) => {
-    const pt = svg.createSVGPoint();
-    pt.x = clientX; pt.y = clientY;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return { x: 0, y: 0 };
-    const out = pt.matrixTransform(ctm.inverse());
-    return { x: out.x, y: out.y };
+  const nodes = [...nodesById.values()].sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' }) || a.id.localeCompare(b.id));
+  return {
+    mode,
+    nodes,
+    edges,
+    nodeById: new Map(nodes.map(node => [node.id, node])),
+    total: nodes.length * (nodes.length - 1) / 2,
   };
-
-  let dragging = null;  // { charId, node, offsetX, offsetY, moved }
-
-  svg.addEventListener('pointerdown', (e) => {
-    const node = e.target.closest('.pp-rel-node');
-    if (!node) return;
-    const charId = node.dataset.charId;
-    if (!charId) return;
-    e.preventDefault();
-    const ring = node.querySelector('.pp-rel-ring');
-    const cx = parseFloat(ring.getAttribute('cx'));
-    const cy = parseFloat(ring.getAttribute('cy'));
-    const p = clientToSvg(e.clientX, e.clientY);
-    dragging = { charId, node, offsetX: p.x - cx, offsetY: p.y - cy, moved: false, startX: cx, startY: cy };
-    node.setPointerCapture?.(e.pointerId);
-    node.classList.add('is-dragging');
-  });
-
-  svg.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    const p = clientToSvg(e.clientX, e.clientY);
-    const x = p.x - dragging.offsetX;
-    const y = p.y - dragging.offsetY;
-    if (!dragging.moved && (Math.abs(x - dragging.startX) > 2 || Math.abs(y - dragging.startY) > 2)) {
-      dragging.moved = true;
-    }
-    _moveRelNode(dragging.node, dragging.charId, x, y);
-  });
-
-  const endDrag = (e) => {
-    if (!dragging) return;
-    const { charId, node, moved, startX, startY } = dragging;
-    const ring = node.querySelector('.pp-rel-ring');
-    const x = parseFloat(ring.getAttribute('cx'));
-    const y = parseFloat(ring.getAttribute('cy'));
-    node.classList.remove('is-dragging');
-    node.releasePointerCapture?.(e.pointerId);
-    if (moved) {
-      STORE.relPositions[charId] = { x, y };
-    } else {
-      // Clic simple sans drag → ouvrir la fiche
-      const id = node.dataset.id;
-      if (id) { STORE.activeId = id; _refreshView(); window.scrollTo(0, 0); }
-    }
-    dragging = null;
-  };
-  svg.addEventListener('pointerup', endDrag);
-  svg.addEventListener('pointercancel', endDrag);
 }
 
-// Déplace en live un nœud (ring + image + label + clipPath + edges liées)
-function _moveRelNode(node, charId, x, y) {
-  const ring = node.querySelector('.pp-rel-ring');
-  if (ring) { ring.setAttribute('cx', x); ring.setAttribute('cy', y); }
-  const img = node.querySelector('image');
-  if (img) {
-    const w = parseFloat(img.getAttribute('width'));
-    const h = parseFloat(img.getAttribute('height'));
-    // Conserve l'offset photoX/Y déjà appliqué : on recalc en partant du centre
-    img.setAttribute('x', x - w / 2);
-    img.setAttribute('y', y - h / 2);
-  }
-  const label = node.querySelector('.pp-rel-label');
-  if (label) {
-    label.setAttribute('x', x);
-    label.setAttribute('y', y + REL_NODE_R + 18);
-  }
-  // Le clipPath dédié à ce charId doit suivre
-  const clipCircle = document.querySelector(`#pp-rel-clip-${CSS.escape(charId)} circle`);
-  if (clipCircle) { clipCircle.setAttribute('cx', x); clipCircle.setAttribute('cy', y); }
-  // Met à jour toutes les arêtes touchant ce charId
-  document.querySelectorAll('.pp-rel-edge').forEach(line => {
-    const [a, b] = (line.dataset.edge || '').split('|');
-    if (a === charId) { line.setAttribute('x1', x); line.setAttribute('y1', y); }
-    if (b === charId) { line.setAttribute('x2', x); line.setAttribute('y2', y); }
+export function _detectTables(graph) {
+  const nodes = graph?.nodes || [];
+  const index = new Map(nodes.map((node, i) => [node.id, i]));
+  const labels = nodes.map((_, i) => i);
+  const neighbours = nodes.map(() => []);
+  (graph?.edges || []).forEach(edge => {
+    const a = index.get(edge.a), b = index.get(edge.b);
+    if (a === undefined || b === undefined) return;
+    neighbours[a].push([b, edge.n]);
+    neighbours[b].push([a, edge.n]);
   });
+  for (let iteration = 0; iteration < 12; iteration++) {
+    nodes.forEach((_, i) => {
+      const scores = new Map();
+      neighbours[i].forEach(([other, weight]) => scores.set(labels[other], (scores.get(labels[other]) || 0) + weight));
+      let best = labels[i], bestWeight = -1;
+      [...scores.entries()].sort((a, b) => a[0] - b[0]).forEach(([label, weight]) => {
+        if (weight > bestWeight || (weight === bestWeight && label < best)) {
+          best = label;
+          bestWeight = weight;
+        }
+      });
+      labels[i] = best;
+    });
+  }
+  const groups = new Map();
+  labels.forEach((label, i) => {
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(nodes[i]);
+  });
+  return [...groups.entries()]
+    .filter(([, members]) => members.length > 1)
+    .sort((a, b) => b[1].length - a[1].length || a[0] - b[0])
+    .map(([, members], id) => {
+      const memberIds = members.map(member => member.id);
+      const memberSet = new Set(memberIds);
+      const core = [...members].sort((a, b) => b.w - a.w || a.label.localeCompare(b.label, 'fr'))[0];
+      const internal = (graph.edges || []).filter(edge => memberSet.has(edge.a) && memberSet.has(edge.b))
+        .reduce((sum, edge) => sum + edge.n, 0);
+      return { id, color: RELATION_TABLE_COLORS[id % RELATION_TABLE_COLORS.length], memberIds, coreId: core.id, internal };
+    });
+}
+
+export function _bridgeNodes(graph, tables = graph?.tables || _detectTables(graph)) {
+  const tableByNode = new Map();
+  tables.forEach(table => table.memberIds.forEach(id => tableByNode.set(id, table.id)));
+  return (graph?.nodes || []).map(node => {
+    const own = tableByNode.get(node.id);
+    const otherTables = new Set();
+    (graph.edges || []).forEach(edge => {
+      const otherId = edge.a === node.id ? edge.b : edge.b === node.id ? edge.a : '';
+      if (!otherId) return;
+      const tableId = tableByNode.get(otherId);
+      if (tableId !== undefined && tableId !== own) otherTables.add(tableId);
+    });
+    return { id: node.id, tableIds: [...otherTables].sort((a, b) => a - b), count: otherTables.size };
+  }).filter(bridge => bridge.count >= 2);
+}
+
+function _relationLayout(graph) {
+  const signature = `${graph.mode}|${graph.nodes.map(node => node.id).join(',')}|${graph.edges.map(edge => `${edge.a}:${edge.b}:${edge.n}`).join(',')}`;
+  const cached = _relationLayoutCache.get(signature);
+  if (cached) return cached;
+  if (!graph.nodes.length) return new Map();
+  let seed = 11;
+  const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const width = 1000, height = 680, count = graph.nodes.length;
+  const k = Math.sqrt(width * height / count) * .78;
+  const points = graph.nodes.map((node, i) => {
+    const angle = i / count * Math.PI * 2 + Math.max(0, node.tableId ?? 0);
+    return { id: node.id, x: width / 2 + Math.cos(angle) * 260 + (random() - .5) * 80, y: height / 2 + Math.sin(angle) * 200 + (random() - .5) * 80 };
+  });
+  const pointById = new Map(points.map((point, i) => [point.id, i]));
+  for (let iteration = 0, temperature = 60; iteration < 420; iteration++, temperature *= .992) {
+    const delta = points.map(() => [0, 0]);
+    for (let i = 0; i < count; i++) {
+      for (let j = i + 1; j < count; j++) {
+        let dx = points[i].x - points[j].x, dy = points[i].y - points[j].y;
+        const length = Math.hypot(dx, dy) || .01, force = k * k / length;
+        dx /= length; dy /= length;
+        delta[i][0] += dx * force; delta[i][1] += dy * force;
+        delta[j][0] -= dx * force; delta[j][1] -= dy * force;
+      }
+    }
+    graph.edges.forEach(edge => {
+      const i = pointById.get(edge.a), j = pointById.get(edge.b);
+      if (i === undefined || j === undefined) return;
+      let dx = points[i].x - points[j].x, dy = points[i].y - points[j].y;
+      const length = Math.hypot(dx, dy) || .01;
+      const force = length * length / k * (.2 + Math.min(edge.n, 6) * .1);
+      dx /= length; dy /= length;
+      delta[i][0] -= dx * force; delta[i][1] -= dy * force;
+      delta[j][0] += dx * force; delta[j][1] += dy * force;
+    });
+    points.forEach((point, i) => {
+      delta[i][0] += (width / 2 - point.x) * .55;
+      delta[i][1] += (height / 2 - point.y) * .75;
+      const length = Math.hypot(delta[i][0], delta[i][1]) || .01;
+      point.x += delta[i][0] / length * Math.min(length, temperature);
+      point.y += delta[i][1] / length * Math.min(length, temperature);
+    });
+  }
+  const xs = points.map(point => point.x), ys = points.map(point => point.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const scale = Math.min((width - 120) / (maxX - minX || 1), (height - 110) / (maxY - minY || 1));
+  points.forEach(point => {
+    point.x = 60 + (point.x - minX) * scale + ((width - 120) - (maxX - minX) * scale) / 2;
+    point.y = 45 + (point.y - minY) * scale + ((height - 110) - (maxY - minY) * scale) / 2;
+  });
+
+  // La simulation de forces rapproche volontairement les partenaires, mais ne
+  // connaît ni les portraits ni la largeur des noms. Cette seconde passe traite
+  // chaque nœud comme une ellipse et garantit une vraie zone de lecture.
+  for (let iteration = 0; iteration < 150; iteration++) {
+    let moved = false;
+    for (let i = 0; i < count; i++) {
+      for (let j = i + 1; j < count; j++) {
+        let dx = points[i].x - points[j].x, dy = points[i].y - points[j].y;
+        const labelA = graph.nodes[i]?.label?.length || 1;
+        const labelB = graph.nodes[j]?.label?.length || 1;
+        const minDx = Math.max(92, Math.min(142, 48 + (labelA + labelB) * 3.1));
+        const minDy = 72;
+        let distance = Math.hypot(dx / minDx, dy / minDy);
+        if (distance >= 1) continue;
+        if (distance < .001) {
+          const angle = ((i * 37 + j * 61) % 360) * Math.PI / 180;
+          dx = Math.cos(angle) * .01;
+          dy = Math.sin(angle) * .01;
+          distance = .001;
+        }
+        const angle = Math.atan2(dy / minDy, dx / minDx);
+        const overlap = (1 - distance) * .52;
+        const pushX = Math.cos(angle) * minDx * overlap;
+        const pushY = Math.sin(angle) * minDy * overlap;
+        points[i].x += pushX; points[i].y += pushY;
+        points[j].x -= pushX; points[j].y -= pushY;
+        moved = true;
+      }
+    }
+    points.forEach(point => {
+      point.x = Math.max(48, Math.min(width - 48, point.x));
+      point.y = Math.max(38, Math.min(height - 62, point.y));
+    });
+    if (!moved) break;
+  }
+  const result = new Map(points.map(point => [point.id, { x: point.x, y: point.y }]));
+  _relationLayoutCache.set(signature, result);
+  return result;
+}
+
+function _prepareRelationGraph(items) {
+  const graph = _relationGraph(items, STORE.relMode, _allGroupMemberLists());
+  graph.tables = _detectTables(graph);
+  const tableByNode = new Map();
+  graph.tables.forEach(table => table.memberIds.forEach(id => tableByNode.set(id, table.id)));
+  const bridgeByNode = new Map(_bridgeNodes(graph, graph.tables).map(bridge => [bridge.id, bridge]));
+  graph.nodes.forEach(node => {
+    node.tableId = tableByNode.has(node.id) ? tableByNode.get(node.id) : -1;
+    node.bridge = bridgeByNode.get(node.id) || null;
+  });
+  graph.layout = _relationLayout(graph);
+  return graph;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -924,10 +1055,7 @@ function _renderFiche(item, items) {
     ? `<img class="pp-fiche-portrait" src="${_esc(item.imageUrl)}" alt="${_esc(item.nom)}">`
     : `<div class="pp-fiche-portrait pp-fiche-portrait-empty">${item.initials}</div>`;
   const profileCharId = item.char?.id || item.charId;
-  const profileMissionCount = profileCharId ? STORE.story.filter(ev => {
-    if ((ev.participants || []).some(p => p.id === profileCharId)) return true;
-    return _missionGroupCharIds(ev.id).has(profileCharId);
-  }).length : 0;
+  const profileMissionCount = profileCharId ? _computeRecentMissions(profileCharId, Infinity).length : 0;
   const profileAchievementCount = profileCharId
     ? STORE.achievements.filter(a => (a.contributeurs || []).includes(profileCharId)).length
     : 0;
@@ -1296,11 +1424,8 @@ function _renderChroniqueBlock(item) {
   const missions = isExpanded ? allMissions : allMissions.slice(0, visibleLimit);
   const remainingCount = Math.max(0, allMissions.length - visibleLimit);
 
-  // Compte le total des missions auxquelles le PJ a participé
-  const totalCount = STORE.story.filter(ev => {
-    if ((ev.participants || []).some(p => p.id === charId)) return true;
-    return _missionGroupCharIds(ev.id).has(charId);
-  }).length;
+  // Compte uniquement les missions rattachées à un groupe encore existant.
+  const totalCount = allMissions.length;
   const latest = allMissions[0];
   const missionCount = allMissions.filter(m => m.type === 'mission').length;
   const storyCount = allMissions.length - missionCount;
@@ -1417,11 +1542,545 @@ function _renderTopAdventurersBlock(item, items) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ROSTER V4 — registre maître/détail, galerie et carte des relations
+// ══════════════════════════════════════════════════════════════════════════════
+function _playerKey(item) {
+  return item.ownerUid || item.joueur || 'sans-joueur';
+}
+
+function _playerGroups(items = STORE.items) {
+  const groups = new Map();
+  items.forEach(item => {
+    const key = _playerKey(item);
+    if (!groups.has(key)) groups.set(key, { key, name: item.joueur || 'Sans joueur', items: [], online: false });
+    const group = groups.get(key);
+    group.items.push(item);
+    // Le compte courant est forcément en ligne. La page ne crée volontairement
+    // aucun listener Presence supplémentaire (quota Firestore).
+    if (item.ownerUid && item.ownerUid === STATE.user?.uid) group.online = true;
+  });
+  return [...groups.values()]
+    .map(group => ({
+      ...group,
+      items: group.items.sort((a, b) => Number(Boolean(b.char?.isDefault)) - Number(Boolean(a.char?.isDefault))
+        || (Number(b.level) || 0) - (Number(a.level) || 0)
+        || a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' })),
+    }))
+    .sort((a, b) => {
+      const aMine = a.key === STATE.user?.uid;
+      const bMine = b.key === STATE.user?.uid;
+      if (aMine !== bMine) return aMine ? -1 : 1;
+      return a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' });
+    });
+}
+
+function _playerGroupLabel(group) {
+  return group.key === STATE.user?.uid ? 'Mes personnages' : group.name;
+}
+
+function _playerAvatar(group, cls = '') {
+  return `<span class="pp-player-avatar ${cls}" data-online="${group.online}">${_esc((group.name || '?').charAt(0).toUpperCase())}</span>`;
+}
+
+function _portraitStyle(item) {
+  const cc = item.cardCrop;
+  return cc
+    ? `position:absolute;left:${(Number(cc.offX || 0) * 100).toFixed(2)}%;top:${(Number(cc.offY || 0) * 100).toFixed(2)}%;width:${(Number(cc.imgW || 1) * 100).toFixed(2)}%;height:auto;max-width:none`
+    : 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+}
+
+function _portrait(item, className = 'pp-register-portrait') {
+  const image = item.imageUrl || item.portraitUrl;
+  return `<span class="${className}" style="--pp-accent:${_accentColor(item.nom)}">${image
+    ? `<img src="${_esc(image)}" alt="Portrait de ${_esc(item.nom)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" style="${_portraitStyle(item)}">`
+    : `<b>${_esc(item.initials)}</b>`}</span>`;
+}
+
+function _renderRosterTop(items) {
+  const groups = _playerGroups(items);
+  const views = [
+    ['gallery', 'Galerie', 'cards'],
+    ['register', 'Registre', 'list'],
+    ['relations', 'Liens du groupe', 'relations'],
+  ];
+  return `<header class="pp-roster-top">
+    <div class="pp-roster-title"><h1>Joueurs</h1><small>${items.length} personnage${items.length !== 1 ? 's' : ''} · ${groups.length} joueur${groups.length !== 1 ? 's' : ''}${groups.some(g => g.online) ? ` · ${groups.filter(g => g.online).length} en ligne` : ''}</small></div>
+    <div class="pp-roster-views" role="tablist" aria-label="Affichage">
+      ${views.map(([mode, label, icon]) => {
+        const sub = mode === 'register'
+          ? (STORE.activeId ? `register/${STORE.activeId}` : 'register')
+          : mode === 'relations' ? `relations/${STORE.relMode}${STORE.relSelectedId ? `/${encodeURIComponent(STORE.relSelectedId)}` : ''}` : 'gallery';
+        return `<button type="button" role="tab" aria-selected="${STORE.viewMode === mode}" class="${STORE.viewMode === mode ? 'is-active' : ''}" data-pp-action="setViewMode" data-mode="${mode}" data-nav-page="players" data-nav-sub="${_esc(sub)}">${_ppIcon(icon)}<span>${label}</span></button>`;
+      }).join('')}
+    </div>
+    <span class="pp-roster-spacer"></span>
+    ${STATE.isAdmin ? `<button type="button" class="pp-roster-primary" data-pp-action="newPlayer">${_ppIcon('plus')} Présentation</button>` : ''}
+  </header>`;
+}
+
+function _renderRosterSearch() {
+  return `<div class="pp-roster-filters">
+    <label class="pp-roster-search">${_ppIcon('search')}<input type="search" placeholder="Nom, classe, trait, joueur…" value="${_esc(STORE.filterSearch)}" autocomplete="off" data-pp-action="search" data-pp-on="input"><kbd>/</kbd>${STORE.filterSearch ? `<button type="button" data-pp-action="clearSearch" aria-label="Effacer">${_ppIcon('x')}</button>` : ''}</label>
+  </div>`;
+}
+
+function _renderRegisterList(items) {
+  const row = item => {
+    const subtitle = [item.classe, item.race, STORE.grouped ? '' : item.joueur].filter(Boolean).join(' · ');
+    return `<div class="pp-register-row-wrap" data-pp-id="${_esc(item.id)}">
+      <button type="button" class="pp-register-row ${item.id === STORE.activeId ? 'is-selected' : ''}" data-pp-action="selectItem" data-id="${_esc(item.id)}" aria-current="${item.id === STORE.activeId}">
+        ${_portrait(item)}
+        <span class="pp-register-row-text"><b>${_esc(item.nom)}</b><small>${_esc(subtitle || 'Personnage')}</small></span>
+        <span class="pp-register-marks">${item.char?.isDefault ? `<span class="is-main" title="Personnage principal">${_ppIcon('star')}</span>` : ''}${item.visible === false ? `<span class="is-hidden" title="Masqué aux joueurs">${_ppIcon('lock')}</span>` : ''}<span class="pp-register-level">${Number(item.level) || 1}</span></span>
+      </button>
+    </div>`;
+  };
+  const groups = _playerGroups(items);
+  const searching = Boolean(STORE.filterSearch.trim());
+  const rows = groups.map(group => {
+    const collapsed = !searching && Boolean(STORE.collapsedGroups[group.key]);
+    return `<section class="pp-register-group-block ${collapsed ? 'is-collapsed' : ''}">
+      <button type="button" class="pp-register-group ${group.key === STATE.user?.uid ? 'is-mine' : ''}" data-pp-action="togglePlayerGroup" data-group="${_esc(group.key)}" aria-expanded="${!collapsed}">
+        <span class="pp-register-chevron">${_ppIcon('chevronDown')}</span>${_playerAvatar(group)}<span class="pp-register-group-name">${_esc(_playerGroupLabel(group))}</span><i>${group.online ? 'en ligne' : ''}</i><b>${group.items.length}</b>
+      </button>
+      ${collapsed ? '' : group.items.map(row).join('')}
+    </section>`;
+  }).join('');
+
+  return `<aside class="pp-register-rail">
+    <div class="pp-register-tools">${_renderRosterSearch()}<div class="pp-register-toolrow"><span>${items.length} résultat${items.length !== 1 ? 's' : ''}</span></div></div>
+    <div class="pp-register-list" id="pp-register-list">${rows || `<div class="pp-roster-empty">Aucun personnage.<button type="button" data-pp-action="resetFilters">Réinitialiser les filtres</button></div>`}</div>
+    <div class="pp-register-keys"><span><kbd>↑</kbd><kbd>↓</kbd> personnage</span><span><kbd>1</kbd>–<kbd>4</kbd> sections</span><span><kbd>Échap.</kbd> galerie</span></div>
+  </aside>`;
+}
+
+function _renderVitalBar(label, current, max, cls) {
+  const pct = max ? Math.max(0, Math.min(100, Math.round(Number(current ?? max) / Number(max) * 100))) : 0;
+  return `<div class="pp-detail-vital ${cls}"><div><span>${label}</span><b>${current ?? max}<small>/${max}</small></b></div><i><span style="width:${pct}%"></span></i></div>`;
+}
+
+function _identityRows(item) {
+  return (item.identity || []).map(entry => Array.isArray(entry)
+    ? { key: String(entry[0] || ''), value: String(entry[1] || '') }
+    : { key: String(entry?.k || entry?.key || ''), value: String(entry?.v || entry?.value || '') })
+    .filter(entry => entry.key && entry.value);
+}
+
+function _presentationHtml(item) {
+  const isSlideshow = item.afficherBio && hasFreePage(item.bioPage);
+  const narrative = item.afficherBio
+    ? (isSlideshow
+      ? renderFreePageHtml({ page: item.bioPage, className: 'pp-free-page', keyboard: true })
+      : item.content
+        ? richTextContentHtml({ html: item.content, className: 'pp-rich-content' })
+        : item.bio ? `<div class="pp-bio-legacy">${_nl2br(item.bio)}</div>` : '')
+    : '';
+  const identity = item.afficherIdentite ? _identityRows(item) : [];
+  const stats = item.afficherStats ? item.stats : [];
+  const best = stats.length ? Math.max(...stats.map(s => Number(s.value) || 0)) : 0;
+  const equipment = item.afficherEquip && item.char ? getEquipmentSlots().map(slot => {
+    const equipped = item.char.equipement?.[slot.id];
+    return equipped?.nom ? { slot: slot.label, name: equipped.nom } : null;
+  }).filter(Boolean) : [];
+  return `<div class="pp-detail-columns ${isSlideshow ? 'is-slideshow' : ''}"><article class="pp-detail-bio ${isSlideshow ? 'is-slideshow' : ''}">${isSlideshow ? `<div class="pp-slideshow-toolbar"><span>Présentation</span><button type="button" data-pp-action="fullscreenPresentation">${_ppIcon('external')} Plein écran</button></div>` : ''}${narrative || `<div class="pp-roster-empty">${_ppIcon('book')}<p>${item.afficherBio ? 'Pas encore de présentation.' : 'Présentation masquée.'}</p>${_canManageItem(item) ? `<button type="button" data-pp-action="editItem" data-id="${_esc(item.id)}">Rédiger la présentation</button>` : ''}</div>`}</article>
+    <aside class="pp-detail-aside">
+      ${identity.length ? `<section><h3>Identité</h3><dl>${identity.map(row => `<dt>${_esc(row.key)}</dt><dd>${_esc(row.value)}</dd>`).join('')}</dl></section>` : ''}
+      ${stats.length ? `<section><h3>Caractéristiques</h3><div class="pp-detail-stats">${stats.map(stat => { const mod = getModFromScore(Number(stat.value) || 0); return `<div class="${Number(stat.value) === best ? 'is-best' : ''}" style="--stat:${stat.color || _accentColor(item.nom)}"><span>${_esc(stat.label.slice(0, 3).toUpperCase())}</span><b>${stat.value}</b><em>${modStr(mod)}</em></div>`; }).join('')}</div></section>` : ''}
+      ${equipment.length ? `<section><h3>Équipement</h3><ul class="pp-detail-equipment">${equipment.map(row => `<li><span>${_esc(row.slot)}</span><b>${_esc(row.name)}</b></li>`).join('')}</ul></section>` : ''}
+    </aside>
+  </div>`;
+}
+
+function _missionStatus(mission) {
+  const raw = _norm(mission.statut || mission.status || '');
+  if (raw.includes('cours') || raw === 'active') return ['active', 'En cours'];
+  if (raw.includes('prev') || raw.includes('plan')) return ['planned', 'Prévue'];
+  return ['done', 'Terminée'];
+}
+
+function _missionMembers(mission, currentCharId, items) {
+  const ids = _missionGroupMemberIds(mission.id, currentCharId);
+  ids.delete(currentCharId);
+  return [...ids].map(id => items.find(it => it.charId === id)).filter(Boolean);
+}
+
+function _chronicleHtml(item, items) {
+  const missions = _computeRecentMissions(item.charId, Infinity);
+  const achievements = STORE.achievements.filter(a => (a.contributeurs || a.by || []).includes(item.charId));
+  if (!missions.length && !achievements.length) return `<div class="pp-roster-empty">${_ppIcon('book')}<p>Aucune aventure pour l’instant.</p></div>`;
+  return `<div class="pp-detail-columns"><ol class="pp-detail-timeline">${missions.map(mission => {
+    const [statusClass, statusLabel] = _missionStatus(mission);
+    const members = _missionMembers(mission, item.charId, items);
+    return `<li class="${statusClass}"><i></i><div><header><button type="button" class="pp-mission-link" data-pp-action="openChroniqueMission" data-id="${_esc(mission.id)}">${_esc(mission.titre || 'Sans titre')}${_ppIcon('arrowRight')}</button><span>${statusLabel}</span></header>${mission.date ? `<small>${_esc(mission.date)}</small>` : ''}${members.length ? `<div class="pp-detail-chips">${members.map(member => `<button type="button" data-pp-action="selectItem" data-id="${_esc(member.id)}">${_portrait(member, 'pp-detail-chip-portrait')}${_esc(member.nom.split(' ')[0])}</button>`).join('')}</div>` : ''}</div></li>`;
+  }).join('')}</ol><aside class="pp-detail-aside"><section><h3>Hauts-faits · ${achievements.length}</h3>${achievements.length ? `<ul class="pp-detail-achievements">${achievements.map(a => `<li>★ <span>${_esc(a.titre || a.nom || 'Haut-fait')}</span></li>`).join('')}</ul>` : '<p>Aucun pour l’instant.</p>'}</section></aside></div>`;
+}
+
+function _companionsHtml(item, items) {
+  const partners = _computeTopAdventurers(item.charId, items, 99);
+  const max = Math.max(1, ...partners.map(p => p.count));
+  const met = new Set(partners.map(p => p.item.id));
+  const never = items.filter(other => other.id !== item.id && !met.has(other.id));
+  return `${partners.length ? `<div class="pp-detail-companions">${partners.map(({ item: other, count }) => `<button type="button" data-pp-action="selectItem" data-id="${_esc(other.id)}">${_portrait(other, 'pp-detail-companion-portrait')}<span><b>${_esc(other.nom)}</b><small>${_esc([other.classe, other.joueur].filter(Boolean).join(' · '))}</small></span><em><i><span style="width:${Math.round(count / max * 100)}%"></span></i>${count} aventure${count !== 1 ? 's' : ''}</em></button>`).join('')}</div>` : `<div class="pp-roster-empty">${_ppIcon('users')}<p>N’a encore partagé aucun groupe.</p></div>`}${never.length ? `<section class="pp-detail-never"><h3>Pas encore croisés</h3><div class="pp-detail-chips">${never.map(other => `<button type="button" data-pp-action="selectItem" data-id="${_esc(other.id)}">${_portrait(other, 'pp-detail-chip-portrait')}${_esc(other.nom)}</button>`).join('')}</div></section>` : ''}`;
+}
+
+function _galleryDetailHtml(item) {
+  const photos = item.gallery || [];
+  const add = _canManageItem(item) ? `<button type="button" class="pp-detail-gallery-add" data-pp-action="editItem" data-id="${_esc(item.id)}">${_ppIcon('plus')}<span>Ajouter</span></button>` : '';
+  return photos.length || add ? `<div class="pp-detail-gallery">${photos.map((photo, index) => `<button type="button" data-pp-action="lightbox" data-pres-id="${_esc(item.presentationId || item.id)}" data-idx="${index}"><img src="${_esc(photo.url || photo.thumb)}" alt="Illustration ${index + 1} de ${_esc(item.nom)}" loading="lazy" decoding="async"><span>${photo.isPortrait ? 'Portrait' : `Illustration ${index + 1}`}</span></button>`).join('')}${add}</div>` : `<div class="pp-roster-empty">${_ppIcon('image')}<p>Aucune illustration.</p></div>`;
+}
+
+function _detailSectionHeader(icon, title, count, subtitle) {
+  return `<header class="pp-detail-section-head"><div><h3>${_ppIcon(icon)} ${title}${count != null ? `<em>${count}</em>` : ''}</h3>${subtitle ? `<p>${subtitle}</p>` : ''}</div></header>`;
+}
+
+function _detailSectionsHtml(item, items) {
+  const photos = item.gallery || [];
+  const missions = _computeRecentMissions(item.charId, Infinity);
+  const partners = _computeTopAdventurers(item.charId, items, 99);
+  const achievements = STORE.achievements.filter(a => (a.contributeurs || a.by || []).includes(item.charId));
+  return `<div class="pp-detail-stack">
+    <section id="pp-section-presentation" class="pp-detail-section" data-detail-section="presentation">${_detailSectionHeader('book', 'Présentation', null, 'Identité, histoire et caractéristiques du personnage.')}${_presentationHtml(item)}</section>
+    <section id="pp-section-gallery" class="pp-detail-section" data-detail-section="gallery">${_detailSectionHeader('image', 'Galerie', photos.length, 'Portraits et illustrations du personnage.')}${_galleryDetailHtml(item)}</section>
+    <section id="pp-section-chronicle" class="pp-detail-section" data-detail-section="chronicle">${_detailSectionHeader('book', 'Chronique', `${missions.length} · ${achievements.length} HF`, 'Missions et hauts-faits vécus par le personnage.')}${_chronicleHtml(item, items)}</section>
+    <section id="pp-section-companions" class="pp-detail-section" data-detail-section="companions">${_detailSectionHeader('users', 'Compagnons', partners.length, 'Personnages rencontrés dans ses groupes d’aventure.')}${_companionsHtml(item, items)}</section>
+  </div>`;
+}
+
+function _renderRegisterDetail(item, items) {
+  if (!item) return `<main class="pp-register-detail"><div class="pp-roster-empty">Sélectionne un personnage.</div></main>`;
+  const index = items.findIndex(it => it.id === item.id);
+  const group = _playerGroups(STORE.items).find(g => g.key === _playerKey(item));
+  const siblings = group?.items.filter(it => it.id !== item.id) || [];
+  const missions = _computeRecentMissions(item.charId, Infinity);
+  const partners = _computeTopAdventurers(item.charId, items, 99);
+  const tabs = [
+    ['presentation', 'Présentation', 'user', null],
+    ['gallery', 'Galerie', 'image', (item.gallery || []).length],
+    ['chronicle', 'Chronique', 'book', missions.length],
+    ['companions', 'Compagnons', 'users', partners.length],
+  ];
+  const portraitIndex = Math.max(0, (item.gallery || []).findIndex(photo => photo.isPortrait));
+  const portrait = item.gallery?.length
+    ? `<button type="button" class="pp-detail-portrait-button" data-pp-action="lightbox" data-pres-id="${_esc(item.presentationId || item.id)}" data-idx="${portraitIndex}" aria-label="Voir le portrait de ${_esc(item.nom)}">${_portrait(item, 'pp-detail-portrait')}</button>`
+    : _portrait(item, 'pp-detail-portrait');
+  const tags = item.afficherTags ? (item.tags || []) : [];
+  const vitalParts = STATE.isAdmin ? [
+    item.afficherPV && item.pvMax != null ? _renderVitalBar('PV', item.pvActuel, item.pvMax, 'is-pv') : '',
+    item.afficherPM && item.pmMax != null ? _renderVitalBar('PM', item.pmActuel, item.pmMax, 'is-pm') : '',
+    item.afficherCA && item.ca != null ? `<div class="pp-detail-simple"><span>CA</span><b>${item.ca}</b></div>` : '',
+    item.afficherOr && item.gold != null ? `<div class="pp-detail-simple"><span>Or</span><b>${item.gold}</b></div>` : '',
+  ].filter(Boolean) : [];
+  return `<main class="pp-register-detail">
+    <section class="pp-detail-head" style="--pp-accent:${_accentColor(item.nom)}">
+      <button type="button" class="pp-mobile-list" data-pp-action="mobileBack">${_ppIcon('arrowLeft')} Liste</button>
+      ${portrait}
+      <div class="pp-detail-identity"><div class="pp-detail-name"><h2>${_esc(item.nom)}</h2>${item.visible === false ? `<span>${_ppIcon('lock')} Masqué</span>` : ''}</div><p>${_esc([item.classe, item.race].filter(Boolean).join(' · '))}${item.afficherNiveau ? ` · <b>Niv. ${item.level}</b>` : ''}</p>${group ? `<div class="pp-detail-player">${_playerAvatar(group)}<span>Joué par <b>${_esc(group.name)}</b></span>${siblings.length ? `<span class="pp-detail-siblings">${siblings.map(sibling => `<button type="button" data-pp-action="selectSibling" data-id="${_esc(sibling.id)}" title="${_esc(sibling.nom)}">${_portrait(sibling, 'pp-detail-chip-portrait')}<span>${_esc(sibling.nom)}</span></button>`).join('')}</span>` : ''}</div>` : ''}${tags.length ? `<div class="pp-detail-tags">${tags.map(tag => `<span>${_esc(tag)}</span>`).join('')}</div>` : ''}${item.afficherCitation && item.quote ? `<q>${_esc(item.quote)}</q>` : ''}</div>
+      <div class="pp-detail-actions"><div class="pp-detail-nav"><button type="button" data-pp-action="stepItem" data-step="-1" ${index <= 0 ? 'disabled' : ''}>${_ppIcon('arrowLeft')}</button><span>${index + 1}<i>/</i>${items.length}</span><button type="button" data-pp-action="stepItem" data-step="1" ${index >= items.length - 1 ? 'disabled' : ''}>${_ppIcon('arrowRight')}</button></div>${_canManageItem(item) ? `<div><button type="button" class="is-primary" data-pp-action="openCharacter" data-char-id="${_esc(item.charId)}">${_ppIcon('external')} Fiche de jeu</button><button type="button" data-pp-action="editItem" data-id="${_esc(item.id)}">${_ppIcon('edit')} Modifier</button><button type="button" class="is-icon" data-pp-action="toggleVisible" data-id="${_esc(item.id)}" title="${item.visible === false ? 'Publier' : 'Masquer'}">${_ppIcon(item.visible === false ? 'eyeOff' : 'eye')}</button></div>` : ''}</div>
+    </section>
+    ${vitalParts.length ? `<section class="pp-detail-vitals">${vitalParts.join('')}<span class="pp-detail-mj">${_ppIcon('lock')} Visible MJ uniquement</span></section>` : ''}
+    <nav class="pp-detail-tabs" aria-label="Sections de la fiche">${tabs.map(([key, label, icon, count], tabIndex) => `<button type="button" aria-current="${STORE.detailSection === key ? 'true' : 'false'}" class="${STORE.detailSection === key ? 'is-active' : ''}" data-pp-action="jumpDetailSection" data-section="${key}">${_ppIcon(icon)}${label}${count != null ? `<em>${count}</em>` : ''}<kbd>${tabIndex + 1}</kbd></button>`).join('')}</nav>
+    <div class="pp-detail-panel">${_detailSectionsHtml(item, items)}</div>
+  </main>`;
+}
+
+function _renderGalleryScreen(items) {
+  const groupByKey = new Map(_playerGroups(STORE.items).map(group => [group.key, group]));
+  const canReorder = STATE.isAdmin && !STORE.grouped;
+  const card = item => {
+    const group = groupByKey.get(_playerKey(item));
+    const canManage = _canManageItem(item);
+    return `<article class="pp-gallery-card ${item.id === STORE.activeId ? 'is-selected' : ''}" data-pp-id="${_esc(item.id)}" style="--pp-accent:${_accentColor(item.nom)}">
+      <button type="button" class="pp-gallery-card-open" data-pp-action="openRegister" data-id="${_esc(item.id)}" aria-label="Ouvrir ${_esc(item.nom)}">
+        <span class="pp-gallery-image">${_portrait(item, 'pp-gallery-portrait')}<em>${item.level}</em>${item.visible === false ? `<i title="Masqué">${_ppIcon('lock')}</i>` : ''}${item.char?.isDefault ? `<span class="pp-gallery-main" title="Personnage principal">${_ppIcon('star')}</span>` : ''}${canReorder ? `<span class="pp-gallery-drag" title="Réordonner" aria-label="Réordonner">${_ppIcon('grip')}</span>` : ''}</span>
+        <span class="pp-gallery-copy"><b>${_esc(item.nom)}</b><small>${_esc([item.classe, item.race].filter(Boolean).join(' · '))}</small>${!STORE.grouped && group ? `<span class="pp-gallery-player">${_playerAvatar(group)}${_esc(group.name)}</span>` : ''}</span>
+      </button>
+      ${canManage ? `<span class="pp-gallery-quick-actions"><button type="button" data-pp-action="editItem" data-id="${_esc(item.id)}" title="Modifier ${_esc(item.nom)}" aria-label="Modifier ${_esc(item.nom)}">${_ppIcon('edit')}</button><button type="button" class="${item.visible === false ? 'is-hidden' : ''}" data-pp-action="toggleVisible" data-id="${_esc(item.id)}" title="${item.visible === false ? 'Publier' : 'Masquer'} ${_esc(item.nom)}" aria-label="${item.visible === false ? 'Publier' : 'Masquer'} ${_esc(item.nom)}">${_ppIcon(item.visible === false ? 'eyeOff' : 'eye')}</button></span>` : ''}
+    </article>`;
+  };
+  const grouped = _playerGroups(items).map(group => `<section class="pp-gallery-group ${group.key === STATE.user?.uid ? 'is-mine' : ''}">
+    <header>${_playerAvatar(group)}<div><h2>${_esc(_playerGroupLabel(group))}</h2><small>${group.items.length} personnage${group.items.length !== 1 ? 's' : ''}</small></div></header>
+    <div class="pp-gallery-grid">${group.items.map(card).join('')}</div>
+  </section>`).join('');
+  return `<div class="pp-gallery-screen">
+    <div class="pp-gallery-toolbar">${_renderRosterSearch()}<div class="pp-gallery-toolbar-row"><span>${items.length} personnage${items.length !== 1 ? 's' : ''}</span>${canReorder ? `<span class="pp-gallery-order-hint">${_ppIcon('grip')} Glisser pour réordonner</span>` : ''}<label><input type="checkbox" data-pp-action="toggleGrouped" data-pp-on="change" ${STORE.grouped ? 'checked' : ''}> Grouper par joueur</label></div></div>
+    ${items.length ? (STORE.grouped ? grouped : `<div id="pp-gallery-grid" class="pp-gallery-grid pp-gallery-grid--all">${items.map(card).join('')}</div>`) : `<div class="pp-roster-empty">Aucun personnage.<button type="button" data-pp-action="resetFilters">Réinitialiser les filtres</button></div>`}
+  </div>`;
+}
+
+let _relationRuntimeGraph = null;
+let _relationResizeBound = false;
+
+function _relationPartners(graph, id) {
+  return graph.edges.filter(edge => edge.a === id || edge.b === id).map(edge => ({
+    node: graph.nodeById.get(edge.a === id ? edge.b : edge.a),
+    count: edge.n,
+  })).filter(partner => partner.node).sort((a, b) => b.count - a.count || a.node.label.localeCompare(b.node.label, 'fr'));
+}
+
+function _relationNodeRadius(node) {
+  return 13 + Math.min(10, node.deg * .7);
+}
+
+function _relationTable(graph, node) {
+  return node?.tableId >= 0 ? graph.tables[node.tableId] : null;
+}
+
+function _relationTableColor(graph, node) {
+  return _relationTable(graph, node)?.color || '#56657a';
+}
+
+function _relationAvatar(node, className = '') {
+  const item = node?.item;
+  const image = item?.char?.photo || '';
+  const position = `${50 + (Number(item?.photoX) || 0) * 50}% ${50 + (Number(item?.photoY) || 0) * 50}%`;
+  return `<span class="pp-rel-avatar ${className}" style="--rel-color:${_relationTableColor(_relationRuntimeGraph, node)}">${image
+    ? `<img src="${_esc(image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" style="object-position:${position}">`
+    : `<b>${_esc(_initials(node?.label || '?'))}</b>`}</span>`;
+}
+
+function _relationSvg(graph) {
+  const viewport = _relationViewport();
+  const edges = graph.edges.filter(edge => edge.n >= STORE.relMin).sort((a, b) => a.n - b.n);
+  const edgeHtml = edges.map(edge => {
+    const a = graph.nodeById.get(edge.a), b = graph.nodeById.get(edge.b);
+    const pa = graph.layout.get(edge.a), pb = graph.layout.get(edge.b);
+    if (!a || !b || !pa || !pb) return '';
+    const sameTable = a.tableId >= 0 && a.tableId === b.tableId;
+    const color = sameTable ? _relationTableColor(graph, a) : 'rgba(200,212,232,.55)';
+    const midX = (pa.x + pb.x) / 2, midY = (pa.y + pb.y) / 2;
+    return `<g class="pp-rel-edge" data-a="${_esc(edge.a)}" data-b="${_esc(edge.b)}" data-n="${edge.n}">
+      <line x1="${pa.x.toFixed(1)}" y1="${pa.y.toFixed(1)}" x2="${pb.x.toFixed(1)}" y2="${pb.y.toFixed(1)}" stroke="${color}" stroke-width="${(.8 + edge.n * 1.1).toFixed(1)}" vector-effect="non-scaling-stroke" ${sameTable ? '' : 'stroke-dasharray="4 4"'}></line>
+      <g class="pp-rel-edge-label" transform="translate(${midX.toFixed(1)},${midY.toFixed(1)})"><g class="pp-rel-edge-label-visual"><rect x="-11" y="-9" width="22" height="18" rx="9"></rect><text x="0" y="0" dy=".35em">${edge.n}</text></g></g>
+    </g>`;
+  }).join('');
+  const definitions = graph.nodes.map((node, index) => `<clipPath id="pp-rel-clip-${index}"><circle r="${_relationNodeRadius(node) - 2}"></circle></clipPath>`).join('');
+  const nodes = graph.nodes.map((node, index) => {
+    const point = graph.layout.get(node.id);
+    if (!point) return '';
+    const radius = _relationNodeRadius(node), color = _relationTableColor(graph, node);
+    const image = node.item?.char?.photo || '';
+    const photoX = Number(node.item?.photoX) || 0, photoY = Number(node.item?.photoY) || 0;
+    const portraitAlign = `${photoX < -.18 ? 'xMin' : photoX > .18 ? 'xMax' : 'xMid'}${photoY < -.18 ? 'YMin' : photoY > .18 ? 'YMax' : 'YMid'}`;
+    const selected = node.id === STORE.relSelectedId;
+    return `<g class="pp-rel-node ${selected ? 'is-selected' : ''}" data-pp-action="relationSelect" data-id="${_esc(node.id)}" tabindex="0" role="button" aria-label="${_esc(`${node.label}, ${node.adv} aventures, ${node.deg} partenaires`)}" transform="translate(${point.x.toFixed(1)},${point.y.toFixed(1)})">
+      <g class="pp-rel-node-visual">
+        ${selected ? `<circle class="pp-rel-halo" r="${radius + 7}" stroke="${color}"></circle>` : ''}
+        <circle class="pp-rel-node-disc" r="${radius}" fill="color-mix(in srgb, ${color} 26%, #111b2a)" stroke="${color}" stroke-width="${node.secondary ? 1.5 : 2.2}" ${node.secondary ? 'stroke-dasharray="3 2"' : ''}></circle>
+        ${image ? `<image href="${_esc(image)}" x="${-radius + 2}" y="${-radius + 2}" width="${(radius - 2) * 2}" height="${(radius - 2) * 2}" preserveAspectRatio="${portraitAlign} slice" clip-path="url(#pp-rel-clip-${index})"></image>` : `<text class="pp-rel-node-initials" dy=".35em" style="font-size:${Math.round(radius * .72)}px">${_esc(_initials(node.label))}</text>`}
+        ${node.bridge ? `<circle class="pp-rel-bridge-dot" cx="${(radius * .72).toFixed(1)}" cy="${(-radius * .72).toFixed(1)}" r="5.5"></circle>` : ''}
+        <text class="pp-rel-label" y="${(radius + 14).toFixed(1)}">${_esc(node.label)}</text>
+      </g>
+    </g>`;
+  }).join('');
+  return `<svg id="pp-rel-net" class="pp-relations-svg" viewBox="${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Réseau des liens du groupe"><defs>${definitions}</defs>${edgeHtml}${nodes}</svg>`;
+}
+
+function _renderRelationSide(graph) {
+  const selected = graph.nodeById.get(STORE.relSelectedId);
+  if (selected) {
+    const partners = _relationPartners(graph, selected.id);
+    const met = new Set(partners.map(partner => partner.node.id));
+    const never = graph.nodes.filter(node => node.id !== selected.id && !met.has(node.id));
+    const table = _relationTable(graph, selected);
+    const otherTables = selected.bridge?.tableIds.map(id => graph.tables[id]).filter(Boolean) || [];
+    const maxCount = Math.max(1, ...partners.map(partner => partner.count));
+    return `<div class="pp-rel-side-head"><button type="button" class="pp-rel-close" data-pp-action="relationClear" aria-label="Fermer">${_ppIcon('x')}</button>${_relationAvatar(selected, 'is-large')}<div><h2>${_esc(selected.label)}</h2><small>${_esc(selected.sub || (STORE.relMode === 'players' ? 'Joueur' : 'Personnage'))}</small></div></div>
+      <div class="pp-rel-kpis"><span><b>${selected.adv}</b> aventures</span><span><b>${partners.length}</b> partenaires</span><span><b>${never.length}</b> jamais croisés</span></div>
+      ${table ? `<div class="pp-rel-table-banner" style="--rel-color:${table.color}"><b>Autour de ${_esc(graph.nodeById.get(table.coreId)?.label || selected.label)}</b>${otherTables.length ? `<span>${_ppIcon('relations')} fait le pont avec ${otherTables.map(other => `<button type="button" data-pp-action="relationTable" data-table="${other.id}">Autour de ${_esc(graph.nodeById.get(other.coreId)?.label || '')}</button>`).join(', ')}</span>` : ''}</div>` : ''}
+      <h3>Joue le plus avec</h3>
+      <div class="pp-rel-partners">${partners.map(partner => `<button type="button" class="${partner.count < STORE.relMin ? 'is-weak' : ''}" data-pp-action="relationSelect" data-id="${_esc(partner.node.id)}">${_relationAvatar(partner.node, 'is-small')}<span><b>${_esc(partner.node.label)}</b><small>${_esc(partner.node.sub)}</small></span><em><i><span style="width:${partner.count / maxCount * 100}%"></span></i>${partner.count}</em></button>`).join('') || '<p class="pp-rel-muted">Aucune aventure partagée.</p>'}</div>
+      ${never.length ? `<button type="button" class="pp-rel-never-toggle" data-pp-action="relationNever">${STORE.relShowNever ? 'Masquer' : 'Voir'} les ${never.length} jamais croisés</button>${STORE.relShowNever ? `<div class="pp-rel-chips">${never.map(node => `<button type="button" data-pp-action="relationSelect" data-id="${_esc(node.id)}">${_esc(node.label)}</button>`).join('')}</div>` : ''}` : ''}
+      <button type="button" class="pp-rel-open" data-pp-action="relationOpen">Ouvrir la fiche ${_ppIcon('arrowRight')}</button>`;
+  }
+
+  const links = graph.edges.filter(edge => edge.n >= STORE.relMin).length;
+  const duos = [...graph.edges].sort((a, b) => b.n - a.n || a.a.localeCompare(b.a)).slice(0, 6);
+  const bridges = graph.nodes.filter(node => node.bridge).sort((a, b) => b.bridge.count - a.bridge.count || b.w - a.w).slice(0, 4);
+  return `<p class="pp-rel-lead"><b>${links}</b> liens sur ${graph.total} paires possibles. ${STORE.relMode === 'players' ? 'Les joueurs' : 'Les personnages'} se regroupent naturellement en tablées : chaque couleur en est une.</p>
+    <h3>Tablées</h3>
+    <div class="pp-rel-tables">${graph.tables.map(table => {
+      const core = graph.nodeById.get(table.coreId);
+      const members = table.memberIds.map(id => graph.nodeById.get(id)).filter(Boolean);
+      return `<button type="button" class="${STORE.relTableId === table.id ? 'is-active' : ''}" data-pp-action="relationTable" data-table="${table.id}" style="--rel-color:${table.color}"><i></i><span><b>Autour de ${_esc(core?.label || '')}</b><small>${members.length} ${STORE.relMode === 'players' ? 'joueurs' : 'personnages'} · ${table.internal} participations communes</small></span><em>${members.slice(0, 5).map(node => `<i>${_esc(_initials(node.label))}</i>`).join('')}${members.length > 5 ? `<i>+${members.length - 5}</i>` : ''}</em></button>`;
+    }).join('') || '<p class="pp-rel-muted">Pas encore assez de liens pour former une tablée.</p>'}</div>
+    <h3>Duos les plus soudés</h3>
+    <div class="pp-rel-duos">${duos.map(edge => `<button type="button" data-pp-action="relationSelect" data-id="${_esc(edge.a)}"><span>${_esc(graph.nodeById.get(edge.a)?.label || '')}</span><i></i><span>${_esc(graph.nodeById.get(edge.b)?.label || '')}</span><em>${edge.n} aventure${edge.n > 1 ? 's' : ''}</em></button>`).join('') || '<p class="pp-rel-muted">Aucun duo pour le moment.</p>'}</div>
+    ${bridges.length ? `<h3>${_ppIcon('relations')} Ponts entre tablées</h3><div class="pp-rel-chips">${bridges.map(node => `<button type="button" data-pp-action="relationSelect" data-id="${_esc(node.id)}"><i></i>${_esc(node.label)}</button>`).join('')}</div><p class="pp-rel-muted">Ces ${STORE.relMode === 'players' ? 'joueurs' : 'personnages'} ont partagé des aventures avec plusieurs tablées.</p>` : ''}`;
+}
+
+function _renderRelationsScreen(items) {
+  const graph = _prepareRelationGraph(items.filter(item => item.charId));
+  _relationRuntimeGraph = graph;
+  if (STORE.relSelectedId && !graph.nodeById.has(STORE.relSelectedId)) STORE.relSelectedId = '';
+  if (STORE.relTableId !== null && !graph.tables[STORE.relTableId]) STORE.relTableId = null;
+  return `<div class="pp-relations-screen">
+    <main class="pp-relations-main">
+      <div class="pp-relations-bar">
+        <div class="pp-relations-segment" role="group" aria-label="Type de réseau"><button type="button" class="${STORE.relMode === 'characters' ? 'is-active' : ''}" data-pp-action="relationMode" data-mode="characters">Personnages</button><button type="button" class="${STORE.relMode === 'players' ? 'is-active' : ''}" data-pp-action="relationMode" data-mode="players">Joueurs</button></div>
+        <label class="pp-relations-search">${_ppIcon('search')}<input type="search" placeholder="Trouver un ${STORE.relMode === 'players' ? 'joueur' : 'personnage'}…" value="${_esc(STORE.relQuery)}" autocomplete="off" data-pp-action="relationSearch" data-pp-on="input"></label>
+        <label class="pp-relations-min"><span>Liens d’au moins</span><input type="range" min="1" max="4" step="1" value="${STORE.relMin}" data-pp-action="relationMin" data-pp-on="input"><output>${STORE.relMin} aventure${STORE.relMin > 1 ? 's' : ''}</output></label>
+      </div>
+      <div class="pp-relations-stage" data-pp-action="relationClear">${graph.nodes.length ? _relationSvg(graph) : '<div class="pp-roster-empty">Aucun personnage à afficher.</div>'}<div class="pp-relations-zoom" aria-label="Navigation dans le réseau"><button type="button" data-pp-action="relationZoom" data-factor="1.25" aria-label="Dézoomer">−</button><button type="button" data-pp-action="relationResetView" aria-label="Recentrer le réseau" title="Recentrer">${_ppIcon('reset')}</button><button type="button" data-pp-action="relationZoom" data-factor="0.8" aria-label="Zoomer">+</button></div><div class="pp-relations-legend"><span><i class="is-solid"></i>même tablée</span><span><i class="is-dashed"></i>entre tablées</span><span><i class="is-weight"></i>épaisseur = aventures partagées</span><span><i class="is-bridge"></i>pont</span>${STORE.relMode === 'characters' ? '<span><i class="is-secondary"></i>perso secondaire</span>' : ''}</div><div class="pp-rel-tooltip" role="tooltip"></div></div>
+    </main>
+    <aside class="pp-relations-side">${_renderRelationSide(graph)}</aside>
+  </div>`;
+}
+
+function _fitRelationText() {
+  const svg = document.getElementById('pp-rel-net');
+  if (!svg) return;
+  const rect = svg.getBoundingClientRect();
+  const viewport = _relationViewport();
+  const scale = Math.min(rect.width / viewport.width, rect.height / viewport.height) || 1;
+  svg.style.setProperty('--u', Math.min(2.2, Math.max(1, 1 / scale)).toFixed(3));
+}
+
+function _relationPointFromClient(svg, clientX, clientY) {
+  const rect = svg.getBoundingClientRect();
+  const viewport = _relationViewport();
+  const scale = Math.min(rect.width / viewport.width, rect.height / viewport.height) || 1;
+  const offsetX = (rect.width - viewport.width * scale) / 2;
+  const offsetY = (rect.height - viewport.height * scale) / 2;
+  return {
+    x: viewport.x + (clientX - rect.left - offsetX) / scale,
+    y: viewport.y + (clientY - rect.top - offsetY) / scale,
+    scale,
+  };
+}
+
+function _relationFocusIds(graph, hoverId = '') {
+  const focusId = hoverId || STORE.relSelectedId;
+  if (focusId) return new Set([focusId, ..._relationPartners(graph, focusId).filter(partner => partner.count >= STORE.relMin).map(partner => partner.node.id)]);
+  if (STORE.relTableId !== null) return new Set(graph.tables[STORE.relTableId]?.memberIds || []);
+  const query = _norm(STORE.relQuery);
+  if (query) return new Set(graph.nodes.filter(node => _norm(`${node.label} ${node.sub}`).includes(query)).map(node => node.id));
+  return null;
+}
+
+function _applyRelationFocus(hoverId = '') {
+  const graph = _relationRuntimeGraph;
+  const screen = document.querySelector('.pp-relations-screen');
+  if (!graph || !screen) return;
+  const focus = _relationFocusIds(graph, hoverId);
+  const pivot = hoverId || STORE.relSelectedId;
+  screen.querySelectorAll('.pp-rel-node').forEach(element => element.classList.toggle('is-dim', Boolean(focus && !focus.has(element.dataset.id))));
+  screen.querySelectorAll('.pp-rel-edge').forEach(element => {
+    const connected = pivot ? (element.dataset.a === pivot || element.dataset.b === pivot) : Boolean(focus?.has(element.dataset.a) && focus?.has(element.dataset.b));
+    element.classList.toggle('is-hot', Boolean(focus && connected));
+    element.classList.toggle('is-dim', Boolean(focus && !connected));
+  });
+}
+
+function _bindRelationView() {
+  const screen = document.querySelector('.pp-relations-screen');
+  if (!screen) return;
+  const stage = screen.querySelector('.pp-relations-stage');
+  _fitRelationText();
+  _applyRelationFocus();
+  if (!_relationResizeBound) {
+    _relationResizeBound = true;
+    window.addEventListener('resize', _fitRelationText, { passive: true });
+  }
+  const tooltip = screen.querySelector('.pp-rel-tooltip');
+  const showTooltip = element => {
+    const node = _relationRuntimeGraph?.nodeById.get(element?.dataset.id);
+    if (!node || !tooltip) return;
+    const nodeRect = element.getBoundingClientRect(), stageRect = screen.querySelector('.pp-relations-stage').getBoundingClientRect();
+    tooltip.innerHTML = `<b>${_esc(node.label)}</b><small>${_esc(node.sub)}</small><span>${node.adv} aventures · ${node.deg} partenaires</span>`;
+    tooltip.style.left = `${nodeRect.left - stageRect.left + nodeRect.width / 2}px`;
+    tooltip.style.top = `${nodeRect.top - stageRect.top}px`;
+    tooltip.classList.add('is-visible');
+  };
+  screen.addEventListener('pointerover', event => {
+    const node = event.target.closest('.pp-rel-node');
+    if (!node || node.contains(event.relatedTarget)) return;
+    _applyRelationFocus(node.dataset.id);
+    showTooltip(node);
+  });
+  screen.addEventListener('pointerout', event => {
+    const node = event.target.closest('.pp-rel-node');
+    if (!node || node.contains(event.relatedTarget)) return;
+    _applyRelationFocus();
+    tooltip?.classList.remove('is-visible');
+  });
+  screen.addEventListener('focusin', event => {
+    const node = event.target.closest('.pp-rel-node');
+    if (!node) return;
+    _applyRelationFocus(node.dataset.id);
+    showTooltip(node);
+  });
+  screen.addEventListener('focusout', event => {
+    const node = event.target.closest('.pp-rel-node');
+    if (!node || node.contains(event.relatedTarget)) return;
+    _applyRelationFocus();
+    tooltip?.classList.remove('is-visible');
+  });
+  stage?.addEventListener('wheel', event => {
+    const svg = screen.querySelector('#pp-rel-net');
+    if (!svg) return;
+    event.preventDefault();
+    const point = _relationPointFromClient(svg, event.clientX, event.clientY);
+    _zoomRelation(Math.exp(Math.max(-240, Math.min(240, event.deltaY)) * .0018), point);
+  }, { passive: false });
+
+  let drag = null;
+  stage?.addEventListener('pointerdown', event => {
+    const svg = screen.querySelector('#pp-rel-net');
+    if (!svg || event.button !== 0 || event.target.closest('button,.pp-rel-node')) return;
+    const point = _relationPointFromClient(svg, event.clientX, event.clientY);
+    drag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, scale: point.scale, viewport: { ..._relationViewport() } };
+    _relationPanSuppressUntil = 0;
+    stage.setPointerCapture?.(event.pointerId);
+    stage.classList.add('is-panning');
+  });
+  stage?.addEventListener('pointermove', event => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const dx = event.clientX - drag.startX, dy = event.clientY - drag.startY;
+    if (Math.hypot(dx, dy) > 3) _relationPanSuppressUntil = Date.now() + 300;
+    _relationViewports.set(STORE.relMode, _clampRelationViewport({
+      ...drag.viewport,
+      x: drag.viewport.x - dx / drag.scale,
+      y: drag.viewport.y - dy / drag.scale,
+    }));
+    _applyRelationViewport();
+  });
+  const stopPan = event => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    stage.releasePointerCapture?.(event.pointerId);
+    stage.classList.remove('is-panning');
+    drag = null;
+  };
+  stage?.addEventListener('pointerup', stopPan);
+  stage?.addEventListener('pointercancel', stopPan);
+}
+
+function _refreshRelationView({ syncRoute = true } = {}) {
+  const area = document.getElementById('pp-view-area');
+  if (!area) return;
+  area.innerHTML = _renderRelationsScreen(_applyFilters(STORE.items));
+  if (syncRoute) _syncPlayersRoute();
+  _bindRelationView();
+}
+
+function _refreshRelationGraph({ syncRoute = true } = {}) {
+  const graph = _relationRuntimeGraph;
+  const svg = document.getElementById('pp-rel-net');
+  const side = document.querySelector('.pp-relations-side');
+  if (!graph || !svg || !side) return;
+  svg.outerHTML = _relationSvg(graph);
+  side.innerHTML = _renderRelationSide(graph);
+  if (syncRoute) _syncPlayersRoute();
+  _fitRelationText();
+  _applyRelationFocus();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // PAGE PRINCIPALE — entrée + dispatch sommaire/fiche
 // ══════════════════════════════════════════════════════════════════════════════
 export async function renderPlayersPage() {
   const content = document.getElementById('main-content');
   if (!content) return;
+  _bindRosterKeyboard();
 
   // Story (chronique) + quests (groupes) servent aux partenaires d'aventure.
   const [presentations, characters, achievements, story, quests] = await Promise.all([
@@ -1438,10 +2097,27 @@ export async function renderPlayersPage() {
   STORE.quests        = quests;
   STORE.items         = _buildDataset(presentations, characters);
 
+  // Une nouvelle ouverture de #players commence toujours par la galerie. Seule
+  // une sous-route explicite restaure le registre ou le réseau de liens.
+  STORE.viewMode = 'gallery';
+  STORE.detailSection = 'presentation';
+  STORE.mobileDetail = false;
+  _restorePlayersRoute();
+
+  if (!STORE.items.some(item => item.id === STORE.activeId)) {
+    STORE.activeId = STORE.items.find(item => item.ownerUid === STATE.user?.uid && item.char?.isDefault)?.id
+      || STORE.items.find(item => item.ownerUid === STATE.user?.uid)?.id
+      || STORE.items[0]?.id
+      || '';
+  }
+  // Une URL de page nue (#players) devient immédiatement l'état affiché exact.
+  // Ainsi, le premier Retour après plusieurs onglets retrouve aussi cette vue.
+  _syncPlayersRoute({ replace: true });
+
   if (!STORE.items.length) {
     content.innerHTML = `
-      <div class="pp-page">
-        ${_renderHero([], [])}
+      <div class="pp-page pp-roster-page">
+        ${_renderRosterTop([])}
         <div class="pp-page-body">
           ${STATE.isAdmin
             ? `<div class="pp-empty">
@@ -1457,50 +2133,291 @@ export async function renderPlayersPage() {
     return;
   }
 
-  _renderView(content);
+  _renderView(content, { restoreSection: STORE.viewMode === 'register' && STORE.detailSection !== 'presentation' });
   _initSortable();
 }
 
-function _renderView(content) {
-  const activeItem = STORE.activeId ? STORE.items.find(i => i.id === STORE.activeId) : null;
-  const filtered = _applyFilters(STORE.items);
-  content.innerHTML = `
-    <div class="pp-page">
-      ${_renderHero(STORE.items, filtered, activeItem)}
-      <div id="pp-view-area" class="pp-page-body">
-        ${activeItem ? _renderFiche(activeItem, STORE.items) : _renderSommaire(STORE.items)}
-      </div>
-    </div>`;
-  if (activeItem) requestAnimationFrame(() => {
-    _bindHexagonTooltips();
-    document.querySelector('.pp-strip-item.is-active')
-      ?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+let _detailSectionObserver = null;
+
+function _setActiveDetailSection(section) {
+  if (!_PLAYER_DETAIL_TABS.has(section)) return;
+  STORE.detailSection = section;
+  document.querySelectorAll('.pp-detail-tabs [data-section]').forEach(button => {
+    const active = button.dataset.section === section;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-current', active ? 'true' : 'false');
   });
-  if (!activeItem && STORE.viewMode === 'relations') {
-    requestAnimationFrame(() => _bindRelationsDrag());
+}
+
+function _detailSectionTop(detail, sectionEl) {
+  const navHeight = detail.querySelector('.pp-detail-tabs')?.offsetHeight || 0;
+  return sectionEl.getBoundingClientRect().top - detail.getBoundingClientRect().top + detail.scrollTop - navHeight - 6;
+}
+
+function _scrollDetailSection(section, { smooth = true } = {}) {
+  const detail = document.querySelector('.pp-register-detail');
+  const sectionEl = detail?.querySelector(`[data-detail-section="${section}"]`);
+  if (!detail || !sectionEl) return;
+  _setActiveDetailSection(section);
+  detail.scrollTo({ top: _detailSectionTop(detail, sectionEl), behavior: smooth ? 'smooth' : 'auto' });
+}
+
+function _bindDetailSectionSpy() {
+  _detailSectionObserver?.disconnect();
+  _detailSectionObserver = null;
+  const detail = document.querySelector('.pp-register-detail');
+  const sections = [...(detail?.querySelectorAll('[data-detail-section]') || [])];
+  if (!detail || !sections.length || !('IntersectionObserver' in window)) return;
+  _detailSectionObserver = new IntersectionObserver(entries => {
+    const visible = entries.filter(entry => entry.isIntersecting)
+      .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+    const section = visible[0]?.target?.dataset?.detailSection;
+    if (section) _setActiveDetailSection(section);
+  }, { root: detail, rootMargin: '-90px 0px -55% 0px', threshold: [0, .01] });
+  sections.forEach(section => _detailSectionObserver.observe(section));
+}
+
+function _renderView(content, { restoreSection = false } = {}) {
+  const filtered = _applyFilters(STORE.items);
+  if (filtered.length && !filtered.some(item => item.id === STORE.activeId)) STORE.activeId = filtered[0].id;
+  const activeItem = filtered.find(item => item.id === STORE.activeId) || null;
+  const body = STORE.viewMode === 'register'
+    ? `<div class="pp-register-layout ${STORE.mobileDetail ? 'is-mobile-detail' : ''}">${_renderRegisterList(filtered)}${_renderRegisterDetail(activeItem, filtered)}</div>`
+    : STORE.viewMode === 'relations'
+      ? _renderRelationsScreen(filtered)
+      : _renderGalleryScreen(filtered);
+  content.innerHTML = `
+    <div class="pp-page pp-roster-page">
+      ${_renderRosterTop(STORE.items)}
+      <div id="pp-view-area" class="pp-roster-body">${body}</div>
+    </div>`;
+  _saveViewState();
+  _bindDetailSectionSpy();
+  if (STORE.viewMode === 'relations') _bindRelationView();
+  if (restoreSection && STORE.viewMode === 'register') {
+    requestAnimationFrame(() => _scrollDetailSection(STORE.detailSection, { smooth: false }));
   }
 }
 
-function _refreshView() {
+function _refreshView(options = {}) {
   const content = document.getElementById('main-content');
   if (!content) return;
-  _renderView(content);
+  _renderView(content, options);
   _initSortable();
+}
+
+function _visibleRegisterItems() {
+  const items = _applyFilters(STORE.items);
+  if (STORE.filterSearch.trim()) return _playerGroups(items).flatMap(group => group.items);
+  return _playerGroups(items).flatMap(group => STORE.collapsedGroups[group.key] ? [] : group.items);
+}
+
+function _stepRoster(direction) {
+  const items = STORE.viewMode === 'register' ? _visibleRegisterItems() : _applyFilters(STORE.items);
+  if (!items.length || !direction) return;
+  const current = items.findIndex(item => item.id === STORE.activeId);
+  const next = items[Math.max(0, Math.min(items.length - 1, (current < 0 ? 0 : current) + direction))];
+  if (!next) return;
+  STORE.activeId = next.id;
+  if (STORE.viewMode === 'register' && window.innerWidth < 860) STORE.mobileDetail = true;
+  _syncPlayersRoute({ replace: true });
+  _refreshView({ restoreSection: STORE.viewMode === 'register' });
+  requestAnimationFrame(() => document.querySelector('.pp-register-row.is-selected')?.scrollIntoView({ block: 'nearest' }));
+}
+
+let _rosterKeyboardBound = false;
+function _bindRosterKeyboard() {
+  if (_rosterKeyboardBound) return;
+  _rosterKeyboardBound = true;
+  document.addEventListener('keydown', event => {
+    if (!document.querySelector('.pp-roster-page')) return;
+    // La visionneuse de galerie possède sa propre navigation. Tant qu'elle est
+    // ouverte, aucune flèche ne doit changer le personnage situé en arrière-plan.
+    if (document.getElementById('pp-lightbox')) return;
+    // Dans une présentation en diaporama, ←/→ appartiennent aux diapos. Les
+    // touches ↑/↓ et j/k restent disponibles pour changer de personnage.
+    if (document.querySelector('[data-free-page-reader][data-free-page-keyboard] [data-fpe-reader-nav]')
+      && ['ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(event.key)) return;
+    const active = document.activeElement;
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(active?.tagName) || active?.isContentEditable;
+    const search = document.querySelector('.pp-roster-search input, .pp-relations-search input');
+    if (event.key === 'Escape' && active === search) {
+      event.preventDefault();
+      if (STORE.viewMode === 'relations') {
+        STORE.relQuery = '';
+        STORE.relSelectedId = '';
+        STORE.relTableId = null;
+        STORE.relShowNever = false;
+        active.value = '';
+        _refreshRelationGraph();
+        return;
+      }
+      STORE.filterSearch = '';
+      _refreshView();
+      return;
+    }
+    if (event.key === '/' && !typing) {
+      event.preventDefault();
+      search?.focus();
+      return;
+    }
+    if (typing) {
+      if (active?.matches?.('[data-pp-action="relationSearch"]') && event.key === 'Enter') {
+        const query = _norm(STORE.relQuery);
+        const first = _relationRuntimeGraph?.nodes.find(node => _norm(`${node.label} ${node.sub}`).includes(query));
+        if (first) {
+          event.preventDefault();
+          STORE.relSelectedId = first.id;
+          STORE.relTableId = null;
+          STORE.relQuery = '';
+          active.value = '';
+          _refreshRelationGraph();
+        }
+        return;
+      }
+      if (active === search && event.key === 'Enter' && STORE.viewMode === 'gallery') {
+        const first = _applyFilters(STORE.items)[0];
+        if (first) {
+          event.preventDefault();
+          STORE.activeId = first.id;
+          STORE.viewMode = 'register';
+          STORE.detailSection = 'presentation';
+          STORE.mobileDetail = window.innerWidth < 860;
+          _syncPlayersRoute();
+          _refreshView();
+        }
+        return;
+      }
+      if (active === search && ['ArrowDown', 'ArrowUp'].includes(event.key)) {
+        event.preventDefault();
+        _stepRoster(event.key === 'ArrowDown' ? 1 : -1);
+        requestAnimationFrame(() => document.querySelector('.pp-roster-search input')?.focus());
+      }
+      return;
+    }
+    if (STORE.viewMode === 'relations' && event.key === 'Escape') {
+      event.preventDefault();
+      STORE.relSelectedId = '';
+      STORE.relTableId = null;
+      STORE.relShowNever = false;
+      _refreshRelationGraph();
+      return;
+    }
+    if (STORE.viewMode === 'relations' && event.key === 'Enter' && active?.classList?.contains('pp-rel-node')) {
+      event.preventDefault();
+      STORE.relSelectedId = active.dataset.id;
+      STORE.relTableId = null;
+      STORE.relShowNever = false;
+      _refreshRelationGraph();
+      return;
+    }
+    if (event.key === 'Escape' && STORE.viewMode === 'register') {
+      event.preventDefault();
+      STORE.viewMode = 'gallery';
+      STORE.mobileDetail = false;
+      _syncPlayersRoute();
+      _refreshView();
+      return;
+    }
+    if (STORE.viewMode === 'register' && ['ArrowDown', 'j'].includes(event.key)) {
+      event.preventDefault(); _stepRoster(1); return;
+    }
+    if (STORE.viewMode === 'register' && ['ArrowUp', 'k'].includes(event.key)) {
+      event.preventDefault(); _stepRoster(-1); return;
+    }
+    if (STORE.viewMode === 'register' && /^[1-4]$/.test(event.key)) {
+      const section = ['presentation', 'gallery', 'chronicle', 'companions'][Number(event.key) - 1];
+      event.preventDefault();
+      _scrollDetailSection(section);
+    }
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // HANDLERS — délégation data-pp-action
 // ══════════════════════════════════════════════════════════════════════════════
+function _selectRosterItem(id, { keepSection = false, section = 'presentation' } = {}) {
+  if (!id) return;
+  STORE.activeId = id;
+  STORE.viewMode = 'register';
+  STORE.detailSection = keepSection ? STORE.detailSection : section;
+  STORE.mobileDetail = window.innerWidth < 860;
+  _syncPlayersRoute();
+  _refreshView({ restoreSection: keepSection || section !== 'presentation' });
+  requestAnimationFrame(() => document.querySelector('.pp-register-row.is-selected')?.scrollIntoView({ block: 'nearest' }));
+}
+
 Object.assign(ppHandlers, {
-  updateVisiblePill: (el) => _ppUpdateVisiblePill(el.checked),
-  refreshVisCount:   ()   => _ppRefreshVisCount(),
-  openFiche:     (el) => { STORE.activeId = el.dataset.id; _refreshView(); window.scrollTo(0, 0); },
-  back:          ()   => { STORE.activeId = ''; _refreshView(); },
+  openFiche:     (el) => _selectRosterItem(el.dataset.id),
+  selectItem:    (el) => _selectRosterItem(el.dataset.id, { keepSection: Boolean(el.closest('.pp-register-rail')) }),
+  selectSibling: (el) => _selectRosterItem(el.dataset.id),
+  openRegister:  (el) => _selectRosterItem(el.dataset.id),
+  relationMode: (el) => {
+    const mode = el.dataset.mode === 'players' ? 'players' : 'characters';
+    if (mode === STORE.relMode) return;
+    STORE.relMode = mode;
+    STORE.relSelectedId = '';
+    STORE.relTableId = null;
+    STORE.relQuery = '';
+    STORE.relShowNever = false;
+    _refreshRelationView();
+  },
+  relationSelect: (el) => {
+    const id = el.dataset.id || '';
+    STORE.relSelectedId = STORE.relSelectedId === id ? '' : id;
+    STORE.relTableId = null;
+    STORE.relShowNever = false;
+    _refreshRelationGraph();
+  },
+  relationClear: () => {
+    if (Date.now() < _relationPanSuppressUntil) return;
+    if (!STORE.relSelectedId && STORE.relTableId === null) return;
+    STORE.relSelectedId = '';
+    STORE.relTableId = null;
+    STORE.relShowNever = false;
+    _refreshRelationGraph();
+  },
+  relationZoom: (el) => _zoomRelation(Number(el.dataset.factor) || 1),
+  relationResetView: () => {
+    _relationViewports.set(STORE.relMode, { x: 0, y: 0, width: 1000, height: 680 });
+    _applyRelationViewport();
+  },
+  relationTable: (el) => {
+    const id = Number(el.dataset.table);
+    STORE.relSelectedId = '';
+    STORE.relTableId = STORE.relTableId === id ? null : id;
+    STORE.relShowNever = false;
+    _refreshRelationGraph();
+  },
+  relationNever: () => {
+    STORE.relShowNever = !STORE.relShowNever;
+    const side = document.querySelector('.pp-relations-side');
+    if (side && _relationRuntimeGraph) side.innerHTML = _renderRelationSide(_relationRuntimeGraph);
+  },
+  relationOpen: () => {
+    const node = _relationRuntimeGraph?.nodeById.get(STORE.relSelectedId);
+    if (node?.item) _selectRosterItem(node.item.id, { section: 'companions' });
+  },
+  relationSearch: (el) => {
+    STORE.relQuery = el.value;
+    STORE.relSelectedId = '';
+    STORE.relTableId = null;
+    STORE.relShowNever = false;
+    _refreshRelationGraph({ syncRoute: false });
+    _syncPlayersRoute({ replace: true });
+  },
+  relationMin: (el) => {
+    STORE.relMin = Math.max(1, Math.min(4, Number(el.value) || 1));
+    const output = el.nextElementSibling;
+    if (output) output.textContent = `${STORE.relMin} aventure${STORE.relMin > 1 ? 's' : ''}`;
+    _refreshRelationGraph({ syncRoute: false });
+  },
+  mobileBack:    () => { STORE.mobileDetail = false; _refreshView(); },
+  back:          ()   => { STORE.mobileDetail = false; _refreshView(); },
   search:        (el) => {
     STORE.filterSearch = el.value;
-    STORE.activeId = '';
     const caret = el.selectionStart;
-    _refreshView();
+    _refreshView({ restoreSection: STORE.viewMode === 'register' });
     // Restaure le focus + la position du curseur après re-render
     requestAnimationFrame(() => {
       const next = document.querySelector('[data-pp-action="search"]');
@@ -1511,15 +2428,45 @@ Object.assign(ppHandlers, {
     });
   },
   clearSearch:   ()   => { STORE.filterSearch = ''; _refreshView(); },
-  setJoueur:     (el) => { STORE.filterJoueur = el.value; STORE.activeId = ''; _refreshView(); },
-  setSort:       (el) => { STORE.sortBy = el.value; STORE.activeId = ''; _refreshView(); },
-  setViewMode:   (el) => { STORE.viewMode = el.dataset.mode || 'gallery'; STORE.activeId = ''; _refreshView(); },
+  setSort:       (el) => { STORE.sortBy = el.value; _refreshView(); },
+  setViewMode:   (el) => {
+    STORE.viewMode = el.dataset.mode || 'gallery';
+    if (STORE.viewMode === 'register') STORE.detailSection = 'presentation';
+    if (STORE.viewMode === 'gallery' && !STORE.grouped) STORE.sortBy = 'ordre';
+    STORE.mobileDetail = false;
+    _syncPlayersRoute();
+    _refreshView();
+  },
+  toggleGrouped: (el) => {
+    STORE.grouped = Boolean(el.checked);
+    if (!STORE.grouped) STORE.sortBy = STORE.viewMode === 'gallery' ? 'ordre' : 'nom';
+    _refreshView();
+  },
+  togglePlayerGroup: (el) => {
+    const key = el.dataset.group;
+    if (!key) return;
+    STORE.collapsedGroups[key] = !STORE.collapsedGroups[key];
+    _saveViewState();
+    _refreshView({ restoreSection: true });
+  },
+  jumpDetailSection: (el) => _scrollDetailSection(el.dataset.section),
+  fullscreenPresentation: (el) => {
+    const reader = el.closest('.pp-detail-bio')?.querySelector('[data-free-page-reader]');
+    if (!reader) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+      return;
+    }
+    reader.requestFullscreen?.().catch(() => showNotif('Plein écran indisponible.', 'info'));
+  },
+  stepItem:      (el) => _stepRoster(Number(el.dataset.step) || 0),
+  openCharacter: (el) => openCharacterSheetFromShowcase(el.dataset.charId),
   toggleChronique: (el) => {
     const charId = el.dataset.charId;
     if (!charId) return;
     const y = window.scrollY || 0;
     STORE.chroniqueExpanded[charId] = !STORE.chroniqueExpanded[charId];
-    _refreshView();
+    _refreshView({ restoreSection: true });
     requestAnimationFrame(() => window.scrollTo({ top: y, left: 0, behavior: 'auto' }));
   },
   togglePartenaires: (el) => {
@@ -1527,7 +2474,7 @@ Object.assign(ppHandlers, {
     if (!charId) return;
     const y = window.scrollY || 0;
     STORE.partenairesExpanded[charId] = !STORE.partenairesExpanded[charId];
-    _refreshView();
+    _refreshView({ restoreSection: true });
     requestAnimationFrame(() => window.scrollTo({ top: y, left: 0, behavior: 'auto' }));
   },
   openChroniqueMission: async (el) => {
@@ -1542,23 +2489,8 @@ Object.assign(ppHandlers, {
       showNotif('Impossible d’ouvrir cette mission dans la Trame.', 'error');
     }
   },
-  relTogglePicker: () => { STORE.relPickerOpen = !STORE.relPickerOpen; _refreshView(); },
-  relToggleChar: (el) => {
-    const id = el.dataset.charId; if (!id) return;
-    const all = STORE.items.filter(i => i.charId).map(i => i.charId);
-    // Initialise la sélection si elle est encore "tous"
-    if (!STORE.relSelected) STORE.relSelected = new Set(all);
-    if (el.checked) STORE.relSelected.add(id);
-    else            STORE.relSelected.delete(id);
-    // Si on a tout coché → revient à "tous" (état neutre)
-    if (STORE.relSelected.size === all.length) STORE.relSelected = null;
-    _refreshView();
-  },
-  relSelectAll:  () => { STORE.relSelected = null; _refreshView(); },
-  relSelectNone: () => { STORE.relSelected = new Set(); _refreshView(); },
-  relResetPositions: () => { STORE.relPositions = {}; _refreshView(); },
   resetFilters:  ()   => {
-    STORE.filterSearch = ''; STORE.filterJoueur = '';
+    STORE.filterSearch = '';
     _refreshView();
   },
   toggleVisible: (el) => _toggleVisible(el.dataset.id),
@@ -1597,30 +2529,61 @@ async function _toggleVisible(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 let _ppSortable = null;
 let _ppGallerySortable = null;
+async function _persistRosterOrder(container) {
+  const movedIds = [...container.querySelectorAll('[data-pp-id]')].map(el => el.dataset.ppId).filter(Boolean);
+  if (!movedIds.length) return;
+
+  // Quand la galerie est filtrée, seules les positions occupées par le
+  // sous-ensemble visible sont remplacées. Les personnages masqués par le
+  // filtre gardent ainsi leur place relative.
+  const localOrder = _getLocalOrdre() || [];
+  const rank = item => {
+    const stored = Number(item.ordre);
+    if (Number.isFinite(stored) && stored !== 999) return stored;
+    const localIndex = localOrder.indexOf(item.id);
+    return localIndex >= 0 ? localIndex + 1 : Number.MAX_SAFE_INTEGER;
+  };
+  const ordered = [...STORE.items].sort((a, b) => rank(a) - rank(b)
+    || a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }));
+  const movedSet = new Set(movedIds);
+  const slots = ordered.map((item, index) => movedSet.has(item.id) ? index : -1).filter(index => index >= 0);
+  const byId = new Map(STORE.items.map(item => [item.id, item]));
+  slots.forEach((slot, index) => { ordered[slot] = byId.get(movedIds[index]); });
+
+  const writes = [];
+  ordered.forEach((item, index) => {
+    if (!item) return;
+    const ordre = index + 1;
+    if (Number(item.ordre) !== ordre && item.presentationId) {
+      writes.push(updateInCol('players', item.presentationId, { ordre }));
+    }
+    item.ordre = ordre;
+  });
+  _setLocalOrdre(ordered.filter(Boolean).map(item => item.id));
+  await Promise.all(writes);
+}
+
 function _initSortable() {
-  if (!STATE.isAdmin) return;
-  const list = document.getElementById('pp-gallery');
-  if (!list) return;
   _ppSortable?.destroy();
+  _ppSortable = null;
+  if (!STATE.isAdmin || STORE.viewMode !== 'gallery' || STORE.grouped || STORE.sortBy !== 'ordre') return;
+  const list = document.getElementById('pp-gallery-grid');
+  if (!list) return;
   _ppSortable = makeSortable(list, {
     prefix: 'pp',
-    handle: '.pp-card-drag',
-    delay: 100,
+    draggable: '.pp-gallery-card',
+    handle: '.pp-gallery-drag',
+    filter: 'a, input, select, textarea, .btn, .btn-icon',
+    delay: 80,
+    swapThreshold: .62,
+    fallbackTolerance: 4,
     onEnd: async () => {
-      const ids = [...list.querySelectorAll('[data-pp-id]')].map(el => el.dataset.ppId);
-      // Diff avant mutation : n'écrire que les fiches dont l'ordre change.
-      const writes = [];
-      ids.forEach((id, idx) => {
-        const item = STORE.items.find(i => i.id === id);
-        if (!item) return;
-        const ordre = idx + 1;
-        if (Number(item.ordre) !== ordre && item.presentationId) {
-          writes.push(updateInCol('players', item.presentationId, { ordre }));
-        }
-        item.ordre = ordre;
-      });
-      _setLocalOrdre(ids);
-      await Promise.all(writes);
+      try {
+        await _persistRosterOrder(list);
+      } catch (error) {
+        console.warn('[players] réorganisation impossible', error);
+        showNotif('Impossible d’enregistrer ce nouvel ordre.', 'error');
+      }
     },
   });
 }
@@ -1628,417 +2591,505 @@ function _initSortable() {
 // ══════════════════════════════════════════════════════════════════════════════
 // MODAL ADMIN — création / édition (upload + crop illustration)
 // ══════════════════════════════════════════════════════════════════════════════
+const _PP_VIS_GROUPS = [
+  {
+    label: 'Fiche publique',
+    items: [
+      { id:'pp-show-lvl', label:'Niveau', key:'afficherNiveau', def:true },
+      { id:'pp-show-tags', label:'Traits', key:'afficherTags', def:true },
+      { id:'pp-show-citation', label:'Citation', key:'afficherCitation', def:true },
+      { id:'pp-show-bio', label:'Présentation', key:'afficherBio', def:true },
+      { id:'pp-show-identite', label:'Identité', key:'afficherIdentite', def:true },
+      { id:'pp-show-stats', label:'Caractéristiques', key:'afficherStats', def:true },
+      { id:'pp-show-equip', label:'Équipement', key:'afficherEquip', def:true },
+    ],
+  },
+  {
+    label: 'Vitaux', note: 'Visibles par le MJ uniquement',
+    items: [
+      { id:'pp-show-pv', label:'PV', key:'afficherPV', def:true },
+      { id:'pp-show-pm', label:'PM', key:'afficherPM', def:true },
+      { id:'pp-show-ca', label:'CA', key:'afficherCA', def:true },
+      { id:'pp-show-or', label:'Or', key:'afficherOr', def:false },
+    ],
+  },
+];
+const _PP_VIS_ENTRIES = _PP_VIS_GROUPS.flatMap(group => group.items);
+
+function _ppModalChar() {
+  const id = document.getElementById('pp-char-id')?.value || _ppEditingPlayer?.charId || '';
+  return STORE.characters.find(char => char.id === id) || null;
+}
+
+function _ppModalFlag(key) {
+  const entry = _PP_VIS_ENTRIES.find(item => item.key === key);
+  return document.getElementById(entry?.id)?.checked ?? entry?.def ?? true;
+}
+
+function _ppModalCropParams() {
+  return _ppCardCropper?.getCropParams?.() || _ppCardCropParams || null;
+}
+
+function _ppModalPreviewItem(char) {
+  return {
+    nom: char?.nom || _ppEditingPlayer?.nom || 'Nouvelle présentation',
+    initials: _initials(char?.nom || _ppEditingPlayer?.nom || '?'),
+    imageUrl: _ppModalImageUrl,
+    portraitUrl: _ppModalImageUrl,
+    cardCrop: _ppModalCropParams(),
+  };
+}
+
+function _ppModalWordCount() {
+  const text = document.querySelector('#pp-content .ql-editor')?.textContent?.trim() || '';
+  const words = text ? text.split(/\s+/).length : 0;
+  const target = document.getElementById('pp-mn-word-count');
+  if (target) target.textContent = `${words} mot${words > 1 ? 's' : ''}`;
+}
+
+function _ppMarkModalDirty() {
+  if (_ppModalDirty) return;
+  _ppModalDirty = true;
+  _ppRenderModalFooter();
+}
+
+function _ppRenderModalFooter() {
+  const footer = document.getElementById('pp-mn-footer');
+  if (!footer) return;
+  if (_ppModalConfirm === 'delete') {
+    footer.innerHTML = `<div class="pp-mn-confirm">Supprimer la présentation ? <button type="button" class="is-danger" data-pp-action="confirmPresentationDelete" data-id="${_esc(_ppEditingPlayer?.id || '')}">Supprimer</button><button type="button" data-pp-action="cancelPresentationConfirm">Annuler</button></div>`;
+    return;
+  }
+  if (_ppModalConfirm === 'close') {
+    footer.innerHTML = `<div class="pp-mn-confirm">Fermer sans enregistrer ? <button type="button" class="is-danger" data-pp-action="discardPresentationChanges">Fermer</button><button type="button" data-pp-action="cancelPresentationConfirm">Continuer les modifications</button></div>`;
+    return;
+  }
+  footer.innerHTML = `${_ppEditingPlayer?.id ? `<button type="button" class="pp-mn-foot-btn is-delete" data-pp-action="askPresentationDelete">${_ppIcon('trash')} Supprimer</button>` : '<span></span>'}<span class="pp-mn-foot-space"></span><span class="pp-mn-dirty ${_ppModalDirty ? 'is-dirty' : ''}">${_ppModalDirty ? 'Modifications non enregistrées' : 'Tout est enregistré'}</span><button type="button" class="pp-mn-foot-btn" data-pp-action="cancelPresentation">Annuler</button><button type="button" class="pp-mn-foot-btn is-primary" data-pp-action="save" data-id="${_esc(_ppEditingPlayer?.id || '')}">Enregistrer <kbd>Ctrl S</kbd></button>`;
+}
+
+function _ppUpdateModalHeader() {
+  const char = _ppModalChar();
+  const name = char?.nom || _ppEditingPlayer?.nom || 'Nouvelle présentation';
+  const player = char?.ownerPseudo || _ppEditingPlayer?.joueur || 'Sans joueur';
+  const title = document.getElementById('pp-mn-title');
+  const overline = document.getElementById('pp-mn-overline');
+  if (title) title.textContent = name;
+  if (overline) overline.textContent = `Présentation · ${player}`;
+  const sheet = document.getElementById('pp-mn-open-sheet');
+  if (sheet) sheet.disabled = !char?.id;
+}
+
+function _ppRenderModalPreview() {
+  const root = document.getElementById('pp-mn-preview-body');
+  if (!root) return;
+  const char = _ppModalChar();
+  const item = _ppModalPreviewItem(char);
+  const level = Number(char?.niveau) || 1;
+  const tags = Array.isArray(char?.tags) ? char.tags : [];
+  const identity = _identityRows({ identity: Array.isArray(char?.identity) ? char.identity : [] });
+  const previewStatOrder = ['force', 'dexterite', 'constitution', 'intelligence', 'sagesse', 'charisme'];
+  const stats = char ? previewStatOrder.map(key => {
+    const meta = STAT_META.find(entry => entry.key === key);
+    return { label: statShort(key).toUpperCase(), value: _getStat(char, key), color: meta?.color || '#7eb0ff' };
+  }) : [];
+  const equipment = char ? getEquipmentSlots().map(slot => {
+    const equipped = char.equipement?.[slot.id];
+    return equipped?.nom ? { slot: slot.label, name: equipped.nom } : null;
+  }).filter(Boolean) : [];
+  const plain = _plainExcerpt(getQuillHtml('pp-content') || _ppEditingPlayer?.content || '', 170);
+  const card = `<div class="pp-mn-pv-card ${_ppModalVisible ? '' : 'is-hidden'}"><div class="pp-mn-pv-image">${_portrait(item, 'pp-gallery-portrait')}${_ppModalFlag('afficherNiveau') ? `<em data-v="afficherNiveau">Niv. ${level}</em>` : ''}${_ppModalVisible ? '' : `<span>${_ppIcon('lock')} Masqué</span>`}</div><div class="pp-mn-pv-copy"><b>${_esc(item.nom)}</b><small>${_esc([char?.classe, char?.race].filter(Boolean).join(' · '))}</small><i>${_esc(char?.ownerPseudo || 'Sans joueur')}</i></div></div>`;
+  const vitals = [
+    _ppModalFlag('afficherPV') ? `<span data-v="afficherPV"><i>PV</i><b>${char?.pvActuel ?? calcPVMax(char || {})}/${calcPVMax(char || {})}</b></span>` : '',
+    _ppModalFlag('afficherPM') ? `<span data-v="afficherPM"><i>PM</i><b>${char?.pmActuel ?? calcPMMax(char || {})}/${calcPMMax(char || {})}</b></span>` : '',
+    _ppModalFlag('afficherCA') ? `<span data-v="afficherCA"><i>CA</i><b>${calcCA(char || {})}</b></span>` : '',
+    _ppModalFlag('afficherOr') ? `<span data-v="afficherOr"><i>OR</i><b>${calcOr(char || {})}</b></span>` : '',
+  ].filter(Boolean);
+  const fiche = `<div class="pp-mn-pv-sheet"><header>${_portrait(item, 'pp-mn-pv-portrait')}<div><h4>${_esc(item.nom)}</h4><p>${_esc([char?.classe, char?.race].filter(Boolean).join(' · '))}${_ppModalFlag('afficherNiveau') ? ` · <b data-v="afficherNiveau">Niv. ${level}</b>` : ''}</p>${_ppModalFlag('afficherTags') && tags.length ? `<div class="pp-mn-pv-tags" data-v="afficherTags">${tags.map(tag => `<span>${_esc(tag)}</span>`).join('')}</div>` : ''}${_ppModalFlag('afficherCitation') && char?.quote ? `<q data-v="afficherCitation">«${_esc(char.quote)}»</q>` : ''}</div></header>${vitals.length ? `<div class="pp-mn-pv-vitals">${vitals.join('')}<small>${_ppIcon('lock')} MJ</small></div>` : ''}${_ppModalFlag('afficherBio') ? `<p class="pp-mn-pv-bio" data-v="afficherBio">${plain || '<i>Pas encore de présentation.</i>'}</p>` : ''}${_ppModalFlag('afficherIdentite') && identity.length ? `<dl data-v="afficherIdentite">${identity.map(row => `<dt>${_esc(row.key)}</dt><dd>${_esc(row.value)}</dd>`).join('')}</dl>` : ''}${_ppModalFlag('afficherStats') && stats.length ? `<div class="pp-mn-pv-stats" data-v="afficherStats">${stats.map(stat => `<span style="--pp-stat:${stat.color}"><i>${_esc(stat.label)}</i><b>${stat.value}</b><em>${modStr(getModFromScore(stat.value))}</em></span>`).join('')}</div>` : ''}${_ppModalFlag('afficherEquip') && equipment.length ? `<ul data-v="afficherEquip">${equipment.map(row => `<li><span>${_esc(row.slot)}</span><b>${_esc(row.name)}</b></li>`).join('')}</ul>` : ''}</div>`;
+  root.innerHTML = _ppModalPreview === 'card' ? card : fiche;
+  document.querySelectorAll('[data-pp-preview]').forEach(button => button.classList.toggle('is-active', button.dataset.ppPreview === _ppModalPreview));
+  const note = document.getElementById('pp-mn-preview-note');
+  if (note) note.textContent = _ppModalVisible ? 'Visible par tous les joueurs dans la Galerie.' : 'Masquée : seuls toi et le MJ la voyez.';
+}
+
 async function openPlayerPresentModal(player = null) {
   const characters = STORE.characters.length ? STORE.characters : await loadCollection('characters');
-  const curCharId = player?.charId || '';
-  const existingContent = player?.content || player?.bio || '';
-  _ppCardCropParams = null;
-  // Galerie en édition : on travaille sur un tableau ordonné où le portrait
-  // (imageUrl) est représenté par {portrait: true}. À la sauvegarde, on le
-  // stocke tel quel ; au render, on le résout via imageUrl.
-  const rawGal = Array.isArray(player?.gallery) ? player.gallery.slice() : null;
-  const hasImg = !!(player?.imageUrl);
-  if (rawGal) {
-    _ppGallery = rawGal.slice();
-    // Si une imageUrl existe mais aucun marqueur portrait → l'ajouter en tête
-    if (hasImg && !_ppGallery.some(g => g?.portrait)) {
-      _ppGallery.unshift({ portrait: true });
-    }
-    // Si pas d'imageUrl → purge des marqueurs portrait orphelins
-    if (!hasImg) _ppGallery = _ppGallery.filter(g => !g?.portrait);
-  } else {
-    _ppGallery = hasImg ? [{ portrait: true }] : [];
-  }
-  _ppEditingPlayer = player;
-
-  // ── Helpers pour le hero ──
-  const linkedChar = curCharId ? characters.find(c => c.id === curCharId) : null;
   const selectableCharacters = STATE.isAdmin ? characters : characters.filter(_canManageCharacter);
-  const heroNom    = player?.nom || linkedChar?.nom || (player ? 'Présentation' : 'Nouvelle présentation');
-  const heroClasse = linkedChar?.classe || '';
-  const heroRace   = linkedChar?.race   || '';
-  const heroJoueur = linkedChar?.ownerPseudo || '';
-  const heroNiveau = linkedChar?.niveau ?? null;
-  const isVisible  = player?.visible !== false;
-  const heroBg     = player?.imageUrl ? `background-image:url('${_esc(player.imageUrl).replace(/'/g, '%27')}')` : '';
+  const curCharId = player?.charId || '';
+  const rawGallery = Array.isArray(player?.gallery) ? player.gallery.map(photo => ({ ...photo })) : [];
+  _ppEditingPlayer = player;
+  _ppModalImageUrl = player?.imageUrl || '';
+  _ppCardCropParams = player?.cardCrop || null;
+  _ppModalVisible = player?.visible !== false;
+  _ppModalPreview = globalThis.matchMedia?.('(max-width: 900px)')?.matches ? 'card' : 'sheet';
+  _ppModalDirty = false;
+  _ppModalConfirm = '';
+  _ppGallery = rawGallery.filter(photo => _ppModalImageUrl || !photo?.portrait);
+  if (_ppModalImageUrl && !_ppGallery.some(photo => photo?.portrait)) _ppGallery.unshift({ portrait: true });
 
-  const visEntries = [
-    { id:'pp-show-pv',       label:'PV',           key:'afficherPV',       def:true,  ico:'❤' },
-    { id:'pp-show-pm',       label:'PM',           key:'afficherPM',       def:true,  ico:'✦' },
-    { id:'pp-show-ca',       label:'CA',           key:'afficherCA',       def:true,  ico:'🛡' },
-    { id:'pp-show-or',       label:'Or',           key:'afficherOr',       def:false, ico:'🪙' },
-    { id:'pp-show-stats',    label:'Statistiques', key:'afficherStats',    def:true,  ico:'📊' },
-    { id:'pp-show-lvl',      label:'Niveau',       key:'afficherNiveau',   def:true,  ico:'⭐' },
-    { id:'pp-show-equip',    label:'Équipement',   key:'afficherEquip',    def:true,  ico:'⚔' },
-    { id:'pp-show-identite', label:'Identité',     key:'afficherIdentite', def:true,  ico:'📜' },
-    { id:'pp-show-citation', label:'Citation',     key:'afficherCitation', def:true,  ico:'💬' },
-    { id:'pp-show-bio',      label:'Biographie',   key:'afficherBio',      def:true,  ico:'📖' },
-    { id:'pp-show-tags',     label:'Traits',       key:'afficherTags',     def:true,  ico:'🎭' },
-  ];
+  const linkedChar = characters.find(char => char.id === curCharId) || null;
+  const title = linkedChar?.nom || player?.nom || 'Nouvelle présentation';
+  const owner = linkedChar?.ownerPseudo || player?.joueur || 'Sans joueur';
+  const visibilityHtml = _PP_VIS_GROUPS.map(group => `<div class="pp-mn-vis-group">
+    <h4>${_esc(group.label)}${group.note ? `<small>${_ppIcon('lock')} ${_esc(group.note)}</small>` : ''}</h4>
+    <div class="pp-mn-vis-list">${group.items.map(item => {
+      const checked = player?.[item.key] !== undefined ? player[item.key] : item.def;
+      return `<button type="button" class="pp-mn-vis-pill ${checked ? 'is-on' : ''}" data-vis-key="${item.key}" data-vis-input="${item.id}" aria-pressed="${checked}">
+        <span class="pp-mn-vis-icons" aria-hidden="true">${_ppIcon('eye', 'pp-icon is-visible')}${_ppIcon('eyeOff', 'pp-icon is-hidden')}</span><span>${_esc(item.label)}</span>
+      </button><input class="pp-mn-vis-input" type="checkbox" id="${item.id}" ${checked ? 'checked' : ''} tabindex="-1" aria-hidden="true">`;
+    }).join('')}</div>
+  </div>`).join('');
 
-  openModal('', `
-  <div class="pp-mn-shell">
-
-    <!-- ════ HERO BANNER — preview image + drop zone overlay ═══════ -->
-    <div class="pp-mn-hero" id="pp-mn-hero">
-      <div class="pp-mn-hero-bg" id="pp-mn-hero-bg" style="${heroBg}"></div>
-      <div class="pp-mn-hero-fade"></div>
-
-      <!-- Drop zone overlay (cropper rattaché ci-dessous) -->
-      <div id="pp-img-drop" class="pp-mn-hero-drop" title="Cliquer ou déposer une image">
-        <div id="pp-img-preview"></div>
-        <div class="pp-mn-hero-drop-hint">
-          <span class="pp-mn-hero-drop-icon">🖼️</span>
-          <span>${player?.imageUrl ? "Changer l'illustration" : 'Glisser une image ou cliquer pour ouvrir'}</span>
-        </div>
+  openModal('', `<div class="pp-mn-shell">
+    <header class="pp-mn-header">
+      <div class="pp-mn-heading"><small id="pp-mn-overline">Présentation · ${_esc(owner)}</small><h2 id="pp-mn-title">${_esc(title)}</h2></div>
+      <div class="pp-mn-publish" aria-label="Publication">
+        <button type="button" class="${_ppModalVisible ? 'is-on' : ''}" data-pp-action="setPresentationVisibility" data-visible="true">${_ppIcon('eye')} Publiée</button>
+        <button type="button" class="${!_ppModalVisible ? 'is-on is-off' : ''}" data-pp-action="setPresentationVisibility" data-visible="false">${_ppIcon('eyeOff')} Masquée</button>
       </div>
+      <button type="button" class="pp-mn-close" data-pp-action="cancelPresentation" aria-label="Fermer">${_ppIcon('x')}</button>
+    </header>
 
-      <!-- Contenu hero -->
-      <div class="pp-mn-hero-content">
-        <div class="pp-mn-hero-eyebrow">
-          <span id="pp-mn-eyebrow">${heroClasse || heroRace ? _esc([heroClasse, heroRace].filter(Boolean).join(' · ')) : 'Présentation joueurs'}</span>
-          ${heroJoueur ? `<span class="pp-mn-hero-eyebrow-sep">·</span><span>${_esc(heroJoueur)}</span>` : ''}
-        </div>
-        <h2 class="pp-mn-hero-title" id="pp-mn-title">${_esc(heroNom)}</h2>
-        <div class="pp-mn-hero-meta">
-          ${heroNiveau !== null ? `<span class="pp-mn-meta-pill">⭐ Niv. <b>${heroNiveau}</b></span>` : ''}
-          <span class="pp-mn-meta-pill ${isVisible?'is-on':'is-off'}" id="pp-mn-vis-pill">
-            ${isVisible ? '👁 Visible' : '🚫 Masqué'}
-          </span>
-          ${player?.imageUrl ? `<button type="button" class="pp-mn-meta-pill pp-mn-pill-action"
-            id="pp-img-clear" title="Retirer l'illustration">✕ Retirer image</button>` : ''}
-        </div>
-      </div>
-
-      <!-- Cropper inline -->
-      <div id="pp-crop-wrap" class="pp-mn-crop-wrap" style="display:none">
-        <canvas id="pp-crop-canvas"></canvas>
-        <div class="pp-mn-crop-bar">
-          <span class="pp-mn-crop-hint">Recadre · ratio 3:4</span>
-          <button type="button" class="btn btn-gold btn-sm" id="pp-crop-confirm">✂️ Confirmer</button>
-          <div id="pp-crop-ok" style="display:none;font-size:.75rem"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ════ TABS ════════════════════════════════════════════════ -->
-    <div class="pp-mn-tabs" role="tablist" aria-label="Sections de la présentation">
-      <button type="button" id="pp-tab-presentation" class="pp-mn-tab is-active" data-pp-tab="presentation" role="tab" aria-selected="true" aria-controls="pp-panel-presentation">📝 Présentation</button>
-      <button type="button" id="pp-tab-visibilite" class="pp-mn-tab" data-pp-tab="visibilite" role="tab" aria-selected="false" aria-controls="pp-panel-visibilite">👁 Visibilité <span class="pp-mn-tab-count" id="pp-mn-vis-count">${visEntries.filter(f => (player?.[f.key] !== undefined ? player[f.key] : f.def)).length}</span></button>
-      <button type="button" id="pp-tab-galerie" class="pp-mn-tab" data-pp-tab="galerie" role="tab" aria-selected="false" aria-controls="pp-panel-galerie">🖼 Galerie <span class="pp-mn-tab-count" id="pp-mn-gal-count">${_ppGallery.length || ''}</span></button>
-    </div>
-
-    <!-- ════ TAB CONTENT ═════════════════════════════════════════ -->
-    <div class="pp-mn-body">
-
-      <!-- ── ONGLET PRÉSENTATION ────────────────────────────────── -->
-      <section id="pp-panel-presentation" class="pp-mn-panel is-active" data-pp-panel="presentation" role="tabpanel" aria-labelledby="pp-tab-presentation">
-        <div class="pp-mn-grid-2">
-          <div class="pp-mn-field">
-            <label class="pp-mn-label">Fiche liée <span class="pp-form-hint">(auto-remplit classe, race, joueur)</span></label>
-            <select class="pp-mn-input" id="pp-char-id" ${STATE.isAdmin ? '' : 'disabled'}>
-              <option value="">— Aucun lien —</option>
-              ${selectableCharacters.map(c => `<option value="${_esc(c.id)}" ${c.id===curCharId?'selected':''}>${_esc(c.nom||'?')}${c.classe?' — '+_esc(c.classe):''}${c.ownerPseudo?' ('+_esc(c.ownerPseudo)+')':''}</option>`).join('')}
-            </select>
+    <div class="pp-mn-layout">
+      <main class="pp-mn-editor">
+        <section class="pp-mn-block">
+          <div class="pp-mn-block-head"><h3>Personnage</h3></div>
+          <div class="pp-mn-link-row">
+            <label class="pp-mn-select">${_ppIcon('link')}<select id="pp-char-id" ${STATE.isAdmin ? '' : 'disabled'}>
+              <option value="">— Aucun personnage lié —</option>
+              ${selectableCharacters.map(char => `<option value="${_esc(char.id)}" ${char.id === curCharId ? 'selected' : ''}>${_esc(char.nom || '?')}${char.classe ? ` — ${_esc(char.classe)}` : ''}${char.ownerPseudo ? ` (${_esc(char.ownerPseudo)})` : ''}</option>`).join('')}
+            </select>${_ppIcon('chevronDown', 'pp-icon pp-mn-select-arrow')}</label>
+            <button type="button" id="pp-mn-open-sheet" class="pp-mn-mini-link" data-pp-action="openPresentationCharacter" ${linkedChar ? '' : 'disabled'}>${_ppIcon('external')} Fiche de jeu</button>
           </div>
-          <div class="pp-mn-field">
-            <label class="pp-mn-label">Ordre d'affichage</label>
-            <input type="number" class="pp-mn-input" id="pp-ordre" value="${player?.ordre??''}" placeholder="Auto" min="1">
-          </div>
-        </div>
+          <p class="pp-mn-hint pp-mn-link-hint">Classe, race, niveau, traits, citation et identité viennent de la fiche de jeu.</p>
+        </section>
 
-        <div class="pp-mn-field">
-          <label class="pp-mn-label">Présentation</label>
-          ${quillEditorHtml({ id: 'pp-content', html: existingContent, minHeight: 240, placeholder: 'Décris librement ce personnage…' })}
-        </div>
+        <section class="pp-mn-block">
+          <div class="pp-mn-block-head"><h3>Images <em id="pp-mn-image-count">${_ppGallery.length}/${PP_GALLERY_MAX}</em></h3><span class="pp-mn-hint">Glisse pour réordonner · ★ = portrait de la carte</span></div>
+          <div id="pp-gallery-list" class="pp-mn-images"></div>
+          <div id="pp-gallery-status" class="pp-mn-status" aria-live="polite"></div>
+          <div id="pp-card-crop-host"></div>
+        </section>
 
-        <label class="pp-mn-toggle-row">
-          <input type="checkbox" id="pp-visible" ${isVisible?'checked':''}
-            data-pp-action="updateVisiblePill" data-pp-on="change">
-          <span class="pp-mn-toggle-track"><span class="pp-mn-toggle-thumb"></span></span>
-          <span class="pp-mn-toggle-lbl">
-            <b>Visible dans le sommaire</b>
-            <small>Désactive pour masquer ce personnage aux joueurs.</small>
-          </span>
-        </label>
-      </section>
+        <section class="pp-mn-block">
+          <div class="pp-mn-block-head"><h3>Présentation</h3><span id="pp-mn-word-count" class="pp-mn-hint">0 mot</span></div>
+          ${quillEditorHtml({ id: 'pp-content', html: player?.content || player?.bio || '', minHeight: 210, placeholder: 'Décris librement ce personnage…' })}
+        </section>
 
-      <!-- ── ONGLET VISIBILITÉ ──────────────────────────────────── -->
-      <section id="pp-panel-visibilite" class="pp-mn-panel" data-pp-panel="visibilite" role="tabpanel" aria-labelledby="pp-tab-visibilite" hidden>
-        <div class="pp-mn-section-intro">
-          🔒 Coche les informations que les joueurs verront sur la fiche.
-        </div>
-        <div class="pp-mn-vis-grid">
-          ${visEntries.map(f => {
-            const checked = player?.[f.key] !== undefined ? player[f.key] : f.def;
-            return `<label class="pp-mn-vis-card ${checked?'is-on':''}">
-              <input type="checkbox" id="${f.id}" ${checked?'checked':''}
-                data-pp-action="refreshVisCount" data-pp-on="change">
-              <span class="pp-mn-vis-ico">${f.ico}</span>
-              <span class="pp-mn-vis-lbl">${f.label}</span>
-              <span class="pp-mn-vis-check">✓</span>
-            </label>`;
-          }).join('')}
-        </div>
-      </section>
+        <section class="pp-mn-block">
+          <div class="pp-mn-block-head"><h3>Ce que voient les autres joueurs</h3><span class="pp-mn-hint">Survole une option pour la repérer dans l’aperçu.</span></div>
+          ${visibilityHtml}
+        </section>
+      </main>
 
-      <!-- ── ONGLET GALERIE ────────────────────────────────────── -->
-      <section id="pp-panel-galerie" class="pp-mn-panel" data-pp-panel="galerie" role="tabpanel" aria-labelledby="pp-tab-galerie" hidden>
-        <div class="pp-mn-section-intro">
-          🖼️ Galerie photos — la première image sert d'illustration principale.
-        </div>
-
-        <!-- Cadrage de l'image dans la card du Roster -->
-        ${player?.imageUrl ? `
-          <div class="pp-mn-card-crop">
-            <div class="pp-mn-card-crop-head">
-              <span class="pp-mn-label">Cadrage dans la card</span>
-              <span class="pp-form-hint">glisse · molette/pinch pour zoomer</span>
-            </div>
-            <div class="pp-card-crop-wrap">
-              ${panZoomCropHTML({ idPrefix: 'pp-card', viewW: 240, viewH: 320, hint: false })}
-              <div class="pp-card-crop-actions">
-                <button type="button" class="btn btn-outline btn-sm" data-pp-action="resetCardCrop">↺ Réinitialiser</button>
-                <button type="button" class="btn btn-gold btn-sm" data-pp-action="confirmCardCrop">✓ Confirmer</button>
-              </div>
-              <div class="pp-card-crop-status" id="pp-card-crop-status"></div>
-            </div>
-          </div>` : ''}
-
-        <div class="pp-mn-field">
-          <label class="pp-mn-label">Photos additionnelles <span class="pp-form-hint">(glisse pour réordonner · pleine qualité)</span></label>
-          <div id="pp-gallery-list" class="pp-gallery-edit"></div>
-          <div id="pp-gallery-drop" class="pp-form-drop pp-gallery-drop">
-            <div class="pp-gallery-drop-hint">+ Glisser une photo (ou cliquer)</div>
-          </div>
-          <div id="pp-gallery-status" class="pp-form-hint" style="margin-top:.3rem"></div>
-        </div>
-      </section>
+      <aside class="pp-mn-preview">
+        <div class="pp-mn-preview-head"><span>Aperçu</span><div class="pp-mn-segment"><button type="button" class="${_ppModalPreview === 'card' ? 'is-active' : ''}" data-pp-action="setPresentationPreview" data-pp-preview="card">Carte</button><button type="button" class="${_ppModalPreview === 'sheet' ? 'is-active' : ''}" data-pp-action="setPresentationPreview" data-pp-preview="sheet">Fiche</button></div></div>
+        <div id="pp-mn-preview-body" class="pp-mn-preview-body"></div>
+        <p id="pp-mn-preview-note" class="pp-mn-preview-note"></p>
+      </aside>
     </div>
+    <footer id="pp-mn-footer" class="pp-mn-footer"></footer>
+  </div>`);
 
-    <!-- ════ FOOTER ACTIONS ═══════════════════════════════════════ -->
-    <div class="pp-mn-footer">
-      ${player?.id ? `<button class="btn btn-outline btn-sm pp-btn-danger" data-pp-action="delete" data-id="${_esc(player.id)}">🗑 Supprimer</button>` : '<span></span>'}
-      <div class="pp-mn-footer-right">
-        <button class="btn btn-outline btn-sm" data-pp-action="closeModal">Annuler</button>
-        <button class="btn btn-gold" data-pp-action="save" data-id="${_esc(player?.id||'')}">💾 Enregistrer</button>
-      </div>
-    </div>
-  </div>
-  `);
-
-  // ── Wiring : tabs + live updates ──
-  document.querySelectorAll('[data-pp-tab]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.ppTab;
-      document.querySelectorAll('[data-pp-tab]').forEach((b) => {
-        const active = b.dataset.ppTab === tab;
-        b.classList.toggle('is-active', active);
-        b.setAttribute('aria-selected', active ? 'true' : 'false');
-      });
-      document.querySelectorAll('[data-pp-panel]').forEach((p) => {
-        const active = p.dataset.ppPanel === tab;
-        p.classList.toggle('is-active', active);
-        p.hidden = !active;
-      });
-    });
-  });
-  function _ppUpdateVisiblePill(on) {
-    const pill = document.getElementById('pp-mn-vis-pill');
-    if (!pill) return;
-    pill.classList.toggle('is-on', !!on); pill.classList.toggle('is-off', !on);
-    pill.textContent = on ? '👁 Visible' : '🚫 Masqué';
-  };
-  function _ppRefreshVisCount() {
-    const n = visEntries.filter(f => document.getElementById(f.id)?.checked).length;
-    const el = document.getElementById('pp-mn-vis-count');
-    if (el) el.textContent = n;
-    // Toggle visual state on cards
-    document.querySelectorAll('.pp-mn-vis-card').forEach(card => {
-      const cb = card.querySelector('input[type=checkbox]');
-      if (cb) card.classList.toggle('is-on', cb.checked);
-    });
-  };
-  // Met à jour l'eyebrow live quand on change la fiche liée
-  const selCh = document.getElementById('pp-char-id');
-  selCh?.addEventListener('change', () => {
-    const c = characters.find(x => x.id === selCh.value);
-    const eb = document.getElementById('pp-mn-eyebrow');
-    if (eb) eb.textContent = c && (c.classe || c.race)
-      ? [c.classe, c.race].filter(Boolean).join(' · ')
-      : 'Présentation joueurs';
-    const t = document.getElementById('pp-mn-title');
-    if (t && c?.nom) t.textContent = c.nom;
-  });
-
-  bindQuillEditors();
-  _ppCropper?.destroy();
-  _ppCropper = attachDropAndCrop({
-    dropEl:        document.getElementById('pp-img-drop'),
-    previewEl:     document.getElementById('pp-img-preview'),
-    cropWrapEl:    document.getElementById('pp-crop-wrap'),
-    canvasId:      'pp-crop-canvas',
-    statusEl:      document.getElementById('pp-crop-ok'),
-    confirmBtnEl:  document.getElementById('pp-crop-confirm'),
-    clearBtnEl:    document.getElementById('pp-img-clear'),
-    initialUrl:    player?.imageUrl || '',
-    initialRatio:  { w: 3, h: 4 },
-    maxDisplayW:   440,
-  });
-
-  // Cropper interactif pour la card du Roster (viewport 3:4 portrait).
-  // On part TOUJOURS de l'image source (imageUrl). Les coords du cadrage existant
-  // sont appliquées après initialisation pour reprendre exactement où on était.
-  _ppCardCropper?.destroy(); _ppCardCropper = null;
-  if (player?.imageUrl) {
-    _ppCardCropper = attachPanZoomCrop({
-      idPrefix:   'pp-card',
-      dataUrl:    player.imageUrl,
-      viewW:      240, viewH: 320,
-      background: '#0b1118',
-    });
-    // Restaure le cadrage précédemment sauvegardé si présent
-    if (player?.cardCrop && _ppCardCropper && typeof _ppCardCropper.setCropParams === 'function') {
-      _ppCardCropper.setCropParams(player.cardCrop);
-    }
-  }
-
+  const shell = document.querySelector('.pp-mn-shell');
+  await bindQuillEditors(shell, { onUserEdit: () => {
+    _ppMarkModalDirty();
+    _ppModalWordCount();
+    _ppRenderModalPreview();
+  } });
   _renderGalleryEditor();
-  const galleryDrop = document.getElementById('pp-gallery-drop');
-  if (galleryDrop && !CLOUDINARY_ENABLED) {
-    // Mode gratuit : photo HD pointée par URL (ex. dossier GitHub) → qualité
-    // conservée, zéro poids Firestore. Le « drop » devient un bouton d'ajout URL.
-    const hint = galleryDrop.querySelector('.pp-gallery-drop-hint');
-    if (hint) hint.textContent = '🔗 Ajouter une photo par URL';
-    galleryDrop.addEventListener('click', async () => {
-      const status = document.getElementById('pp-gallery-status');
-      if (_ppGallery.length >= PP_GALLERY_MAX) {
-        if (status) { status.textContent = `Maximum ${PP_GALLERY_MAX} photos atteint.`; status.style.color = '#ff6b6b'; }
-        return;
-      }
-      let url = (await promptModal(
-        'Colle l\'URL de la photo (ex. image hébergée dans un dossier GitHub) :',
-        { title: '🔗 Photo par URL', placeholder: 'https://…github.io/le-grand-jdr/images/illustrations/…' },
-      ))?.trim();
-      if (!url) return;
-      url = normalizeImageUrl(url);   // tolère github.com/.../tree/... + encode les espaces
-      _ppGallery.push({ url, thumb: url, deleteUrl: '' });
-      _renderGalleryEditor();
-      if (status) { status.textContent = '✓ Photo ajoutée (URL).'; status.style.color = 'var(--green)'; }
-    });
-  } else if (galleryDrop) {
-    bindImageUploadDropZone(galleryDrop, {
-      onImage: async ({ file }) => {
-        const status = document.getElementById('pp-gallery-status');
-        if (!file) return;
-        if (_ppGallery.length >= PP_GALLERY_MAX) {
-          if (status) { status.textContent = `Maximum ${PP_GALLERY_MAX} photos atteint.`; status.style.color = '#ff6b6b'; }
-          return;
-        }
-        if (!hasCloudinaryConfig()) {
-          if (status) { status.textContent = 'Config Cloudinary requise — saisis-la puis relance l\'upload.'; status.style.color = '#ff6b6b'; }
-          openCloudinaryConfigModal();
-          return;
-        }
-        if (status) { status.textContent = '⏳ Upload en cours…'; status.style.color = 'var(--text-muted)'; }
-        try {
-          const b64full = await uploadJpeg(file, PP_GALLERY_UPLOAD);
-          const up = await uploadCloudinary(b64full, { folder: 'gallery', tags: ['gallery'] });
-          _ppGallery.push({ url: up.url, thumb: up.thumbUrl || '', deleteUrl: '' });
-          _renderGalleryEditor();
-          if (status) { status.textContent = `✓ Ajoutée (qualité d'origine, hébergée sur Cloudinary)`; status.style.color = 'var(--green)'; }
-        } catch (e) {
-          console.error('[players gallery]', e);
-          if (status) { status.textContent = `Erreur upload : ${e?.message || '?'}`; status.style.color = '#ff6b6b'; }
-        }
-      },
-    });
-  }
+  _ppRenderCropEditor();
+  _ppRenderModalFooter();
+  _ppModalWordCount();
+  _ppRenderModalPreview();
+
+  const onChange = event => {
+    if (event.target.id === 'pp-char-id') {
+      _ppUpdateModalHeader();
+      _ppRenderModalPreview();
+      _ppMarkModalDirty();
+    }
+  };
+  const onClick = event => {
+    const pill = event.target.closest?.('.pp-mn-vis-pill');
+    if (!pill || !shell?.contains(pill)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const input = document.getElementById(pill.dataset.visInput || '');
+    if (!input) return;
+    input.checked = !input.checked;
+    pill.classList.toggle('is-on', input.checked);
+    pill.setAttribute('aria-pressed', String(input.checked));
+    _ppRenderModalPreview();
+    _ppMarkModalDirty();
+  };
+  const onOver = event => {
+    const pill = event.target.closest('.pp-mn-vis-pill');
+    if (!pill || pill.contains(event.relatedTarget)) return;
+    _ppHighlightPreview(pill.dataset.visKey);
+  };
+  const onOut = event => {
+    const pill = event.target.closest('.pp-mn-vis-pill');
+    if (!pill || pill.contains(event.relatedTarget)) return;
+    document.querySelectorAll('#pp-mn-preview-body .is-highlighted').forEach(node => node.classList.remove('is-highlighted'));
+  };
+  const onKeydown = event => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return;
+    event.preventDefault();
+    _savePlayerPresent(_ppEditingPlayer?.id || '');
+  };
+  shell?.addEventListener('change', onChange);
+  shell?.addEventListener('click', onClick);
+  shell?.addEventListener('mouseover', onOver);
+  shell?.addEventListener('mouseout', onOut);
+  document.addEventListener('keydown', onKeydown);
+  const closed = () => _ppCleanupPresentationModal();
+  document.addEventListener('app:modal-closed', closed, { once: true });
+  _ppModalCleanup = () => {
+    shell?.removeEventListener('change', onChange);
+    shell?.removeEventListener('click', onClick);
+    shell?.removeEventListener('mouseover', onOver);
+    shell?.removeEventListener('mouseout', onOut);
+    document.removeEventListener('keydown', onKeydown);
+    document.removeEventListener('app:modal-closed', closed);
+  };
+  setModalCloseGuard(() => {
+    if (!_ppModalDirty) return false;
+    _ppModalConfirm = 'close';
+    _ppRenderModalFooter();
+    return true;
+  });
+  (player ? document.querySelector('#pp-content .ql-editor') : document.getElementById('pp-char-id'))?.focus();
 }
 
 function _renderGalleryEditor() {
   const list = document.getElementById('pp-gallery-list');
   if (!list) return;
   _ppGallerySortable?.destroy(); _ppGallerySortable = null;
-  if (!_ppGallery.length) {
-    list.innerHTML = '<div class="pp-gallery-empty">Aucune photo additionnelle.</div>';
-    return;
-  }
-  const player = _ppEditingPlayer;
-  const portraitUrl = player?.imageUrl || '';
-  list.innerHTML = _ppGallery.map((g, i) => {
-    const isPortrait = !!g.portrait;
-    const src = isPortrait ? portraitUrl : (g.thumb || g.url);
-    return `
-    <div class="pp-gallery-edit-item ${isPortrait ? 'is-portrait' : ''}" data-gal-idx="${i}" title="Glisse pour réordonner">
-      <span class="pp-gallery-edit-handle" aria-hidden="true">⠿</span>
-      <img src="${_esc(src)}" alt="Photo ${i+1}" loading="lazy">
+  list.innerHTML = `${_ppGallery.map((photo, index) => {
+    const isPortrait = !!photo?.portrait;
+    const src = isPortrait ? _ppModalImageUrl : (photo?.thumb || photo?.url || '');
+    return `<article class="pp-mn-thumb ${isPortrait ? 'is-portrait' : ''}" data-gal-idx="${index}">
+      <img src="${_esc(src)}" alt="Photo ${index + 1}" loading="lazy">
+      <span class="pp-mn-thumb-grip" title="Réordonner">${_ppIcon('grip')}</span>
       ${isPortrait
-        ? '<span class="pp-gallery-edit-flag" title="Image de présentation (gérée plus haut)">Portrait</span>'
-        : `<button type="button" class="pp-gallery-edit-del" data-pp-action="removeGalleryPhoto" data-idx="${i}" title="Retirer">✕</button>`}
-    </div>`;
-  }).join('');
+        ? `<span class="pp-mn-thumb-flag">${_ppIcon('star')} Portrait</span>`
+        : `<button type="button" class="pp-mn-thumb-star" data-pp-action="setGalleryPortrait" data-idx="${index}" title="Utiliser comme portrait">${_ppIcon('star')}</button>`}
+      <button type="button" class="pp-mn-thumb-delete" data-pp-action="removeGalleryPhoto" data-idx="${index}" title="Retirer">${_ppIcon('x')}</button>
+    </article>`;
+  }).join('')}${_ppGallery.length < PP_GALLERY_MAX ? `<button type="button" id="pp-gallery-drop" class="pp-mn-image-add">${_ppIcon('upload')}<b>Ajouter</b><small>${CLOUDINARY_ENABLED ? 'Glisser, coller ou cliquer' : 'Coller une URL'}</small></button>` : ''}`;
+  const count = document.getElementById('pp-mn-image-count');
+  if (count) count.textContent = `${_ppGallery.length}/${PP_GALLERY_MAX}`;
   _ppGallerySortable = makeSortable(list, {
     prefix: 'pp',
-    handle: '.pp-gallery-edit-handle',
+    draggable: '.pp-mn-thumb',
+    handle: '.pp-mn-thumb-grip',
+    filter: 'button',
+    delay: 70,
+    fallbackTolerance: 4,
     onEnd: () => {
       const newOrder = [...list.querySelectorAll('[data-gal-idx]')]
         .map(el => parseInt(el.dataset.galIdx, 10))
         .map(i => _ppGallery[i])
         .filter(Boolean);
       _ppGallery = newOrder;
+      _ppMarkModalDirty();
       _renderGalleryEditor();
+    },
+  });
+  _bindPlayerGalleryAdd();
+}
+
+function _ppAddGalleryPhoto(photo) {
+  if (!photo?.url || _ppGallery.length >= PP_GALLERY_MAX) return;
+  if (!_ppModalImageUrl) {
+    _ppModalImageUrl = photo.url;
+    _ppGallery.push({ portrait: true });
+    _ppCardCropParams = null;
+  } else {
+    _ppGallery.push(photo);
+  }
+  _ppMarkModalDirty();
+  _renderGalleryEditor();
+  _ppRenderCropEditor();
+  _ppRenderModalPreview();
+}
+
+function _bindPlayerGalleryAdd() {
+  const drop = document.getElementById('pp-gallery-drop');
+  if (!drop) return;
+  if (!CLOUDINARY_ENABLED) {
+    drop.addEventListener('click', async () => {
+      let url = (await promptModal('Colle l’URL de la photo :', {
+        title: 'Photo par URL',
+        placeholder: 'https://…github.io/le-grand-jdr/images/…',
+      }))?.trim();
+      if (!url) return;
+      url = normalizeImageUrl(url);
+      _ppAddGalleryPhoto({ url, thumb: url, deleteUrl: '' });
+      const status = document.getElementById('pp-gallery-status');
+      if (status) status.textContent = 'Photo ajoutée.';
+    });
+    return;
+  }
+  bindImageUploadDropZone(drop, {
+    onImage: async ({ file }) => {
+      const status = document.getElementById('pp-gallery-status');
+      if (!file || _ppGallery.length >= PP_GALLERY_MAX) return;
+      if (!hasCloudinaryConfig()) {
+        if (status) status.textContent = 'Configuration de l’hébergement requise.';
+        openCloudinaryConfigModal();
+        return;
+      }
+      if (status) status.textContent = 'Import en cours…';
+      try {
+        const encoded = await uploadJpeg(file, PP_GALLERY_UPLOAD);
+        const uploaded = await uploadCloudinary(encoded, { folder: 'gallery', tags: ['gallery'] });
+        _ppAddGalleryPhoto({ url: uploaded.url, thumb: uploaded.thumbUrl || '', deleteUrl: '' });
+        if (status) status.textContent = 'Photo ajoutée.';
+      } catch (error) {
+        console.error('[players gallery]', error);
+        if (status) status.textContent = `Import impossible : ${error?.message || 'erreur inconnue'}`;
+      }
     },
   });
 }
 
+function _ppRenderCropEditor({ restore = true } = {}) {
+  const host = document.getElementById('pp-card-crop-host');
+  if (!host) return;
+  _ppCardCropper?.destroy();
+  _ppCardCropper = null;
+  if (!_ppModalImageUrl) {
+    host.innerHTML = '';
+    return;
+  }
+  host.innerHTML = `<div class="pp-mn-crop">
+    <div class="pp-mn-crop-main"><div id="pp-card-zone"><img id="pp-card-img" alt="" draggable="false"><span class="pp-mn-crop-grid"></span></div></div>
+    <div class="pp-mn-crop-copy"><b>Cadrage du portrait</b><p>Glisse l’image et zoome. L’aperçu à droite se met à jour en direct. Le cadrage est enregistré avec le reste, sans bouton « Confirmer ».</p><label class="pp-mn-crop-zoom"><span>Zoom</span><input type="range" id="pp-card-zoom" min="0.1" max="4" step="0.01" value="1"><output id="pp-card-zoom-output">100 %</output></label><button type="button" class="pp-mn-ghost" data-pp-action="resetCardCrop">${_ppIcon('reset')} Recentrer</button></div>
+  </div>`;
+  const syncZoomOutput = () => {
+    const ratio = _ppCardCropper?.getZoomRatio?.();
+    const output = document.getElementById('pp-card-zoom-output');
+    if (output && Number.isFinite(ratio)) output.textContent = `${Math.round(ratio * 100)} %`;
+  };
+  _ppCardCropper = attachPanZoomCrop({
+    idPrefix: 'pp-card',
+    dataUrl: _ppModalImageUrl,
+    viewW: 150,
+    viewH: 200,
+    background: '#0b1118',
+    constrainCover: true,
+    onChange: () => {
+      _ppCardCropParams = _ppCardCropper?.getCropParams?.() || _ppCardCropParams;
+      syncZoomOutput();
+      _ppMarkModalDirty();
+      _ppRenderModalPreview();
+    },
+  });
+  if (restore && _ppCardCropParams) _ppCardCropper?.setCropParams?.(_ppCardCropParams);
+  document.getElementById('pp-card-img')?.addEventListener('load', () => requestAnimationFrame(syncZoomOutput), { once: true });
+}
+
+function _ppSetGalleryPortrait(index) {
+  const photo = _ppGallery[index];
+  if (!photo || photo.portrait || !photo.url) return;
+  const previousIndex = _ppGallery.findIndex(entry => entry?.portrait);
+  if (previousIndex >= 0) {
+    _ppGallery[previousIndex] = { url: _ppModalImageUrl, thumb: _ppModalImageUrl, deleteUrl: '' };
+  }
+  _ppModalImageUrl = photo.url;
+  _ppGallery[index] = { portrait: true };
+  _ppCardCropParams = null;
+  _ppMarkModalDirty();
+  _renderGalleryEditor();
+  _ppRenderCropEditor({ restore: false });
+  _ppRenderModalPreview();
+}
+
+function _ppRemoveGalleryPhoto(index) {
+  const photo = _ppGallery[index];
+  if (!photo) return;
+  const wasPortrait = !!photo.portrait;
+  _ppGallery.splice(index, 1);
+  if (wasPortrait) {
+    const replacementIndex = _ppGallery.findIndex(entry => entry?.url);
+    if (replacementIndex >= 0) {
+      _ppModalImageUrl = _ppGallery[replacementIndex].url;
+      _ppGallery[replacementIndex] = { portrait: true };
+    } else {
+      _ppModalImageUrl = '';
+    }
+    _ppCardCropParams = null;
+  }
+  _ppMarkModalDirty();
+  _renderGalleryEditor();
+  _ppRenderCropEditor({ restore: false });
+  _ppRenderModalPreview();
+}
+
+function _ppHighlightPreview(key) {
+  if (key !== 'afficherNiveau' && _ppModalPreview !== 'sheet') {
+    _ppModalPreview = 'sheet';
+    _ppRenderModalPreview();
+  }
+  requestAnimationFrame(() => document.querySelectorAll(`#pp-mn-preview-body [data-v="${key}"]`).forEach(node => node.classList.add('is-highlighted')));
+}
+
+function _ppCleanupPresentationModal() {
+  _ppModalCleanup?.();
+  _ppModalCleanup = null;
+  _ppGallerySortable?.destroy();
+  _ppGallerySortable = null;
+  _ppCardCropper?.destroy();
+  _ppCardCropper = null;
+  clearModalCloseGuard();
+}
+
 // ── Modal handlers ────────────────────────────────────────────────────────────
 Object.assign(ppHandlers, {
-  save:       (el) => _savePlayerPresent(el.dataset.id || ''),
-  delete:     (el) => _deletePlayerPresent(el.dataset.id),
-  closeModal: ()   => closeModal(),
-  // Card crop interactif (pan-zoom) — capture les COORDS du cadrage (4 nombres).
-  // Aucune image n'est dupliquée → pas de problème de taille Firestore.
-  confirmCardCrop: () => {
-    const status = document.getElementById('pp-card-crop-status');
-    const tryConfirm = (retries = 5) => {
-      const params = _ppCardCropper?.getCropParams();
-      if (params) {
-        _ppCardCropParams = params;
-        if (status) {
-          status.textContent = `✓ Cadrage confirmé — sera enregistré au save`;
-          status.style.color = '#22c38e';
-        }
-      } else if (retries > 0) {
-        setTimeout(() => tryConfirm(retries - 1), 100);
-      } else if (status) {
-        status.textContent = '⚠ Image pas encore chargée. Réessaie dans un instant.';
-        status.style.color = '#ff6b6b';
-      }
-    };
-    tryConfirm();
+  save: el => _savePlayerPresent(el.dataset.id || ''),
+  cancelPresentation: () => closeModalDirect(),
+  cancelPresentationConfirm: () => { _ppModalConfirm = ''; _ppRenderModalFooter(); },
+  discardPresentationChanges: () => {
+    _ppModalDirty = false;
+    clearModalCloseGuard();
+    closeModalDirect();
   },
-  removeGalleryPhoto: (el) => {
-    const idx = parseInt(el.dataset.idx, 10);
-    if (!Number.isInteger(idx)) return;
-    if (_ppGallery[idx]?.portrait) return;   // portrait non supprimable depuis ici
-    _ppGallery.splice(idx, 1);
-    _renderGalleryEditor();
+  askPresentationDelete: () => { _ppModalConfirm = 'delete'; _ppRenderModalFooter(); },
+  confirmPresentationDelete: el => _deletePlayerPresent(el.dataset.id, { confirmed: true }),
+  setPresentationVisibility: el => {
+    _ppModalVisible = el.dataset.visible === 'true';
+    document.querySelectorAll('[data-pp-action="setPresentationVisibility"]').forEach(button => {
+      const active = button.dataset.visible === String(_ppModalVisible);
+      button.classList.toggle('is-on', active);
+      button.classList.toggle('is-off', active && !_ppModalVisible);
+    });
+    _ppRenderModalPreview();
+    _ppMarkModalDirty();
   },
+  setPresentationPreview: el => {
+    _ppModalPreview = el.dataset.ppPreview === 'sheet' ? 'sheet' : 'card';
+    _ppRenderModalPreview();
+  },
+  openPresentationCharacter: async () => {
+    const charId = document.getElementById('pp-char-id')?.value || '';
+    if (!charId) return;
+    if (_ppModalDirty) {
+      _ppModalConfirm = 'close';
+      _ppRenderModalFooter();
+      return;
+    }
+    clearModalCloseGuard();
+    closeModalDirect();
+    await openCharacterSheetFromShowcase(charId);
+  },
+  setGalleryPortrait: el => _ppSetGalleryPortrait(parseInt(el.dataset.idx, 10)),
+  removeGalleryPhoto: el => _ppRemoveGalleryPhoto(parseInt(el.dataset.idx, 10)),
   resetCardCrop: () => {
     _ppCardCropParams = null;
-    // Re-init du cropper depuis l'image source pour repartir du centre
-    _ppCardCropper?.destroy();
-    const player = _ppEditingPlayer || null;
-    const src = player?.imageUrl || document.getElementById('pp-img-b64')?.value || '';
-    if (!src) return;
-    _ppCardCropper = attachPanZoomCrop({
-      idPrefix: 'pp-card', dataUrl: src,
-      viewW: 240, viewH: 320,
-      background: '#0b1118',
-    });
-    const status = document.getElementById('pp-card-crop-status');
-    if (status) status.textContent = 'Cadrage réinitialisé';
+    _ppRenderCropEditor({ restore: false });
+    _ppRenderModalPreview();
+    _ppMarkModalDirty();
   },
 });
 
@@ -2049,43 +3100,16 @@ async function _savePlayerPresent(id = '') {
     showNotif('Tu ne peux modifier que la présentation de ton personnage.', 'error');
     return;
   }
-  const cropResult = _ppCropper?.getResult();
-    let imageUrl = '';
-    if (typeof cropResult === 'string')      imageUrl = cropResult;
-    else if (cropResult === null)            imageUrl = '';
-    else if (id) {
-      const existing = STORE.presentations.find(p => p.id === id);
-      imageUrl = existing?.imageUrl || '';
-    }
-    _ppCropper?.destroy(); _ppCropper = null;
-
-    // Cadrage de la card : on stocke les COORDS (offX, offY, imgW, imgH) — pas
-    // une image. ~50 octets vs ~50KB → aucun problème de taille Firestore.
-    // Priorité : confirmé > auto-capture du cadrage en cours > existant.
-    let cardCrop = null;
-    if (_ppCardCropParams) {
-      cardCrop = _ppCardCropParams;
-    } else if (_ppCardCropper) {
-      const autoParams = _ppCardCropper.getCropParams();
-      if (autoParams) cardCrop = autoParams;
-    }
-    if (!cardCrop && id) {
-      const existing = STORE.presentations.find(p => p.id === id);
-      cardCrop = existing?.cardCrop || null;
-    }
-    // Si l'illustration est effacée, on efface aussi le crop card (cohérence)
-    if (!imageUrl) cardCrop = null;
-    _ppCardCropper?.destroy(); _ppCardCropper = null;
-    _ppCardCropParams = null;
-    _ppEditingPlayer = null;
-
-    const data = {
+  const existing = id ? STORE.presentations.find(p => p.id === id) : null;
+  const imageUrl = _ppModalImageUrl;
+  const cardCrop = imageUrl ? (_ppModalCropParams() || existing?.cardCrop || null) : null;
+  const data = {
       charId,
       content:        getQuillHtml('pp-content'),
       imageUrl,
       cardCrop,
-      ordre:          parseInt(document.getElementById('pp-ordre')?.value, 10) || 999,
-      visible:        document.getElementById('pp-visible')?.checked    ?? true,
+      ordre:          existing?.ordre ?? 999,
+      visible:        _ppModalVisible,
       afficherPV:     document.getElementById('pp-show-pv')?.checked    ?? true,
       afficherPM:     document.getElementById('pp-show-pm')?.checked    ?? true,
       afficherCA:     document.getElementById('pp-show-ca')?.checked    ?? true,
@@ -2098,23 +3122,27 @@ async function _savePlayerPresent(id = '') {
       afficherBio:       document.getElementById('pp-show-bio')?.checked       ?? true,
       afficherTags:      document.getElementById('pp-show-tags')?.checked      ?? true,
       gallery:        _ppGallery.slice(0, PP_GALLERY_MAX),
-    };
-    _ppGallery = [];
-
-    if (!await tryUpsert('players', id || null, data)) return;
-    closeModal();
-    showNotif('Présentation enregistrée.', 'success');
-    await PAGES.players();
+  };
+  if (!await tryUpsert('players', id || null, data)) return;
+  _ppModalDirty = false;
+  clearModalCloseGuard();
+  closeModalDirect();
+  showNotif('Présentation enregistrée.', 'success');
+  await PAGES.players();
 }
 
-async function _deletePlayerPresent(id) {
+async function _deletePlayerPresent(id, { confirmed = false } = {}) {
   const snapshot = STORE.presentations.find(p => p.id === id);
   if (!await confirmDelete('players', id, 'Supprimer cette présentation ?', {
     snapshot,
     successMessage: 'Présentation supprimée.',
     onRestore: () => PAGES.players(),
+    confirmed,
   })) return;
   STORE.activeId = '';
+  _ppModalDirty = false;
+  clearModalCloseGuard();
+  closeModalDirect();
   await PAGES.players();
 }
 
@@ -2138,7 +3166,7 @@ async function _editPlayerItem(id) {
 
 // ── Lightbox galerie (overlay plein écran, pas une modale scrollable) ──────
 function _openLightbox(presId, startIdx = 0) {
-  const item = STORE.items.find(i => i.presentationId === presId);
+  const item = STORE.items.find(i => i.presentationId === presId || i.id === presId);
   const photos = item?.gallery || [];
   if (!photos.length) return;
   let idx = Math.max(0, Math.min(startIdx, photos.length - 1));
@@ -2182,17 +3210,21 @@ function _openLightbox(presId, startIdx = 0) {
   };
   const close = () => {
     overlay.classList.add('is-closing');
-    document.removeEventListener('keydown', onKey);
+    document.removeEventListener('keydown', onKey, true);
     setTimeout(() => overlay.remove(), 180);
   };
   const next = () => { idx = (idx + 1) % photos.length; render(); };
   const prev = () => { idx = (idx - 1 + photos.length) % photos.length; render(); };
   const onKey = (e) => {
-    if (e.key === 'Escape')    close();
+    if (!['Escape', 'ArrowRight', 'ArrowLeft'].includes(e.key)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.key === 'Escape') close();
     else if (e.key === 'ArrowRight') next();
-    else if (e.key === 'ArrowLeft')  prev();
+    else prev();
   };
-  document.addEventListener('keydown', onKey);
+  // Capture avant les raccourcis du registre et ceux du lecteur de diapos.
+  document.addEventListener('keydown', onKey, true);
 
   // Clic sur le fond (mais pas sur l'image ni les contrôles) → fermer.
   overlay.addEventListener('click', (e) => {

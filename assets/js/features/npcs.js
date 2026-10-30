@@ -52,6 +52,7 @@ import { pickImageFile, compressDataUrl } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 import { replaceHtmlPreservingView } from '../shared/view-context.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 // ── Stats PNJ (admin) ────────────────────────────────────────────────────────
 // Les vitales/caractéristiques saisies sont les valeurs DE BASE. Les objets
@@ -254,6 +255,9 @@ const TYPE_COLORS = ['#d63031','#e74c3c','#ff6b6b','#ff7675','#ff4757','#e84393'
   '#55efc4','#7bed9f','#00cec9','#0abde3','#81ecec','#48dbfb','#00a8ff','#4f8cff','#0984e3','#3742fa','#6c5ce7',
   '#9c88ff','#a29bfe','#b47fff','#8e44ad','#636e72','#2d3436'
 ];
+const DEFAULT_AFFINITE_TYPE = {
+  id: '__relation__', label: 'Relation', emoji: '🔗', couleur: '#4f8cff', builtin: true,
+};
 
 const afx = (n) => AFFINITE[Math.max(0, Math.min(4, n ?? 2))];
 // Variables CSS inline pour les couleurs dynamiques d'affinité (consommées par npcs.css).
@@ -294,6 +298,37 @@ let _npcSheetTab   = 'combat';   // onglet actif de la fiche PNJ : 'combat' | 's
 let _npcRelSel     = null;       // id du lien d'affinité sélectionné dans le Cercle des relations
 let _npcLink       = { npcId: null, charId: null, charNom: '', typeId: null };  // sélection en cours dans le modal « Lier »
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+
+const NPC_ROUTE_PANELS = ['dossier', 'tactique', 'relations', 'chronologie'];
+const NPC_ROUTE_SHEET_TABS = ['combat', 'sorts'];
+
+function _npcRouteSub(id = _activeId, panel = _npcPanel, sheetTab = _npcSheetTab) {
+  if (!id) return '';
+  const safePanel = NPC_ROUTE_PANELS.includes(panel) && (panel !== 'tactique' || STATE.isAdmin)
+    ? panel
+    : 'dossier';
+  const safeTab = NPC_ROUTE_SHEET_TABS.includes(sheetTab) ? sheetTab : 'combat';
+  return `${id}/${safePanel}/${safeTab}`;
+}
+
+function _applyNpcRoute(sub) {
+  const [id, panel = 'dossier', sheetTab = 'combat'] = String(sub || '').split('/');
+  if (!id || !_npcs.some(npc => npc.id === id)) return false;
+  _activeId = id;
+  _npcPanel = NPC_ROUTE_PANELS.includes(panel) && (panel !== 'tactique' || STATE.isAdmin)
+    ? panel
+    : 'dossier';
+  _npcSheetTab = NPC_ROUTE_SHEET_TABS.includes(sheetTab) ? sheetTab : 'combat';
+  _filterSearch = '';
+  _filterStatus = '';
+  _filterHidden = false;
+  _activeOrgFilter = null;
+  return true;
+}
+
+function _syncNpcRoute({ replace = false } = {}) {
+  setRouteSub('npcs', _npcRouteSub(), { replace });
+}
 let _equipPickerState = {
   npcId: '', slot: '', q: '', sort: 'name', filtersOpen: true,
   filters: { type: '', rarity: '', stat: '', damage: '', trait: '', feature: '', availability: '' },
@@ -329,7 +364,11 @@ async function _load() {
 }
 
 // ── Helpers types ─────────────────────────────────────────────────────────────
-const _getAffiniteType      = (id) => _affiniteTypes.find(t => t.id === id) || null;
+const _affiniteTypeChoices  = () => [
+  DEFAULT_AFFINITE_TYPE,
+  ..._affiniteTypes.filter(t => t?.id && t.id !== DEFAULT_AFFINITE_TYPE.id),
+];
+const _getAffiniteType      = (id) => _affiniteTypeChoices().find(t => t.id === id) || null;
 const _getAffiniteTypeLabel = (id, fb = '') => _getAffiniteType(id)?.label   || fb || '';
 const _getAffiniteTypeColor = (id) => _getAffiniteType(id)?.couleur || TYPE_COLORS[0];
 const _getAffiniteTypeEmoji = (id) => _getAffiniteType(id)?.emoji   || '✨';
@@ -426,6 +465,7 @@ export async function renderNpcs() {
   // spinner disgracieux. Le splash reste visible pendant _load, puis _renderPage.
   await _load();
   const target = consumeTargetEntity('npc');
+  const targetId = target?.id || '';
   _pendingTargetNpcId = target?.id || _pendingTargetNpcId;
   if (_pendingTargetNpcId && _npcs.some(n => n.id === _pendingTargetNpcId)) {
     _activeId = _pendingTargetNpcId;
@@ -435,7 +475,9 @@ export async function renderNpcs() {
     _activeOrgFilter = null;
     _pendingTargetNpcId = null;
   }
-  if (!_activeId && _npcs.length) _activeId = _npcs[0].id;
+  if (!targetId) _applyNpcRoute(getRouteSub('npcs'));
+  if (!_npcs.some(npc => npc.id === _activeId)) _activeId = _npcs[0]?.id || null;
+  _syncNpcRoute({ replace: true });
   _renderPage(content);
   _bindCharPickOutside();
 
@@ -452,6 +494,7 @@ export async function renderNpcs() {
       _filterHidden = false;
       _activeOrgFilter = null;
       _pendingTargetNpcId = null;
+      _syncNpcRoute({ replace: true });
     }
     _refreshList({ keepScroll: true });
     _refreshActivePanel();
@@ -631,7 +674,8 @@ function _renderNavItem(n) {
   const hasVtt = n.pv || n.pm || n.ca || n.vitesse || Object.keys(n.stats || {}).length || Object.keys(n.equipement || {}).length;
   return `
   <div class="npc-nav-item ${isActive ? 'is-active' : ''} ${n.statut === 'mort' ? 'npc-nav-item--dead' : ''}" style="${_afVars(af)}"
-    data-action="selectNpc" data-id="${n.id}" data-npc-id="${n.id}">
+    data-action="selectNpc" data-id="${n.id}" data-npc-id="${n.id}"
+    data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(n.id))}">
 
     <div class="npc-nav-avatar">
       ${n.imageUrl
@@ -911,7 +955,7 @@ function _renderHistorique(n) {
 function _renderRelationChip(a, npcId) {
   const { emoji, color } = _typeView(a);
   const vars = `--rc:${color};--rc-bg:${color}12;--rc-bd:${color}30`;
-  const typeOpts = _affiniteTypes.map(t =>
+  const typeOpts = _affiniteTypeChoices().map(t =>
     `<option value="${t.id}" ${t.id === a.typeId ? 'selected' : ''}>${t.emoji || '✨'} ${_esc(_displayText(t.label))}</option>`).join('');
   return `
   <div class="npc-rel-chip npc-rel-chip--edit" style="${vars}">
@@ -970,7 +1014,7 @@ function _renderRelationsPanel(n) {
   const myAffi    = persoList.filter(a => myChars.some(c => c.id === a.charId));
 
   if (STATE.isAdmin) {
-    const chars = sortCharactersForDisplay(STATE.characters || []);
+    const chars = _npcLinkableCharacters();
     return `
     <div class="npc-card">
       <div class="npc-card-hd">
@@ -1003,7 +1047,7 @@ function _renderRelationsPanel(n) {
           </div>
           <select class="npc-select" id="afp-type-${n.id}">
             <option value="">— Type —</option>
-            ${_affiniteTypes.map(t => `<option value="${t.id}">${t.emoji || '✨'} ${_esc(_displayText(t.label))}</option>`).join('')}
+            ${_affiniteTypeChoices().map(t => `<option value="${t.id}">${t.emoji || '✨'} ${_esc(_displayText(t.label))}</option>`).join('')}
           </select>
           <button class="npc-event-btn" data-action="npcAddAffiPerso" data-npc-id="${n.id}">＋ Ajouter</button>
         </div>
@@ -1249,9 +1293,9 @@ function _renderFiche(n) {
   const _tico = (id) => `<span class="tab-ico" aria-hidden="true"><svg class="cs-tab-svg"><use href="./assets/img/icons.svg#icon-${id}"/></svg></span>`;
   const tabsBar = `
     <nav class="tabs-v3 npc-sheet-tabs" role="tablist" aria-label="Sections du PNJ">
-      <button type="button" class="tab-v3 ${tab === 'combat' ? 'active' : ''}" role="tab" aria-selected="${tab === 'combat'}" data-action="npcSetTab" data-tab="combat">
+      <button type="button" class="tab-v3 ${tab === 'combat' ? 'active' : ''}" role="tab" aria-selected="${tab === 'combat'}" data-action="npcSetTab" data-tab="combat" data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, _npcPanel, 'combat'))}">
         ${_tico('sword')} Combat</button>
-      <button type="button" class="tab-v3 ${tab === 'sorts' ? 'active' : ''}" role="tab" aria-selected="${tab === 'sorts'}" data-action="npcSetTab" data-tab="sorts">
+      <button type="button" class="tab-v3 ${tab === 'sorts' ? 'active' : ''}" role="tab" aria-selected="${tab === 'sorts'}" data-action="npcSetTab" data-tab="sorts" data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, _npcPanel, 'sorts'))}">
         ${_tico('sparkles')} Sorts <span class="tab-badge">${deckActifs}/${deckMax}${deckFree ? ` +${deckFree}` : ''}</span></button>
     </nav>`;
   // Onglet Sorts actif → le PNJ devient l'hôte du moteur de sorts (édition +
@@ -1527,6 +1571,7 @@ function _renderNpcPanelTabs() {
     <nav class="tabs-v3 npc-tabs-v3" role="tablist" aria-label="Sections de la fiche PNJ">
       ${_npcPanelDefs().map(tab => `
         <button type="button" class="${_npcPanel === tab.id ? 'is-active' : ''}" data-action="npcSetPanel" data-panel="${tab.id}"
+          data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, tab.id, _npcSheetTab))}"
           role="tab" aria-selected="${_npcPanel === tab.id}">
           <span>${_esc(tab.label)}</span>
           <small>${_esc(tab.hint)}</small>
@@ -1549,8 +1594,18 @@ function _renderNpcEmptyPanel(text) {
   return `<section class="npc-work-card npc-empty-panel">${_esc(text)}</section>`;
 }
 
-function _npcSetPanel(btn) {
-  _npcPanel = btn?.dataset?.panel || 'dossier';
+function _npcSetPanel(panel, { syncRoute = true } = {}) {
+  _npcPanel = NPC_ROUTE_PANELS.includes(panel) && (panel !== 'tactique' || STATE.isAdmin)
+    ? panel
+    : 'dossier';
+  if (syncRoute) _syncNpcRoute();
+  _refreshActivePanel();
+}
+
+function _npcSetSheetTab(sheetTab, { syncRoute = true } = {}) {
+  if (!NPC_ROUTE_SHEET_TABS.includes(sheetTab)) return;
+  _npcSheetTab = sheetTab;
+  if (syncRoute) _syncNpcRoute();
   _refreshActivePanel();
 }
 
@@ -1907,7 +1962,7 @@ function _renderNpcSpecificRelationsDesk(n) {
   const myAffi = persoList.filter(a => myChars.some(c => c.id === a.charId));
 
   if (STATE.isAdmin) {
-    const chars = sortCharactersForDisplay(STATE.characters || []);
+    const chars = _npcLinkableCharacters();
     return `
       <section class="npc-work-card npc-work-card--links">
         <div class="npc-work-card-head">
@@ -1935,7 +1990,7 @@ function _renderNpcSpecificRelationsDesk(n) {
           </div>
           <select class="npc-select" id="afp-type-${n.id}">
             <option value="">Type de relation</option>
-            ${_affiniteTypes.map(t => `<option value="${t.id}">${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('')}
+            ${_affiniteTypeChoices().map(t => `<option value="${t.id}">${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('')}
           </select>
           <button class="npc-event-btn" data-action="npcAddAffiPerso" data-npc-id="${n.id}">Lier</button>
         </div>
@@ -1955,7 +2010,7 @@ function _renderNpcSpecificRelationsDesk(n) {
 function _renderNpcRelationCard(a, { publicOnly = false, playerView = false } = {}) {
   const { emoji, color, label } = _typeView(a);
   const vars = `--rc:${color};--rc-bg:${color}12;--rc-bd:${color}34`;
-  const typeOpts = _affiniteTypes.map(t =>
+  const typeOpts = _affiniteTypeChoices().map(t =>
     `<option value="${t.id}" ${t.id === a.typeId ? 'selected' : ''}>${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('');
   const publicNote = (a.notePublique || '').trim();
   const privateNote = (a.note || '').trim();
@@ -2040,7 +2095,7 @@ function _renderNpcRelationHub(n, af) {
   let detail = '';
   if (sel) {
     const { color } = _typeView(sel);
-    const typeOpts = _affiniteTypes.map(t =>
+    const typeOpts = _affiniteTypeChoices().map(t =>
       `<option value="${t.id}" ${t.id === sel.typeId ? 'selected' : ''}>${t.emoji || '*'} ${_esc(_displayText(t.label))}</option>`).join('');
     detail = `
       <div class="npc-hub-detail" style="--rc:${color}">
@@ -2082,7 +2137,7 @@ function _renderNpcRelationHub(n, af) {
   const composer = adm
     ? `<button type="button" class="npc-hub-addbtn" data-action="npcOpenLinkModal" data-npc-id="${n.id}">
         <span class="npc-hub-addbtn-ico">🔗</span>
-        <span class="npc-hub-addbtn-txt"><b>Lier un joueur à ce PNJ</b><small>Choisis un personnage et sa relation particulière</small></span>
+        <span class="npc-hub-addbtn-txt"><b>Lier un personnage à ce PNJ</b><small>Choisis un personnage et sa relation particulière</small></span>
         <span class="npc-hub-addbtn-plus">＋</span>
       </button>`
     : '';
@@ -2162,10 +2217,13 @@ function _renderFlatList(filtered) {
 }
 
 // ── Sélection & filtres ───────────────────────────────────────────────────────
-export function selectNpc(id) {
+export function selectNpc(id, { syncRoute = true, replace = false } = {}) {
+  if (!_npcs.some(item => item.id === id)) return;
   _activeId = id;
   const npc = _npcs.find(item => item.id === id);
   if (npc) recordRecentNavigation({ type: 'npc', id, title: npc.nom || npc.name || '' });
+
+  if (syncRoute) _syncNpcRoute({ replace });
 
   _refreshList();
   _refreshActivePanel();
@@ -3635,6 +3693,7 @@ export async function deleteNpc(id) {
     _npcs      = _npcs.filter(n => n.id !== id);
     _affiPerso = _affiPerso.filter(a => a.npcId !== id);
     if (_activeId === id) _activeId = _npcs[0]?.id || null;
+    _syncNpcRoute({ replace: true });
     showNotif('PNJ supprimé.', 'success');
     _renderPage(document.getElementById('main-content'));
     return true;
@@ -4299,6 +4358,22 @@ async function _npcAffiField(el) {
 }
 
 // Ajout inline d'une affinité spécifique (personnage + type) — sans modal.
+function _npcLinkableCharacters() {
+  const byId = new Map();
+  // Le cache propre à la page est chargé dans _load(). STATE.characters reste
+  // prioritaire lorsqu'il est disponible, car il porte les mutations locales
+  // les plus récentes. Aucun accès Firestore supplémentaire n'est déclenché ici.
+  for (const character of _relationCharacters || []) {
+    if (character?.id) byId.set(character.id, character);
+  }
+  for (const character of STATE.characters || []) {
+    if (character?.id) byId.set(character.id, character);
+  }
+  return sortCharactersForDisplay([...byId.values()]);
+}
+
+const _npcLinkCharacter = (charId) => _npcLinkableCharacters().find(c => c.id === charId) || null;
+
 async function _npcAddAffiPerso(btn) {
   if (!STATE.isAdmin) return;
   const npcId = btn.dataset.npcId;
@@ -4307,7 +4382,7 @@ async function _npcAddAffiPerso(btn) {
   if (!charSel) { showNotif('Choisis un personnage.', 'error'); return; }
   if (!typeId)  { showNotif('Choisis un type d\'affinité.', 'error'); return; }
   const [charId, charNom] = charSel.split('|');
-  const char = (STATE.characters || []).find(c => c.id === charId);
+  const char = _npcLinkCharacter(charId);
   const type = _getAffiniteType(typeId);
   const data = {
     npcId,
@@ -4327,9 +4402,9 @@ async function _npcAddAffiPerso(btn) {
   } catch (e) { notifySaveError(e); }
 }
 
-// ── Flux « Lier un joueur » : modal visuel en 2 étapes (choix joueur + relation) ──
+// ── Flux « Lier un personnage » : modal en 2 étapes (personnage + relation) ───
 async function _npcCreateLink(npcId, charId, charNom, typeId) {
-  const char = (STATE.characters || []).find(c => c.id === charId);
+  const char = _npcLinkCharacter(charId);
   const type = _getAffiniteType(typeId);
   const data = {
     npcId, charId, charNom, charPhoto: _charPortraitSrc(char),
@@ -4348,9 +4423,13 @@ function _npcOpenLinkModal(btn) {
   if (!STATE.isAdmin) return;
   const npcId = btn?.dataset?.npcId;
   const n = _npcs.find(x => x.id === npcId); if (!n) return;
-  _npcLink = { npcId, charId: null, charNom: '', typeId: null };
+  const hasCustomTypes = _affiniteTypes.length > 0;
+  _npcLink = {
+    npcId, charId: null, charNom: '',
+    typeId: hasCustomTypes ? null : DEFAULT_AFFINITE_TYPE.id,
+  };
   const linked = new Set(_affiPerso.filter(a => a.npcId === npcId).map(a => a.charId));
-  const chars = sortCharactersForDisplay(STATE.characters || []).filter(c => !linked.has(c.id));
+  const chars = _npcLinkableCharacters().filter(c => !linked.has(c.id));
   const tiles = chars.length
     ? chars.map(c => `
         <button type="button" class="npc-linkmodal-tile" data-action="npcLinkPickChar" data-char-id="${c.id}" data-char-nom="${_esc(c.nom || '?')}">
@@ -4359,15 +4438,13 @@ function _npcOpenLinkModal(btn) {
           <small>${_esc(c.ownerPseudo || '')}</small>
         </button>`).join('')
     : `<div class="npc-empty-line">Tous les personnages ont déjà un lien avec ce PNJ.</div>`;
-  const chips = _affiniteTypes.length
-    ? _affiniteTypes.map(t => `
-        <button type="button" class="npc-linkmodal-type" data-action="npcLinkPickType" data-type-id="${t.id}" style="--rc:${t.couleur || '#4f8cff'}">
-          <span class="npc-linkmodal-type-emo">${t.emoji || '✨'}</span> ${_esc(_displayText(t.label))}</button>`).join('')
-    : `<div class="npc-empty-line">Aucun type de relation. Crée-en un via « 🏷 Types ».</div>`;
-  openModal(`🔗 Lier un joueur à ${_esc(n.nom || 'ce PNJ')}`, `
+  const chips = _affiniteTypeChoices().map(t => `
+        <button type="button" class="npc-linkmodal-type${t.id === _npcLink.typeId ? ' is-sel' : ''}" data-action="npcLinkPickType" data-type-id="${t.id}" style="--rc:${t.couleur || '#4f8cff'}">
+          <span class="npc-linkmodal-type-emo">${t.emoji || '✨'}</span> ${_esc(_displayText(t.label))}</button>`).join('');
+  openModal(`🔗 Lier un personnage à ${_esc(n.nom || 'ce PNJ')}`, `
     <div class="npc-linkmodal">
       <div class="npc-linkmodal-step">
-        <div class="npc-linkmodal-head"><span class="npc-linkmodal-num">1</span> Quel joueur ?</div>
+        <div class="npc-linkmodal-head"><span class="npc-linkmodal-num">1</span> Quel personnage ?</div>
         <input type="text" class="npc-linkmodal-search" data-input="npcLinkModalFilter" placeholder="🔍 Rechercher un personnage…" autocomplete="off">
         <div class="npc-linkmodal-grid">${tiles}</div>
       </div>
@@ -4389,7 +4466,7 @@ function _npcLinkUpdateConfirm() {
 
 async function _npcLinkConfirm() {
   if (!_npcLink.npcId || !_npcLink.charId || !_npcLink.typeId) {
-    showNotif('Choisis un joueur et une relation.', 'error');
+    showNotif('Choisis un personnage et une relation.', 'error');
     return;
   }
   const ok = await _npcCreateLink(_npcLink.npcId, _npcLink.charId, _npcLink.charNom, _npcLink.typeId);
@@ -4397,7 +4474,8 @@ async function _npcLinkConfirm() {
 }
 
 // ── Sélecteur de personnage avec portraits (pour l'ajout d'affinité) ─────────
-const _profilePortraitSrc = (p = {}) => p.portraitUrl || p.photo || p.avatar || p.avatarUrl || '';
+const _profilePortraitSrc = (p = {}) =>
+  p?.portraitUrl || p?.photo || p?.avatar || p?.avatarUrl || '';
 const _playerProfileForChar = (charId = '', charNom = '') => {
   const byId = charId ? _playerProfiles.find(p =>
     p.charId === charId || p.characterId === charId || p.persoId === charId || p.linkedCharId === charId
@@ -4407,7 +4485,7 @@ const _playerProfileForChar = (charId = '', charNom = '') => {
   return targetName ? _playerProfiles.find(p => _norm(p.nom || p.name || '') === targetName) || null : null;
 };
 const _charPortraitSrc = (c = {}, profile = null) =>
-  c.photo || c.portraitUrl || c.avatar || c.avatarUrl || _profilePortraitSrc(profile) || '';
+  c?.photo || c?.portraitUrl || c?.avatar || c?.avatarUrl || _profilePortraitSrc(profile);
 const _relationCharacterFor = (a = {}) => {
   const chars = [...(STATE.characters || []), ..._relationCharacters];
   const byId = a.charId ? chars.find(x => x.id === a.charId) : null;
@@ -4415,9 +4493,12 @@ const _relationCharacterFor = (a = {}) => {
   const targetName = _norm(a.charNom || '');
   return targetName ? chars.find(x => _norm(x.nom || x.name || '') === targetName) || null : null;
 };
-const _charAvatar = (c) => _charPortraitSrc(c)
-  ? `<img class="npc-charpick-av" src="${_esc(_charPortraitSrc(c))}" alt="">`
-  : `<span class="npc-charpick-av npc-charpick-av--ph">${_esc((c.nom || '?')[0].toUpperCase())}</span>`;
+const _charAvatar = (c) => {
+  const src = _charPortraitSrc(c);
+  return src
+    ? `<img class="npc-charpick-av" src="${_esc(src)}" alt="">`
+    : `<span class="npc-charpick-av npc-charpick-av--ph">${_esc((c?.nom || '?')[0].toUpperCase())}</span>`;
+};
 
 const _storedRelationPortraitSrc = (a = {}, profile = null) => {
   const stored = a.charPhoto || a.photo || a.portraitUrl || a.avatar || a.avatarUrl || '';
@@ -4426,9 +4507,9 @@ const _storedRelationPortraitSrc = (a = {}, profile = null) => {
 };
 
 const _profileCroppedAvatar = (profile = {}) => {
-  const src = profile.imageUrl || '';
+  const src = profile?.imageUrl || '';
   if (!src) return '';
-  const cc = profile.cardCrop;
+  const cc = profile?.cardCrop;
   const imgStyle = cc
     ? `position:absolute;left:${(cc.offX * 100).toFixed(2)}%;top:${(cc.offY * 100).toFixed(2)}%;width:${(cc.imgW * 100).toFixed(2)}%;height:auto;max-width:none`
     : 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top';
@@ -4505,6 +4586,7 @@ async function _npcCreate() {
     const entry = { id: newId || `npc_${Date.now()}`, ...data };
     if (!_npcs.find(n => n.id === entry.id)) _npcs.push(entry);
     _activeId = entry.id;
+    _syncNpcRoute();
     _renderPage(document.getElementById('main-content'));
     showNotif('PNJ créé — modifie-le directement dans la fiche.', 'success');
   } catch (e) { notifySaveError(e); }
@@ -4525,6 +4607,7 @@ function _refreshActivePanel() {
 
   if (!_npcs.find(x => x.id === _activeId)) {
     _activeId = active?.id || null;
+    _syncNpcRoute({ replace: true });
   }
 
   replaceHtmlPreservingView(
@@ -4551,6 +4634,16 @@ export async function deleteAffinitePerso(id) {
 // ── Override PAGES.npcs ───────────────────────────────────────────────────────
 PAGES.npcs = renderNpcs;
 
+// Retour/Avance entre deux PNJ ou deux panneaux : on réutilise les données déjà
+// en mémoire et les abonnements existants, sans remonter la page ni relire Firestore.
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'npcs' || !document.querySelector('.npc-page')) return;
+  if (!_applyNpcRoute(event.detail.sub)) return;
+  event.preventDefault();
+  _refreshList({ keepScroll: true });
+  _refreshActivePanel();
+});
+
 
 registerActions({
   _npcSearch:                (el) => _npcSearch(el.value),
@@ -4568,7 +4661,7 @@ registerActions({
   npcLinkPickType:           (btn) => { _npcLink.typeId = btn.dataset.typeId; document.querySelectorAll('.npc-linkmodal-type').forEach(t => t.classList.toggle('is-sel', t === btn)); _npcLinkUpdateConfirm(); },
   npcLinkModalFilter:        (el)  => { const q = (el.value || '').trim().toLowerCase(); document.querySelectorAll('.npc-linkmodal-tile').forEach(t => { t.style.display = t.textContent.toLowerCase().includes(q) ? '' : 'none'; }); },
   npcLinkConfirm:            ()    => _npcLinkConfirm(),
-  npcSetTab:                 (btn) => { const t = btn?.dataset?.tab; if (t === 'combat' || t === 'sorts') { _npcSheetTab = t; _refreshActivePanel(); } },
+  npcSetTab:                 (btn) => _npcSetSheetTab(btn?.dataset?.tab),
   // Deck de sorts PNJ (hôte-aware via forms.js) — dispo sur la page PNJ.
   toggleSort:                (btn) => _spellToggle(Number(btn.dataset.idx), btn),
   duplicateSort:             (btn) => _spellDuplicate(Number(btn.dataset.idx)),
@@ -4591,7 +4684,7 @@ registerActions({
   npcManualEquipCancel:      () => popModal(),
   npcEditAction:             (btn) => _npcEditAction(btn),
   npcDeleteAction:           (btn) => _npcDeleteAction(btn),
-  npcSetPanel:               (btn) => _npcSetPanel(btn),
+  npcSetPanel:               (btn) => _npcSetPanel(btn?.dataset?.panel),
   npcSetPhoto:               (btn) => _npcSetPhoto(btn),
   npcViewPhoto:              (btn) => _npcViewPhoto(btn),
   npcSetStatut:              (btn) => _npcSetStatut(btn),

@@ -24,6 +24,8 @@ import {
   makeInventoryHistoryEntry,
 } from '../../shared/inventory-history.js';
 import { getArmorTypeMeta, getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
+import { isFeatureEnabled } from '../../shared/features.js';
+import { recipeBookButton } from '../recipes.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import { characterBuildsForStorage, patchBuildLocally } from '../../shared/character-builds.js';
@@ -42,12 +44,7 @@ import {
 
 import { canControlCharacter, getCharacterById } from '../../shared/character-state.js';
 let _charInvSearch = '';
-let _invCatOpen = {};
-let _invCategoryFilter = 'all';
-let _invSort = 'category';
-let _invOnlyNew = false;
 let _invSelected = '';
-let _invZoneOpen = { worn: true, belt: true, bag: true };
 let _sellRefundsCum = [];
 let _modalCharTargets = [];
 let _shopItemsCache = null;
@@ -527,102 +524,110 @@ function _invCategoryGroups(groups) {
   ];
 }
 
-function _invSortGroups(groups, recentMap) {
-  const sorted = [...groups];
-  if (_invSort === 'value') return sorted.sort((a, b) => getInventoryItemValue(b.item, getInventoryCatalogItem(b.item.itemId)) - getInventoryItemValue(a.item, getInventoryCatalogItem(a.item.itemId)));
-  if (_invSort === 'recent') return sorted.sort((a, b) => _invRecentAt(b, recentMap) - _invRecentAt(a, recentMap));
-  if (_invSort === 'az') return sorted.sort((a, b) => String(a.item.nom || '').localeCompare(String(b.item.nom || ''), 'fr', { sensitivity: 'base' }));
-  return sorted;
+// ── Inventaire v10 « lisible d'abord » : trois listes en une colonne, une ligne
+// = nom + quantité + une info clé, détail en accordéon. Réutilise toute la
+// logique métier existante (équipement, vente, envoi, suppression, historique).
+const _IV_RAR = item => Math.max(0, parseInt(item?.rarete ?? item?.rare ?? 0) || 0);
+// Barème réel 1-indexé (Commun = 1). « Notable » = au-dessus du commun → marque
+// + couleur ; 0/1 = aucune marque (volontaire, pour ne pas charger la liste).
+const _IV_NOTABLE = rare => rare >= 2 && !!RARETE_NAMES[rare];
+const _ivRareColor = rare => _IV_NOTABLE(rare) ? (_rareteColor(RARETE_NAMES[rare]) || '#7a8fa8') : '';
+function _ivOrder(recentMap) {
+  return (a, b) => (_invRecentAt(b, recentMap) ? 1 : 0) - (_invRecentAt(a, recentMap) ? 1 : 0)
+    || _IV_RAR(b.item) - _IV_RAR(a.item)
+    || String(a.item.nom || '').localeCompare(String(b.item.nom || ''), 'fr', { sensitivity: 'base' });
 }
-
-function _invDetailHtml(c, group, canEdit, zone, categories, recentMap) {
-  if (!group) {
-    const total = categories.reduce((sum, cat) => sum + cat.items.reduce((n, g) => n + g.qte, 0), 0);
-    const distributionData = categories.map(cat => {
-      const count = cat.items.reduce((sum, g) => sum + g.qte, 0);
-      const value = cat.items.reduce((sum, g) => sum + getInventoryItemValue(g.item, getInventoryCatalogItem(g.item.itemId)) * g.qte, 0);
-      return { ...cat, count, value };
-    }).filter(cat => cat.value > 0).sort((a, b) => b.value - a.value);
-    const maxValue = Math.max(1, ...distributionData.map(cat => cat.value));
-    const distribution = distributionData.map(cat => `<button class="inv5-distribution-row" data-action="_invSetCategory" data-cat="${_esc(cat.id)}">
-      <span class="inv5-distribution-label"><i>${cat.icon}</i>${_esc(cat.label)}</span>
-      <span class="inv5-distribution-track"><i style="--inv5-share:${Math.max(1, cat.value / maxValue * 100).toFixed(2)}%"></i></span>
-      <em>${Number(cat.value).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} or</em>
-    </button>`).join('');
-    return `<aside class="inv5-detail inv5-value-panel" aria-label="Répartition de la valeur">
-      <h3>Répartition de la valeur</h3>
-      <p>Sélectionnez un objet pour voir sa fiche complète et ses actions.</p>
-      <div class="inv5-distribution" aria-label="Valeur de ${total} objets par catégorie">${distribution || '<span class="inv5-muted">Aucun objet de valeur.</span>'}</div>
-    </aside>`;
-  }
-
+function _ivLegendHtml() {
+  // Liste les raretés notables (index ≥ 2) ; le commun (1) reste « sans marque ».
+  const tiers = RARETE_NAMES.map((n, i) => [n, i]).filter(([n, i]) => i >= 2 && n);
+  if (!tiers.length) return '';
+  return `<div class="iv-leg" aria-label="Légende des raretés">Rareté :${tiers
+    .map(([n]) => `<span style="--iv-rc:${_rareteColor(n) || '#7a8fa8'}"><em>${_esc(n)}</em></span>`).join('')}<span class="nog" style="--iv-rc:var(--text-dim)"><em>Commun : sans marque</em></span></div>`;
+}
+function _ivRowHtml(c, group, zone, canEdit, recentMap, slotLabel = '') {
   const item = group.item;
-  const indicesB64 = btoa(JSON.stringify(group.indices));
+  const rare = _IV_RAR(item);
+  const key = `${zone}::${group.key}`;
+  const open = _invSelected === key;
+  const fresh = !!_invRecentAt(group, recentMap);
+  const notable = _IV_NOTABLE(rare);
+  const b64 = btoa(JSON.stringify(group.indices));
+  return `<div class="iv-row ${zone}${open ? ' open' : ''}" data-action="_invToggleRow" data-key="${_esc(key)}" role="button" tabindex="0" aria-expanded="${open}"${notable ? ` data-r="${rare}"${rare >= RARETE_NAMES.length - 1 ? ' data-top="1"' : ''} style="--iv-rc:${_ivRareColor(rare)}" title="${_esc(RARETE_NAMES[rare])}"` : ''}>
+    <span class="iv-n">${zone === 'worn' && slotLabel ? `<small>${_esc(slotLabel)}</small>` : ''}${fresh ? '<span class="iv-dot" title="Nouveau"></span>' : ''}${notable ? '<span class="iv-gem" aria-hidden="true"></span>' : ''}<b>${_invHighlight(item.nom || 'Sans nom')}</b>${group.qte > 1 ? `<i>×${group.qte}</i>` : ''}</span>
+    <span class="iv-k">${_invHighlight(_invKeyInfo(item))}</span>
+    ${zone === 'belt' && canEdit ? `<button class="iv-use" data-action="_invConsumeOne" data-id="${_esc(c.id)}" data-indices="${b64}">Utiliser</button>` : ''}
+  </div>${open ? _invAccordionDetail(c, group, canEdit, zone) : ''}`;
+}
+function _invAccordionDetail(c, group, canEdit, zone) {
+  const item = group.item;
+  const b64 = btoa(JSON.stringify(group.indices));
   const catalogItem = getInventoryCatalogItem(item.itemId);
   const price = getInventoryItemValue(item, catalogItem);
   const resale = getInventoryItemResaleValue(item, catalogItem);
-  const rarityIndex = Math.max(0, parseInt(item.rarete || item.rare || 0) || 0);
-  const rarityName = RARETE_NAMES[rarityIndex] || 'Commun';
-  const rarityColor = _rareteColor(rarityName) || '#7a8fa8';
-  const imageUrl = getInventoryItemImage(item, catalogItem);
-  const traits = _getTraits(item);
-  const effect = String(getItemEffectText(item) || '').trim();
-  const description = String(item.description || '').trim();
-  const equippedSlots = [...new Set(group.indices.flatMap(index => getEquippedInventoryIndexMap(c).get(index) || []))];
+  const rare = _IV_RAR(item);
+  const isQuest = _invIsQuestItem(item);
+  const equippedMap = getEquippedInventoryIndexMap(c);
+  const equippedSlots = [...new Set(group.indices.flatMap(i => equippedMap.get(i) || []))];
+  const isEquipped = equippedSlots.length > 0;
   const compatibleSlots = getEquipmentSlots().filter(slot => equipmentSlotAcceptsItem(slot, item));
   const preferredSlotId = resolveEquipmentSlotForItem(item);
   const targetSlot = compatibleSlots.find(slot => !c.equipement?.[slot.id])
-    || compatibleSlots.find(slot => slot.id === preferredSlotId)
-    || null;
-  const equipIndex = group.indices.find(index => !(getEquippedInventoryIndexMap(c).get(index) || []).length) ?? group.indices[0];
+    || compatibleSlots.find(slot => slot.id === preferredSlotId) || compatibleSlots[0] || null;
+  const equipIndex = group.indices.find(i => !(equippedMap.get(i) || []).length) ?? group.indices[0];
   const readable = getInventoryReadableDocument(item, catalogItem);
-  const isQuest = _invIsQuestItem(item);
-  const facts = [
-    ['Catégorie', _invCategory(item).label],
-    ['Maniement', item.mains],
-    ['Toucher', item.toucher || (item.toucherStat ? statShort(item.toucherStat) : '')],
-    ['Portée', item.portee],
-    ['Quantité', `×${group.qte}`],
-    ['Valeur', price ? `${price} or` : '—'],
-    ['Revente', resale ? `${resale} or` : '—'],
-  ].filter(([, value]) => value);
-
-  const statusLabel = equippedSlots.length
-    ? `Équipé · ${getEquipmentSlot(equippedSlots[0])?.label || equippedSlots[0]}`
-    : zone === 'belt' ? 'Dans la ceinture' : 'Dans le sac';
-
-  return `<aside class="inv5-detail is-selected" style="--inv5-accent:${rarityColor}" aria-label="Détail de ${_esc(item.nom || 'l’objet')}">
-    <button class="inv5-detail-close" data-action="_invCloseDetail" aria-label="Fermer le détail">×</button>
-    <header class="inv5-detail-hero${imageUrl ? ' has-image' : ''}">
-      ${imageUrl ? `<div class="inv5-detail-image" aria-hidden="true"><img src="${_esc(imageUrl)}" alt="" loading="lazy"></div>` : ''}
-      <div class="inv5-detail-hero-content">
-        <div class="inv5-detail-rarity">${_rareteLabel(rarityIndex) || _esc(rarityName)}</div>
-        <h3>${_esc(item.nom || 'Sans nom')}</h3>
-        <div class="inv5-detail-status"><span class="${equippedSlots.length ? 'is-equipped' : ''}">${_esc(statusLabel)}</span>${_invRecentAt(group, recentMap) ? '<span class="is-new">Nouveau</span>' : ''}</div>
-      </div>
-    </header>
-    <div class="inv5-detail-body">
-      <section><h4>En bref</h4><strong class="inv5-detail-key">${_esc(_invKeyInfo(item))}</strong></section>
-      <dl class="inv5-detail-facts">${facts.map(([label, value]) => `<div><dt>${_esc(label)}</dt><dd>${_esc(value)}</dd></div>`).join('')}</dl>
-      ${_inventoryStatBadgesHtml(item) ? `<section><h4>Bonus</h4><div class="inv-detail-stat-badges">${_inventoryStatBadgesHtml(item)}</div></section>` : ''}
-      ${effect && _norm(effect) !== _norm(description) ? `<section><h4>Effet</h4><p>${_esc(effect)}</p></section>` : ''}
-      ${traits.length ? `<section><h4>Traits</h4><div class="inv5-traits">${traits.map(trait => `<span>${_esc(trait)}</span>`).join('')}</div></section>` : ''}
-      ${description ? `<section class="inv5-detail-description"><h4>Description</h4><p>${_esc(description)}</p></section>` : ''}
-      <section><h4>Note personnelle</h4>${renderInvPersonalLine(c, group.indices, indicesB64, 'row', canEdit)}</section>
-    </div>
-    <footer class="inv5-detail-actions">
-      ${readable && canEdit ? `<button data-action="openInventoryReadableContent" data-id="${_esc(c.id)}" data-indices="${indicesB64}">📖 Lire</button>` : ''}
-      ${canEdit && equippedSlots.length ? `<button data-action="clearEquipSlot" data-slot="${_esc(equippedSlots[0])}" data-render-tab="inventaire">Retirer</button>` : ''}
-      ${canEdit && !equippedSlots.length && targetSlot ? `<button class="is-primary" data-action="equipInventoryItem" data-index="${equipIndex}" data-slot="${_esc(targetSlot.id)}" data-render-tab="inventaire">⚔️ Équiper · ${_esc(targetSlot.label)}</button>` : ''}
-      ${canEdit && _invIsBeltItem({ ...item, belt: undefined }) ? `<button data-action="_invToggleBelt" data-id="${_esc(c.id)}" data-indices="${indicesB64}" data-belt="${zone !== 'belt'}">${zone === 'belt' ? 'Vers le sac' : 'À la ceinture'}</button>` : ''}
-      ${canEdit && item.source === 'boutique' ? `<button class="is-sell" data-action="openSellInvModal" data-id="${_esc(c.id)}" data-indices="${indicesB64}" data-prix="${resale}" data-name="${_esc(item.nom || '')}">↻ Vendre</button>` : ''}
-      ${canEdit ? `<button data-action="openSendInvModal" data-id="${_esc(c.id)}" data-indices="${indicesB64}" data-name="${_esc(item.nom || '')}">↗ Envoyer</button>` : ''}
-      ${canEdit && !isQuest ? `<button class="is-danger" data-action="openDeleteInvModal" data-id="${_esc(c.id)}" data-indices="${indicesB64}" data-name="${_esc(item.nom || '')}" aria-label="Supprimer">×</button>` : ''}
-    </footer>
-  </aside>`;
+  const effect = String(getItemEffectText(item) || '').trim();
+  const description = String(item.description || '').trim();
+  const occupant = targetSlot && !isEquipped ? c.equipement?.[targetSlot.id] : null;
+  const meta = [
+    _IV_NOTABLE(rare) ? `<b>◆ ${_esc(RARETE_NAMES[rare])}</b>` : '',
+    _esc(_invCategory(item).label),
+    item.mains ? _esc(item.mains) : '',
+    (item.toucher || item.toucherStat) ? `Toucher ${_esc(item.toucher || statShort(item.toucherStat))}` : '',
+    item.portee ? `Portée ${_esc(item.portee)}` : '',
+    price ? `${price} or${group.qte > 1 ? ' / u.' : ''}` : '',
+    item.set ? `Set ${_esc(item.set)}` : '',
+  ].filter(Boolean);
+  const txt = effect || description;
+  const txtEdito = !effect && description;
+  const mainBtn = zone === 'belt'
+    ? (canEdit ? `<button class="iv-btn pri" data-action="_invConsumeOne" data-id="${_esc(c.id)}" data-indices="${b64}">Utiliser</button>` : '')
+    : readable && canEdit ? `<button class="iv-btn pri" data-action="openInventoryReadableContent" data-id="${_esc(c.id)}" data-indices="${b64}">Lire</button>`
+      : isEquipped && canEdit ? `<button class="iv-btn" data-action="clearEquipSlot" data-slot="${_esc(equippedSlots[0])}" data-render-tab="inventaire">Retirer</button>`
+        : targetSlot && canEdit ? `<button class="iv-btn pri" data-action="equipInventoryItem" data-index="${equipIndex}" data-slot="${_esc(targetSlot.id)}" data-render-tab="inventaire">Équiper${occupant ? ' à la place de ' + _esc(occupant.nom || 'X') : ''}</button>`
+          : '';
+  const beltBtn = canEdit && !isEquipped && _invIsBeltItem({ ...item, belt: undefined })
+    ? `<button class="iv-btn ghost" data-action="_invToggleBelt" data-id="${_esc(c.id)}" data-indices="${b64}" data-belt="${zone !== 'belt'}">${zone === 'belt' ? 'Ranger dans le sac' : 'Garder à portée de main'}</button>` : '';
+  const sellBtn = canEdit && !isQuest && item.source === 'boutique' && resale
+    ? `<button class="iv-btn ghost" data-action="openSellInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-prix="${resale}" data-name="${_esc(item.nom || '')}">Vendre</button>` : '';
+  const giveBtn = canEdit ? `<button class="iv-btn ghost" data-action="openSendInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-name="${_esc(item.nom || '')}">Donner</button>` : '';
+  const dropBtn = canEdit && !isQuest ? `<button class="iv-btn ghost danger" data-action="openDeleteInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-name="${_esc(item.nom || '')}">Jeter</button>` : '';
+  return `<div class="iv-det" style="--iv-rc:${_ivRareColor(rare) || 'var(--text-dim)'}">
+    <div class="iv-meta">${meta.map(m => `<span>${m}</span>`).join('')}</div>
+    ${occupant ? `<div class="iv-cmp">Actuellement équipé (${_esc(getEquipmentSlot(targetSlot.id)?.label || targetSlot.label)}) : <b>${_esc(occupant.nom || 'objet')}</b> · ${_esc(_invKeyInfo(occupant))} → remplacé par <b>${_esc(_invKeyInfo(item) || item.nom)}</b></div>` : ''}
+    ${txt ? `<p class="${txtEdito ? 'edito' : ''}">${_esc(txt)}</p>` : ''}
+    ${canEdit ? `<div class="iv-note-wrap">${renderInvPersonalLine(c, group.indices, b64, 'row', canEdit)}</div>` : ''}
+    <div class="iv-acts">${mainBtn}${beltBtn}<span class="sp"></span>${sellBtn}${giveBtn}${dropBtn}</div>
+  </div>`;
+}
+let _ivKeysBound = false;
+function _ivBindInventoryKeys() {
+  if (_ivKeysBound) return; _ivKeysBound = true;
+  document.addEventListener('keydown', e => {
+    if (!document.querySelector('.iv')) return;
+    if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) {
+      const input = document.querySelector('.iv-search input');
+      if (input) { e.preventDefault(); input.focus(); }
+    } else if (e.key === 'Escape' && _invSelected && e.target.tagName !== 'TEXTAREA') {
+      _invSelected = ''; _rerenderInventoryView();
+    }
+  });
 }
 
-export function renderCharInventaire(c, canEdit) {
+// Construit UNIQUEMENT le contenu de la liste (.iv-body). Isolé du cadre (barre
+// de recherche + boutons) pour permettre une mise à jour ciblée à la frappe :
+// on remplace le seul innerHTML de .iv-body sans toucher à l'input (plus de
+// perte de focus/caret ni de reconstruction de tout l'onglet).
+function _ivBuildListHtml(c, canEdit) {
   const inv = Array.isArray(c.inventaire) ? c.inventaire : [];
   const allIndices = inv.map((_, index) => index);
   const equippedMap = getEquippedInventoryIndexMap(c);
@@ -630,106 +635,74 @@ export function renderCharInventaire(c, canEdit) {
   const beltIndices = allIndices.filter(index => !equippedIndices.has(index) && _invIsBeltItem(inv[index]));
   const bagIndices = allIndices.filter(index => !equippedIndices.has(index) && !beltIndices.includes(index));
   const recentMap = _invRecentAcquisitions(c);
-  const isNew = group => !!_invRecentAt(group, recentMap);
-  const beltGroups = _groupInventoryEntries(inv, beltIndices).filter(group => !_invOnlyNew || isNew(group));
-  const bagGroupsAll = _groupInventoryEntries(inv, bagIndices);
-  const categoriesAll = _invCategoryGroups(bagGroupsAll);
-  const distributionCategories = _invCategoryGroups(_groupInventoryEntries(inv, allIndices));
-  const availableCategories = new Set(categoriesAll.map(cat => cat.id));
-  if (_invCategoryFilter !== 'all' && !availableCategories.has(_invCategoryFilter)) _invCategoryFilter = 'all';
-  const categories = categoriesAll.map(cat => ({
-    ...cat,
-    items: _invSortGroups(cat.items.filter(group =>
-      (_invCategoryFilter === 'all' || cat.id === _invCategoryFilter) && (!_invOnlyNew || isNew(group))), recentMap),
-  })).filter(cat => cat.items.length);
-  const allGroups = [
-    ..._groupInventoryEntries(inv, [...equippedIndices]).map(group => ({ ...group, zone: 'worn' })),
-    ...beltGroups.map(group => ({ ...group, zone: 'belt' })),
-    ...bagGroupsAll.map(group => ({ ...group, zone: 'bag' })),
-  ];
-  let selected = allGroups.find(group => `${group.zone}::${group.key}` === _invSelected) || null;
-  if (_invSelected && !selected) _invSelected = '';
-  const totalItems = inv.reduce((sum, item) => sum + (parseInt(item.quantite || item.qte || 1) || 1), 0);
-  const totalValue = inv.reduce((sum, item) => sum + getInventoryItemValue(item, getInventoryCatalogItem(item.itemId)) * (parseInt(item.quantite || item.qte || 1) || 1), 0);
-  const newCount = allGroups.filter(group => isNew(group)).reduce((sum, group) => sum + group.qte, 0);
-
-  const renderSelectAttrs = (group, zone) => {
-    const indices = btoa(JSON.stringify(group.indices));
-    return `data-action="_invSelectItem" data-key="${_esc(`${zone}::${group.key}`)}" data-zone="${zone}" data-indices="${indices}" data-search="${_esc(_invSearchValue(group.item))}"`;
-  };
-  const renderBeltRow = group => `<div class="inv5-belt-row inv5-filterable${`belt::${group.key}` === _invSelected ? ' is-selected' : ''}" ${renderSelectAttrs(group, 'belt')}>
-    <button class="inv5-row-main" data-action="_invSelectItem" data-key="${_esc(`belt::${group.key}`)}" data-zone="belt">
-      <span class="inv5-new-dot${isNew(group) ? '' : ' is-placeholder'}"${isNew(group) ? ' title="Nouveau"' : ''}></span><span class="inv5-searchable" data-plain="${_esc(group.item.nom || 'Sans nom')}">${_invHighlight(group.item.nom || 'Sans nom')}</span>
-      <small class="inv5-searchable" data-plain="${_esc(_invKeyInfo(group.item))}">${_invHighlight(_invKeyInfo(group.item))}</small>
-    </button><b>${group.qte}</b>
-    ${canEdit ? `<button class="inv5-use" data-action="_invConsumeOne" data-id="${_esc(c.id)}" data-indices="${btoa(JSON.stringify(group.indices))}" title="Utiliser une unité">−1</button>` : ''}
-  </div>`;
-  const renderBagRow = group => {
-    const item = group.item;
-    const price = getInventoryItemValue(item, getInventoryCatalogItem(item.itemId));
-    const isQuest = _invIsQuestItem(item);
-    const rarityName = RARETE_NAMES[Math.max(0, parseInt(item.rarete || item.rare || 0) || 0)] || 'Commun';
-    const rowAccent = isQuest ? '#facc15' : (_rareteColor(rarityName) || '#7a8fa8');
-    const keyInfo = _invKeyInfo(item);
-    const infoTone = /^\s*\+\d/.test(keyInfo) ? ' is-positive' : (isQuest || /\b(sort|fragment)/i.test(keyInfo) ? ' is-arcane' : '');
-    return `<button class="inv5-item-row inv5-filterable${`bag::${group.key}` === _invSelected ? ' is-selected' : ''}" style="--inv5-row-accent:${rowAccent}" ${renderSelectAttrs(group, 'bag')}>
-      <span class="inv5-item-name">${isNew(group) ? '<i class="inv5-item-new" title="Nouveau" aria-label="Nouveau"></i>' : ''}<strong class="inv5-searchable" data-plain="${_esc(item.nom || 'Sans nom')}">${_invHighlight(item.nom || 'Sans nom')}</strong>${isQuest ? '<span class="inv5-quest-tag">Quête</span>' : ''}${item.notePerso ? `<em class="inv5-searchable" data-plain="${_esc(item.notePerso)}">${_invHighlight(item.notePerso)}</em>` : ''}</span>
-      <span class="inv5-item-info${infoTone} inv5-searchable" data-plain="${_esc(keyInfo)}">${_invHighlight(keyInfo)}</span><span class="inv5-item-qty${group.qte > 1 ? ' is-stack' : ''}">×${group.qte}</span><span class="inv5-item-value">${price ? `${price * group.qte} or` : '—'}</span>
-    </button>`;
-  };
+  const q = _norm(_charInvSearch || '');
+  const matches = group => !q || _invSearchValue(group.item).includes(q);
+  const sortGroups = groups => [...groups].sort(_ivOrder(recentMap));
 
   const slots = getEquipmentSlots();
-  const wornHtml = slots.map(slot => {
-    const index = [...equippedMap.entries()].find(([, slotIds]) => slotIds.includes(slot.id))?.[0];
-    const item = Number.isInteger(index) ? inv[index] : null;
-    if (item) {
-      const group = { key: _invItemKey(item), item, indices: [index], qte: parseInt(item.quantite || item.qte || 1) || 1 };
-      return `<button class="inv5-slot is-filled${`worn::${group.key}` === _invSelected ? ' is-selected' : ''}" ${renderSelectAttrs(group, 'worn')}><small>${_esc(slot.label)}</small><strong>${_esc(item.nom || 'Sans nom')}</strong><span>${_esc(_invKeyInfo(item))}</span></button>`;
-    }
-    const compatibles = bagGroupsAll.filter(group => group.indices.some(idx => equipmentSlotAcceptsItem(slot, inv[idx])));
-    return `<button class="inv5-slot is-empty" ${compatibles.length ? `data-action="_invFocusCompatible" data-slot="${_esc(slot.id)}"` : 'disabled'}><small>${_esc(slot.label)}</small><strong>Vide</strong>${compatibles.length ? `<span>${compatibles.length} compatible${compatibles.length > 1 ? 's' : ''} dans le sac →</span>` : ''}</button>`;
-  }).join('');
+  const wornEntries = slots.map(slot => {
+    const index = [...equippedMap.entries()].find(([, ids]) => ids.includes(slot.id))?.[0];
+    if (!Number.isInteger(index)) return { slot, group: null };
+    const item = inv[index];
+    return { slot, group: { key: `${slot.id}:${_invItemKey(item)}`, item, indices: [index], qte: parseInt(item.quantite || item.qte || 1) || 1 } };
+  });
+  const wornAll = wornEntries.filter(e => e.group);
+  const wornShown = wornAll.filter(e => matches(e.group));
+  const freeSlots = wornEntries.filter(e => !e.group).map(e => e.slot.label);
 
-  const chips = [{ id: 'all', label: 'Tout', icon: '' }, ...categoriesAll].map(cat => {
-    const count = cat.id === 'all' ? bagGroupsAll.reduce((sum, group) => sum + group.qte, 0) : cat.items.reduce((sum, group) => sum + group.qte, 0);
-    return `<button class="inv5-chip${_invCategoryFilter === cat.id ? ' is-on' : ''}" data-action="_invSetCategory" data-cat="${_esc(cat.id)}">${cat.icon || ''} ${_esc(cat.label || 'Tout')} <b>${count}</b></button>`;
-  }).join('');
-  const bagHtml = categories.map(cat => {
-    const count = cat.items.reduce((sum, group) => sum + group.qte, 0);
-    const value = cat.items.reduce((sum, group) => sum + getInventoryItemValue(group.item, getInventoryCatalogItem(group.item.itemId)) * group.qte, 0);
-    return `<details class="inv5-group inv5-filter-group" ${_invCatOpen[cat.id] !== false ? 'open' : ''}><summary data-action="_invCatToggle" data-cat="${_esc(cat.id)}"><span class="inv5-group-chevron">▸</span><span class="inv5-group-icon">${cat.icon}</span><strong>${_esc(cat.label)}</strong><b>${count}</b><em>${value ? `${Number(value).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} or` : '—'}</em></summary><div>${cat.items.map(renderBagRow).join('')}</div></details>`;
-  }).join('');
+  const beltGroups = _groupInventoryEntries(inv, beltIndices);
+  const beltShown = sortGroups(beltGroups.filter(matches));
 
-  return `<div class="inv5-shell">
-    <div class="inv5-layout">
-      <div class="inv5-left">
-        <header class="inv5-topbar">
-          <div class="inv5-summary">
-            <div><small>Bourse</small><strong>${calcOr(c).toLocaleString('fr-FR')} or</strong></div>
-            <div><small>Valeur des objets</small><strong>${totalValue.toLocaleString('fr-FR')} or</strong></div>
-            <div><small>Objets</small><strong>${totalItems}</strong></div>
-          </div>
-          <nav class="inv5-top-actions" aria-label="Actions de l’inventaire">
-            ${canEdit ? `<button class="is-gold" data-action="openSendGoldModal" data-id="${_esc(c.id)}">↗ Or</button><button data-action="openCreateItemModal" data-id="${_esc(c.id)}">🛠️ Créer</button><button data-action="addInvItem">🎁 Butin</button>` : ''}
-            ${inventoryHistoryButton(c)}
-          </nav>
-        </header>
-        <div class="inv5-tools">
-          <label><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg><input type="search" value="${_esc(_charInvSearch)}" placeholder="Rechercher un objet, une note…" data-input="_charInvSearch"></label>
-          ${newCount ? `<button class="inv5-new-filter${_invOnlyNew ? ' is-on' : ''}" data-action="_invToggleNew"><i aria-hidden="true"></i><span>${newCount} nouveau${newCount > 1 ? 'x' : ''}</span></button>` : ''}
-          <div class="inv5-sort" role="group" aria-label="Tri du sac">${[['category','Catégorie'],['value','Valeur'],['recent','Récents'],['az','A–Z']].map(([id,label]) => `<button class="${_invSort === id ? 'is-on' : ''}" data-action="_invSetSort" data-sort="${id}">${label}</button>`).join('')}</div>
-        </div>
-        <main class="inv5-content">
-          <section class="inv5-zone inv5-zone--worn"><button class="inv5-zone-head" data-action="_invToggleZone" data-zone="worn"><span>${_invZoneOpen.worn ? '▾' : '▸'}</span><h3>🧍 Porté</h3><p>Ce que le personnage a sur lui</p><b>${equippedIndices.size} / ${slots.length} emplacements</b></button>${_invZoneOpen.worn ? `<div class="inv5-slots">${wornHtml}</div>` : ''}</section>
-          <section class="inv5-zone inv5-zone--belt"><button class="inv5-zone-head" data-action="_invToggleZone" data-zone="belt"><span>${_invZoneOpen.belt ? '▾' : '▸'}</span><h3>🧪 Ceinture</h3><p>Consommables utilisables en un geste</p><b>${beltGroups.reduce((sum, group) => sum + group.qte, 0)} unités</b></button>${_invZoneOpen.belt ? `<div class="inv5-belt">${beltGroups.map(renderBeltRow).join('') || '<p class="inv5-empty">Aucun objet en accès rapide.</p>'}</div>` : ''}</section>
-          <section class="inv5-zone inv5-zone--bag"><button class="inv5-zone-head" data-action="_invToggleZone" data-zone="bag"><span>${_invZoneOpen.bag ? '▾' : '▸'}</span><h3>🎒 Sac</h3><p>Tout le reste, rangé par catégorie</p><b>${bagGroupsAll.reduce((sum, group) => sum + group.qte, 0)} objets</b></button>${_invZoneOpen.bag ? `<div class="inv5-chips">${chips}</div><div class="inv5-table-head"><span>Objet</span><span>Info clé</span><span>Qté</span><span>Valeur</span></div>${bagHtml || '<p class="inv5-empty">Aucun objet ne correspond aux filtres.</p>'}` : ''}</section>
-        </main>
-      </div>
-      ${_invDetailHtml(c, selected, canEdit, selected?.zone || 'bag', distributionCategories, recentMap)}
+  const bagGroups = _groupInventoryEntries(inv, bagIndices);
+  const bagCats = _invCategoryGroups(bagGroups)
+    .map(cat => ({ ...cat, items: sortGroups(cat.items.filter(matches)) }))
+    .filter(cat => cat.items.length);
+
+  // Nettoie une sélection devenue invalide (objet consommé / déplacé).
+  const allKeys = new Set([
+    ...wornAll.map(e => `worn::${e.group.key}`),
+    ...beltGroups.map(g => `belt::${g.key}`),
+    ...bagGroups.map(g => `bag::${g.key}`),
+  ]);
+  if (_invSelected && !allKeys.has(_invSelected)) _invSelected = '';
+
+  const head = (title, count) => `<div class="iv-sh"><h3>${title}</h3><span>${count}</span></div>`;
+  let listHtml = '';
+  if (wornShown.length || (!q && freeSlots.length)) {
+    listHtml += `<section class="iv-sec iv-whole">${head('Sur moi', wornAll.length)}`
+      + wornShown.map(e => _ivRowHtml(c, e.group, 'worn', canEdit, recentMap, e.slot.label)).join('')
+      + (!q && freeSlots.length ? `<div class="iv-free">Libre : ${_esc(freeSlots.join(' · '))}</div>` : '')
+      + `</section>`;
+  }
+  if (beltShown.length) {
+    listHtml += `<section class="iv-sec iv-whole">${head('À portée de main', beltGroups.reduce((s, g) => s + g.qte, 0))}`
+      + beltShown.map(g => _ivRowHtml(c, g, 'belt', canEdit, recentMap)).join('') + `</section>`;
+  }
+  // Chaque catégorie du sac = un bloc insécable (ne se coupe pas entre colonnes).
+  const bagInner = bagCats.map(cat => `<div class="iv-grp"><div class="iv-gh">${_esc(cat.label)}</div>`
+    + cat.items.map(g => _ivRowHtml(c, g, 'bag', canEdit, recentMap)).join('') + `</div>`).join('');
+  if (bagInner) {
+    listHtml += `<section class="iv-sec">${head('Sac', bagGroups.reduce((s, g) => s + g.qte, 0))}${bagInner}</section>`;
+  }
+  if (listHtml) listHtml += _ivLegendHtml();
+  else listHtml = `<div class="iv-empty">${q ? `Rien ne correspond à « ${_esc(_charInvSearch)} ».` : 'Inventaire vide.'}</div>`;
+  return listHtml;
+}
+
+export function renderCharInventaire(c, canEdit) {
+  const listHtml = _ivBuildListHtml(c, canEdit);
+  setTimeout(_ivBindInventoryKeys, 0);
+  return `<div class="iv">
+    <div class="iv-bar">
+      <label class="iv-search"><span aria-hidden="true">🔍</span><input type="search" value="${_esc(_charInvSearch)}" placeholder="Chercher un objet…  ( / )" data-input="_charInvSearch" autocomplete="off" aria-label="Rechercher dans l’inventaire"></label>
+      ${canEdit ? `<button class="iv-btn" data-action="addInvItem" data-id="${_esc(c.id)}">+ Ajouter</button>` : ''}
+      ${isFeatureEnabled('recettes') ? recipeBookButton(c) : ''}
+      ${inventoryHistoryButton(c)}
     </div>
-    ${selected ? '<button class="inv5-sheet-backdrop" data-action="_invCloseDetail" aria-label="Fermer le détail"></button>' : ''}
+    <div class="iv-body">${listHtml}</div>
   </div>`;
 }
+
 
 // ── Filtrage live par recherche ───────────────
 export function filterInvRows(val) {
@@ -1835,68 +1808,39 @@ export async function saveInvItem(idx) {
   _renderInventoryChar(c, 'inventaire');
 }
 
+// Mise à jour CIBLÉE de la liste : ne reconstruit que .iv-body, laisse la barre
+// de recherche (et son input focalisé) intacte. Utilisée à la frappe.
+function _ivUpdateList() {
+  const c = charSession.getCurrentChar?.() || STATE.activeChar;
+  const body = document.querySelector('.iv .iv-body');
+  if (!c || !body) return;
+  body.innerHTML = _ivBuildListHtml(c, charSession.getCanEditChar?.() ?? STATE.isAdmin);
+}
+// Débounce : coalesce les reconstructions pendant une frappe rapide. L'input
+// reste vivant et réactif ; seule la liste filtrée se met à jour après la pause.
+let _ivSearchTimer = null;
+function _ivDebouncedListUpdate() {
+  clearTimeout(_ivSearchTimer);
+  _ivSearchTimer = setTimeout(() => { _ivSearchTimer = null; _ivUpdateList(); }, 120);
+}
+
 function _rerenderInventoryView({ focusSearch = false } = {}) {
   const c = charSession.getCurrentChar?.() || STATE.activeChar;
   if (!c) return;
   const scrollTop = document.scrollingElement?.scrollTop || window.scrollY || 0;
-  const search = document.querySelector('.inv5-tools input[type="search"]');
+  const search = document.querySelector('.iv-search input[type="search"]');
   const caret = search?.selectionStart ?? String(_charInvSearch || '').length;
   _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
   requestAnimationFrame(() => {
     window.scrollTo(0, scrollTop);
     if (!focusSearch) return;
-    const input = document.querySelector('.inv5-tools input[type="search"]');
+    const input = document.querySelector('.iv-search input[type="search"]');
     if (!input) return;
     input.focus({ preventScroll: true });
     try { input.setSelectionRange(caret, caret); } catch {}
   });
 }
 
-function _invSelectItem(key, zone = 'bag') {
-  _invSelected = String(key || '');
-  _patchInventorySelection();
-  requestAnimationFrame(() => {
-    const detail = document.querySelector('.inv5-detail.is-selected');
-    if (detail && window.matchMedia('(max-width: 900px)').matches) detail.focus?.({ preventScroll: true });
-  });
-}
-
-function _patchInventorySelection() {
-  const c = charSession.getCurrentChar?.() || STATE.activeChar;
-  const shell = document.querySelector('.inv5-shell');
-  if (!c || !shell) return;
-
-  // Une sélection ne change que l'inspecteur. Conserver le DOM de la liste évite
-  // de relancer l'animation d'entrée de tout l'onglet à chaque clic.
-  const template = document.createElement('template');
-  template.innerHTML = renderCharInventaire(c, charSession.getCanEditChar());
-  const nextShell = template.content.querySelector('.inv5-shell');
-  const nextDetail = nextShell?.querySelector('.inv5-detail');
-  const currentDetail = shell.querySelector('.inv5-detail');
-  if (currentDetail && nextDetail) currentDetail.replaceWith(nextDetail);
-
-  shell.querySelector('.inv5-sheet-backdrop')?.remove();
-  const nextBackdrop = nextShell?.querySelector('.inv5-sheet-backdrop');
-  if (nextBackdrop) shell.append(nextBackdrop);
-
-  shell.querySelectorAll('.inv5-slot[data-key], .inv5-belt-row[data-key], .inv5-item-row[data-key]').forEach(row => {
-    row.classList.toggle('is-selected', row.dataset.key === _invSelected);
-  });
-}
-
-function _invFocusCompatible(slotId) {
-  const c = charSession.getCurrentChar?.() || STATE.activeChar;
-  const slot = getEquipmentSlot(slotId);
-  if (!c || !slot) return;
-  const equipped = new Set(getEquippedInventoryIndexMap(c).keys());
-  const compatible = (c.inventaire || []).find((item, index) => !equipped.has(index) && equipmentSlotAcceptsItem(slot, item));
-  if (!compatible) return;
-  _invCategoryFilter = _invIsQuestItem(compatible) ? 'quest' : _invCategory(compatible).id;
-  _invOnlyNew = false;
-  _invZoneOpen.bag = true;
-  _rerenderInventoryView();
-  requestAnimationFrame(() => document.querySelector('.inv5-zone:last-of-type')?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
-}
 
 async function _invToggleBelt(charId, indicesB64, belt) {
   const c = getCharacterById(charId);
@@ -1956,9 +1900,9 @@ async function _invConsumeOne(charId, indicesB64) {
 }
 
 registerActions({
-  _charInvSearch:      (el)  => { _charInvSearch = el.value; filterInvRows(el.value); },
+  _charInvSearch:      (el)  => { _charInvSearch = el.value; _invSelected = ''; _ivDebouncedListUpdate(); },
+  _invToggleRow:       (btn) => { const key = btn.dataset.key || ''; _invSelected = _invSelected === key ? '' : key; _rerenderInventoryView(); },
   _sendTargetFilter:   (el)  => _sendTargetFilter(el),
-  _invCatToggle:       (btn) => { const d = btn.closest('details'); requestAnimationFrame(() => { if (d) _invCatOpen[btn.dataset.cat] = d.open; }); },
   _sellRefreshTotal:   (el)  => _sellRefreshTotal(el, Number(el.dataset.prix), Number(el.dataset.max)),
   _invmStep:          (btn) => _invmStep(btn.dataset.input, Number(btn.dataset.delta), Number(btn.dataset.max), btn.dataset.context),
   _lootFilter:         ()    => _lootFilter(),
@@ -1971,13 +1915,6 @@ registerActions({
   _lootSelect:         (btn) => _lootSelect(btn.dataset.id),
   _lootSetCat:         (btn) => _lootSetCat(btn.dataset.cat),
   _lootQte:            (btn) => { const i = document.getElementById('loot-qte'); if (i) i.value = Math.max(1, parseInt(i.value || 1) + Number(btn.dataset.delta)); },
-  _invSelectItem:      (btn) => _invSelectItem(btn.dataset.key, btn.dataset.zone),
-  _invCloseDetail:     () => { _invSelected = ''; _patchInventorySelection(); },
-  _invFocusCompatible:(btn) => _invFocusCompatible(btn.dataset.slot),
-  _invSetCategory:     (btn) => { _invCategoryFilter = btn.dataset.cat || 'all'; if (_invCategoryFilter !== 'all') _invCatOpen[_invCategoryFilter] = true; _invSelected = ''; _rerenderInventoryView(); },
-  _invSetSort:         (btn) => { _invSort = btn.dataset.sort || 'category'; _rerenderInventoryView(); },
-  _invToggleNew:       () => { _invOnlyNew = !_invOnlyNew; _invSelected = ''; _rerenderInventoryView(); },
-  _invToggleZone:      (btn) => { const zone = btn.dataset.zone; if (zone) _invZoneOpen[zone] = !_invZoneOpen[zone]; _rerenderInventoryView(); },
   _invToggleBelt:      (btn) => _invToggleBelt(btn.dataset.id, btn.dataset.indices, btn.dataset.belt === 'true'),
   _invConsumeOne:      (btn) => _invConsumeOne(btn.dataset.id, btn.dataset.indices),
 });

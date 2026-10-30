@@ -419,6 +419,9 @@ const _LAZY_SESSION_COLLECTIONS = new Set([
   'story',
   'achievements',
   'collection',
+  // Cotisations Bastion : collection bornée (1 doc joueur/personnage/salle),
+  // partagée par la page, le dashboard et le badge de navigation.
+  'bastionInvestments',
   // Bestiaire principal : lu par la page Bestiaire, la palette Ctrl+K et le VTT.
   // Lazy-session → 0 lecture en repeat-visit (au prix de la RAM, cf. note ci-dessus).
   'bestiary',
@@ -437,9 +440,10 @@ const _LAZY_SESSION_DOCS = new Set([
   'world/dice_skills',      // histoire.js, shop.js, vtt.js
   'world/rarities',         // boutique/inventaire, stable par aventure
   'world/map',              // config fond de carte, stable mais image potentiellement lourde
-  // Résumé compact du dashboard (tenu par le client MJ) : remplace côté joueur la
-  // lecture complète de story/achievements/collection. Session-live → la porte
-  // « trustworthy » ne conclut jamais « absent » sur un simple snapshot cache.
+  // Résumé compact du dashboard (tenu par le client MJ) : séances + groupes
+  // actifs, sans obliger les joueurs à lire story, quests ou agenda_session.
+  // Session-live → la porte « trustworthy » ne conclut jamais « absent » sur
+  // un simple snapshot cache.
   'settings/dashboardSummary',
   // Pastille « Mur du Bastion » de la navigation (shared/bastion-signal.js) :
   // écoutée sur toutes les pages, elle doit survivre aux navigations.
@@ -1069,6 +1073,28 @@ export async function batchUpdateInCol(updates = []) {
   } catch (e) {
     const targets = resolved.map(({ path, id }) => `${path}/${id}`).join(', ');
     _handleFirestoreError(e, `batchUpdateInCol(${targets})`);
+    throw e;
+  }
+}
+
+// Enregistre plusieurs documents avec merge dans un même commit. Contrairement
+// à batchUpdateInCol, la cible peut ne pas encore exister (documents de réglage
+// initialisés au premier enregistrement, par exemple world/dice_skills).
+export async function batchSaveInCol(updates = []) {
+  if (!Array.isArray(updates) || !updates.length) return;
+  const resolved = updates.map(({ col, id, data }) => ({
+    path: _colPath(col),
+    id,
+    data,
+  }));
+  try {
+    const batch = writeBatch(db);
+    resolved.forEach(({ path, id, data }) => batch.set(doc(db, path, id), data, { merge: true }));
+    await batch.commit();
+    resolved.forEach(({ path, id, data }) => _cachePatchSave(path, id, data));
+  } catch (e) {
+    const targets = resolved.map(({ path, id }) => `${path}/${id}`).join(', ');
+    _handleFirestoreError(e, `batchSaveInCol(${targets})`);
     throw e;
   }
 }

@@ -138,6 +138,7 @@ export const SPELL_PLAY_GROUPS = [
 export const SPELL_FREE_FIELDS = new Set([
   'nom', 'icon', 'effet', 'catId', 'id',
   'actif', 'alwaysPrepared', 'mjValidation', 'mjValidated', 'pmOverride', 'mjNotes', 'mjAlwaysMax',
+  'applyArmorSetBonuses',   // case du MJ (bonus de set du porteur)
   'countInStats', 'mjReviewed',
   'typeSoin', 'classicFormulaFinal', 'enchantMode',
   'afflictionEtatLabel', 'afflictionEtatIcon', 'classicStateLabel', 'classicStateIcon',

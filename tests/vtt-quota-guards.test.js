@@ -2,19 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const firestore = readFileSync(new URL('../assets/js/data/firestore.js', import.meta.url), 'utf8');
-const sharedPresence = readFileSync(new URL('../assets/js/shared/presence.js', import.meta.url), 'utf8');
-const layout = readFileSync(new URL('../assets/js/core/layout.js', import.meta.url), 'utf8');
-const presence = readFileSync(new URL('../assets/js/features/vtt/vtt-presence.js', import.meta.url), 'utf8');
-const chat = readFileSync(new URL('../assets/js/features/chat.js', import.meta.url), 'utf8');
-const pages = readFileSync(new URL('../assets/js/features/pages.js', import.meta.url), 'utf8');
-const vtt = readFileSync(new URL('../assets/js/features/vtt/vtt.js', import.meta.url), 'utf8');
-const tray = readFileSync(new URL('../assets/js/features/vtt/vtt-tray.js', import.meta.url), 'utf8');
-const vttChat = readFileSync(new URL('../assets/js/features/vtt/vtt-chat.js', import.meta.url), 'utf8');
-const adventure = readFileSync(new URL('../assets/js/core/adventure.js', import.meta.url), 'utf8');
-const navigation = readFileSync(new URL('../assets/js/core/navigation.js', import.meta.url), 'utf8');
-const ruler = readFileSync(new URL('../assets/js/features/vtt/vtt-ruler.js', import.meta.url), 'utf8');
-const rules = readFileSync(new URL('../docs/firestore-rules.md', import.meta.url), 'utf8');
+const readSource = url => readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
+const firestore = readSource(new URL('../assets/js/data/firestore.js', import.meta.url));
+const sharedPresence = readSource(new URL('../assets/js/shared/presence.js', import.meta.url));
+const layout = readSource(new URL('../assets/js/core/layout.js', import.meta.url));
+const presence = readSource(new URL('../assets/js/features/vtt/vtt-presence.js', import.meta.url));
+const chat = readSource(new URL('../assets/js/features/chat.js', import.meta.url));
+const pages = readSource(new URL('../assets/js/features/pages.js', import.meta.url));
+const vtt = readSource(new URL('../assets/js/features/vtt/vtt.js', import.meta.url));
+const tray = readSource(new URL('../assets/js/features/vtt/vtt-tray.js', import.meta.url));
+const vttChat = readSource(new URL('../assets/js/features/vtt/vtt-chat.js', import.meta.url));
+const adventure = readSource(new URL('../assets/js/core/adventure.js', import.meta.url));
+const navigation = readSource(new URL('../assets/js/core/navigation.js', import.meta.url));
+const ruler = readSource(new URL('../assets/js/features/vtt/vtt-ruler.js', import.meta.url));
+const rules = readSource(new URL('../docs/firestore-rules.md', import.meta.url));
 
 test('la présence est limitée au VTT et ses lecteurs ne restent pas actifs globalement', () => {
   const lazyCollections = firestore.match(/_LAZY_SESSION_COLLECTIONS = new Set\(\[([\s\S]*?)\]\);/)?.[1] || '';
@@ -71,9 +72,9 @@ test('le journal MJ ne lit pas deux fois quatre-vingts messages pour en afficher
 });
 
 test('le passage de round et le démarrage du combat ne réécrivent pas les tokens inchangés', () => {
-  const turns = readFileSync(new URL('../assets/js/features/vtt/vtt-combat-turns.js', import.meta.url), 'utf8');
+  const turns = readSource(new URL('../assets/js/features/vtt/vtt-combat-turns.js', import.meta.url));
   // Un drapeau n'est réinitialisé que s'il était posé ; les deux boucles passent par le même helper.
-  const flags = readFileSync(new URL('../assets/js/features/vtt/vtt-turn-flags.js', import.meta.url), 'utf8');
+  const flags = readSource(new URL('../assets/js/features/vtt/vtt-turn-flags.js', import.meta.url));
   assert.match(flags, /if \(token\.movedThisTurn\)\s+updates\.movedThisTurn = false;/);
   assert.equal((turns.match(/const updates = _turnResetPatch\(tokData, epoch\);/g) || []).length, 2);
   assert.match(turns, /if \(Object\.keys\(updates\)\.length\) ops\.push/);
@@ -96,11 +97,11 @@ test('les boutons ±1 PV/PM n’écrivent qu’une fois par rafale de clics', ()
 
 test('la présence bat toutes les 180 s et tous les lecteurs partagent la même expiration', () => {
   assert.match(sharedPresence, /const HEARTBEAT_MS = 180_000;/);
-  const ttl = readFileSync(new URL('../assets/js/shared/presence-ttl.js', import.meta.url), 'utf8');
+  const ttl = readSource(new URL('../assets/js/shared/presence-ttl.js', import.meta.url));
   assert.match(ttl, /export const PRESENCE_TTL_MS = 300_000;/);
   const readers = {
     chat, presence, tray, pages,
-    rest: readFileSync(new URL('../assets/js/features/vtt/vtt-rest.js', import.meta.url), 'utf8'),
+    rest: readSource(new URL('../assets/js/features/vtt/vtt-rest.js', import.meta.url)),
   };
   for (const [name, src] of Object.entries(readers)) {
     assert.match(src, /PRESENCE_TTL_MS/, `${name} doit utiliser PRESENCE_TTL_MS`);
@@ -109,7 +110,7 @@ test('la présence bat toutes les 180 s et tous les lecteurs partagent la même 
 });
 
 test('Ctrl+K et la page Admin ne relisent plus des catalogues entiers sans besoin', () => {
-  const palette = readFileSync(new URL('../assets/js/features/command-palette.js', import.meta.url), 'utf8');
+  const palette = readSource(new URL('../assets/js/features/command-palette.js', import.meta.url));
   assert.match(palette, /const shallow = await _loadEntries\(\{ deep: false \}\)/);
   assert.match(palette, /_ensureDeepEntriesForQuery\(requestedQuery\)/);
   assert.match(palette, /getCachedCollection\(col\)/);
@@ -124,7 +125,7 @@ test('2e passe : présence, notes, accusés de lecture et KO ennemi sans écritu
   assert.match(sharedPresence, /_announced = false;[\s\S]{0,260}_lastWriteAt = 0;/);
   assert.match(sharedPresence, /if \(_announced && since < HEARTBEAT_MS\) _timer = setTimeout\(beat, HEARTBEAT_MS - since\);/);
   // Notes mini-fiche : brouillon capturé à la frappe, écrit au blur / à 1,5 s.
-  const mini = readFileSync(new URL('../assets/js/features/vtt/vtt-mini-fiche.js', import.meta.url), 'utf8');
+  const mini = readSource(new URL('../assets/js/features/vtt/vtt-mini-fiche.js', import.meta.url));
   assert.match(mini, /const _MS_NOTE_SAVE_MS = 1500;/);
   assert.match(mini, /t\.onblur = onBlur/);
   assert.match(mini, /notes\[idx\] = \{ \.\.\.notes\[idx\], titre: draft\.titre\.trim\(\) \|\| 'Sans titre', contenu: draft\.contenu \}/);
@@ -146,7 +147,7 @@ test('3e passe : un token relâché sur sa case et un nombre inchangé ne rééc
   assert.match(dragEnd, /if \(!distance\) continue;\s+const movePatch=\{col:nc,row:nr\};/);
   assert.match(dragEnd, /if \(!moves\.length\) \{[\s\S]{0,400}_multiDragOrigin=null; return;\s+\}\s+const batch=writeBatch\(db\);/);
   // Fiche : édition inline d'un nombre sans changement de valeur.
-  const inline = readFileSync(new URL('../assets/js/features/characters/inline-edit.js', import.meta.url), 'utf8');
+  const inline = readSource(new URL('../assets/js/features/characters/inline-edit.js', import.meta.url));
   assert.match(inline, /if \(!c \|\| String\(val\) === cur\) \{ input\.replaceWith\(el\); return; \}/);
 });
 
@@ -160,8 +161,8 @@ test('3e passe : les catalogues secrets du MJ ne sont relus qu’une fois par se
 });
 
 test('3e passe : la cloche ne lit que les événements du joueur, avec repli sans index', () => {
-  const qol = readFileSync(new URL('../assets/js/shared/global-qol.js', import.meta.url), 'utf8');
-  const queries = readFileSync(new URL('../assets/js/data/firestore-queries.js', import.meta.url), 'utf8');
+  const qol = readSource(new URL('../assets/js/shared/global-qol.js', import.meta.url));
+  const queries = readSource(new URL('../assets/js/data/firestore-queries.js', import.meta.url));
   const block = qol.slice(qol.indexOf('function _mountBastionWallNotifications'), qol.indexOf('function _isVisible'));
   assert.match(block, /subscribeRecentWhere\('bastionWallNotifications',\s*\{ field: 'targetUid', value: uid \},\s*\{ orderField: 'ts', max: 30 \}/);
   // Repli historique UNIQUEMENT dans onUnavailable (index absent / refus).
@@ -181,12 +182,12 @@ test('3e passe : les modules feuilles n’importent que des exports existants (d
     }
     return names;
   };
-  const read = rel => readFileSync(new URL(`../assets/js/${rel}`, import.meta.url), 'utf8');
+  const read = rel => readSource(new URL(`../assets/js/${rel}`, import.meta.url));
   const leaves = { 'data/firestore-queries.js': read('data/firestore-queries.js') };
   for (const [file, src] of Object.entries(leaves)) {
     for (const m of src.matchAll(/import\s*\{([\s\S]*?)\}\s*from\s*'([^']+)'/g)) {
       const target = new URL(m[2], new URL(`../assets/js/${file}`, import.meta.url));
-      const available = exportsOf(readFileSync(target, 'utf8'));
+      const available = exportsOf(readSource(target));
       m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean).forEach(name => {
         assert.ok(available.has(name), `${file} importe « ${name} » absent de ${m[2]}`);
       });
@@ -195,7 +196,7 @@ test('3e passe : les modules feuilles n’importent que des exports existants (d
 });
 
 test('la pastille du Mur du Bastion reste à l’écoute après une navigation', () => {
-  const signal = readFileSync(new URL('../assets/js/shared/bastion-signal.js', import.meta.url), 'utf8');
+  const signal = readSource(new URL('../assets/js/shared/bastion-signal.js', import.meta.url));
   const lazyDocs = firestore.match(/_LAZY_SESSION_DOCS = new Set\(\[([\s\S]*?)\]\);/)?.[1] || '';
   // watchDoc (realtime.js) est coupé par unwatchAll() à chaque navigate().
   assert.doesNotMatch(signal, /watchDoc\(|from '\.\/realtime\.js'/);

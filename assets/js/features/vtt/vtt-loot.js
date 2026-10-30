@@ -379,7 +379,7 @@ function _goldRange(str) {
 
 // ── Ligne d'objet (réserve/table) ───────────────────────────────────
 function _lootStepperQty(id, v, min, max) {
-  return `<span class="vtt-loot-qstep"><button data-vtt-fn="_vttLootQtyStep" data-vtt-args="${id}|-1" ${v <= min ? 'disabled' : ''}>${_li('minus')}</button><span>${v}${max != null ? `<em>/${max}</em>` : ''}</span><button data-vtt-fn="_vttLootQtyStep" data-vtt-args="${id}|1" ${max != null && v >= max ? 'disabled' : ''}>${_li('plus')}</button></span>`;
+  return `<span class="vtt-loot-qstep"><button data-vtt-fn="_vttLootQtyStep" data-vtt-args="${id}|-1" ${v <= min ? 'disabled' : ''}>${_li('minus')}</button><label class="vtt-loot-qfield"><input id="vtt-loot-qty-input" class="vtt-loot-qinput" data-loot-qty-input="${_esc(id)}" type="number" inputmode="numeric" step="1" min="${min}"${max != null ? ` max="${max}"` : ''} value="${v}" aria-label="Quantité">${max != null ? `<em>/${max}</em>` : ''}</label><button data-vtt-fn="_vttLootQtyStep" data-vtt-args="${id}|1" ${max != null && v >= max ? 'disabled' : ''}>${_li('plus')}</button></span>`;
 }
 function _lootRow(item, zone) {
   const mj = STATE.isAdmin;
@@ -474,7 +474,7 @@ function _lootCatItem(i) {
     ${n ? _lootStepperBk(i.id, n) : `<span class="vtt-loot-add">${_li('plus')}</span>`}</div>`;
 }
 function _lootStepperBk(id, v) {
-  return `<span class="vtt-loot-qstep"><button data-vtt-fn="_vttLootBasketStep" data-vtt-args="${id}|-1">${_li('minus')}</button><span>${v}</span><button data-vtt-fn="_vttLootBasketStep" data-vtt-args="${id}|1">${_li('plus')}</button></span>`;
+  return `<span class="vtt-loot-qstep"><button data-vtt-fn="_vttLootBasketStep" data-vtt-args="${id}|-1">${_li('minus')}</button><label class="vtt-loot-qfield"><input class="vtt-loot-qinput" data-loot-basket-input="${_esc(id)}" type="number" inputmode="numeric" step="1" min="1" value="${v}" aria-label="Quantité à ajouter"></label><button data-vtt-fn="_vttLootBasketStep" data-vtt-args="${id}|1">${_li('plus')}</button></span>`;
 }
 function _lootCreatureCard(c) {
   const d = _creatureDraws[c.beastId];
@@ -578,6 +578,37 @@ function _updateLootTrigger() {
 
 // ── Liaisons d'inputs (ajout rapide, or, recherche catalogue) ───────
 function _bindLootInputs() {
+  const qty = document.getElementById('vtt-loot-qty-input');
+  if (qty) {
+    qty.onchange = () => _vttLootQtySet(qty.dataset.lootQtyInput, qty.value);
+    qty.onkeydown = e => {
+      if (e.key === 'Enter') { e.preventDefault(); qty.blur(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); _qtyEdit = null; _renderLootPanel(); }
+    };
+  }
+  document.querySelectorAll('[data-loot-basket-input]').forEach(input => {
+    const itemId = input.dataset.lootBasketInput;
+    input.onclick = e => e.stopPropagation();
+    input.onfocus = () => { input.dataset.initialValue = String(_basket[itemId] || 1); input.select(); };
+    input.oninput = () => {
+      if (input.value === '') return;
+      _basket[itemId] = _lootQtyValue(input.value);
+    };
+    input.onchange = () => {
+      const value = _lootQtyValue(input.value);
+      _basket[itemId] = value;
+      input.value = String(value);
+    };
+    input.onkeydown = e => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      else if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        _basket[itemId] = _lootQtyValue(input.dataset.initialValue || _basket[itemId]);
+        input.value = String(_basket[itemId]);
+        input.blur();
+      }
+    };
+  });
   const qa = document.getElementById('vtt-loot-qa');
   if (qa) {
     qa.oninput = e => { _qa = e.target.value; _qaIdx = 0; _qaOpen = true; _renderLootPanel(); };
@@ -676,11 +707,39 @@ function _vttLootRemoveStash(id) { _loot.stash = _loot.stash.filter(i => i.id !=
 function _vttLootRemoveLoot(id)  { _loot.loot  = _loot.loot.filter(i => i.id !== id);  _saveLoot(); }
 function _vttLootClear() { _loot.loot = []; _saveLoot(); }
 
-function _vttLootQtyEdit(id) { _qtyEdit = _qtyEdit === id ? null : id; _renderLootPanel(); }
+function _lootQtyEntry(id) {
+  return _loot.stash.find(x => x.id === id) || _loot.loot.find(x => x.id === id);
+}
+
+function _lootQtyValue(value, min = 1, max = null) {
+  const parsed = Math.floor(Number(value));
+  const safe = Number.isFinite(parsed) ? Math.max(min, parsed) : min;
+  return max == null ? safe : Math.min(max, safe);
+}
+
+function _vttLootQtyEdit(id) {
+  _qtyEdit = _qtyEdit === id ? null : id;
+  _renderLootPanel();
+  if (_qtyEdit) setTimeout(() => document.getElementById('vtt-loot-qty-input')?.select(), 0);
+}
+
+function _vttLootQtySet(id, value) {
+  const entry = _lootQtyEntry(id);
+  if (!entry || entry.kind === 'gold' || entry.vote?.open) return;
+  const qty = _lootQtyValue(value);
+  const input = document.getElementById('vtt-loot-qty-input');
+  if (input) input.value = String(qty);
+  if (qty === entry.qty) return;
+  entry.qty = qty;
+  _saveLoot();
+}
+
 function _vttLootQtyStep(id, delta) {
-  const e = _loot.stash.find(x => x.id === id) || _loot.loot.find(x => x.id === id);
+  const e = _lootQtyEntry(id);
   if (!e || e.kind === 'gold' || e.vote?.open) return;
-  e.qty = Math.max(1, (e.qty || 1) + (+delta));
+  const input = document.getElementById('vtt-loot-qty-input');
+  const displayed = input?.dataset.lootQtyInput === id ? input.value : e.qty;
+  e.qty = _lootQtyValue(_lootQtyValue(displayed) + (+delta));
   _saveLoot();
 }
 
@@ -798,7 +857,10 @@ function _vttLootCataAdd(itemId) {
   _renderLootPanel();
 }
 function _vttLootBasketStep(itemId, delta) {
-  _basket[itemId] = Math.max(0, (_basket[itemId] || 0) + (+delta));
+  const input = [...document.querySelectorAll('[data-loot-basket-input]')]
+    .find(el => el.dataset.lootBasketInput === itemId);
+  const displayed = input?.value === '' ? _basket[itemId] : input?.value;
+  _basket[itemId] = Math.max(0, _lootQtyValue(displayed || _basket[itemId] || 1) + (+delta));
   if (!_basket[itemId]) delete _basket[itemId];
   _renderLootPanel();
 }

@@ -82,6 +82,15 @@ export function invalidateDamageTypesCache() {
   _damageTypes = null;
 }
 
+/**
+ * Lecture synchrone du catalogue déjà disponible, sans déclencher Firestore.
+ * Les vues condensées peuvent ainsi reprendre les couleurs configurées lorsque
+ * le catalogue a déjà été chargé, avec les valeurs de repli de l'aventure sinon.
+ */
+export function getDamageTypes() {
+  return _cloneDamageTypes(_damageTypes || _defaultDamageTypesForAdventure());
+}
+
 /** Retourne les règles d'un type par son id (ou les règles par défaut). */
 export function getDamageTypeRules(types, typeId) {
   if (!typeId || !types) return { ...DEFAULT_RULES };

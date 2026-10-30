@@ -29,3 +29,9 @@ test('sur écran étroit, la fiche du sort devient un panneau du bas refermable'
   );
   assert.match(css, /\.cs-grim\.is-sheet-open \.cs-grim-sheet-x\s*\{[^}]*display:grid/);
 });
+
+test('le modificateur choisi dans la fiche est synchronisé et lu avant le défaut de l arme', () => {
+  assert.match(spellsJs, /function _syncSpellStatProxy\(el\)[\s\S]*target\.value = el\.value;[\s\S]*_updateSortPreview\(\);/);
+  assert.match(spellsJs, /_syncSpellStatProxy:\s*\(el\)\s*=>\s*_syncSpellStatProxy\(el\)/);
+  assert.match(spellsJs, /degatsStat:\s*_readSpellStatOverride\('s-degats-stat', 's-degats-stat-soin'\)/);
+});

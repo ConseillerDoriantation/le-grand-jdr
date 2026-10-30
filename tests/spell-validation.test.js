@@ -38,7 +38,7 @@ const classic = () => ({
   classicStateId: null, classicStateLabel: null, classicStateIcon: null, classicStateDC: null,
   classicStateSaveStat: null, enchantMode: null, enchantEtatId: null, enchantEtatIds: [],
   afflictionMode: null, afflictionEtatId: null, afflictionSaveStat: '', invocation: null,
-  countInStats: true, mjAutoHit: false, mjAlwaysMax: false, mjNotes: '',
+  countInStats: true, mjAutoHit: false, mjAlwaysMax: false, mjNotes: '', applyArmorSetBonuses: true,
   mjValidation: 'ok', mjValidated: true, alwaysPrepared: false, actif: true,
 });
 

@@ -7,76 +7,99 @@ const feature = readFileSync(new URL('assets/js/features/characters/inventory.js
 const sheet = readFileSync(new URL('assets/js/features/characters.js', root), 'utf8');
 const css = readFileSync(new URL('assets/css/characters.css', root), 'utf8');
 
-test('l onglet inventaire actif utilise la vue Porté Ceinture Sac', () => {
+test('l onglet inventaire utilise la vue v10 trois listes (Sur moi · À portée · Sac)', () => {
   assert.match(sheet, /inv:\s*\(\)\s*=>\s*renderCharInventaire\(c, canEdit\)/);
-  const worn = feature.indexOf('🧍 Porté');
-  const belt = feature.indexOf('🧪 Ceinture');
-  const bag = feature.indexOf('🎒 Sac');
-  assert.ok(worn >= 0 && belt > worn && bag > belt);
+  const worn = feature.indexOf("head('Sur moi'");
+  const belt = feature.indexOf("head('À portée de main'");
+  const bag = feature.indexOf("head('Sac'");
+  assert.ok(worn >= 0 && belt > worn && bag > belt, 'les trois sections dans l’ordre');
   assert.match(feature, /const slots = getEquipmentSlots\(\)/);
+  // Sac groupé par type d'objet réel, pas de groupes en dur.
+  assert.match(feature, /_invCategoryGroups\(bagGroups\)/);
 });
 
-test('la vue conserve recherche tris nouveautés et actions contextuelles', () => {
+test('une ligne = losange + nom + qté + info clé, détail en accordéon', () => {
+  for (const marker of [
+    'class="iv-row',
+    'data-action="_invToggleRow"',
+    'class="iv-n"',
+    'class="iv-k"',
+    'class="iv-gem"',   // losange de rareté
+    'class="iv-dot"',   // point « nouveau »
+    'class="iv-leg"',   // légende des raretés
+    'Commun : sans marque',
+  ]) assert.ok(feature.includes(marker), marker);
+  // Rareté « notable » = au-dessus du commun (barème réel 1-indexé).
+  assert.match(feature, /_IV_NOTABLE\s*=\s*rare\s*=>\s*rare\s*>=\s*2/);
+});
+
+test('la barre et les actions réutilisent les flux existants', () => {
   for (const marker of [
     'data-input="_charInvSearch"',
+    'data-action="addInvItem"',       // + Ajouter (forge/butin)
+    'recipeBookButton(c)',
+    'inventoryHistoryButton(c)',
+    'data-action="_invConsumeOne"',    // Utiliser (ceinture)
+    'data-action="equipInventoryItem"',
+    'data-action="clearEquipSlot"',    // Retirer
+    'data-action="_invToggleBelt"',
+    'data-action="openSellInvModal"',  // Vendre
+    'data-action="openSendInvModal"',  // Donner
+    'data-action="openDeleteInvModal"',// Jeter
+    'data-action="openInventoryReadableContent"', // Lire
+  ]) assert.ok(feature.includes(marker), marker);
+  // Un objet de quête n'a ni Vendre ni Jeter.
+  assert.match(feature, /!isQuest[^\n]*data-action="openDeleteInvModal"/);
+});
+
+test('raccourci « / » et fermeture Échap de l’accordéon', () => {
+  assert.match(feature, /e\.key === '\/'/);
+  assert.match(feature, /e\.key === 'Escape'[\s\S]*?_invSelected = ''/);
+});
+
+test('la densité v5 (tri, puces, répartition, panneau sticky) est supprimée', () => {
+  for (const gone of [
     'data-action="_invSetSort"',
     'data-action="_invToggleNew"',
-    'data-action="_invToggleBelt"',
-    'data-action="_invConsumeOne"',
-    'data-action="openInventoryReadableContent"',
-  ]) assert.ok(feature.includes(marker), marker);
-  assert.match(feature, /Un objet de quête ne peut pas être supprimé/);
-  assert.match(feature, /<small>Bourse<\/small><strong>\$\{calcOr\(c\)\.toLocaleString\('fr-FR'\)\} or<\/strong>/);
-  assert.doesNotMatch(feature, /<small>Bourse<\/small><strong>\$\{Number\(c\.or/);
+    'data-action="_invSetCategory"',
+    'inv5-shell',
+    'inv5-distribution',
+    'inv5-chip',
+    'function _invDetailHtml',
+    'function renderCharInventaireLegacy',
+  ]) assert.ok(!feature.includes(gone), `supprimé : ${gone}`);
+  // La barre de chiffres (Bourse/Valeur/Objets) est retirée de l'inventaire.
+  assert.ok(!feature.includes('<small>Bourse</small>'), 'barre Bourse retirée');
 });
 
-test('le détail devient une feuille basse sous 900 px sans casser le sticky desktop', () => {
-  assert.match(css, /\.cs-v3 \.main-col:has\(\.inv5-shell\)\s*\{[\s\S]*?overflow:\s*clip/);
-  assert.match(css, /\.cs-v3 \.inv5-detail\s*\{[\s\S]*?position:\s*sticky/);
-  assert.match(css, /top:\s*calc\(var\(--top-h/);
-  assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*?\.cs-v3 \.inv5-detail\s*\{[\s\S]*?position:\s*fixed/);
-  assert.match(css, /\.cs-v3 \.inv5-sheet-backdrop/);
+test('CSS v10 présent, scopé .cs-v3, responsive et contraste thème clair', () => {
+  // Colonnes fluides pour remplir l'écran (plus de colonne unique centrée).
+  assert.match(css, /\.cs-v3 \.iv-body \{[^}]*column-width: 480px/);
+  assert.match(css, /\.cs-v3 \.iv-leg \{[^}]*column-span: all/);
+  assert.match(css, /\.cs-v3 \.iv-row \{/);
+  assert.match(css, /\.cs-v3 \.iv-gem \{/);
+  assert.match(css, /\.cs-v3 \.iv-row\[data-r\] \.iv-n b \{ color: var\(--iv-rc\)/);
+  assert.match(css, /@media \(max-width: 560px\)[\s\S]*?\.cs-v3 \.iv-k \{ max-width: 42%/);
+  assert.match(css, /\[data-theme="light"\] \.cs-v3 \.iv-row\[data-r\] \.iv-n b/);
+  // Les classes inv5 ne doivent plus exister dans le CSS.
+  assert.ok(!css.includes('.inv5-shell'), 'CSS inv5-shell retiré');
+  assert.ok(!css.includes('.inv5-distribution'), 'CSS inv5-distribution retiré');
 });
 
-test('la répartition, la fiche objet et la ceinture reprennent les composants de la maquette', () => {
-  for (const marker of [
-    'inv5-distribution-track',
-    'inv5-detail-hero',
-    'inv5-detail-body',
-    'inv5-detail-facts',
-    'inv5-zone--belt',
-    'inv5-summary',
-    'inv5-top-actions',
-    'inv5-left',
-    'inv5-detail-image',
-    'inv5-detail-hero-content',
-  ]) assert.ok(feature.includes(marker), marker);
-  assert.match(css, /\.cs-v3 \.inv5-distribution-track/);
-  assert.match(css, /\.cs-v3 \.inv5-zone--belt/);
-  assert.match(css, /\.cs-v3 \.inv5-detail-facts\s*\{[^}]*grid-template-columns:\s*repeat\(2/);
-  assert.match(css, /\.cs-v3 \.inv5-value-panel > h3\s*\{[^}]*font:\s*700 15px/);
-  assert.match(css, /\.cs-v3 \.inv5-distribution button\.inv5-distribution-row\s*\{[^}]*grid-template-columns:\s*110px 116px 55px/);
-  assert.match(feature, /class="inv5-new-filter[\s\S]*?<i aria-hidden="true"><\/i>/);
-  assert.match(css, /\.cs-v3 \.inv5-detail-hero\.has-image/);
-  assert.match(feature, /getInventoryItemImage\(item, catalogItem\)/);
-  assert.ok(feature.indexOf('<header class="inv5-topbar">') < feature.indexOf('<main class="inv5-content">'));
-  assert.match(feature, /function _patchInventorySelection\(\)/);
-  assert.match(feature, /function _invSelectItem[\s\S]*?_patchInventorySelection\(\)/);
-});
-
-test('le sac utilise des filtres compacts, des catégories valorisées et un point pour Nouveau', () => {
-  for (const marker of [
-    'inv5-group-chevron',
-    'inv5-group-icon',
-    'inv5-item-new',
-    'inv5-quest-tag',
-    'inv5-item-qty',
-    'inv5-item-value',
-  ]) assert.ok(feature.includes(marker), marker);
-  assert.doesNotMatch(feature, /isNew\(group\) \? '<i>Nouveau<\/i>'/);
-  assert.match(feature, /const value = cat\.items\.reduce/);
-  assert.match(css, /\.cs-v3 \.inv5-zone--bag/);
-  assert.match(css, /\.cs-v3 button\.inv5-chip/);
-  assert.match(css, /\.cs-v3 \.inv5-item-new\s*\{[^}]*border-radius:\s*50%/);
+test('le changement d onglet rejoue le fondu (characters.js)', () => {
   assert.match(sheet, /if \(!samePanel\)[\s\S]*?area\.classList\.add\('cs-tab-fadein'\)/);
+});
+
+test('la recherche met à jour la liste de façon ciblée et débouncée (sans re-render total)', () => {
+  // La liste est isolée dans un helper réutilisé par le rendu complet ET la MAJ ciblée.
+  assert.match(feature, /function _ivBuildListHtml\(c, canEdit\)/);
+  assert.match(feature, /const listHtml = _ivBuildListHtml\(c, canEdit\)/);       // rendu complet
+  assert.match(feature, /body\.innerHTML = _ivBuildListHtml\(/);                   // MAJ ciblée .iv-body
+  assert.match(feature, /document\.querySelector\('\.iv \.iv-body'\)/);
+  // Le handler de recherche passe par le débounce ciblé, plus par le re-render total.
+  assert.match(feature, /_charInvSearch:\s*\(el\)\s*=>\s*\{[^}]*_ivDebouncedListUpdate\(\)/);
+  assert.ok(!/_charInvSearch:\s*\(el\)\s*=>\s*\{[^}]*_rerenderInventoryView/.test(feature),
+    'la recherche ne doit plus déclencher un re-render total de l’onglet');
+  // Débounce présent.
+  assert.match(feature, /function _ivDebouncedListUpdate\(\)[\s\S]*?setTimeout\([\s\S]*?120\)/);
 });

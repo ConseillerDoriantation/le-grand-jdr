@@ -147,9 +147,49 @@ function _focusModalLayer() {
 // le focus déjà présent dans la SPA et fait journaliser un avertissement par le
 // navigateur. Le composant gère lui-même le focus : on convertit donc cet
 // attribut en intention explicite consommée par _focusModalLayer().
+function _modalBodyHtml(html) {
+  return String(html ?? '').replace(/\sautofocus(?=[\s>])/gi, ' data-modal-initial-focus');
+}
+
 function _setModalBodyHtml(body, html) {
   if (!body) return;
-  body.innerHTML = String(html ?? '').replace(/\sautofocus(?=[\s>])/gi, ' data-modal-initial-focus');
+  body.innerHTML = _modalBodyHtml(html);
+}
+
+// Une couche de confirmation ne doit pas sérialiser/recréer l'éditeur situé en
+// dessous : cela détruirait ses écouteurs directs (upload d'image, aperçus…).
+// On gare donc ses vrais nœuds dans le DOM, masqués et inertes, puis on ajoute
+// la nouvelle couche à côté. Les MutationObserver des composants continuent à
+// voir leurs nœuds attachés au document et ne se détruisent pas prématurément.
+function _parkModalBody(body) {
+  const doc = body?.ownerDocument || globalThis.document;
+  if (!body?.childNodes || typeof body.appendChild !== 'function' || typeof doc?.createElement !== 'function') return null;
+  const parked = doc.createElement('div');
+  parked.className = 'modal-preserved-layer';
+  parked.hidden = true;
+  parked.inert = true;
+  parked.setAttribute?.('aria-hidden', 'true');
+  while (body.firstChild) parked.appendChild(body.firstChild);
+  body.appendChild(parked);
+  return parked;
+}
+
+function _appendModalBodyHtml(body, html) {
+  const doc = body?.ownerDocument || globalThis.document;
+  if (!body || typeof body.appendChild !== 'function' || typeof doc?.createElement !== 'function') return false;
+  const template = doc.createElement('template');
+  if (!('content' in template)) return false;
+  template.innerHTML = _modalBodyHtml(html);
+  body.appendChild(template.content);
+  return true;
+}
+
+function _restoreParkedModalBody(body, parked) {
+  if (!body || !parked || parked.parentNode !== body || !body.childNodes) return false;
+  [...body.childNodes].forEach(node => { if (node !== parked) node.remove(); });
+  while (parked.firstChild) body.insertBefore(parked.firstChild, parked);
+  parked.remove();
+  return true;
 }
 
 function _a11yOnShow() {
@@ -211,13 +251,18 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
 
   const isLayered = !!(bodyEl && overlay?.classList.contains('show'));
   _a11yOnShow();
+  let parkedBody = null;
   if (isLayered) {
+    const previousBody = bodyEl.innerHTML || '';
+    const viewContext = captureViewContext(bodyEl, { includeFocus: true, includeFields: true });
+    parkedBody = _parkModalBody(bodyEl);
     _modalStack.push({
       title: bar?.dataset.title || '',   // titre brut (cf. _applyModalHeader)
-      body: bodyEl.innerHTML || '',
+      body: previousBody,
+      parkedBody,
       // innerHTML ne reflète pas les valeurs saisies dans les inputs/textarea.
       // On capture donc explicitement l'état vivant du formulaire de fond.
-      viewContext: captureViewContext(bodyEl, { includeFocus: true, includeFields: true }),
+      viewContext,
       describedBy: overlay.getAttribute?.('aria-describedby') || '',
       restore,
       dismiss: _activeDismiss,
@@ -234,7 +279,7 @@ export function pushModal(title, bodyHtml, restore = null, opts = {}) {
   _activeDismiss = typeof opts.onDismiss === 'function' ? opts.onDismiss : null;
 
   _applyModalHeader(title, opts);
-  _setModalBodyHtml(bodyEl, bodyHtml);
+  if (!parkedBody || !_appendModalBodyHtml(bodyEl, bodyHtml)) _setModalBodyHtml(bodyEl, bodyHtml);
   overlay?.classList.add('show');
   _focusModalLayer();
 }
@@ -250,7 +295,7 @@ export function popModal() {
   const bodyEl  = document.getElementById('modal-body');
   const overlay = document.getElementById('modal-overlay');
   _applyModalHeader(previous.title);
-  if (bodyEl)  bodyEl.innerHTML    = previous.body;
+  if (bodyEl && !_restoreParkedModalBody(bodyEl, previous.parkedBody)) bodyEl.innerHTML = previous.body;
   if (previous.describedBy) overlay?.setAttribute('aria-describedby', previous.describedBy);
   else overlay?.removeAttribute('aria-describedby');
   restoreViewContextAfterRender(bodyEl, previous.viewContext, { includeFocus: true, includeFields: true });

@@ -32,6 +32,7 @@ import { emptyStateHtml }        from '../shared/list-renderer.js';
 import { calcOr }                from '../shared/char-stats.js';
 import { hasPremiumAccess, planLabel, PREMIUM_LIMITS } from '../shared/premium.js';
 import { deleteAdventure, removeSelfFromAdventure } from '../core/adventure.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 
 import { getCharacterById } from '../shared/character-state.js';
 // ══════════════════════════════════════════════════════════════════════════════
@@ -176,6 +177,7 @@ const _accountUi = {
   avatarTab: 'characters',
   avatarChoice: null,
 };
+const _ACCOUNT_SECTIONS = ['profile', 'connection', 'plan', 'danger'];
 let _accountObserver = null;
 
 const _ACCOUNT_ICONS = {
@@ -275,14 +277,21 @@ async function renderAccount() {
   const user = auth.currentUser;
   const profile = STATE.profile || {};
   if (!user) { content.innerHTML = emptyStateHtml('', 'Non connecté.'); return; }
+  const firstRender = !document.querySelector('.ac-page');
+  const routeSection = getRouteSub('account');
+  if (_ACCOUNT_SECTIONS.includes(routeSection)) _accountUi.section = routeSection;
+  else setRouteSub('account', _accountUi.section, { replace: true });
   const pending = localStorage.getItem(_pendingEmailKey(user.uid));
   if (pending && user.email?.toLowerCase() === pending.toLowerCase()) localStorage.removeItem(_pendingEmailKey(user.uid));
   const pseudo = profile.pseudo || 'Aventurier';
   const premium = hasPremiumAccess(profile);
   const ownsAdventure = (STATE.adventures || []).some(a => a.createdBy === user.uid || (a.admins || []).includes(user.uid));
-  content.innerHTML = `<div class="ac-page"><header class="ac-header"><button class="ac-header-avatar" data-action="openAvatarPicker" aria-label="Changer d'avatar"><img src="${_esc(avatarSrcOf(profile))}" alt=""><span>${_ai('edit')}</span></button><div class="ac-header-text"><span class="ac-kicker">Mon compte</span><h1>${_esc(pseudo)}</h1><p>${_esc(user.email || profile.email || '')}</p><div class="ac-tags"><span class="${premium ? 'premium' : ''}">${_esc(planLabel(profile))}</span>${ownsAdventure ? '<span class="gm">Maître de jeu</span>' : ''}<span>${_esc(_accountProviderLabel(user))}</span></div></div></header><div class="ac-layout"><nav class="ac-nav" aria-label="Sections du compte"><button class="${_accountUi.section === 'profile' ? 'active' : ''}" data-action="goAccountSection" data-section="profile">${_ai('user')}Profil</button><button class="${_accountUi.section === 'connection' ? 'active' : ''}" data-action="goAccountSection" data-section="connection">${_ai('key')}Connexion</button><button class="${_accountUi.section === 'plan' ? 'active' : ''}" data-action="goAccountSection" data-section="plan">${_ai('star')}Abonnement</button><button class="danger-nav ${_accountUi.section === 'danger' ? 'active' : ''}" data-action="goAccountSection" data-section="danger">${_ai('warn')}Zone sensible</button></nav><main class="ac-main">${_profileSection(profile, user)}${_connectionSection(user)}${_planSection(profile)}${_dangerSection(user)}</main></div></div>`;
+  content.innerHTML = `<div class="ac-page"><header class="ac-header"><button class="ac-header-avatar" data-action="openAvatarPicker" aria-label="Changer d'avatar"><img src="${_esc(avatarSrcOf(profile))}" alt=""><span>${_ai('edit')}</span></button><div class="ac-header-text"><span class="ac-kicker">Mon compte</span><h1>${_esc(pseudo)}</h1><p>${_esc(user.email || profile.email || '')}</p><div class="ac-tags"><span class="${premium ? 'premium' : ''}">${_esc(planLabel(profile))}</span>${ownsAdventure ? '<span class="gm">Maître de jeu</span>' : ''}<span>${_esc(_accountProviderLabel(user))}</span></div></div></header><div class="ac-layout"><nav class="ac-nav" aria-label="Sections du compte"><button class="${_accountUi.section === 'profile' ? 'active' : ''}" data-action="goAccountSection" data-section="profile" data-nav-page="account" data-nav-sub="profile">${_ai('user')}Profil</button><button class="${_accountUi.section === 'connection' ? 'active' : ''}" data-action="goAccountSection" data-section="connection" data-nav-page="account" data-nav-sub="connection">${_ai('key')}Connexion</button><button class="${_accountUi.section === 'plan' ? 'active' : ''}" data-action="goAccountSection" data-section="plan" data-nav-page="account" data-nav-sub="plan">${_ai('star')}Abonnement</button><button class="danger-nav ${_accountUi.section === 'danger' ? 'active' : ''}" data-action="goAccountSection" data-section="danger" data-nav-page="account" data-nav-sub="danger">${_ai('warn')}Zone sensible</button></nav><main class="ac-main">${_profileSection(profile, user)}${_connectionSection(user)}${_planSection(profile)}${_dangerSection(user)}</main></div></div>`;
   _setupAccountObserver();
   validateAccountForm();
+  if (firstRender && routeSection && routeSection !== 'profile') {
+    requestAnimationFrame(() => document.getElementById(`account-${routeSection}`)?.scrollIntoView({ block: 'start' }));
+  }
 }
 
 function _setupAccountObserver() {
@@ -293,6 +302,7 @@ function _setupAccountObserver() {
     if (!visible) return;
     const section = visible.target.id.replace('account-', '');
     _accountUi.section = section;
+    setRouteSub('account', section, { replace: true });
     document.querySelectorAll('.ac-nav button').forEach(button => button.classList.toggle('active', button.dataset.section === section));
   }, { rootMargin: '-25% 0px -60% 0px', threshold: [0, .2, .6] });
   document.querySelectorAll('.ac-sec').forEach(section => _accountObserver.observe(section));
@@ -721,9 +731,11 @@ async function copyAccountUid() {
   catch { showNotif("Impossible de copier automatiquement l'identifiant.", 'error'); }
 }
 
-function goAccountSection(section) {
+function goAccountSection(section, { syncRoute = true, behavior = 'smooth' } = {}) {
+  if (!_ACCOUNT_SECTIONS.includes(section)) return;
   _accountUi.section = section;
-  document.getElementById(`account-${section}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (syncRoute) setRouteSub('account', section);
+  document.getElementById(`account-${section}`)?.scrollIntoView({ behavior, block: 'start' });
 }
 
 async function openAccountDanger() {
@@ -851,6 +863,12 @@ async function deleteCharWithRefund(charId) {
 // ══════════════════════════════════════════════════════════════════════════════
 PAGES.account = renderAccount;
 
+document.addEventListener('app:route-sub-changed', (event) => {
+  const { page, sub } = event.detail || {};
+  if (page !== 'account' || !document.querySelector('.ac-page') || !_ACCOUNT_SECTIONS.includes(sub)) return;
+  event.preventDefault();
+  goAccountSection(sub, { syncRoute: false, behavior: 'auto' });
+});
 
 registerActions({
   openAvatarPicker:    () => openAvatarPicker(),

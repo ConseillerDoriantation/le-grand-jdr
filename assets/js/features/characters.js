@@ -8,6 +8,7 @@ import { _esc, _norm, loadingHtml } from '../shared/html.js';
 import { charSession } from '../shared/char-session.js';
 import { characterPortraitContent } from '../shared/portraits.js';
 import { openImageLightbox } from '../shared/image-lightbox.js';
+import { characterOriginalPhotoFor } from '../shared/character-media.js';
 import { avatarSrcOf } from '../shared/avatar.js';
 import {
   applyActiveBuild, buildProjectionPatch, createBuild, deleteBuild,
@@ -32,7 +33,7 @@ import {
   loadCombatStyles, detectCombatStyle,
   openCombatStylesAdmin, openDamageTypesAdmin,
   _weaponFormats,
-  _getTraits, getEquippedInventoryIndexMap, getArmorTypeMeta, getArmorSetData,
+  _getTraits, getEquippedInventoryIndexMap, getArmorTypeMeta, getArmorSetChipText, getArmorSetData,
   // V3 — combat helpers
   getMainWeapon, getWeaponToucherParts, getWeaponDegatsParts,
 } from './characters/data.js';
@@ -111,7 +112,7 @@ import { bindQuillEditors } from '../shared/rich-text-quill.js';
 import { registerActions } from '../core/actions.js';
 // URL de la fiche : #characters/<idPerso>/<onglet> — permet le clic molette sur
 // un onglet (nouvel onglet navigateur sur CE perso) et le partage d'un lien direct.
-import { setRouteSub } from '../shared/route.js';
+import { getRouteSub, setRouteSub } from '../shared/route.js';
 import {
   captureViewContext,
   restoreViewContextAfterRender,
@@ -145,7 +146,7 @@ import { lsJson } from '../shared/local-storage.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
-let _combatTabUi = { charId: '', selected: '', open: false, candidates: false };
+let _combatTabUi = { charId: '', open: null };
 let _currentTopTab   = 'combat';
 let _csV3InvFilter = { cat: 'all', search: '' };
 let _csV3InvDensity = lsJson.get('cs-inventory-density') === 'list' ? 'list' : 'cards';
@@ -156,6 +157,11 @@ const AURA_PALETTE = {
   blue: '#4f8cff', arcane: '#9d6fff', crimson: '#ff5a7e',
   gold: '#e8b84b', emerald: '#22c38e', ember: '#ff9544',
 };
+const CHARACTER_LIFE_STATUSES = Object.freeze({
+  alive: { label: 'En vie' },
+  dead: { label: 'Mort' },
+  other: { label: 'Autre' },
+});
 const _auraColor = (key) => AURA_PALETTE[key] || AURA_PALETTE.blue;
 const _charBlurActions = {};
 let _charCalcPopover = null;
@@ -163,8 +169,6 @@ let _charCalcAnchor = null;
 const _identityUi = {
   charId: null,
   popover: null,
-  editing: false,
-  draft: null,
   vitalBreakdown: null,
 };
 
@@ -172,11 +176,16 @@ function _identityStateFor(c) {
   if (_identityUi.charId !== c?.id) {
     _identityUi.charId = c?.id || null;
     _identityUi.popover = null;
-    _identityUi.editing = false;
-    _identityUi.draft = null;
     _identityUi.vitalBreakdown = null;
   }
   return _identityUi;
+}
+
+function _characterLifeStatus(c) {
+  const raw = _norm(c?.lifeStatus || 'alive');
+  if (['dead', 'mort', 'morte', 'decede', 'decedee'].includes(raw)) return 'dead';
+  if (['other', 'autre'].includes(raw)) return 'other';
+  return 'alive';
 }
 
 const _calcRow = (label, value, detail = '') => `
@@ -551,6 +560,15 @@ const V3_TAB_REMAP = {
   quetes:     'journal',
 };
 
+function _characterRouteSub(charId, tab) {
+  const [routeCharId, routeTab, routeMode] = getRouteSub('characters').split('/');
+  if (tab === 'sorts' && routeCharId === charId && routeTab === 'sorts'
+    && ['grimoire', 'prepare'].includes(routeMode)) {
+    return `${charId}/sorts/${routeMode}`;
+  }
+  return `${charId}/${tab}`;
+}
+
 function _resolveV3Tab(raw) {
   if (V3_TABS.includes(raw)) return raw;
   return V3_TAB_REMAP[raw] || 'combat';
@@ -903,7 +921,7 @@ function _buildTabsHtml(c, v3Tab) {
     role="tab" aria-selected="${t.k===v3Tab?'true':'false'}" aria-controls="char-tab-content"
     tabindex="${t.k===v3Tab?'0':'-1'}"
     data-tab-v3="${t.k}" data-action="showCharTab" data-tab="${t.k}"
-    data-nav-sub="${c.id}/${t.k}">
+    data-nav-page="characters" data-nav-sub="${_characterRouteSub(c.id, t.k)}">
     <span class="tab-ico" aria-hidden="true">${_ico(t.ico)}</span> ${t.lbl}
     ${t.badge?`<span class="tab-badge">${t.badge}</span>`:''}
   </button>`).join('');
@@ -915,13 +933,27 @@ function _identityPopoverHtml(c, canEdit, { xpCur, xpPalier, xpPct }) {
   const ui = _identityStateFor(c);
   if (!ui.popover) return '';
   if (ui.popover === 'builds') return canEdit ? _buildBuildManagerHtml(c) : '';
-  if (ui.popover === 'appearance') {
+  if (ui.popover === 'status') {
+    if (!canEdit) return '';
+    const current = _characterLifeStatus(c);
+    const descriptions = {
+      alive: 'Participe normalement à l’aventure',
+      dead: 'Portrait affiché en noir et blanc',
+      other: 'Situation particulière ou indéterminée',
+    };
+    return `<section class="ids-pop ids-pop-status" role="menu" aria-label="État du personnage">
+      <span class="ids-pop-kicker">État du personnage</span>
+      <div class="ids-status-options">
+        ${Object.entries(CHARACTER_LIFE_STATUSES).map(([value, meta]) => `<button type="button" class="ids-status-option is-${value}${value === current ? ' active' : ''}" role="menuitemradio" aria-checked="${value === current}" data-action="setCharacterLifeStatus" data-id="${c.id}" data-status="${value}">
+          <i aria-hidden="true"></i><span><b>${meta.label}</b><small>${descriptions[value]}</small></span><em aria-hidden="true">✓</em>
+        </button>`).join('')}
+      </div>
+    </section>`;
+  }
+  if (ui.popover === 'aura') {
     if (!canEdit) return '';
     const isCustom = !!c.auraColor;
-    return `<section class="ids-pop ids-pop-look" role="dialog" aria-label="Apparence du personnage">
-      <span class="ids-pop-kicker">Apparence</span>
-      <button class="ids-photo-btn" data-action="open-character-photo" data-charid="${c.id}">Choisir une photo</button>
-      <div class="ids-pop-divider"></div>
+    return `<section class="ids-pop ids-pop-look" role="dialog" aria-label="Aura du personnage">
       <span class="ids-pop-kicker">Aura</span>
       <p class="ids-aura-help">Couleur de l'anneau d'expérience autour du portrait.</p>
       <div class="ids-aura">
@@ -931,6 +963,7 @@ function _identityPopoverHtml(c, canEdit, { xpCur, xpPalier, xpPct }) {
           <input type="color" value="${_auraHex(c)}" data-change="setCharAuraColor" data-id="${c.id}">
         </label>
       </div>
+      ${c.photo ? `<div class="ids-pop-divider"></div><button class="ids-photo-remove" data-action="delete-character-photo" data-charid="${c.id}">Retirer la photo</button>` : ''}
     </section>`;
   }
   const ready = xpPalier > 0 && xpCur >= xpPalier;
@@ -938,8 +971,10 @@ function _identityPopoverHtml(c, canEdit, { xpCur, xpPalier, xpPct }) {
     <header><b>Progression</b><button data-action="closeIdentityPopover" aria-label="Fermer">×</button></header>
     <div class="ids-xp-pop-head"><span>Niveau ${c.niveau || 1}</span><b>${xpPct}%</b></div>
     <div class="ids-xp-track"><i style="width:${xpPct}%"></i></div>
-    <p>${_identityNumber(xpCur)} / ${_identityNumber(xpPalier)} XP</p>
-    ${canEdit ? `<div class="ids-xp-add"><input type="number" id="xp-add-input-${c.id}" placeholder="Gain d'XP" data-char-id="${c.id}" data-xp-input><button data-action="addXpDelta" data-id="${c.id}">Ajouter</button></div>
+    <p class="ids-xp-current-line">${canEdit
+      ? `<button class="ids-xp-current" data-action="inlineEditNum" data-id="${c.id}" data-field="exp" data-min="0" data-max="999999" title="Modifier l’XP actuel">${_identityNumber(xpCur)}</button>`
+      : `<b>${_identityNumber(xpCur)}</b>`}<span>/ ${_identityNumber(xpPalier)} XP</span></p>
+    ${canEdit ? `<div class="ids-xp-add"><input type="number" id="xp-add-input-${c.id}" placeholder="Gain d'XP" data-char-id="${c.id}" data-xp-input data-enter-click="#xp-add-button-${c.id}" aria-label="Ajouter de l'expérience"><button id="xp-add-button-${c.id}" data-action="addXpDelta" data-id="${c.id}">Ajouter</button></div>
     ${ready ? `<button class="ids-levelup" data-action="identityLevelUp" data-id="${c.id}">Niveau ${(c.niveau || 1) + 1}<small>Garde ${xpCur - xpPalier} XP</small></button>` : ''}` : ''}
     ${STATE.isAdmin ? `<div class="ids-manual-level"><span>Niveau manuel</span><div>
       <button data-action="adjustIdentityLevel" data-id="${c.id}" data-delta="-1" aria-label="Baisser le niveau">−</button>
@@ -967,26 +1002,11 @@ function _identityVitalBreakdownHtml(c, canEdit) {
   </div>`;
 }
 
-function _identityFormHtml(c) {
-  const ui = _identityStateFor(c);
-  const draft = ui.draft || { nom: c.nom || '', classe: c.classe || '', race: c.race || '', titres: [...(c.titres || [])] };
-  ui.draft = draft;
-  return `<div class="ids-edit" data-identity-edit="${c.id}">
-    <label>Nom<input data-identity-field="nom" maxlength="80" value="${_esc(draft.nom)}"></label>
-    <div class="ids-edit-pair">
-      <label>Classe<input data-identity-field="classe" maxlength="60" value="${_esc(draft.classe)}" list="identity-class-list"></label>
-      <label>Race<input data-identity-field="race" maxlength="60" value="${_esc(draft.race)}" list="identity-race-list"></label>
-    </div>
-    <datalist id="identity-class-list"><option>Guerrier</option><option>Mage</option><option>Voleur</option><option>Clerc</option><option>Rôdeur</option><option>Barde</option></datalist>
-    <datalist id="identity-race-list"><option>Humain</option><option>Elfe</option><option>Demi-Elfe</option><option>Nain</option><option>Halfelin</option><option>Tieffelin</option></datalist>
-    <label>Titres</label>${_characterTitlesHtml(c, true, draft.titres, true)}
-    <div class="ids-edit-actions"><button data-action="identityCancelEdit">Annuler</button><button class="primary" data-action="identitySaveEdit" data-id="${c.id}">Enregistrer</button></div>
-  </div>`;
-}
-
 function _buildSidebarHtml(c, canEdit, { pvCur, pvMax, pvPct, hpBarCls, pmCur, pmMax, pmPct, xpCur, xpPalier, xpPct, deckActifs, deckFree, deckMax }) {
-  const ui = _identityStateFor(c);
+  _identityStateFor(c);
   const owner = _characterOwnerMeta(c);
+  const lifeStatus = _characterLifeStatus(c);
+  const lifeStatusLabel = CHARACTER_LIFE_STATUSES[lifeStatus].label;
   const ready = xpPalier > 0 && xpCur >= xpPalier;
   const classRace = [c.classe, c.race].filter(Boolean).map(_esc).join(' · ') || 'Identité à compléter';
   const vital = (key, label, current, max, percent, barClass) => `<div class="ids-vital ${key}${percent < 25 ? ' danger' : ''}"${key === 'pv' ? ' id="vital-hp"' : ''}>
@@ -1002,18 +1022,27 @@ function _buildSidebarHtml(c, canEdit, { pvCur, pvMax, pvPct, hpBarCls, pmCur, p
     </div>
 
     <div class="ids-hero">
-      <div class="ids-portrait${ready ? ' is-ready' : ''}">
+      <div class="ids-portrait${ready ? ' is-ready' : ''}${lifeStatus === 'dead' ? ' is-dead' : ''}">
         <svg viewBox="0 0 144 144" aria-label="${xpPct}% d'expérience"><circle class="ids-ring-bg" cx="72" cy="72" r="65"></circle><circle class="ids-ring" cx="72" cy="72" r="65" pathLength="100" stroke-dasharray="${xpPct} ${Math.max(0, 100 - xpPct)}"></circle></svg>
-        ${c.photo
-          ? `<button type="button" class="ids-portrait-in is-clickable" data-action="openCharacterPortraitViewer" data-id="${c.id}" title="Afficher le portrait en entier" aria-label="Afficher le portrait de ${_esc(c.nom || 'ce personnage')} en entier">${characterPortraitContent(c, { imgStyle: `transform:scale(${c.photoZoom || 1}) translate(${c.photoX || 0}px,${c.photoY || 0}px);transform-origin:center`, fallbackTag: 'span' })}</button>`
+        ${canEdit
+          ? `<button type="button" class="ids-portrait-in is-clickable" data-action="open-character-photo" data-charid="${c.id}" data-character-photo-drop="${c.id}" title="Cliquer ou déposer une image" aria-label="Changer le portrait de ${_esc(c.nom || 'ce personnage')}">${characterPortraitContent(c, { fallbackTag: 'span' })}<span class="ids-portrait-hover">${c.photo ? 'Changer' : 'Ajouter'} la photo</span></button>`
           : `<div class="ids-portrait-in">${characterPortraitContent(c, { fallbackTag: 'span' })}</div>`}
-        ${canEdit ? `<button class="ids-portrait-edit" data-action="toggleIdentityPopover" data-popover="appearance" data-id="${c.id}" title="Modifier l'apparence">✎</button>` : ''}
-        <button class="ids-level" data-action="toggleIdentityPopover" data-popover="xp" data-id="${c.id}" title="Voir la progression"><small>NIV</small>${c.niveau || 1}</button>
+        ${canEdit ? `<button class="ids-portrait-edit ids-aura-button" style="--dot-c:${_auraHex(c)}" data-action="toggleIdentityPopover" data-popover="aura" data-id="${c.id}" title="Aura du personnage" aria-label="Modifier l'aura"></button>` : ''}
       </div>
-      ${ui.editing ? _identityFormHtml(c) : `<div class="ids-copy"><h2>${_esc(c.nom || 'Sans nom')}</h2><p>${classRace}</p>${_characterTitlesHtml(c, false)}
+      <button class="ids-level${ready ? ' is-ready' : ''}" data-action="toggleIdentityPopover" data-popover="xp" data-id="${c.id}" title="Expérience et niveau"><small>NIV.</small><b>${c.niveau || 1}</b></button>
+      <div class="ids-copy">
+        ${canEdit
+          ? `<input class="ids-inline ids-name" data-change="identityInlineCommit" data-id="${c.id}" data-field="nom" data-original="${_esc(c.nom || '')}" value="${_esc(c.nom || '')}" maxlength="80" placeholder="Nom du personnage" aria-label="Nom du personnage" autocomplete="off">
+            <div class="ids-sub"><input class="ids-inline" data-change="identityInlineCommit" data-id="${c.id}" data-field="classe" data-original="${_esc(c.classe || '')}" value="${_esc(c.classe || '')}" maxlength="60" placeholder="Classe" aria-label="Classe" autocomplete="off"><span>·</span><input class="ids-inline" data-change="identityInlineCommit" data-id="${c.id}" data-field="race" data-original="${_esc(c.race || '')}" value="${_esc(c.race || '')}" maxlength="60" placeholder="Race" aria-label="Race" autocomplete="off"></div>`
+          : `<h2>${_esc(c.nom || 'Sans nom')}</h2><p>${classRace}</p>`}
+        ${canEdit ? `<button type="button" class="ids-life is-${lifeStatus}" data-action="toggleIdentityPopover" data-popover="status" data-id="${c.id}" title="Modifier l’état du personnage" aria-label="État : ${lifeStatusLabel}. Modifier">
+          <i aria-hidden="true"></i>
+          <span>${lifeStatusLabel}</span>
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5l3-3"/></svg>
+        </button>` : `<span class="ids-life is-${lifeStatus}" title="État du personnage"><i aria-hidden="true"></i><span>${lifeStatusLabel}</span></span>`}
+        ${_characterTitlesHtml(c, canEdit)}
         <button class="ids-xp-line${ready ? ' ready' : ''}" data-action="toggleIdentityPopover" data-popover="xp" data-id="${c.id}">${ready ? `<b>Niveau ${(c.niveau || 1) + 1} prêt</b><span>· gérer</span>` : `<b>${_identityNumber(xpCur)}</b><span>/ ${_identityNumber(xpPalier)} XP · encore ${_identityNumber(Math.max(0, xpPalier - xpCur))}</span>`}</button>
-        ${canEdit ? `<button class="ids-edit-open" data-action="identityStartEdit" data-id="${c.id}">✎ Modifier l'identité</button>` : ''}
-      </div>`}
+      </div>
     </div>
 
     ${_buildBuildSwitcherHtml(c, canEdit)}
@@ -1046,7 +1075,8 @@ function _buildBuildSwitcherHtml(c, canEdit) {
     <select data-change="switchCharacterBuild" data-id="${c.id}" ${canEdit ? '' : 'disabled'}>
       ${builds.map(b => `<option value="${_esc(b.id)}" ${b.id === activeBuildId ? 'selected' : ''}>${_esc(b.name || 'Build')}</option>`).join('')}
     </select>
-    ${canEdit ? `<button type="button" class="ids-build-more${menuOpen ? ' is-open' : ''}" data-action="toggleIdentityPopover" data-popover="builds" data-id="${c.id}" title="Gérer les builds" aria-label="Gérer les builds" aria-expanded="${menuOpen}">⋯</button>` : ''}
+    <em>${builds.length}</em>
+    ${canEdit ? `<button type="button" class="ids-build-more${menuOpen ? ' is-open' : ''}" data-action="toggleIdentityPopover" data-popover="builds" data-id="${c.id}" title="Gérer les builds" aria-label="Gérer les builds" aria-expanded="${menuOpen}">⚙</button>` : ''}
   </div>`;
 }
 
@@ -1090,19 +1120,19 @@ function _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v
   </section>`;
 }
 
-function _characterTitlesHtml(c, canEdit, values = c.titres, draftMode = false) {
+function _characterTitlesHtml(c, canEdit, values = c.titres) {
   const titres = Array.isArray(values) ? values : [];
   if (!titres.length && !canEdit) return '';
-  if (!draftMode) return `<div class="ids-titles">${titres.map(_esc).join('<span aria-hidden="true"> · </span>')}</div>`;
-  return `<div class="ids-title-editor">
+  if (!canEdit) return `<div class="ids-titles">${titres.map(_esc).join('<span aria-hidden="true"> · </span>')}</div>`;
+  return `<div class="ids-title-editor ids-titles">
     <div class="ids-title-list" id="identity-title-list-${_esc(c.id)}">
       ${titres.map((titre, index) => `<div class="ids-title-item">
         <span class="ids-title-handle" title="Glisser pour réordonner" aria-hidden="true">⠿</span>
-        <input data-identity-title data-index="${index}" value="${_esc(titre)}" maxlength="80" aria-label="Titre ${index + 1}">
-        <button data-action="identityRemoveTitle" data-index="${index}" title="Retirer ce titre" aria-label="Retirer ce titre">×</button>
+        <input class="ids-inline" data-change="identityTitleCommit" data-id="${c.id}" data-identity-title data-index="${index}" data-original="${_esc(titre)}" value="${_esc(titre)}" maxlength="80" aria-label="Titre ${index + 1}">
+        <button data-action="identityRemoveTitle" data-id="${c.id}" data-index="${index}" title="Retirer ce titre" aria-label="Retirer ce titre">×</button>
       </div>`).join('')}
     </div>
-    <div class="ids-title-new"><input id="identity-title-new-${_esc(c.id)}" placeholder="Nouveau titre…" maxlength="80" data-enter-click="#identity-title-add-${_esc(c.id)}"><button id="identity-title-add-${_esc(c.id)}" data-action="identityAddTitle" data-id="${c.id}" aria-label="Ajouter le titre">＋</button></div>
+    <input class="ids-inline ids-title-new" id="identity-title-new-${_esc(c.id)}" data-change="identityAddTitle" data-id="${c.id}" placeholder="+ titre" maxlength="80" aria-label="Ajouter un titre">
   </div>`;
 }
 
@@ -1117,10 +1147,17 @@ function _initCharacterTitlesSortable(c) {
     draggable: '.ids-title-item',
     handle: '.ids-title-handle',
     fallbackOnBody: false,
-    onEnd: () => {
-      _identityUi.draft.titres = [...host.querySelectorAll('[data-identity-title]')]
-        .map(input => input.value.trim())
-        .filter(Boolean);
+    onEnd: async () => {
+      const titres = [...host.querySelectorAll('[data-identity-title]')]
+        .map(input => input.value.trim()).filter(Boolean);
+      c.titres = titres;
+      try {
+        await updateInCol('characters', c.id, { titres });
+        _rerenderIdentity(c);
+      } catch (error) {
+        notifySaveError(error);
+        renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
+      }
     },
   });
 }
@@ -1162,15 +1199,6 @@ function _rerenderIdentity(c, focusSelector = '') {
   });
 }
 
-function _readIdentityDraft(c) {
-  const ui = _identityStateFor(c);
-  if (!ui.draft) ui.draft = { nom: c.nom || '', classe: c.classe || '', race: c.race || '', titres: [...(c.titres || [])] };
-  document.querySelectorAll('[data-identity-field]').forEach(input => { ui.draft[input.dataset.identityField] = input.value; });
-  const titleInputs = [...document.querySelectorAll('[data-identity-title]')];
-  if (titleInputs.length) ui.draft.titres = titleInputs.map(input => input.value.trim()).filter(Boolean);
-  return ui.draft;
-}
-
 function _removeIdentityPopover() {
   document.getElementById('identity-popover-layer')?.remove();
 }
@@ -1198,8 +1226,10 @@ function _toggleIdentityPopover(btn) {
   requestAnimationFrame(() => {
     const popover = layer.querySelector('.ids-pop');
     if (!popover) return;
-    const anchor = ui.popover === 'appearance'
-      ? side.querySelector('.ids-portrait') || btn
+    const anchor = ui.popover === 'aura'
+      ? side.querySelector('.ids-aura-button') || btn
+      : ui.popover === 'status'
+        ? side.querySelector('.ids-life') || btn
       : ui.popover === 'builds'
         ? side.querySelector('.ids-build') || btn
         : side.querySelector('.ids-hero') || btn;
@@ -1212,76 +1242,98 @@ function _toggleIdentityPopover(btn) {
   });
 }
 
-function _openCharacterPortraitViewer(btn) {
+async function _openCharacterPortraitViewer(btn) {
   const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
   if (!c?.photo) return;
+  const src = await characterOriginalPhotoFor(c);
   openImageLightbox({
-    src: c.photoOriginal || c.photo,
+    src,
     alt: `Portrait complet de ${c.nom || 'ce personnage'}`,
   });
 }
 
-function _identityStartEdit(btn) {
-  const c = getCharacterById(btn.dataset.id);
-  if (!c || !canControlCharacter(c)) return;
-  const ui = _identityStateFor(c);
-  ui.editing = true;
-  ui.popover = null;
-  ui.draft = { nom: c.nom || '', classe: c.classe || '', race: c.race || '', titres: [...(c.titres || [])] };
-  _rerenderIdentity(c, '[data-identity-field="nom"]');
+function _identityFieldSaved(input) {
+  input.classList.add('is-saved');
+  setTimeout(() => input.isConnected && input.classList.remove('is-saved'), 900);
 }
 
-function _identityCancelEdit() {
-  const c = charSession.getCurrentChar();
-  if (!c) return;
-  const ui = _identityStateFor(c);
-  ui.editing = false;
-  ui.draft = null;
-  _rerenderIdentity(c);
-}
-
-function _identityAddTitle(btn) {
-  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
-  if (!c) return;
-  const draft = _readIdentityDraft(c);
-  const input = document.getElementById(`identity-title-new-${c.id}`);
-  const title = input?.value.trim();
-  if (!title) { input?.focus(); return; }
-  if (draft.titres.some(item => _norm(item) === _norm(title))) { showNotif('Ce titre est déjà présent.', 'info'); input.select(); return; }
-  draft.titres.push(title);
-  _rerenderIdentity(c, `#identity-title-new-${c.id}`);
-}
-
-function _identityRemoveTitle(btn) {
-  const c = charSession.getCurrentChar();
-  if (!c) return;
-  const draft = _readIdentityDraft(c);
-  draft.titres.splice(Number(btn.dataset.index), 1);
-  _rerenderIdentity(c);
-}
-
-async function _identitySaveEdit(btn) {
-  const c = getCharacterById(btn.dataset.id);
-  if (!c || !canControlCharacter(c)) return;
-  const previous = { nom: c.nom, classe: c.classe, race: c.race, titres: [...(c.titres || [])] };
-  const draft = _readIdentityDraft(c);
-  const payload = {
-    nom: draft.nom.trim() || 'Sans nom',
-    classe: draft.classe.trim(),
-    race: draft.race.trim(),
-    titres: [...new Map(draft.titres.map(title => [title.trim().toLocaleLowerCase('fr'), title.trim()])).values()].filter(Boolean),
-  };
-  Object.assign(c, payload);
+async function _identityInlineCommit(input) {
+  const c = getCharacterById(input.dataset.id);
+  const field = input.dataset.field;
+  if (!c || !canControlCharacter(c) || !['nom', 'classe', 'race'].includes(field)) return;
+  const previous = input.dataset.original ?? String(c[field] || '');
+  const next = input.value.trim();
+  if (field === 'nom' && !next) { input.value = previous; return; }
+  if (next === previous) return;
+  c[field] = next;
+  input.value = next;
+  input.dataset.original = next;
   try {
-    await updateInCol('characters', c.id, payload);
-    _identityUi.editing = false;
-    _identityUi.draft = null;
-    showNotif('Identité mise à jour.', 'success');
+    await updateInCol('characters', c.id, { [field]: next });
+    _identityFieldSaved(input);
+    if (field === 'nom') {
+      document.querySelectorAll(`#char-pills .char-pill[data-charid="${CSS.escape(c.id)}"] .char-pill-name`).forEach(el => { el.textContent = next; });
+    }
   } catch (error) {
-    Object.assign(c, previous);
+    c[field] = previous;
+    input.value = previous;
+    input.dataset.original = previous;
     notifySaveError(error);
   }
-  renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
+}
+
+async function _identityTitleCommit(input) {
+  const c = getCharacterById(input.dataset.id);
+  if (!c || !canControlCharacter(c)) return;
+  const index = Number(input.dataset.index);
+  const previousTitles = [...(c.titres || [])];
+  const next = input.value.trim();
+  if (!next) {
+    c.titres.splice(index, 1);
+    try { await updateInCol('characters', c.id, { titres: c.titres }); }
+    catch (error) { c.titres = previousTitles; notifySaveError(error); }
+    _rerenderIdentity(c);
+    return;
+  }
+  if (next === previousTitles[index]) return;
+  c.titres[index] = next;
+  input.value = next;
+  input.dataset.original = next;
+  try {
+    await updateInCol('characters', c.id, { titres: c.titres });
+    _identityFieldSaved(input);
+  } catch (error) {
+    c.titres = previousTitles;
+    input.value = previousTitles[index] || '';
+    input.dataset.original = input.value;
+    notifySaveError(error);
+  }
+}
+
+async function _identityAddTitle(input) {
+  const c = getCharacterById(input.dataset.id) || charSession.getCurrentChar();
+  const title = input.value.trim();
+  if (!c || !canControlCharacter(c) || !title) return;
+  if ((c.titres || []).some(item => _norm(item) === _norm(title))) { input.select(); return; }
+  const previousTitles = [...(c.titres || [])];
+  c.titres = [...previousTitles, title];
+  try {
+    await updateInCol('characters', c.id, { titres: c.titres });
+    _rerenderIdentity(c, `#identity-title-new-${CSS.escape(c.id)}`);
+  } catch (error) {
+    c.titres = previousTitles;
+    notifySaveError(error);
+  }
+}
+
+async function _identityRemoveTitle(btn) {
+  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
+  if (!c || !canControlCharacter(c)) return;
+  const previousTitles = [...(c.titres || [])];
+  c.titres = previousTitles.filter((_, index) => index !== Number(btn.dataset.index));
+  try { await updateInCol('characters', c.id, { titres: c.titres }); }
+  catch (error) { c.titres = previousTitles; notifySaveError(error); }
+  _rerenderIdentity(c);
 }
 
 function _toggleIdentityVitalBreakdown(btn) {
@@ -1290,6 +1342,25 @@ function _toggleIdentityVitalBreakdown(btn) {
   const ui = _identityStateFor(c);
   ui.vitalBreakdown = ui.vitalBreakdown === btn.dataset.calc ? null : btn.dataset.calc;
   _rerenderIdentity(c);
+}
+
+async function _setCharacterLifeStatus(el) {
+  const c = getCharacterById(el.dataset.id) || charSession.getCurrentChar();
+  if (!c || !canControlCharacter(c)) return;
+  const next = CHARACTER_LIFE_STATUSES[el.dataset.status] ? el.dataset.status : 'alive';
+  const previous = _characterLifeStatus(c);
+  if (next === previous) return;
+  c.lifeStatus = next;
+  _identityUi.popover = null;
+  _removeIdentityPopover();
+  _rerenderIdentity(c);
+  try {
+    await updateInCol('characters', c.id, { lifeStatus: next });
+  } catch (error) {
+    c.lifeStatus = previous;
+    _rerenderIdentity(c);
+    notifySaveError(error);
+  }
 }
 
 function _closeIdentityPopover() {
@@ -1341,7 +1412,7 @@ function renderCharSheet(c, keepTab) {
   STATE.activeChar = c;
   charSession.set(c, canEdit, v3Tab);
   _currentTopTab = v3Tab;
-  setRouteSub('characters', `${c.id}/${v3Tab}`);
+  setRouteSub('characters', _characterRouteSub(c.id, v3Tab));
 
   // ── Valeurs dérivées ──────────────────────────
   const pvMax  = calcPVMax(c), pmMax = calcPMMax(c);
@@ -1396,9 +1467,6 @@ function renderCharSheet(c, keepTab) {
 
   _renderTabV3(v3Tab, c, canEdit);
 
-  document.querySelector('[data-xp-input]')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); addXpDelta(e.currentTarget.dataset.charId); }
-  });
   restoreViewContextAfterRender(area, sheetViewContext, {
     includeWindow: true,
     includeFocus: true,
@@ -1555,6 +1623,7 @@ function _itemBonusBadges(it = {}) {
 }
 
 function renderCharCombatV3(c, canEdit) {
+  const mj = canEdit && STATE.isAdmin;
   const equip = c.equipement || {};
   const inventory = Array.isArray(c.inventaire) ? c.inventaire : [];
   const slotDefs = getEquipmentSlots();
@@ -1562,297 +1631,208 @@ function renderCharCombatV3(c, canEdit) {
   const armorSlots = slotDefs.filter(slot => slot.kind !== 'weapon');
   const primarySlot = getPrimaryWeaponSlotId();
   const secondarySlot = getSecondaryWeaponSlotId();
-  const equippedInvMap = (() => {
-    try { return getEquippedInventoryIndexMap?.(c) || new Map(); }
-    catch { return new Map(); }
-  })();
+  const equippedInvMap = (() => { try { return getEquippedInventoryIndexMap?.(c) || new Map(); } catch { return new Map(); } })();
   const sourceItem = (slot, fallback = {}) => {
     const index = [...equippedInvMap.entries()].find(([, slots]) => slots.includes(slot))?.[0];
     return Number.isInteger(index) ? (inventory[index] || fallback) : fallback;
   };
   const currentItem = slot => {
     const raw = equip[slot] || {};
-    if (slot === primarySlot && !raw.nom && !equip[secondarySlot]?.nom) {
-      try { return getMainWeapon(c) || raw; } catch { return raw; }
-    }
+    if (slot === primarySlot && !raw.nom && !equip[secondarySlot]?.nom) { try { return getMainWeapon(c) || raw; } catch { return raw; } }
     return raw;
   };
-  const isDefaultItem = (slot, item) => slot === primarySlot && !equip[slot]?.nom && Boolean(item?.isDefault);
-  const rarity = (slot, item) => {
+  const rarityOf = (slot, item) => {
     const live = sourceItem(slot, item);
     const level = parseInt(live?.rarete ?? item?.rarete) || 0;
-    const label = RARETE_NAMES[level] || '';
-    return { level, label, color: label ? _rareteColor(label) : '#7a8fa8' };
+    return { level, label: RARETE_NAMES[level] || '', color: (level >= 2 && RARETE_NAMES[level]) ? (_rareteColor(RARETE_NAMES[level]) || '#7a8fa8') : '' };
   };
+  const notable = lvl => lvl >= 2 && !!RARETE_NAMES[lvl];
+  const gem = lvl => notable(lvl) ? `<i class="cb-gem" style="--rc:${_rareteColor(RARETE_NAMES[lvl]) || '#7a8fa8'}"></i>` : '';
+  const nm = (name, lvl) => `<span class="cb-nm">${gem(lvl)}<b class="${notable(lvl) ? 'r' : ''}" style="--rc:${notable(lvl) ? _rareteColor(RARETE_NAMES[lvl]) : 'inherit'}">${_esc(name)}</b></span>`;
   const family = item => item?.typeArme || item?.sousType || item?.format || '';
-  const plainStyleName = style => String(style?.label || style?.name || 'Sans style')
-    .replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Sans style';
-  const selectedClass = key => _combatTabUi.selected === key ? ' is-selected' : '';
+  const plainStyleName = style => String(style?.label || style?.name || 'Sans style').replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Sans style';
 
-  if (_combatTabUi.charId !== String(c.id || '')) {
-    _combatTabUi = { charId: String(c.id || ''), selected: `weapon:${primarySlot}`, open: false, candidates: false };
-  }
-  if (!_combatTabUi.selected) _combatTabUi.selected = `weapon:${primarySlot}`;
+  if (_combatTabUi.charId !== String(c.id || '')) _combatTabUi = { charId: String(c.id || ''), open: null };
+  const open = _combatTabUi.open;
+  _bindCombatKeys();
 
-  if (!_combatTabCache.styles) {
-    loadCombatStyles().then(styles => {
-      _combatTabCache.styles = styles || [];
-      if (charSession.getCurrentChar()?.id === c.id && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit);
-    }).catch(() => { _combatTabCache.styles = []; });
-  }
-  if (!_combatTabCache.dmgTypes) {
-    loadDamageTypes().then(types => {
-      _combatTabCache.dmgTypes = types || [];
-      if (charSession.getCurrentChar()?.id === c.id && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit);
-    }).catch(() => { _combatTabCache.dmgTypes = []; });
-  }
-
+  if (!_combatTabCache.styles) { loadCombatStyles().then(styles => { _combatTabCache.styles = styles || []; if (charSession.getCurrentChar()?.id === c.id && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit); }).catch(() => { _combatTabCache.styles = []; }); }
+  if (!_combatTabCache.dmgTypes) { loadDamageTypes().then(types => { _combatTabCache.dmgTypes = types || []; if (charSession.getCurrentChar()?.id === c.id && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, canEdit); }).catch(() => { _combatTabCache.dmgTypes = []; }); }
   const styles = _combatTabCache.styles || [];
   const damageTypes = _combatTabCache.dmgTypes || [];
-  let activeStyle = null;
-  try { activeStyle = detectCombatStyle?.(c, styles); } catch (error) { console.warn('[style detect]', error); }
-  const styleColor = activeStyle?.couleur || activeStyle?.color || '#7a8fa8';
-  const styleName = activeStyle ? plainStyleName(activeStyle) : 'Aucun style détecté';
-  const styleRules = activeStyle ? combatStyleRuleLabels(activeStyle) : [];
-  const mainWeapon = currentItem(primarySlot);
   const damageContextFor = item => resolveWeaponDamageContext(_weaponFormats || [], damageTypes, item || {}, c.elements || []);
   const missRuleFor = context => {
     const rules = getDamageTypeRules(damageTypes, context.damageTypeId || 'physique');
-    const effect = getAttackMissEffect({
-      damageTypeId: context.damageTypeId,
-      isMagicWeapon: context.isMagic,
-      typeRules: rules,
-    }, damageTypes);
-    return effect === 'full'
-      ? { tone: 'arc', label: 'Échec : dégâts complets', detail: 'Échec critique : 0 dégât' }
-      : effect === 'half'
-        ? { tone: 'arc', label: 'Échec : ½ dégâts', detail: 'Échec critique : 0 dégât' }
-        : { tone: 'muted', label: 'Échec : 0 dégât', detail: 'Aucun dégât si la CA résiste' };
+    const effect = getAttackMissEffect({ damageTypeId: context.damageTypeId, isMagicWeapon: context.isMagic, typeRules: rules }, damageTypes);
+    return effect === 'half' ? { tone: 'arc', label: '½ dégâts' } : { tone: 'muted', label: '0 dégât' };
   };
-  const damageContext = damageContextFor(mainWeapon);
-  const missRule = missRuleFor(damageContext);
-  const ruleTone = tone => ({ reaction: 'pos', positive: 'pos', warning: 'warn', arcane: 'arc', muted: 'muted' }[tone] || 'muted');
-  const rulesHtml = [
-    ...styleRules.map(rule => `<span class="cb-rule ${ruleTone(rule.tone)}" title="${_esc(rule.detail)}">${_esc(rule.label)}</span>`),
-    `<span class="cb-rule ${missRule.tone}" title="${_esc(missRule.detail)}">${_esc(missRule.label)}</span>`,
-  ].join('');
+  let activeStyle = null; try { activeStyle = detectCombatStyle?.(c, styles); } catch {}
+  const styleColor = activeStyle?.couleur || activeStyle?.color || '#7a8fa8';
+  const styleName = activeStyle ? plainStyleName(activeStyle) : 'Aucun style';
+  const styleRules = activeStyle ? combatStyleRuleLabels(activeStyle) : [];
+  const ruleTone = t => ({ reaction: 'pos', positive: 'pos', warning: 'warn', arcane: 'arc', muted: 'muted' }[t] || 'muted');
+  const statKeyOf = item => item?.statAttaque === 'dexterite' ? 'dexterite' : item?.statAttaque === 'intelligence' ? 'intelligence' : (item?.statAttaque || item?.toucherStat || 'force');
+  const toucherOf = item => { try { return item?.nom ? getWeaponToucherParts(c, item, statKeyOf(item)) : null; } catch { return null; } };
+  const degatsOf = item => { try { return item?.nom ? getWeaponDegatsParts(c, item, statKeyOf(item)) : null; } catch { return null; } };
 
-  const weaponData = slotDef => {
-    const item = currentItem(slotDef.id);
-    const locked = slotDef.id === secondarySlot && weaponHands(currentItem(primarySlot)) === 2;
-    const isDefault = isDefaultItem(slotDef.id, item);
-    const statKey = item?.statAttaque === 'dexterite' ? 'dexterite'
-      : item?.statAttaque === 'intelligence' ? 'intelligence' : 'force';
-    let toucher = null, degats = null;
-    try { toucher = item?.nom ? getWeaponToucherParts(c, item, statKey) : null; } catch {}
-    try { degats = item?.nom ? getWeaponDegatsParts(c, item, statKey) : null; } catch {}
-    return { slotDef, item, locked, isDefault, toucher, degats, damageContext: damageContextFor(item), traits: item?.nom ? (_getTraits(sourceItem(slotDef.id, item)) || []) : [] };
+  const calc = (rows, total) => `<div class="cb-calc">${rows.filter(Boolean).map(r => `<div><span>${_esc(r[0])}</span><b>${_esc(r[1])}</b></div>`).join('')}<div class="tot"><span>Total</span><b>${_esc(total)}</b></div></div>`;
+  const chips = (vals, cls = '') => vals?.length ? `<div class="cb-chips">${vals.map(v => `<span class="${cls}">${_esc(v)}</span>`).join('')}</div>` : '';
+  const extras = item => {
+    const bonus = _itemBonusBadges(item).map(b => b.lbl);
+    const traits = _getTraits(item) || [];
+    const part = item.particularite || (getItemEffectText(item) && degatsOf(item) ? '' : '');
+    return `${bonus.length || traits.length ? `<div class="cb-sec"><h5>Bonus et traits</h5>${chips(bonus, 'st')}${chips(traits)}</div>` : ''}${item.particularite ? `<div class="cb-sec"><h5>Particularité</h5><p class="edito">${_esc(item.particularite)}</p></div>` : ''}`;
   };
-  const weapons = weaponSlots.map(weaponData);
-  const equipmentBonusChips = (slot, item, ca = 0) => {
-    const badges = _itemBonusBadges(sourceItem(slot, item));
-    if (ca) badges.unshift({ lbl: `CA +${ca}`, cls: 'derived-tone derived-ca' });
-    if (!badges.length) return '';
-    return `<span class="cb-item-bonuses">${badges.map(badge => `<i class="badge-chip ${_esc(badge.cls)}">${_esc(badge.lbl)}</i>`).join('')}</span>`;
+
+  // Aperçu d'un changement d'arme : nouveau jet + changement de style + objet rangé.
+  const weaponPreview = (slot, item, index) => {
+    const parts = [];
+    const dmg = degatsOf(item), hit = toucherOf(item);
+    if (dmg) { const ctx = damageContextFor(item); const t = damageTypes.find(x => x.id === ctx.damageTypeId); parts.push(`d20 ${_esc(hit?.roll || '').replace('1d20', '').trim() || '+0'} · ${_esc(dmg.roll)} ${_esc(t?.label || (ctx.isMagic ? 'magique' : 'physique'))}`); }
+    else parts.push(_esc(item.particularite || getItemEffectText(item) || 'Objet de soutien'));
+    let sty = '';
+    try {
+      const before = activeStyle ? plainStyleName(activeStyle) : '';
+      const hypo = { ...c, equipement: { ...equip, [slot]: item, ...(slot === primarySlot && weaponHands(item) === 2 ? { [secondarySlot]: {} } : {}) } };
+      const after = detectCombatStyle?.(hypo, styles);
+      const afterN = after ? plainStyleName(after) : '';
+      if (afterN && afterN !== before) sty = `Style : ${before || '—'} → ${afterN}`;
+    } catch {}
+    const warn = (slot === primarySlot && weaponHands(item) === 2 && equip[secondarySlot]?.nom) ? `Range ${equip[secondarySlot].nom}` : '';
+    return { line: parts.join(''), sty, warn };
   };
-  const weaponCard = data => {
-    const { slotDef, item, locked, isDefault, toucher, degats, damageContext: itemDamageContext, traits } = data;
-    const key = `weapon:${slotDef.id}`;
-    if (locked) {
-      return `<div class="cb-w is-locked"><div class="cb-w-head"><div><span class="cb-k">${_esc(slotDef.label)}</span><strong>Prise par l’arme</strong></div></div><p>${_esc(currentItem(primarySlot).nom)} se tient à deux mains.</p></div>`;
-    }
-    if (!item?.nom) {
-      return `<button type="button" class="cb-w is-empty${selectedClass(key)}" data-action="selectCombatDetail" data-detail="${_esc(key)}" data-empty="true"><div class="cb-w-head"><div><span class="cb-k">${_esc(slotDef.label)}</span><strong>Main libre</strong></div></div><p>Rien en main. <b>Équiper…</b></p></button>`;
-    }
-    const rare = rarity(slotDef.id, item);
-    const handLabel = isDefault ? 'Par défaut' : weaponHands(item) === 2 ? '2 mains' : family(item) || '1 main';
-    const head = `<div class="cb-w-head"><div><span class="cb-k">${_esc(slotDef.label)}</span><strong class="${isDefault ? 'is-default' : ''}">${_esc(item.nom)}</strong></div><span class="cb-tag">${_esc(handLabel)}</span></div>`;
-    const bonusChips = equipmentBonusChips(slotDef.id, item);
-    if (!degats) {
-      const effect = item.particularite || getItemEffectText(item) || 'Objet de soutien tenu en main.';
-      return `<button type="button" class="cb-w is-focus${selectedClass(key)}" style="--cb-rare:${_esc(rare.color)}" data-action="selectCombatDetail" data-detail="${_esc(key)}">${head}<span class="cb-focus-effect">${_esc(effect)}</span>${bonusChips}<span class="cb-w-meta">${[family(item), ...traits].filter(Boolean).map(_esc).join(' · ')}</span></button>`;
-    }
-    const type = damageTypes.find(entry => entry.id === itemDamageContext.damageTypeId);
-    const damageLabel = type?.label || (itemDamageContext.isMagic ? 'Magique' : 'Physique');
-    const damageColor = type?.color || (itemDamageContext.isMagic ? '#bca0ff' : 'var(--text-muted)');
-    return `<button type="button" class="cb-w${selectedClass(key)}" style="--cb-rare:${_esc(rare.color)};--cb-damage:${_esc(damageColor)}" data-action="selectCombatDetail" data-detail="${_esc(key)}">${head}<span class="cb-rolls"><span class="cb-roll"><small>Toucher</small><b>${_esc(toucher?.roll || '—')}</b></span><span class="cb-roll"><small>Dégâts</small><b>${_esc(degats.roll)}</b><em>${_esc(damageLabel)}</em></span></span>${bonusChips}<span class="cb-w-meta">${[item.portee, family(item), ...traits].filter(Boolean).map(_esc).join(' · ')}</span></button>`;
-  };
+  const weaponCandidates = slot => inventory.map((item, index) => ({ item, index }))
+    .filter(({ item, index }) => item?.nom && equipmentSlotAcceptsItem(weaponSlots.find(s => s.id === slot), item) && !(equippedInvMap.get(index) || []).length && !(slot === secondarySlot && weaponHands(item) === 2));
+
+  function wCard(slotDef) {
+    const slot = slotDef.id, key = 'w:' + slot, isOpen = open === key;
+    const locked = slot === secondarySlot && weaponHands(currentItem(primarySlot)) === 2;
+    if (locked) return `<div class="cb-w lock"><span class="cb-k">${_esc(slotDef.label)}</span><div class="cb-meta">Occupée : arme à deux mains.</div></div>`;
+    const item = currentItem(slot);
+    if (!item?.nom) return `<button type="button" class="cb-w empty${isOpen ? ' on' : ''}" data-action="cbOpen" data-k="${key}"><span class="cb-k">${_esc(slotDef.label)}</span><div class="cb-meta">Main libre · <b>Équiper…</b></div></button>`;
+    const rare = rarityOf(slot, item), dmg = degatsOf(item), hit = toucherOf(item);
+    const ctx = damageContextFor(item), type = damageTypes.find(x => x.id === ctx.damageTypeId);
+    const dColor = type?.color || (ctx.isMagic ? '#bca0ff' : 'var(--text-muted)'), dLabel = type?.label || (ctx.isMagic ? 'Magique' : 'Physique');
+    const body = dmg
+      ? `<div class="cb-roll"><b><i>d20</i>${_esc((hit?.roll || '').replace('1d20', '').trim() || '+0')}</b><b style="--dc:${_esc(dColor)}">${_esc(dmg.roll)} <em>${_esc(dLabel)}</em></b></div>`
+      : `<div class="cb-meta" style="color:var(--text-soft)">${_esc(item.particularite || getItemEffectText(item) || 'Objet de soutien.')}</div>`;
+    const meta = [item.portee, weaponHands(item) === 2 ? '2 mains' : '', ...(_getTraits(sourceItem(slot, item)) || [])].filter(Boolean).map(_esc).join(' · ');
+    return `<button type="button" class="cb-w${isOpen ? ' on' : ''}" style="--rc:${_esc(rare.color || 'transparent')}" data-action="cbOpen" data-k="${key}"><span class="cb-k">${_esc(slotDef.label)}</span>${nm(item.nom, rare.level)}${body}${meta ? `<div class="cb-meta">${meta}</div>` : ''}</button>`;
+  }
+  function wDetail(slot) {
+    const item = currentItem(slot), dmg = degatsOf(item), hit = toucherOf(item);
+    const cands = weaponCandidates(slot);
+    const candHtml = cands.length ? `<div class="cb-cand">${cands.map(({ item: it, index }) => { const p = weaponPreview(slot, it, index); const r = parseInt(it.rarete) || 0;
+      return `<div class="cb-ci">${nm(it.nom, r)}<span class="d">${_esc(p.line)}</span>${p.sty ? `<span class="d">${_esc(p.sty)}</span>` : ''}${p.warn ? `<span class="warn">${_esc(p.warn)}</span>` : ''}${canEdit ? `<button class="cb-btn" data-action="equipInventoryItem" data-index="${index}" data-slot="${_esc(slot)}" data-render-tab="combat">Équiper</button>` : ''}</div>`; }).join('')}</div>` : '<div class="cb-none">Rien de compatible dans le sac.</div>';
+    let left = '';
+    if (dmg) {
+      left += `<div class="cb-sec"><h5>Toucher</h5>${calc([['Dé', '1d20'], hit?.statLabel ? [`Modificateur ${hit.statLabel}`, modStr(hit.statMod || 0)] : null, hit?.setBonus ? ['Bonus de set', modStr(hit.setBonus)] : null], hit?.roll || '—')}</div>`;
+      const ctx = damageContextFor(item), t = damageTypes.find(x => x.id === ctx.damageTypeId);
+      left += `<div class="cb-sec"><h5>Dégâts<span style="color:${_esc(t?.color || 'var(--text-muted)')}">${_esc(t?.label || (ctx.isMagic ? 'magique' : 'physique'))}</span></h5>${calc([["Dé de l'arme", item.degats || '—'], dmg.statLabel ? [`Modificateur ${dmg.statLabel}`, modStr(dmg.statMod || 0)] : null, dmg.maitriseBonus ? ['Bonus de maîtrise', modStr(dmg.maitriseBonus)] : null], dmg.roll)}</div>`;
+    } else if (item?.nom) left += `<div class="cb-sec"><h5>Effet</h5><p>${_esc(item.particularite || getItemEffectText(item) || 'Objet de soutien.')}</p></div>`;
+    if (item?.nom) left += extras(item);
+    return `<div class="cb-x">${left ? `<div class="cb-sec" style="gap:14px">${left}</div>` : ''}<div class="cb-sec"><h5>${item?.nom ? 'Changer pour' : 'Équiper'}</h5>${candHtml}</div>${item?.nom && canEdit ? `<div class="cb-acts"><button class="cb-btn danger" data-action="clearEquipSlot" data-slot="${_esc(slot)}" data-render-tab="combat">Ranger dans le sac</button></div>` : ''}</div>`;
+  }
+  function styleDetail() {
+    const activeKey = String(activeStyle?.id || _norm(activeStyle?.label || activeStyle?.name || ''));
+    const list = styles.map(s => { const k = String(s?.id || _norm(s?.label || s?.name || '')); const cur = activeKey && k === activeKey;
+      const cond = [(s.condPrincipale || []).filter(Boolean).join(', ') || ((s.condPrincipale || []).length ? 'main vide' : 'toute arme'), s.condMains ? `${s.condMains} main${s.condMains === '2' ? 's' : ''}` : '', (s.condSecondaire || []).filter(Boolean).join(', ') || ((s.condSecondaire || []).length ? 'seconde main vide' : '')].filter(Boolean).join(' · ');
+      return `<div class="${cur ? 'cur' : ''}" style="--sc:${_esc(s.couleur || s.color || '#7a8fa8')}"><b>${_esc(plainStyleName(s))}</b><span>${_esc(cond)}</span>${cur ? '<em>Actif</em>' : ''}</div>`; }).join('');
+    const mainMag = damageContextFor(currentItem(primarySlot)).isMagic;
+    return `<div class="cb-x"><div class="cb-sec"><h5>Effet</h5><p>${_esc(activeStyle?.description || 'Style déduit des armes en main.')}</p><p style="color:var(--text-muted);font-size:.72rem">${mainMag ? 'Arme magique : la moitié des dégâts passe même si la CA résiste.' : 'Arme non magique : aucun dégât si la CA résiste.'}</p></div>
+      <div class="cb-sec"><h5>Tous les styles${mj ? '<span><span class="cb-mj">MJ</span> <button class="cb-btn ghost" data-action="openCombatStylesAdmin">Gérer</button></span>' : ''}</h5><div class="cb-sl">${list}</div></div></div>`;
+  }
 
   const armorSet = (() => { try { return getArmorSetData(c) || {}; } catch { return {}; } })();
   const tracked = new Set(armorSet.trackedSlots || []);
-  const setPips = (armorSet.slots || []).map(entry => {
-    const color = entry.type ? (getArmorTypeMeta(entry.type)?.color || '#7a8fa8') : '';
-    return `<i class="${entry.equipped ? 'is-on' : ''}" style="--cb-pip:${_esc(color)}"></i>`;
-  }).join('');
-  let setHint = '';
-  if ((armorSet.trackedSlots || []).length && !armorSet.isActive) {
-    const types = Object.keys(armorSet.counts || {});
-    setHint = armorSet.equippedCount < armorSet.trackedSlots.length
-      ? `Porte ${armorSet.trackedSlots.length} pièces du même type pour activer un bonus d’ensemble.`
-      : types.length > 1
-        ? `Types mélangés (${types.join(', ')}) : il faut ${armorSet.trackedSlots.length} pièces du même type.`
-        : 'Aucun bonus d’ensemble configuré pour ce type.';
+  const armorKey = item => { const ca = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0); return [ca ? `CA +${ca}` : '', ..._itemBonusBadges(item).map(b => b.lbl)].filter(Boolean).join(' · ') || (item.typeArmure || '—'); };
+  const armorCandidates = slot => inventory.map((item, index) => ({ item, index }))
+    .filter(({ item, index }) => item?.nom && equipmentSlotAcceptsItem(armorSlots.find(s => s.id === slot), item) && !(equippedInvMap.get(index) || []).length);
+  function aRow(slotDef) {
+    const slot = slotDef.id, key = 'a:' + slot, isOpen = open === key;
+    const item = sourceItem(slot, equip[slot] || {});
+    const row = item?.nom
+      ? `<button type="button" class="cb-row${isOpen ? ' on' : ''}" style="--rc:${_esc(rarityOf(slot, item).color || 'transparent')}" data-action="cbOpen" data-k="${key}"><span class="cb-k">${_esc(slotDef.label)}</span>${nm(item.nom, rarityOf(slot, item).level)}<span class="kd">${_esc(armorKey(item))}</span><span class="cb-chev">›</span></button>`
+      : `<button type="button" class="cb-row empty${isOpen ? ' on' : ''}" data-action="cbOpen" data-k="${key}"><span class="cb-k">${_esc(slotDef.label)}</span><span class="cb-nm"><b>Vide</b></span><span class="kd">Équiper…</span><span class="cb-chev">›</span></button>`;
+    return row + (isOpen ? aDetail(slot) : '');
   }
-  const activeSetName = armorSet.activeEffect?.set?.label || armorSet.fullType || '';
-  const activeSetEffect = armorSet.activeEffect?.chipText || '';
-  const setChip = (armorSet.trackedSlots || []).length
-    ? `<span class="cb-set${armorSet.isActive ? ' is-on' : ''}" title="${_esc(activeSetEffect || setHint)}"><span class="cb-pips">${setPips}</span><b>${armorSet.isActive ? _esc(activeSetName) : `Set ${armorSet.equippedCount || 0}/${armorSet.trackedSlots.length}`}</b>${armorSet.isActive && activeSetEffect ? `<span>${_esc(activeSetEffect)}</span>` : ''}</span>`
-    : '';
-  const armorCard = slotDef => {
-    const raw = equip[slotDef.id] || {};
-    const item = sourceItem(slotDef.id, raw);
-    const key = `armor:${slotDef.id}`;
-    if (!item?.nom) return `<button type="button" class="cb-slot is-empty${selectedClass(key)}" data-action="selectCombatDetail" data-detail="${_esc(key)}" data-empty="true"><span class="cb-slot-label">${_esc(slotDef.label)}</span><b>Vide</b><span>Équiper…</span></button>`;
-    const rare = rarity(slotDef.id, item);
-    const armorType = item.typeArmure ? getArmorTypeMeta(item.typeArmure) : null;
-    const ca = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
-    const summary = item.typeArmure ? (armorType?.label || item.typeArmure) : 'Équipé';
-    return `<button type="button" class="cb-slot${selectedClass(key)}" style="--cb-rare:${_esc(rare.color)}" data-action="selectCombatDetail" data-detail="${_esc(key)}"><span class="cb-slot-label">${_esc(slotDef.label)}${tracked.has(slotDef.id) && item.typeArmure ? `<i style="--cb-pip:${_esc(armorType?.color || '#7a8fa8')}" title="Compte pour le set"></i>` : ''}</span><b>${_esc(item.nom)}</b><span class="cb-slot-summary">${_esc(summary)}</span>${equipmentBonusChips(slotDef.id, item, ca)}</button>`;
-  };
+  function aDetail(slot) {
+    const slotDef = armorSlots.find(s => s.id === slot);
+    const item = sourceItem(slot, equip[slot] || {});
+    const warnOf = it => {
+      if (!tracked.has(slot)) return '';
+      const t = it.typeArmure;
+      if (armorSet.isActive && armorSet.dominantType && t && _norm(t) !== _norm(armorSet.dominantType)) return `Casse ${armorSet.fullType || armorSet.dominantType}`;
+      const others = (armorSlots.filter(s => tracked.has(s.id) && s.id !== slot)).map(s => sourceItem(s.id, equip[s.id] || {})?.typeArmure).filter(Boolean);
+      if (t && others.length && others.every(x => _norm(x) === _norm(t))) return `Active un ensemble ${t}`;
+      return '';
+    };
+    const cands = armorCandidates(slot);
+    const candHtml = cands.length ? `<div class="cb-cand">${cands.map(({ item: it, index }) => { const w = warnOf(it); const r = parseInt(it.rarete) || 0;
+      return `<div class="cb-ci">${nm(it.nom, r)}<span class="d">${_esc(armorKey(it))}${it.typeArmure ? ' · ' + _esc(it.typeArmure) : ''}</span>${w ? `<span class="${w.startsWith('Casse') ? 'warn' : 'd'}">${_esc(w)}</span>` : ''}${canEdit ? `<button class="cb-btn" data-action="equipInventoryItem" data-index="${index}" data-slot="${_esc(slot)}" data-render-tab="combat">Équiper</button>` : ''}</div>`; }).join('')}</div>` : '<div class="cb-none">Rien pour cet emplacement dans le sac.</div>';
+    let left = '';
+    if (item?.nom) {
+      if (item.typeArmure) left += `<div class="cb-sec"><h5>Matière</h5><p>${_esc(item.typeArmure)}${tracked.has(slot) ? ' · compte pour un ensemble' : ''}</p></div>`;
+      left += extras(item);
+    }
+    return `<div class="cb-x">${left ? `<div class="cb-sec" style="gap:14px">${left}</div>` : ''}<div class="cb-sec"><h5>${item?.nom ? 'Changer pour' : 'Équiper'}</h5>${candHtml}</div>${item?.nom && canEdit ? `<div class="cb-acts"><button class="cb-btn danger" data-action="clearEquipSlot" data-slot="${_esc(slot)}" data-render-tab="combat">Retirer</button></div>` : ''}</div>`;
+  }
 
-  const heldFamilies = weapons.filter(entry => entry.item?.nom && !entry.isDefault).map(entry => _norm(family(entry.item)));
-  const masteryRows = (c.maitrises || []).map((mastery, index) => {
-    const name = mastery.typeArme || mastery.nom || mastery.name || 'Sans type';
-    const level = Math.max(0, Math.min(5, parseInt(mastery.niveau) || 0));
-    const inHand = heldFamilies.some(value => value && (value.includes(_norm(name)) || _norm(name).includes(value)));
-    return `<button type="button" class="cb-mastery${selectedClass(`mastery:${index}`)}" data-action="selectCombatDetail" data-detail="mastery:${index}"><b>${_esc(name)}${inHand ? '<em>En main</em>' : ''}</b><span class="cb-mastery-pips">${Array.from({ length: 5 }, (_, pip) => `<i class="${pip < level ? 'is-on' : ''}"></i>`).join('')}</span><span>${level ? `+${level} dégât${level > 1 ? 's' : ''}` : 'Initié'}</span></button>`;
+  // Protection : état d'ensemble (pips + nom/effet ou n/3).
+  const setPips = (armorSet.slots || []).map(e => `<i class="${e.equipped ? 'on' : ''}" style="--pc:${_esc(e.type ? (getArmorTypeMeta(e.type)?.color || '#7a8fa8') : '')}"></i>`).join('');
+  const activeSetName = [...new Set((armorSet.activeSets || []).map(a => a?.set?.label || a?.type).filter(Boolean))].join(' + ') || armorSet.fullType || '';
+  const activeSetEffect = getArmorSetChipText(armorSet, { includeNames: false });
+  const setH = (armorSet.trackedSlots || []).length
+    ? (armorSet.isActive
+      ? `<span class="cb-set ok" title="${_esc(activeSetEffect)}"><span class="cb-pips">${setPips}</span><b>${_esc(activeSetName)}</b>${activeSetEffect ? _esc(activeSetEffect) : ''}</span>`
+      : `<span class="cb-set"><span class="cb-pips">${setPips}</span><b>Ensemble ${armorSet.equippedCount || 0}/${armorSet.trackedSlots.length}</b>tête, torse, bottes de même matière</span>`)
+    : '';
+
+  // Savoir-faire : maîtrises (édition MJ) + éléments.
+  const heldFamilies = weaponSlots.map(s => currentItem(s.id)).filter(i => i?.nom).map(i => _norm(family(i)));
+  const mrows = (c.maitrises || []).map((m, i) => {
+    const name = m.typeArme || m.nom || m.name || 'Sans type';
+    const level = Math.max(0, Math.min(5, parseInt(m.niveau) || 0));
+    const inHand = heldFamilies.some(v => v && (v.includes(_norm(name)) || _norm(name).includes(v)));
+    const isOpen = open === 'm:' + i;
+    const pips = [0, 1, 2, 3, 4].map(k => `<i class="${k < level ? 'on' : ''}"></i>`).join('');
+    const lvl = mj
+      ? `<span class="cb-lvl"><button class="cb-step" data-action="stepCombatMastery" data-idx="${i}" data-delta="-1" ${level <= 0 ? 'disabled' : ''}>−</button><span class="cb-mp">${pips}</span><button class="cb-step" data-action="stepCombatMastery" data-idx="${i}" data-delta="1" ${level >= 5 ? 'disabled' : ''}>+</button></span>`
+      : `<span class="cb-lvl"><span class="cb-mp">${pips}</span></span>`;
+    const head = `<div class="cb-m${isOpen ? ' on' : ''}">${mj ? `<button class="cb-m-n" data-action="cbOpen" data-k="m:${i}"><span>${_esc(name)}</span>${inHand ? '<em>En main</em>' : ''}</button>` : `<span class="cb-m-n"><span>${_esc(name)}</span>${inHand ? '<em>En main</em>' : ''}</span>`}<span class="cb-m-fx">${level ? `+${level} dégât${level > 1 ? 's' : ''}` : 'Initié'}</span>${lvl}</div>`;
+    const editor = (mj && isOpen) ? `<div class="cb-mx"><div class="cb-mx-r"><input class="cb-inp" data-change="saveCombatMasteryName" data-idx="${i}" value="${_esc(name === 'Sans type' ? '' : name)}" placeholder="Type d'arme, ex. Épées longues"><button class="cb-btn danger" data-action="deleteMaitrise" data-idx="${i}">Supprimer</button></div><input class="cb-inp" data-change="saveCombatMasteryNote" data-idx="${i}" value="${_esc(m.note || '')}" placeholder="Note : où, avec qui…"></div>` : '';
+    return head + editor;
   }).join('');
   const charElements = c.elements || [];
-  const elementChips = damageTypes.length ? getMagicTypes(damageTypes).map(type => {
-    const active = charElements.includes(type.id);
-    const favorite = active && c.favoriteElement === type.id;
-    const toggle = canEdit && STATE.isAdmin ? `data-action="toggleCharElement" data-id="${_esc(c.id)}" data-elem="${_esc(type.id)}" title="${active ? 'Retirer' : 'Accorder'} cet élément (MJ)"` : '';
-    const fav = active && canEdit
-      ? `<button type="button" class="cb-element-fav${favorite ? ' is-on' : ''}" data-action="setFavoriteElement" data-id="${_esc(c.id)}" data-elem="${_esc(type.id)}" aria-pressed="${favorite}">${favorite ? '★' : '☆'}</button>`
-      : favorite ? '<span class="cb-element-fav is-on">★</span>' : '';
-    return `<span class="cb-element${active ? ' is-on' : ''}${toggle ? ' is-editable' : ''}" style="--cb-element:${_esc(type.color || '#9ca3af')}" ${toggle}><i></i>${_esc(type.label)}${fav}</span>`;
-  }).join('') : loadingHtml('Chargement…', { compact: true });
+  const els = (damageTypes.length ? getMagicTypes(damageTypes) : []).filter(t => mj || charElements.includes(t.id)).map(t => {
+    const active = charElements.includes(t.id), favorite = active && c.favoriteElement === t.id;
+    const toggle = mj ? `data-action="toggleCharElement" data-id="${_esc(c.id)}" data-elem="${_esc(t.id)}" title="${active ? 'Retirer' : 'Accorder'} (MJ)"` : '';
+    // Octroi d'un élément = MJ. Mais choisir son élément par défaut au VTT parmi
+    // ceux déjà maîtrisés est une préférence du propriétaire de la fiche
+    // (setFavoriteElement est ouvert au joueur). On rend donc l'étoile cliquable
+    // dès que la fiche est éditable, pas seulement pour le MJ.
+    const fav = active && canEdit ? `<button class="${favorite ? 'fav' : ''}" data-action="setFavoriteElement" data-id="${_esc(c.id)}" data-elem="${_esc(t.id)}" title="${favorite ? 'Élément par défaut au VTT' : 'Définir par défaut au VTT'}">${favorite ? '★' : '☆'}</button>` : (favorite ? '<span class="fav">★</span>' : '');
+    return `<span class="cb-el${active ? ' on' : ''}" style="--c:${_esc(t.color || '#9ca3af')}" ${toggle}><i></i>${_esc(t.label)}${fav}</span>`;
+  }).join('');
 
-  const calcBlock = (rows, total) => `<div class="cb-calc">${rows.filter(Boolean).map(([label, value]) => `<div><span>${_esc(label)}</span><b>${_esc(value)}</b></div>`).join('')}<div class="cb-calc-total"><span>Total</span><b>${_esc(total)}</b></div></div>`;
-  const chips = (values, tone = '') => values?.length ? `<div class="cb-chips">${values.map(value => `<span class="${tone}">${_esc(value)}</span>`).join('')}</div>` : '';
-  const detailShell = ({ color = '#7a8fa8', kicker, title, tags = [], body = '', footer = '' }) => `<aside class="cb-detail"><header style="--cb-detail:${_esc(color)}"><button type="button" class="cb-detail-close" data-action="closeCombatDetail" aria-label="Fermer">×</button><span>${_esc(kicker)}</span><h4>${_esc(title)}</h4>${tags.length ? `<div>${tags.map(tag => `<i>${_esc(tag)}</i>`).join('')}</div>` : ''}</header><div class="cb-detail-body">${body}</div>${footer ? `<footer>${footer}</footer>` : ''}</aside>`;
-  const compatibleCandidates = (slotDef, selectedItem) => inventory.map((item, index) => ({ item, index })).filter(({ item, index }) => {
-    if (!item?.nom || !equipmentSlotAcceptsItem(slotDef, item)) return false;
-    if ((equippedInvMap.get(index) || []).length) return false;
-    if (slotDef.id === secondarySlot && weaponHands(item) === 2) return false;
-    return index !== selectedItem?.sourceInvIndex;
-  });
-  const candidateList = (slotDef, selectedItem) => {
-    const candidates = compatibleCandidates(slotDef, selectedItem);
-    if (!candidates.length) return '<p class="cb-empty-copy">Rien de compatible dans le sac.</p>';
-    return `<div class="cb-candidates">${candidates.map(({ item, index }) => {
-      const level = parseInt(item.rarete) || 0;
-      const label = RARETE_NAMES[level] || '';
-      const color = label ? _rareteColor(label) : '#7a8fa8';
-      let summary = '';
-      let warning = '';
-      if (slotDef.kind === 'weapon') {
-        const statKey = item.statAttaque || item.toucherStat || 'force';
-        const hit = getWeaponToucherParts(c, item, statKey);
-        const dmg = getWeaponDegatsParts(c, item, statKey);
-        summary = dmg ? `${hit.roll} · ${dmg.roll}${weaponHands(item) === 2 ? ' · 2 mains' : ''}` : (item.particularite || getItemEffectText(item));
-        if (slotDef.id === primarySlot && weaponHands(item) === 2 && equip[secondarySlot]?.nom) warning = `Range ${equip[secondarySlot].nom}`;
-      } else {
-        const ca = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
-        summary = [item.typeArmure, ca ? `CA +${ca}` : '', ..._itemBonusBadges(item).map(badge => badge.lbl)].filter(Boolean).join(' · ');
-        if (tracked.has(slotDef.id) && armorSet.dominantType && item.typeArmure && _norm(item.typeArmure) !== _norm(armorSet.dominantType) && armorSet.equippedCount >= 2) warning = `Casse le set ${armorSet.dominantType}`;
-      }
-      return `<article class="cb-candidate" style="--cb-rare:${_esc(color)}"><div><b>${_esc(item.nom)}</b><span class="${warning ? 'is-warning' : ''}">${_esc(warning || summary || 'Compatible')}</span></div><button type="button" class="cb-btn" data-action="equipInventoryItem" data-index="${index}" data-slot="${_esc(slotDef.id)}" data-render-tab="combat">Équiper</button></article>`;
-    }).join('')}</div>`;
-  };
+  const legend = `<div class="cb-leg">${RARETE_NAMES.map((n, i) => [n, i]).filter(([n, i]) => i >= 2 && n).map(([n, i]) => `<span style="--rc:${_rareteColor(n) || '#7a8fa8'}">${_esc(n)}</span>`).join('')}</div>`;
+  const wOpen = typeof open === 'string' && open.startsWith('w:') ? wDetail(open.slice(2)) : '';
 
-  const renderDetail = () => {
-    const [kind, rawId] = _combatTabUi.selected.split(':');
-    if (kind === 'weapon') {
-      const slotDef = weaponSlots.find(slot => slot.id === rawId) || weaponSlots[0];
-      if (!slotDef) return '';
-      const data = weapons.find(entry => entry.slotDef.id === slotDef.id) || weaponData(slotDef);
-      const { item, isDefault, toucher, degats, damageContext: itemDamageContext, traits } = data;
-      const rare = rarity(slotDef.id, item);
-      const candidates = _combatTabUi.candidates || !item?.nom ? `<section><h5>Dans le sac</h5>${candidateList(slotDef, item)}</section>` : '';
-      if (!item?.nom) return detailShell({ color: '#7a8fa8', kicker: slotDef.label, title: 'Main libre', body: `<section><p>Rien en main. Une arme ou un objet de soutien modifiera automatiquement le style actif.</p></section>${candidates}` });
-      const tags = [isDefault ? 'Par défaut' : rare.label, weaponHands(item) === 2 ? '2 mains' : '1 main', family(item)].filter(Boolean);
-      let body = candidates;
-      if (degats) {
-        body += `<section><h5>Jet d’attaque</h5>${calcBlock([
-          ['Dé', '1d20'],
-          toucher?.statLabel ? [`Modificateur ${toucher.statLabel}`, modStr(toucher.statMod || 0)] : null,
-          toucher?.setBonus ? ['Bonus de set', modStr(toucher.setBonus)] : null,
-        ], toucher?.roll || '—')}</section>`;
-        body += `<section><h5>Dégâts</h5>${calcBlock([
-          ['Dé de l’arme', item.degats || '—'],
-          degats.statLabel ? [`Modificateur ${degats.statLabel}`, modStr(degats.statMod || 0)] : null,
-          degats.maitriseBonus ? ['Bonus de maîtrise', modStr(degats.maitriseBonus)] : null,
-        ], degats.roll)}</section>`;
-        const itemMissRule = missRuleFor(itemDamageContext);
-        body += `<section><h5>Si la CA résiste</h5><p>${_esc(itemMissRule.label.replace('Échec : ', ''))}${itemDamageContext.isMagic ? ' · arme de nature magique.' : ' · arme de nature physique.'}</p></section>`;
-      } else {
-        body += `<section><h5>Effet</h5><p>${_esc(item.particularite || getItemEffectText(item) || 'Objet de soutien.')}</p></section>`;
-      }
-      if (item.portee) body += `<section><h5>Portée</h5><p>${_esc(item.portee)}</p></section>`;
-      const bonusLabels = _itemBonusBadges(sourceItem(slotDef.id, item)).map(badge => badge.lbl);
-      if (bonusLabels.length || traits.length) body += `<section><h5>Bonus et traits</h5>${chips(bonusLabels, 'is-stat')}${chips(traits, 'is-trait')}</section>`;
-      if (item.particularite && degats) body += `<section><h5>Particularité</h5><p class="cb-editorial">${_esc(item.particularite)}</p></section>`;
-      const footer = canEdit ? `<button type="button" class="cb-btn${_combatTabUi.candidates ? ' is-primary' : ''}" data-action="toggleCombatCandidates">${_combatTabUi.candidates ? 'Masquer le sac' : 'Changer…'}</button>${!isDefault ? `<button type="button" class="cb-btn is-danger" data-action="clearEquipSlot" data-slot="${_esc(slotDef.id)}" data-render-tab="combat">Ranger</button>` : ''}` : '';
-      return detailShell({ color: isDefault ? '#7a8fa8' : rare.color, kicker: slotDef.label, title: item.nom, tags, body, footer });
-    }
-    if (kind === 'armor') {
-      const slotDef = armorSlots.find(slot => slot.id === rawId) || armorSlots[0];
-      if (!slotDef) return '';
-      const raw = equip[slotDef.id] || {};
-      const item = sourceItem(slotDef.id, raw);
-      const rare = rarity(slotDef.id, item);
-      const candidates = _combatTabUi.candidates || !item?.nom ? `<section><h5>Dans le sac</h5>${candidateList(slotDef, item)}</section>` : '';
-      if (!item?.nom) return detailShell({ color: '#7a8fa8', kicker: slotDef.label, title: 'Emplacement libre', body: candidates });
-      const armorMeta = item.typeArmure ? getArmorTypeMeta(item.typeArmure) : null;
-      const ca = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
-      const bonusLabels = _itemBonusBadges(item).map(badge => badge.lbl);
-      const traits = _getTraits(item) || [];
-      let body = candidates;
-      if (ca) body += `<section><h5>Classe d’armure</h5><p>+${ca} à la CA · total actuel ${calcCA(c)}.</p></section>`;
-      if (bonusLabels.length || traits.length) body += `<section><h5>Bonus et traits</h5>${chips(bonusLabels, 'is-stat')}${chips(traits, 'is-trait')}</section>`;
-      if (tracked.has(slotDef.id)) body += `<section><h5>Ensemble</h5><p>${armorSet.isActive ? `Pièce du set ${activeSetName} · ${activeSetEffect}` : `Compte pour le set d’armure (${armorSet.equippedCount || 0}/${armorSet.trackedSlots.length} pièces).`}</p></section>`;
-      if (item.particularite || getItemEffectText(item)) body += `<section><h5>Particularité</h5><p class="cb-editorial">${_esc(item.particularite || getItemEffectText(item))}</p></section>`;
-      const footer = canEdit ? `<button type="button" class="cb-btn${_combatTabUi.candidates ? ' is-primary' : ''}" data-action="toggleCombatCandidates">${_combatTabUi.candidates ? 'Masquer le sac' : 'Changer…'}</button><button type="button" class="cb-btn is-danger" data-action="clearEquipSlot" data-slot="${_esc(slotDef.id)}" data-render-tab="combat">Retirer</button>` : '';
-      return detailShell({ color: rare.color, kicker: slotDef.label, title: item.nom, tags: [rare.label, armorMeta?.label || item.typeArmure].filter(Boolean), body, footer });
-    }
-    if (kind === 'style') {
-      const activeStyleKey = String(activeStyle?.id || _norm(activeStyle?.label || activeStyle?.name || ''));
-      const styleList = styles.map(style => {
-        const styleKey = String(style?.id || _norm(style?.label || style?.name || ''));
-        const active = Boolean(activeStyleKey && styleKey === activeStyleKey);
-        const condition = [
-          (style.condPrincipale || []).filter(Boolean).join(', ') || ((style.condPrincipale || []).length ? 'main vide' : 'toute arme'),
-          style.condMains ? `${style.condMains} main${style.condMains === '2' ? 's' : ''}` : '',
-          (style.condSecondaire || []).filter(Boolean).join(', ') || ((style.condSecondaire || []).length ? 'seconde main vide' : ''),
-        ].filter(Boolean).join(' · ');
-        return `<div class="cb-style-row${active ? ' is-current' : ''}" style="--cb-style:${_esc(style.couleur || style.color || '#7a8fa8')}"><b>${_esc(plainStyleName(style))}</b><span>${_esc(condition)}</span>${active ? '<em>Actif</em>' : ''}</div>`;
-      }).join('');
-      const body = activeStyle
-        ? `<section><p>${_esc(activeStyle.description || 'Style déduit des armes actuellement en main.')}</p></section><section><h5>Règles appliquées au VTT</h5><div class="cb-rules">${rulesHtml}</div></section><section><h5>Tous les styles</h5><div class="cb-style-list">${styleList}</div></section>`
-        : `<section><p>Équipe une combinaison d’armes correspondant à un style configuré.</p></section>${styleList ? `<section><h5>Tous les styles</h5><div class="cb-style-list">${styleList}</div></section>` : ''}`;
-      const footer = STATE.isAdmin ? '<button type="button" class="cb-btn" data-action="openCombatStylesAdmin">Gérer les styles <span class="cb-mj">MJ</span></button>' : '';
-      return detailShell({ color: styleColor, kicker: 'Style de combat actif', title: styleName, body, footer });
-    }
-    if (kind === 'mastery') {
-      const index = parseInt(rawId);
-      const mastery = (c.maitrises || [])[index];
-      if (!mastery) return '';
-      const name = mastery.typeArme || mastery.nom || mastery.name || 'Sans type';
-      const level = Math.max(0, Math.min(5, parseInt(mastery.niveau) || 0));
-      const weaponsConcerned = inventory.filter(item => item?.nom && _norm(family(item)) === _norm(name)).map(item => item.nom);
-      const body = `<section><h5>Niveau ${STATE.isAdmin ? '<span class="cb-mj">MJ</span>' : ''}</h5><div class="cb-level">${STATE.isAdmin ? `<button type="button" data-action="stepCombatMastery" data-idx="${index}" data-delta="-1" ${level <= 0 ? 'disabled' : ''}>−</button>` : ''}<span class="cb-mastery-pips">${Array.from({ length: 5 }, (_, pip) => `<i class="${pip < level ? 'is-on' : ''}"></i>`).join('')}</span>${STATE.isAdmin ? `<button type="button" data-action="stepCombatMastery" data-idx="${index}" data-delta="1" ${level >= 5 ? 'disabled' : ''}>+</button>` : ''}</div></section><section><h5>Effet</h5><p>Ajoute +${level} aux dégâts avec ce type d’arme.</p></section>${weaponsConcerned.length ? `<section><h5>Armes concernées</h5>${chips([...new Set(weaponsConcerned)])}</section>` : ''}<section><h5>Note</h5>${canEdit ? `<textarea class="cb-input" data-change="saveCombatMasteryNote" data-idx="${index}" placeholder="Où, avec qui…">${_esc(mastery.note || '')}</textarea>` : `<p>${_esc(mastery.note || 'Aucune note.')}</p>`}</section>`;
-      const footer = STATE.isAdmin ? `<button type="button" class="cb-btn" data-action="editMaitrise" data-idx="${index}">Modifier</button><button type="button" class="cb-btn is-danger" data-action="deleteMaitrise" data-idx="${index}">Supprimer</button>` : '';
-      return detailShell({ color: '#7eb0ff', kicker: 'Maîtrise d’arme', title: name, tags: [level ? `Niveau ${level}` : 'Initié'], body, footer });
-    }
-    return '';
-  };
-
-  const styleBand = `<button type="button" class="cb-style-band${selectedClass('style:active')}" style="--cb-style:${_esc(styleColor)}" data-action="selectCombatDetail" data-detail="style:active"><span><small>Style actif</small><b>${_esc(styleName)}</b></span><span class="cb-rules">${rulesHtml}</span><em>Règles ›</em></button>`;
-  const masterySection = `<section class="cb-zone"><header class="cb-zone-head"><h3>Maîtrises</h3>${STATE.isAdmin ? '<button type="button" class="cb-btn is-ghost" data-action="addMaitrise">+ Maîtrise <span class="cb-mj">MJ</span></button>' : ''}</header><div class="cb-zone-body cb-mastery-list">${masteryRows || '<p class="cb-empty-copy">Aucune maîtrise enregistrée.</p>'}</div></section>`;
-  const elementsSection = `<section class="cb-zone"><header class="cb-zone-head"><h3>Éléments</h3>${STATE.isAdmin ? '<button type="button" class="cb-btn is-ghost" data-action="openDamageTypesAdmin">Types <span class="cb-mj">MJ</span></button>' : ''}</header><div class="cb-zone-body"><div class="cb-elements">${elementChips}</div><p class="cb-note">L’étoile marque l’élément sélectionné par défaut pour les actions au VTT.</p></div></section>`;
-  return `<div class="cb-wrap"><div class="cb-layout${_combatTabUi.open ? ' is-open' : ''}"><main class="cb-main"><section class="cb-zone"><header class="cb-zone-head"><div><h3>Armes en main</h3><p>Le style de combat se déduit de ce que tu tiens.</p></div></header><div class="cb-zone-body"><div class="cb-hands">${weapons.map(weaponCard).join('')}</div>${styleBand}</div></section><section class="cb-zone"><header class="cb-zone-head"><h3>Protection</h3><div class="cb-zone-tools"><span class="cb-ca"><small>CA</small><b>${calcCA(c)}</b></span>${setChip}${STATE.isAdmin ? '<button type="button" class="cb-btn is-ghost" data-action="openArmorSetsAdmin">Sets <span class="cb-mj">MJ</span></button>' : ''}</div></header><div class="cb-zone-body"><div class="cb-slots">${armorSlots.map(armorCard).join('')}</div>${setHint ? `<p class="cb-set-hint">${_esc(setHint)}</p>` : ''}</div></section><div class="cb-duo">${masterySection}${elementsSection}</div></main>${renderDetail()}</div></div>`;
+  return `<div class="cb">
+    <section class="cb-zone"><div class="cb-zh"><h3>En main</h3></div><div class="cb-zb">
+      <div class="cb-hands">${weaponSlots.map(wCard).join('')}</div>${wOpen}
+      <button type="button" class="cb-style${open === 'style' ? ' on' : ''}" style="--sc:${_esc(styleColor)}" data-action="cbOpen" data-k="style"><span class="cb-k">Style</span><b>${_esc(styleName)}</b>${styleRules.map(r => `<span class="cb-rule ${ruleTone(r.tone)}" title="${_esc(r.detail || '')}">${_esc(r.label)}</span>`).join('')}<span class="cb-chev">›</span></button>
+      ${open === 'style' ? styleDetail() : ''}</div></section>
+    <section class="cb-zone"><div class="cb-zh"><h3>Protection</h3><div class="cb-zh-r">${setH}${mj ? '<button type="button" class="cb-btn ghost" data-action="openArmorSetsAdmin">Sets <span class="cb-mj">MJ</span></button>' : ''}</div></div><div class="cb-zb"><div class="cb-list">${armorSlots.map(aRow).join('')}</div></div></section>
+    <section class="cb-zone"><div class="cb-zh"><h3>Savoir-faire</h3></div><div class="cb-zb">
+      <div class="cb-sub">Maîtrises d'arme${mj ? '<span class="cb-mj">MJ</span><button type="button" class="cb-btn ghost" data-action="addMaitrise">+ Maîtrise</button>' : ''}</div>
+      <div class="cb-list cb-mlist">${mrows || '<div class="cb-none">Aucune maîtrise.</div>'}</div>
+      <div class="cb-sub">Éléments${mj ? '<span class="cb-mj">MJ</span>' : ''}<span style="margin-left:auto;letter-spacing:0;text-transform:none;font-weight:500">★ par défaut au VTT</span></div>
+      <div class="cb-elems">${els || '<div class="cb-none">Aucun élément.</div>'}</div></div></section>
+    ${legend}
+  </div>`;
 }
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // V3 — INVENTAIRE (header avec summary + filter chips, puis renderer existant)
@@ -2444,6 +2424,8 @@ async function setCharAura(charId, aura) {
   const c = getCharacterById(charId);
   if (!c) return;
   c.aura = aura; c.auraColor = null;   // preset choisi → efface la couleur personnalisée
+  document.querySelectorAll('.ids-aura .ids-dot').forEach(dot => dot.classList.toggle('active', dot.dataset.auraKey === aura));
+  document.querySelector('.ids-aura-button')?.style.setProperty('--dot-c', _auraHex(c));
   await updateInCol('characters', charId, { aura, auraColor: null });
   _applyAuraVars(c);
 }
@@ -2451,6 +2433,8 @@ async function setCharAuraColor(charId, hex) {
   const c = getCharacterById(charId);
   if (!c || !/^#[0-9a-fA-F]{6}$/.test(hex || '')) return;
   c.auraColor = hex;
+  document.querySelectorAll('.ids-aura .ids-dot').forEach(dot => dot.classList.toggle('active', dot.classList.contains('custom')));
+  document.querySelector('.ids-aura-button')?.style.setProperty('--dot-c', hex);
   await updateInCol('characters', charId, { auraColor: hex });
   _applyAuraVars(c);
 }
@@ -2470,7 +2454,7 @@ function _restoreTabScroll(scrollTop) {
   });
 }
 
-function showCharTab(tab, el) {
+function showCharTab(tab, el, { syncRoute = true } = {}) {
   // V3 : 6 onglets uniquement. Toute valeur legacy est remappée.
   const v3 = _resolveV3Tab(tab);
 
@@ -2486,7 +2470,7 @@ function showCharTab(tab, el) {
   _currentTopTab  = v3;
   charSession.set(charSession.getCurrentChar(), charSession.getCanEditChar(), v3);
   // L'URL suit l'onglet affiché (le perso, lui, ne change pas ici → prevChar).
-  if (prevChar) setRouteSub('characters', `${prevChar}/${v3}`);
+  if (prevChar && syncRoute) setRouteSub('characters', _characterRouteSub(prevChar, v3));
 
   // Onglets v3 (nouveau template) — classe active + ARIA (sélection + roving tabindex)
   document.querySelectorAll('#char-tabs-v3 .tab-v3').forEach(t => {
@@ -2510,6 +2494,17 @@ function showCharTab(tab, el) {
   if (saved != null) _restoreTabScroll(saved);
 }
 
+// Retour/Avance entre deux onglets du même personnage : mise à jour locale,
+// sans démonter la fiche ni réamorcer son abonnement live. Un changement de
+// personnage reste géré par le routeur complet afin de recalculer les droits.
+document.addEventListener('app:route-sub-changed', event => {
+  if (event.detail?.page !== 'characters') return;
+  const [charId, tab] = String(event.detail.sub || '').split('/');
+  if (!charId || !tab || charId !== charSession.getCurrentChar()?.id) return;
+  event.preventDefault();
+  showCharTab(tab, null, { syncRoute: false });
+});
+
 // ══════════════════════════════════════════════
 // EXPORT — expose tout sur window pour les onclick HTML
 // ══════════════════════════════════════════════
@@ -2521,11 +2516,19 @@ function _rerenderCombatTab() {
   if (c && charSession.getCurrentCharTab() === 'combat') _renderTabV3('combat', c, charSession.getCanEditChar());
 }
 
-function _selectCombatDetail(btn) {
-  _combatTabUi.selected = btn.dataset.detail || _combatTabUi.selected;
-  _combatTabUi.open = true;
-  _combatTabUi.candidates = btn.dataset.empty === 'true';
-  _rerenderCombatTab();
+// Échap ferme le détail ouvert (cohérence avec l'inventaire v10 et les recettes).
+// Écouteur global posé une seule fois, borné à la présence de l'onglet combat.
+let _combatKeysBound = false;
+function _bindCombatKeys() {
+  if (_combatKeysBound) return; _combatKeysBound = true;
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || _combatTabUi.open == null) return;
+    if (!document.querySelector('.cb')) return;                        // onglet combat absent
+    if (document.body?.classList.contains('is-modal-open')) return;    // une modale gère déjà Échap
+    if (/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName || '')) return; // saisie en cours (nom/note de maîtrise)
+    _combatTabUi.open = null;
+    _rerenderCombatTab();
+  });
 }
 
 async function _stepCombatMastery(index, delta) {
@@ -2565,6 +2568,26 @@ async function _saveCombatMasteryNote(el) {
   }
 }
 
+async function _saveCombatMasteryName(el) {
+  const c = STATE.activeChar;
+  const index = Number(el.dataset.idx);
+  const current = c?.maitrises?.[index];
+  if (!c || !current) return;
+  const name = el.value.trim();
+  if ((current.typeArme || current.nom || current.name || '') === name) return;
+  const previous = c.maitrises;
+  const maitrises = previous.map((entry, i) => i === index ? { ...entry, typeArme: name } : entry);
+  c.maitrises = maitrises;
+  const row = el.closest('.cb-mx')?.previousElementSibling?.querySelector('.cb-m-n span');
+  if (row) row.textContent = name || 'Sans type';
+  try { await updateInCol('characters', c.id, { maitrises }); }
+  catch (error) {
+    c.maitrises = previous;
+    el.value = current.typeArme || current.nom || current.name || '';
+    showNotif(error?.message || 'Impossible d’enregistrer la maîtrise.', 'error');
+  }
+}
+
 registerCharBlurActions({
   csV3LedgerSaveField: (el) => _csV3LedgerSaveField(el, el.dataset.kind, Number(el.dataset.idx), el.dataset.field),
   csV3LedgerSaveAmount: (el) => _csV3LedgerSaveAmount(el, el.dataset.kind, Number(el.dataset.idx), Number(el.dataset.sign)),
@@ -2582,6 +2605,7 @@ registerActions({
   _csV3SaveVisibility:     (el)     => _csV3SaveVisibility(el.dataset.id, el.dataset.key, el.checked),
   _csV3InvSetSearch:       (el)     => _csV3InvSetSearch(el.value),
   saveCombatMasteryNote:   (el)     => _saveCombatMasteryNote(el),
+  saveCombatMasteryName:   (el)     => _saveCombatMasteryName(el),
   // Sélection
   selectChar:              (btn)    => selectChar(btn.dataset.id, btn),
   createNewChar:           ()       => createNewChar(),
@@ -2618,10 +2642,9 @@ registerActions({
   openCharacterPortraitViewer: (btn) => _openCharacterPortraitViewer(btn),
   toggleIdentityPopover:   (btn)    => _toggleIdentityPopover(btn),
   closeIdentityPopover:    ()       => _closeIdentityPopover(),
-  identityStartEdit:       (btn)    => _identityStartEdit(btn),
-  identityCancelEdit:      ()       => _identityCancelEdit(),
-  identitySaveEdit:        (btn)    => _identitySaveEdit(btn),
-  identityAddTitle:        (btn)    => _identityAddTitle(btn),
+  identityInlineCommit:    (el)     => _identityInlineCommit(el),
+  identityTitleCommit:     (el)     => _identityTitleCommit(el),
+  identityAddTitle:        (el)     => _identityAddTitle(el),
   identityRemoveTitle:     (btn)    => _identityRemoveTitle(btn),
   identityLevelUp:         (btn)    => _identityLevelUp(btn),
   adjustIdentityLevel:     (btn)    => _adjustIdentityLevel(btn),
@@ -2630,6 +2653,7 @@ registerActions({
   deleteChar:              (btn)    => deleteChar(btn.dataset.id),
   setCharAura:             (btn)    => setCharAura(btn.dataset.id, btn.dataset.auraKey),
   setCharAuraColor:        (el)     => setCharAuraColor(el.dataset.id, el.value),
+  setCharacterLifeStatus:  (btn)    => _setCharacterLifeStatus(btn),
   openSendGoldModal:       (btn)    => openSendGoldModal(btn.dataset.id),
 
   // Ledger
@@ -2682,9 +2706,7 @@ registerActions({
   openDamageTypesAdmin:     ()      => openDamageTypesAdmin(),
   toggleCharElement:        (btn)   => toggleCharElement(btn.dataset.id, btn.dataset.elem),
   setFavoriteElement:       (btn)   => setFavoriteElement(btn.dataset.id, btn.dataset.elem),
-  selectCombatDetail:       (btn)   => _selectCombatDetail(btn),
-  toggleCombatCandidates:   ()      => { _combatTabUi.candidates = !_combatTabUi.candidates; _combatTabUi.open = true; _rerenderCombatTab(); },
-  closeCombatDetail:        ()      => { _combatTabUi.open = false; _combatTabUi.candidates = false; _rerenderCombatTab(); },
+  cbOpen:                   (btn)   => { const k = btn.dataset.k; _combatTabUi.open = _combatTabUi.open === k ? null : k; _rerenderCombatTab(); },
   stepCombatMastery:        (btn)   => _stepCombatMastery(Number(btn.dataset.idx), Number(btn.dataset.delta)),
 
   // Maîtrises
@@ -2752,18 +2774,24 @@ document.addEventListener('pointerdown', (e) => {
 // ← → bouclent, Home/End vont au premier/dernier, activation automatique au focus.
 // Listener délégué unique (module importé une seule fois en lazy).
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && (_identityUi.popover || _identityUi.editing)) {
+  const identityInput = e.target.closest?.('#cs-sidebar .ids-inline');
+  if (identityInput && e.key === 'Enter') {
+    e.preventDefault();
+    identityInput.blur();
+    return;
+  }
+  if (identityInput && e.key === 'Escape') {
+    e.preventDefault();
+    identityInput.value = identityInput.dataset.original || '';
+    identityInput.blur();
+    return;
+  }
+  if (e.key === 'Escape' && _identityUi.popover) {
     const c = charSession.getCurrentChar();
     if (!c) return;
     e.preventDefault();
-    if (_identityUi.popover) {
-      _identityUi.popover = null;
-      _removeIdentityPopover();
-      if (!_identityUi.editing) return;
-    }
-    _identityUi.editing = false;
-    _identityUi.draft = null;
-    _rerenderIdentity(c);
+    _identityUi.popover = null;
+    _removeIdentityPopover();
     return;
   }
   const tab = e.target.closest?.('#char-tabs-v3 .tab-v3[role="tab"]');
