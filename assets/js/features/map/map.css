@@ -201,6 +201,16 @@
 .map-root.is-loading .map-transform { visibility: hidden; }
 .map-root.is-loading .map-loader { display: flex; }
 
+/* Image injoignable : le loader devient un message d'erreur figé. */
+.map-root.is-error .map-transform { visibility: hidden; }
+.map-root.is-error .map-loader {
+  display: flex;
+  padding: 1.5rem;
+  font-style: normal;
+  text-align: center;
+}
+.map-root.is-error .map-loader__text::after { content: none; animation: none; }
+
 /* Animation des « … » pour le loader. Largeur fixée pour éviter le décalage
    du texte à chaque frame. */
 .map-loader__text::after {
