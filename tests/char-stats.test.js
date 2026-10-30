@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   getMod, getModFromScore, calcCA, calcVitesse, calcDeckMax, calcPVMax, calcPMMax, calcPalier, pct,
   getItemStatBonus, getDefaultCharForUser, getMyCharacters, sortCharactersForDisplay,
+  computeEquipDerivedBonus,
 } from '../assets/js/shared/char-stats.js';
 import { DEFAULT_CHARACTER_RULES, LEGACY_CHARACTER_RULES, calcCriticalEffectTotal, setCharacterRulesForTests } from '../assets/js/shared/character-rules.js';
 
@@ -147,4 +148,16 @@ test('sortCharactersForDisplay : ★ par défaut en premier au sein d’un même
   ];
   const sorted = sortCharactersForDisplay(chars);
   assert.equal(sorted[0].id, 'b', 'le perso ★ passe devant');
+});
+
+test('computeEquipDerivedBonus : mémoïsé par objet equip, recalculé sur nouvel objet', () => {
+  const equip = { tete: { pvMaxBonus: 3, caBonus: 1 }, torse: { pmMaxBonus: 2, upgrades: { effectBonus: 1 } } };
+  const a = computeEquipDerivedBonus(equip);
+  const b = computeEquipDerivedBonus(equip);
+  assert.equal(a, b, 'même objet equip → même résultat mémoïsé');
+  assert.deepEqual(a, { pvMaxBonus: 3, pmMaxBonus: 3, vitesseBonus: 0, initiativeBonus: 0, caBonus: 1 });
+  // pmMaxBonus 2 + upgrade 1 = 3 ; pvMaxBonus/caBonus sans upgrade inchangés.
+  const c = computeEquipDerivedBonus({ ...equip }); // nouvel objet → recalcul (valeurs identiques)
+  assert.notEqual(a, c, 'nouvel objet equip (equip remplacé) → nouveau calcul');
+  assert.deepEqual(a, c);
 });
