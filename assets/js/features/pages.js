@@ -3009,9 +3009,6 @@ const PAGES = {
           || (order[a.slot] ?? 9) - (order[b.slot] ?? 9));
       return _sessionsMemo;
     };
-    const charForParticipant = participant => allChars.find(char => char.id === participant?.charId)
-      || allChars.find(char => char.uid === participant?.uid)
-      || { nom: participant?.nom || 'Personnage', uid: participant?.uid || '' };
     const avatar = (entity, className = '', live = false) => {
       const sizes = { sm: 24, lg: 46, xl: 56 };
       const sizeClass = className.split(/\s+/).find(value => sizes[value]);
