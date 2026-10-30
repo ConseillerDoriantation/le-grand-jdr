@@ -161,3 +161,15 @@ test('computeEquipDerivedBonus : mémoïsé par objet equip, recalculé sur nouv
   assert.notEqual(a, c, 'nouvel objet equip (equip remplacé) → nouveau calcul');
   assert.deepEqual(a, c);
 });
+
+test('sortCharactersForDisplay : tri réutilisé mais copie fraîche (appelant libre de muter)', () => {
+  const src = [{ id: 'b', nom: 'Zoé' }, { id: 'a', nom: 'Arthur' }, { id: 'c', nom: '' }];
+  const a = sortCharactersForDisplay(src);
+  assert.deepEqual(a.map(c => c.id), ['a', 'b', 'c']); // Arthur, Zoé, puis sans-nom en dernier
+  const b = sortCharactersForDisplay(src);
+  assert.notEqual(a, b, 'chaque appel renvoie un NOUVEAU tableau');
+  assert.deepEqual(a, b);
+  a.push({ id: 'x' }); // muter le résultat ne doit pas contaminer le tri mémoïsé
+  const c = sortCharactersForDisplay(src);
+  assert.deepEqual(c.map(x => x.id), ['a', 'b', 'c']);
+});
