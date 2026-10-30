@@ -44,6 +44,7 @@ test('l’éditeur remplace les onglets par une page structurée et un aperçu l
   assert.match(shop, /current === clicked \? 0 : clicked/);
   assert.match(shop, /function _siWeaponCombatHtml/);
   assert.match(shop, /class="si-field si-combat-touch"><span>Toucher<\/span>/);
+  assert.match(shop, /id="si-toucherStat" value="\$\{_esc\(toucher\)\}"/);
   assert.match(shop, /data-field="\$\{single \? 'toucherStat' : ''\}"/);
   assert.match(shop, /templateExplicit: !!item\?\.template/);
   assert.match(shop, /!_siEditorState\.templateExplicit && cat\?\.template/);

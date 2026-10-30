@@ -3414,7 +3414,7 @@ function _siWeaponCombatHtml(item) {
     <div class="si-field"><span>Maniement</span>${segment('mains', hands, [['1 main','1 main'],['2 mains','2 mains'],['Polyvalente','Polyvalente']])}</div>
     <div class="si-field"><span>Nature</span>${segment('nature', nature, [['','Auto'],['Physique','Physique'],['Magique','Magique']])}</div>
     <div class="si-field si-combat-damage"><span>Dégâts</span><div class="si-damage-line"><input class="input-field" id="si-degats" value="${_esc(item?.degats || '')}" placeholder="1d8"><b>＋</b><input type="hidden" id="si-degats-stats-data" value="${_esc(JSON.stringify(damageStats))}">${statButtons(damageStats, 'editorDamageStat')}</div></div>
-    <div class="si-field si-combat-touch"><span>Toucher</span>${statButtons(toucher ? [toucher] : [], 'editorSelect', true)}</div>
+    <div class="si-field si-combat-touch"><span>Toucher</span><input type="hidden" id="si-toucherStat" value="${_esc(toucher)}">${statButtons(toucher ? [toucher] : [], 'editorSelect', true)}</div>
     <label class="si-field si-combat-range"><span>Portée</span><input class="input-field" id="si-portee" value="${_esc(item?.portee || '')}" placeholder="Contact"></label>
   </div>`;
 }
