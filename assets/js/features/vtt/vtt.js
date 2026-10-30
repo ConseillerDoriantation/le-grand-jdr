@@ -7889,7 +7889,7 @@ function _vttPickOpt(srcId, tgtId, idx) {
         ${hint ? `<span class="vtt-atk-hint">${hint}</span>` : ''}
       </span>
       ${(mode || fields) ? `<span class="vtt-atk-rend">${mode}${fields ? `<button type="button" class="vtt-atk-adjbtn" data-atk-adj aria-expanded="false">Ajuster <s>▾</s></button>` : ''}</span>` : ''}
-      ${fields ? `<div class="vtt-atk-drawer">${fields}<button type="button" class="vtt-atk-reset" data-vtt-fn="_vttAtkBonusReset" data-vtt-blur hidden>Réinitialiser</button></div>` : ''}
+      ${fields ? `<div class="vtt-atk-drawer">${fields}<button type="button" class="vtt-atk-reset" data-vtt-fn="_vttAtkBonusReset" data-vtt-blur aria-hidden="true" tabindex="-1">Réinitialiser</button></div>` : ''}
     </div>`;
 
   // ── Preview d'interaction (immunité / résistance / faiblesse / absorption) ──
@@ -8344,7 +8344,13 @@ function _vttAtkBindResolve(root) {
     const adjBtn = row.querySelector('[data-atk-adj]');
     if (adjBtn) adjBtn.classList.toggle('is-on', active || row.classList.contains('open'));
     const reset = row.querySelector('.vtt-atk-reset');
-    if (reset) reset.hidden = !active;
+    if (reset) {
+      // Le bouton garde toujours sa ligne dans la grille : seule sa visibilité
+      // change. Le stepper ne saute donc plus sous la souris au premier clic.
+      reset.classList.toggle('is-visible', active);
+      reset.setAttribute('aria-hidden', active ? 'false' : 'true');
+      reset.tabIndex = active ? 0 : -1;
+    }
   };
   const syncAll = () => root.querySelectorAll('.vtt-atk-row').forEach(syncRow);
 
