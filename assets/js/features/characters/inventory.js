@@ -103,9 +103,19 @@ export async function ensureInventoryCatalog() {
   return _shopItemsLoading;
 }
 
+// Index id→item du catalogue, reconstruit uniquement quand le snapshot change
+// (le cache session-live remplace le tableau à chaque modif boutique). Évite un
+// .find linéaire PAR objet d'inventaire → O(n×m) sur le rendu d'un gros sac.
+let _catIndexCache = null; // { snap, map }
 export function getInventoryCatalogItem(itemId) {
   if (!itemId || !isInventoryCatalogReady()) return null;
-  return _inventoryCatalogSnapshot().find(item => item.id === itemId) || null;
+  const snap = _inventoryCatalogSnapshot();
+  if (_catIndexCache?.snap !== snap) {
+    const map = new Map();
+    for (const it of snap) { if (it?.id != null) map.set(it.id, it); }
+    _catIndexCache = { snap, map };
+  }
+  return _catIndexCache.map.get(itemId) || null;
 }
 
 function _renderInventoryChar(c, tab = 'inventaire') {
