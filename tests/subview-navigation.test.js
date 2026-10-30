@@ -106,15 +106,16 @@ test('Bestiaire pousse les ouvertures mais remplace la navigation continue au cl
   assert.match(bestiary, /page !== 'bestiaire'[\s\S]*event\.preventDefault\(\)[\s\S]*_syncActivePanel\(\)/);
 });
 
-test('Grimoire et Deck sont des sous-vues partageables de la fiche personnage', async () => {
+test('les vues de l onglet Sorts sont des sous-vues partageables de la fiche personnage', async () => {
   const [characters, spells] = await Promise.all([
     read('assets/js/features/characters.js'),
     read('assets/js/features/characters/spells.js'),
   ]);
   assert.match(characters, /_characterRouteSub\(charId, tab\)/);
   assert.match(characters, /showCharTab\(tab, null, \{ syncRoute: false \}\)/);
-  assert.match(spells, /setRouteSub\('characters', `\$\{c\.id\}\/sorts\/\$\{mode\}`\)/);
-  assert.match(spells, /data-nav-sub="\$\{_esc\(`\$\{c\.id\}\/sorts\/grimoire`\)\}"/);
+  assert.match(spells, /setRouteSub\('characters', `\$\{c\.id\}\/sorts\/\$\{view\}`\)/);
+  // Les anciens liens #…/sorts/grimoire et /prepare restent valides.
+  assert.match(spells, /\{ grimoire: 'all', prepare: 'deck' \}\[routeView\]/);
 });
 
 test('le registre des joueurs mémorise le personnage et garde le réseau partageable', async () => {

@@ -5,25 +5,29 @@ import { readFileSync } from 'node:fs';
 const css = readFileSync(new URL('../assets/css/characters.css', import.meta.url), 'utf8');
 const spellsJs = readFileSync(new URL('../assets/js/features/characters/spells.js', import.meta.url), 'utf8');
 
-test('la fiche détaillée d un sort reste alignée sur toute la grille', () => {
-  assert.doesNotMatch(
-    css,
-    /\.cs-spellcard-grid\s*>\s*\.cs-spellinspector\s*\{[^}]*margin-left\s*:\s*clamp/si,
-  );
-  assert.match(
-    css,
-    /\.cs-spellcard-grid\s*>\s*\.cs-spellinspector\s*\{[^}]*margin-left\s*:\s*0\s*;[^}]*justify-self\s*:\s*stretch/si,
-  );
+const fnBody = (name) => spellsJs.match(new RegExp(`function ${name}\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\}`))?.[1] || '';
+
+test('choisir un sort met à jour la fiche sans re-rendre ni faire défiler la liste', () => {
+  const select = fnBody('_sortsSelect');
+  assert.ok(select, 'le gestionnaire de sélection doit exister');
+  assert.doesNotMatch(select, /scrollIntoView|_sortsRerender\(\);\s*$/m);
+  assert.match(select, /_renderSpellSheet\(/);
 });
 
-test('ouvrir une fiche de sort ne lance aucun défilement horizontal natif', () => {
-  const inspectHandler = spellsJs.match(
-    /function _sortsInspectSpell\(index\)\s*\{([\s\S]*?)\n\}/,
-  )?.[1] || '';
+test('les champs libres de la fiche s’enregistrent au change, jamais à la frappe', () => {
+  const sheet = fnBody('_renderSpellSheet');
+  assert.ok(sheet, 'la fiche doit exister');
+  assert.match(sheet, /data-change="_sortsInlineEdit" data-field="nom"/);
+  assert.match(sheet, /data-change="_sortsInlineEdit" data-field="effet"/);
+  assert.doesNotMatch(sheet, /data-input="_sortsInlineEdit"/);
+});
 
-  assert.ok(inspectHandler, 'le gestionnaire d ouverture du sort doit exister');
-  assert.doesNotMatch(inspectHandler, /scrollIntoView/);
-  assert.match(inspectHandler, /_sortsScrollIntoViewY/);
+test('sur écran étroit, la fiche du sort devient un panneau du bas refermable', () => {
+  assert.match(
+    css,
+    /@media \(max-width: 900px\)\s*\{[^@]*\.cs-grim\.is-sheet-open \.cs-grim-sheet\s*\{[^}]*position:fixed[^}]*bottom:0/s,
+  );
+  assert.match(css, /\.cs-grim\.is-sheet-open \.cs-grim-sheet-x\s*\{[^}]*display:grid/);
 });
 
 test('le modificateur choisi dans la fiche est synchronisé et lu avant le défaut de l arme', () => {

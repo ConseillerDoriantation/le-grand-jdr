@@ -792,6 +792,7 @@ async function _adminValidateSpell(charId, idx) {
   const i = parseInt(idx); const sorts = (c.deck_sorts || []).map(s => ({ ...s }));
   if (!sorts[i]) return;
   sorts[i].mjValidation = 'ok'; sorts[i].mjValidated = true;
+  delete sorts[i].mjReviewed;   // le MJ a tranché : plus de diff à montrer
   try {
     await saveDoc('characters', c.id, { deck_sorts: sorts });
     c.deck_sorts = sorts;
@@ -813,7 +814,7 @@ async function _adminValidateAllSpells() {
   for (const [cid, idxs] of byChar) {
     const c = (STATE.characters || []).find(x => x.id === cid); if (!c) continue;
     const sorts = (c.deck_sorts || []).map(s => ({ ...s }));
-    idxs.forEach(i => { if (sorts[i]) { sorts[i].mjValidation = 'ok'; sorts[i].mjValidated = true; total++; } });
+    idxs.forEach(i => { if (sorts[i]) { sorts[i].mjValidation = 'ok'; sorts[i].mjValidated = true; delete sorts[i].mjReviewed; total++; } });
     try { await saveDoc('characters', c.id, { deck_sorts: sorts }); c.deck_sorts = sorts; }
     catch (e) { notifySaveError(e); }
   }
@@ -871,7 +872,7 @@ function _cmjRow(i) {
   return `<div class="cmj-row${_cmjState.open.has(i.id) ? ' open' : ''}${idx === _cmjState.cur ? ' cur' : ''}" data-id="${_esc(i.id)}">
     <div class="cmj-rw" tabindex="-1" data-cmj-idx="${idx}"><span class="cmj-mk ${i.tone}" aria-hidden="true"></span>
       <div class="cmj-rt"><b>${_esc(i.title)}${i.who ? `<span class="cmj-who">${_esc(i.who)}</span>` : ''}${tag}</b><small>${sp ? `${_esc(sp.cout)} · ${_esc(sp.portee)}` : _esc(i.detail || '')}</small></div>
-      <div class="cmj-ra">${sp ? `<button type="button" class="cmj-btn gh" ${i.secondary || ''}>Ouvrir la fiche</button>` : ''}<button type="button" class="${pri}" ${i.attrs || ''}>${i.act === 'Valider' ? _cmjIc('check') : ''}${_esc(i.act)}</button>${sp ? `<button type="button" class="cmj-exp" data-cmj-exp="${_esc(i.id)}" aria-label="Détail du sort" aria-expanded="${_cmjState.open.has(i.id)}">${_cmjIc('chev')}</button>` : ''}</div>
+      <div class="cmj-ra">${sp ? `<button type="button" class="cmj-btn gh" ${i.secondary || ''}>${_esc(i.secondaryLabel || 'Ouvrir la fiche')}</button>` : ''}<button type="button" class="${pri}" ${i.attrs || ''}>${i.act === 'Valider' ? _cmjIc('check') : ''}${_esc(i.act)}</button>${sp ? `<button type="button" class="cmj-exp" data-cmj-exp="${_esc(i.id)}" aria-label="Détail du sort" aria-expanded="${_cmjState.open.has(i.id)}">${_cmjIc('chev')}</button>` : ''}</div>
     </div>
     ${sp ? `<div class="cmj-spell"><div><div class="cmj-facts"><span>Coût <b>${_esc(sp.cout)}</b></span><span>Portée <b>${_esc(sp.portee)}</b></span></div>${sp.effet ? `<p>${_esc(sp.effet)}</p>` : '<p class="cmj-dim">Pas de description.</p>'}${sp.runes.length ? `<div class="cmj-runes">${sp.runes.map(r => `<span>${_esc(r)}</span>`).join('')}</div>` : ''}</div></div>` : ''}
   </div>`;
@@ -3683,7 +3684,9 @@ const PAGES = {
         who: `${c.nom || 'Personnage'}${owner ? ` · ${owner}` : ''}`,
         act: 'Valider',
         attrs: `data-action="_adminValidateSpell" data-id="${_esc(c.id)}" data-idx="${idx}"`,
-        secondary: `data-action="_goToChar" data-id="${_esc(c.id)}" data-tab="sorts"`,
+        // File de validation : diff avant → après, composition, note au joueur.
+        secondary: `data-action="_openSpellReview" data-char-id="${_esc(c.id)}" data-spell-id="${_esc(s.id || '')}" data-idx="${idx}"`,
+        secondaryLabel: 'Relire',
         spell: { cout: `${pm} PM`, portee: s.portee || '—', effet: s.effet || '', runes: (Array.isArray(s.runes) ? s.runes.filter(Boolean) : []) },
       });
     });
@@ -4587,6 +4590,12 @@ registerActions({
     const proxy = document.createElement('button');
     proxy.dataset.action = fn;
     dispatchAction(proxy, new Event('click'));
+  },
+  // File de validation des sorts (tous les persos) : styles de la fiche perso + module à la demande.
+  _openSpellReview: async (btn) => {
+    try { const { _ensureFeatureCss } = await import('../core/navigation.js'); await _ensureFeatureCss('characters'); } catch {}
+    const { openSpellReview } = await import('./characters/spell-review.js');
+    openSpellReview({ charId: btn.dataset.charId, spellId: btn.dataset.spellId, idx: Number(btn.dataset.idx) });
   },
   _adminRelinkPlayer: (btn) => _adminRelinkPlayer(btn.dataset.oldUid, btn.dataset.newUid, btn.dataset.name),
   _adminMergeDuplicate: (btn) => _adminMergeDuplicate(btn.dataset.uids, btn.dataset.email),
