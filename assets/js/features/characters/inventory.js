@@ -9,7 +9,7 @@ import { _esc, _norm } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { RARETE_NAMES, _rareteColor, _rareteLabel } from '../../shared/rarity.js';
 import { ITEM_STAT_META, statShort, getItemStatBonus, calcOr, getItemEffectText } from '../../shared/char-stats.js';
-import { useGoldMulti } from '../../shared/economy.js';
+import { useGold, useGoldMulti } from '../../shared/economy.js';
 import {
   shopItemToInvEntry,
   getInventoryItemValue,
@@ -1508,34 +1508,19 @@ export async function sendGold(fromCharId) {
   const montant = parseInt(document.getElementById('gold-amount')?.value) || 0;
   if (montant < 1) { showNotif('Montant invalide.', 'error'); return; }
 
-  const orDispo = calcOr(fromChar);
-  if (orDispo < montant) { showNotif(`Fonds insuffisants (${orDispo} or disponibles).`, 'error'); return; }
-
-  const now = new Date().toLocaleDateString('fr-FR');
-
-  // Sender : dépense
-  const fromCompte = { recettes: [], depenses: [], ...(fromChar.compte || {}) };
-  fromCompte.depenses = [...fromCompte.depenses, {
-    date: now,
-    libelle: `Or envoyé à ${toChar.nom || 'joueur'}`,
-    montant,
-  }];
-
-  // Recipient : recette
-  const toCompte = { recettes: [], depenses: [], ...(toChar.compte || {}) };
-  toCompte.recettes = [...toCompte.recettes, {
-    date: now,
-    libelle: `Or reçu de ${fromChar.nom || 'joueur'}`,
-    montant,
-  }];
-
-  await Promise.all([
-    updateInCol('characters', fromCharId, { compte: fromCompte }),
-    updateInCol('characters', targetId,   { compte: toCompte }),
-  ]);
-
-  fromChar.compte = fromCompte;
-  toChar.compte   = toCompte;
+  // Débit puis crédit SÉQUENTIELS avec rollback, via la couche économie (écriture
+  // immuable + vérification de solde). L'ancien Promise.all écrivait les deux
+  // comptes EN PARALLÈLE sans compensation : si une seule écriture échouait, de
+  // l'or était créé ou détruit. `charObj` permet de créditer une cible hors
+  // STATE.characters (autre session).
+  const debit = await useGold(fromCharId, -montant, `Or envoyé à ${toChar.nom || 'joueur'}`, { charObj: fromChar, refreshUI: false });
+  if (!debit.ok) { showNotif(debit.error || 'Transfert impossible.', 'error'); return; }
+  const credit = await useGold(targetId, +montant, `Or reçu de ${fromChar.nom || 'joueur'}`, { charObj: toChar, refreshUI: false });
+  if (!credit.ok) {
+    await useGold(fromCharId, +montant, '↻ Rollback transfert échoué', { charObj: fromChar, refreshUI: false });
+    showNotif(credit.error || 'Transfert échoué — débit annulé.', 'error');
+    return;
+  }
 
   closeModal();
   showNotif(`💰 ${montant} or envoyé à ${toChar.nom || 'joueur'} !`, 'success');
