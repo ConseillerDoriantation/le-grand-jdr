@@ -29,6 +29,7 @@ test('la fiche article est un panneau latéral et propose la reprise', () => {
   assert.match(detail, /_buyBtnHtml\(item, !!ctx\.char, st, \{ detail: true \}\)/);
   assert.doesNotMatch(detail, /pushModal/);
   assert.match(css, /\.shc-detail-sheet\s*\{[^}]*position:\s*fixed;[^}]*width:\s*min\(440px, 100vw\)/s);
+  assert.match(css, /\.shc-detail-pills \.shc-trait\s*\{[^}]*height:\s*auto[^}]*white-space:\s*normal[^}]*overflow-wrap:\s*anywhere/s);
 });
 
 test('les onglets utilisent des icônes SVG et le portefeuille affiche le solde projeté', () => {

@@ -4085,7 +4085,12 @@ html:not([data-theme="light"]) .vtt-root {
 .vtt-atk-step button:hover { background: var(--surface-2); color: var(--text); }
 .vtt-atk-step input { width: 34px; text-align: center; background: none; border: 0; outline: 0; color: var(--text); font-family: var(--font-mono); font-size: 14px; font-weight: 700; -moz-appearance: textfield; }
 .vtt-atk-step input::-webkit-outer-spin-button, .vtt-atk-step input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.vtt-atk-reset { grid-column: 1 / -1; justify-self: start; font-size: 11px; color: var(--text-muted); text-decoration: underline; text-underline-offset: 2px; border: 0; background: transparent; cursor: pointer; }
+.vtt-atk-reset {
+  grid-column: 1 / -1; justify-self: start; font-size: 11px; color: var(--text-muted);
+  text-decoration: underline; text-underline-offset: 2px; border: 0; background: transparent;
+  cursor: pointer; visibility: hidden; opacity: 0; pointer-events: none;
+}
+.vtt-atk-reset.is-visible { visibility: visible; opacity: 1; pointer-events: auto; }
 .vtt-atk-reset:hover { color: var(--text-soft); }
 
 /* ── 3 · Choix optionnels (élément / technique) : rangées de pastilles ── */
