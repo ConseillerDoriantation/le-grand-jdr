@@ -3,8 +3,8 @@
 // âœ“ Admin : CRUD crÃ©atures, image+crop, attaques/traits/butins dynamiques
 // âœ“ Joueur : galerie + suivi personnel (PV/PM live, notes)
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, getDocData, saveDoc, batchUpdateInCol } from '../data/firestore.js';
-import { trySave, confirmDelete, tryDoc } from '../shared/crud.js';
+import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, getDocData, saveDoc, replaceDoc, batchUpdateInCol } from '../data/firestore.js';
+import { trySave, confirmDelete } from '../shared/crud.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, popModal, confirmModal, promptModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -65,6 +65,7 @@ let _bstClickGuardInstalled = false;
 let _bstReordering = false;
 let _pendingTargetBeastId = null;
 let _pendingRouteBeastId = null;
+let _bstTrackerLoaded = false;   // carnet lu au moins une fois (cf. _saveTracker)
 
 function _bstRouteId() {
   return String(getRouteSub('bestiaire') || '').split('/')[0] || '';
@@ -1196,6 +1197,7 @@ export async function renderBestiary() {
   // tenu Ã  jour par le watch ci-dessous.
   const col = STORE.bestiaireId === 'main' ? 'bestiary' : `bestiary_${STORE.bestiaireId}`;
   STORE.tracker = {};
+  _bstTrackerLoaded = false;
   STORE.currentCol = col;
 
   if (!STORE.damageTypes) STORE.damageTypes = await loadDamageTypes();
@@ -1234,6 +1236,7 @@ export async function renderBestiary() {
     watchPageDoc('bst-tracker', 'bestiary_tracker', trackerUid, 'bestiaire', doc => {
       if (_bstShouldSkipLiveRender()) return;
       STORE.tracker = doc?.data || {};
+      _bstTrackerLoaded = true;
       if (_bstSig() === _bstRenderSig) return;
       _render();
     });
@@ -2094,7 +2097,13 @@ async function _saveTracker() {
   // viewAsUid n'est respectÃ© QUE pour un admin â€” sinon un joueur Ã©crirait dans le
   // doc d'un autre joueur (uid pÃ©rimÃ© d'une session MJ prÃ©cÃ©dente).
   const uid = (STATE.isAdmin && STORE.viewAsUid) || STATE.user?.uid; if (!uid) return;
-  await tryDoc('bestiary_tracker', uid, { data: STORE.tracker });
+  // Remplacement, pas fusion : en merge:true, une estimation effacée (clé
+  // supprimée) restait dans le doc et l'écho du watch la faisait revenir.
+  // Tant que le carnet n'a pas été lu, STORE.tracker est partiel → fusion, pour
+  // ne jamais écraser les autres créatures.
+  const write = _bstTrackerLoaded ? replaceDoc : saveDoc;
+  try { await write('bestiary_tracker', uid, { data: STORE.tracker }); }
+  catch (e) { notifySaveError(e); }
 }
 
 function _syncActivePanel() {
