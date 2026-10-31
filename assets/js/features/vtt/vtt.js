@@ -10,7 +10,7 @@ import { STATE } from '../../core/state.js';
 import { PRESENCE_TTL_MS } from '../../shared/presence-ttl.js';
 import { registerActions } from '../../core/actions.js';
 import Sortable from '../../vendor/sortable.esm.js';
-import { getDocData, getDocDataSilent, saveDoc, loadCollection, subscribeCollection, subscribeDoc } from '../../data/firestore.js';
+import { getDocData, getDocDataSilent, saveDoc, replaceDoc, loadCollection, subscribeCollection, subscribeDoc } from '../../data/firestore.js';
 import {
   db, doc, getDoc, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch, deleteField,
@@ -437,6 +437,7 @@ let _resizeObs = null;   // VS.stage, VS.layers, VS.unsubs → VS (cœur Konva/t
 let _bestiaryLoads = new Map(); // beastId → Promise lecture doc ciblée
 let _bestiaryCatalogLoaded = false;
 let _bestiaryCatalogPromise = null;
+let _bstTrackerLoaded = false;  // tracker joueur lu au moins une fois (cf. _saveBstTracker)
 // [VS.bstTracker → VS.bstTracker] (défaut dans vtt-state.js)
 let _attackSrc = null, _moveHL = [];   // VS.selected, VS.tool → VS ; VS.characters/VS.npcs/VS.bestiary → VS
 // (état de scène : session, pages, tokens, activePage, stage, layers, characters,
@@ -1229,6 +1230,7 @@ function _cleanup() {
   _mtBroadcasting = false;
   VS.presence = {}; VS.miniUid = null; VS.miniCharId = null;
   VS.tokens = {}; VS.pages = {}; VS.characters = {}; VS.npcs = {}; VS.bestiary = {}; VS.bstTracker = {};
+  _bstTrackerLoaded = false;
   VS.combatHpEstimates.clear();
   _vttResetCombatHpLog();
   setActiveStatsSession(null);
@@ -12658,6 +12660,7 @@ function _initListeners() {
     if (uid) {
       VS.unsubs.push(onSnapshot(_bstTrackerRef(uid), snap => {
         VS.bstTracker = snap.exists() ? (snap.data().data || {}) : {};
+        _bstTrackerLoaded = true;
         _vttRefreshCombatHpEstimates();
         // Mettre à jour la barre HP de tous les tokens ennemis sur le canvas
         for (const [id, e] of Object.entries(VS.tokens)) {
@@ -13503,9 +13506,12 @@ function _vttSwitchPage(id) { return _switchPage(id); }
 
 // ── Suivi joueur du bestiaire (déductions, notes) depuis l'inspecteur VTT ──
 // Écrit dans le même document Firestore que la fiche bestiaire → cohérent partout.
+// Remplacement (pas merge:true) : sinon une déduction effacée revient à l'écho.
+// Avant le 1er snapshot, VS.bstTracker est vide → fusion, pour ne rien écraser.
 const _saveBstTracker = async () => {
   const uid = STATE.user?.uid; if (!uid) return;
-  try { await saveDoc('bestiary_tracker', uid, { data: VS.bstTracker }); }
+  const write = _bstTrackerLoaded ? replaceDoc : saveDoc;
+  try { await write('bestiary_tracker', uid, { data: VS.bstTracker }); }
   catch (e) { console.error('[vtt] tracker save', e); }
 }
 function _vttBstDed(beastId, key, val) {
