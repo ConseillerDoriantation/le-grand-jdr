@@ -979,18 +979,18 @@ function _sortsSetView(v) {
 // ── Fiche du sort ────────────────────────────────────────────────────────────
 // Sélection : mise à jour CIBLÉE (fiche + surbrillance de la ligne), sans
 // re-rendre la liste → ni saut de défilement ni perte de focus.
-function _sortsSelect(i) {
+function _sortsSelect(i, { open = true } = {}) {
   const c = _getCurrentSpellChar();
   const s = (c?.deck_sorts || [])[i]; if (!s) return;
   _sortsSelKey = _spellCompareKey(s, i);
-  _sortsSheetOpen = true;
+  if (open) _sortsSheetOpen = true;
   const root = document.querySelector('.cs-grim');
   const sheet = root?.querySelector('.cs-grim-sheet');
   if (!root) { _sortsRerender(); return; }
   const html = _renderSpellSheet(s, i, c, _sortsLastCanEdit);
   if (sheet) sheet.outerHTML = html;
   else root.querySelector('.cs-grim-body')?.insertAdjacentHTML('beforeend', html);
-  root.classList.add('is-sheet-open');
+  if (open) root.classList.add('is-sheet-open');
   root.querySelectorAll('.cs-grim-row.is-sel').forEach(row => {
     row.classList.remove('is-sel');
     row.querySelector('.cs-grim-pick')?.setAttribute('aria-pressed', 'false');
@@ -998,6 +998,13 @@ function _sortsSelect(i) {
   const row = root.querySelector(`.cs-grim-row[data-sort-idx="${i}"]`);
   row?.classList.add('is-sel');
   row?.querySelector('.cs-grim-pick')?.setAttribute('aria-pressed', 'true');
+}
+
+// ✏️ d'une ligne : la forge sans passer par la fiche. La ligne devient la
+// sélection (fiche à jour à la fermeture) sans ouvrir le panneau du bas.
+function _sortsEditRow(i) {
+  _sortsSelect(i, { open: false });
+  editSort(i);
 }
 
 // Écran étroit : la fiche est un panneau du bas, refermable.
@@ -1481,6 +1488,7 @@ function _renderSpellRow(s, i, c, canEdit, { pmDelta = 0, deckMax = Infinity, se
         <span class="cs-grim-line">${line}</span>
       </span>
     </button>
+    ${canEdit ? `<button type="button" class="cs-grim-edit" data-action="_sortsEditRow" data-idx="${i}" title="Modifier la composition" aria-label="Modifier ${_esc(s.nom || 'ce sort')}">✏️</button>` : ''}
     <span class="cs-grim-cost" title="Coût : ${pm} ${_esc(spellCostRes(s).full)}"><b>${pm}</b> ${_esc(_sortResLabel(s))}</span>
     ${_renderSpellDeckBtn(s, i, c, canEdit, deckMax)}
   </div>`;
@@ -1561,7 +1569,8 @@ function _renderSpellSheet(s, i, c, canEdit) {
   ].join('');
   const cat = cats.find(ct => ct.id === s.catId);
   const hasInvocation = (s.runes || []).includes('Invocation');
-  return `<aside class="cs-grim-sheet" aria-label="Fiche du sort ${_esc(s.nom || '')}" data-sort-idx="${i}">
+  // data-scroll-key : le défilement interne de la fiche survit aux re-rendus.
+  return `<aside class="cs-grim-sheet" aria-label="Fiche du sort ${_esc(s.nom || '')}" data-sort-idx="${i}" data-scroll-key="cs-grim-sheet-${_esc(String(s.id || i))}">
     <button type="button" class="cs-grim-sheet-x" data-action="_sortsCloseSheet" aria-label="Fermer la fiche">✕</button>
     <header class="cs-grim-sh-head">
       <span class="cs-grim-sh-ic" style="--c:${_typeColor(s)}" aria-hidden="true">${_esc(s.icon || '✦')}</span>
@@ -5898,6 +5907,7 @@ registerActions({
   _sortsClearFacets:      ()    => _sortsClearFacets(),
   _sortsSetPm:            (btn) => _sortsSetPm(btn.dataset.pm),
   _sortsSelect:           (btn) => _sortsSelect(Number(btn.dataset.idx)),
+  _sortsEditRow:          (btn) => _sortsEditRow(Number(btn.dataset.idx)),
   _sortsCloseSheet:       ()    => _sortsCloseSheet(),
   _sortsInlineEdit:       (el)  => _sortsInlineEdit(el),
   _sortsSheetDecide:      (btn) => _sortsSheetDecide(Number(btn.dataset.idx), btn.dataset.val),

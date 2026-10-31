@@ -23236,7 +23236,7 @@ body .modal:has(.cs) > #modal-body { padding: 0 !important; height: auto !import
 .cs-grim-btn.has-dot { position:relative; }
 .cs-grim-btn.has-dot::after { content:''; position:absolute; top:7px; right:7px; width:7px; height:7px; border-radius:50%; background:var(--amber); }
 .cs-grim-link { background:none; border:0; padding:4px 6px; color:var(--gold-2); font:inherit; font-size:12px; font-weight:600; cursor:pointer; }
-.cs-grim :is(.cs-grim-btn, .cs-grim-pick, .cs-grim-tg, .cs-grim-seg, .cs-grim-chipbtn, .cs-grim-slot, .cs-grim-cat-toggle, .cs-grim-link):focus-visible,
+.cs-grim :is(.cs-grim-btn, .cs-grim-pick, .cs-grim-edit, .cs-grim-tg, .cs-grim-seg, .cs-grim-chipbtn, .cs-grim-slot, .cs-grim-cat-toggle, .cs-grim-link):focus-visible,
 .cs-review :is(.cs-grim-btn, .cs-review-item):focus-visible,
 .cs-forge-nav button:focus-visible { outline:2px solid var(--gold-2); outline-offset:2px; }
 
@@ -23318,6 +23318,12 @@ body .modal:has(.cs) > #modal-body { padding: 0 !important; height: auto !import
 .cs-grim-pill { padding:2px 8px; border-radius:999px; border:1px solid; font-size:11px; font-weight:700; white-space:nowrap; }
 .cs-grim-pill.is-pending { color:var(--amber); border-color:color-mix(in srgb, var(--amber) 40%, transparent); background:color-mix(in srgb, var(--amber) 12%, transparent); }
 .cs-grim-pill.is-no { color:var(--crimson-light); border-color:color-mix(in srgb, var(--crimson) 45%, transparent); background:color-mix(in srgb, var(--crimson) 12%, transparent); }
+.cs-grim-edit { flex:none; display:grid; place-items:center; width:38px; height:38px; padding:0; border-radius:10px; border:1px solid transparent; background:transparent; font-size:15px; cursor:pointer; transition:opacity .12s, background .12s, border-color .12s; }
+.cs-grim-edit:hover { background:var(--surface-3); border-color:var(--border-strong); }
+@media (hover:hover) {
+  .cs-grim-edit { opacity:.5; }
+  .cs-grim-row:hover .cs-grim-edit, .cs-grim-edit:focus-visible { opacity:1; }
+}
 .cs-grim-cost { flex:none; min-width:52px; text-align:right; color:var(--text-muted); font-size:13px; font-variant-numeric:tabular-nums; }
 .cs-grim-cost b { color:var(--text); font-size:14px; font-weight:700; }
 .cs-grim-tg { flex:none; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-width:108px; min-height:40px; padding:0 12px; border-radius:12px; border:1px solid var(--border-strong); background:transparent; color:var(--text-soft); font:inherit; font-size:12.5px; font-weight:600; white-space:nowrap; cursor:pointer; }
@@ -23335,6 +23341,18 @@ button.cs-grim-tg:hover { background:var(--surface-3); color:var(--text); }
 /* Fiche du sort */
 .cs-grim-sheet { position:relative; flex:1 1 360px; min-width:0; box-sizing:border-box; display:flex; flex-direction:column; gap:14px; padding:18px; border-radius:18px; background:var(--surface-1); border:1px solid var(--border-md); box-shadow:var(--elev-2); }
 .cs-grim-sheet-x { display:none; }
+/* Fiche à côté de la liste : elle suit le défilement (collée sous .cs-top) et
+   défile en interne si elle dépasse l'écran. .main-col est en overflow:hidden,
+   conteneur de défilement qui piège le sticky → clip (même découpe, sans piège).
+   896px = 520 (liste) + 16 (écart) + 360 (fiche) : en dessous, la fiche passe
+   sous la liste. */
+@media (min-width: 901px) {
+  #char-sheet-area .main-col:has(.cs-grim) { overflow:clip; }
+  #char-sheet-area .cs-grim-body { container:cs-grim-body / inline-size; }
+}
+@container cs-grim-body (min-width: 896px) {
+  .cs-grim-sheet { position:sticky; top:calc(var(--top-h) + 14px); max-height:calc(100vh - var(--top-h) - 28px); overflow-y:auto; scrollbar-width:thin; }
+}
 .cs-grim-sh-head { display:flex; align-items:flex-start; gap:12px; }
 .cs-grim-sh-ic { flex:none; width:58px; height:58px; box-sizing:border-box; border-radius:16px; display:grid; place-items:center; font-size:29px; background:color-mix(in srgb, var(--c) 15%, var(--surface-2)); border:1px solid color-mix(in srgb, var(--c) 40%, transparent); }
 .cs-grim-sh-id { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:8px; }
@@ -23410,7 +23428,7 @@ button.cs-grim-tg:hover { background:var(--surface-3); color:var(--text); }
   .cs-grim-segs { flex:1 1 100%; }
   .cs-grim-seg { flex:1 1 0; justify-content:center; padding:0 6px; }
   .cs-grim-seg-extra { display:none; }
-  .cs-grim-drag { display:none; }
+  .cs-grim-drag, .cs-grim-edit { display:none; }
   .cs-grim-cost { min-width:0; }
   .cs-grim-tg { min-width:0; }
   .cs-grim-row .cs-grim-tg { padding:0 10px; }
@@ -23459,4 +23477,4 @@ button.cs-grim-tg:hover { background:var(--surface-3); color:var(--text); }
 [data-theme="light"] :is(.cs-grim-btn.is-primary, .cs-grim-status.is-deck, .cs-grim-link, .cs-review-kind.is-fixed, .cs-grim-tg.is-always),
 [data-theme="light"] .cs-forge2 .save.is-next { color:var(--gold-dark); }
 
-@media (prefers-reduced-motion: reduce) { .cs-grim-row, .cs-grim-btn { transition:none; } }
+@media (prefers-reduced-motion: reduce) { .cs-grim-row, .cs-grim-btn, .cs-grim-edit { transition:none; } }

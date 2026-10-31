@@ -30,6 +30,21 @@ test('sur écran étroit, la fiche du sort devient un panneau du bas refermable'
   assert.match(css, /\.cs-grim\.is-sheet-open \.cs-grim-sheet-x\s*\{[^}]*display:grid/);
 });
 
+test('sur écran large, la fiche du sort suit le défilement de la liste', () => {
+  // .main-col (overflow:hidden) piège le sticky : clip tant que l'onglet Sorts est affiché.
+  assert.match(css, /@media \(min-width: 901px\)\s*\{[^@]*\.main-col:has\(\.cs-grim\)\s*\{[^}]*overflow:clip/);
+  assert.match(css, /@container cs-grim-body \(min-width: 896px\)\s*\{[^@]*\.cs-grim-sheet\s*\{[^}]*position:sticky[^}]*overflow-y:auto/);
+  assert.match(fnBody('_renderSpellSheet'), /data-scroll-key="cs-grim-sheet-/);
+});
+
+test('chaque ligne a un ✏️ qui ouvre la forge sans ouvrir le panneau du bas', () => {
+  assert.match(fnBody('_renderSpellRow'), /canEdit \? `<button type="button" class="cs-grim-edit" data-action="_sortsEditRow" data-idx="\$\{i\}"/);
+  assert.match(fnBody('_sortsEditRow'), /_sortsSelect\(i, \{ open: false \}\);\s*editSort\(i\);/);
+  assert.match(spellsJs, /_sortsEditRow:\s*\(btn\)\s*=>\s*_sortsEditRow\(Number\(btn\.dataset\.idx\)\)/);
+  // Sur téléphone la ligne est trop étroite : le toucher ouvre déjà la fiche.
+  assert.match(css, /@media \(max-width: 640px\)\s*\{[^@]*\.cs-grim-edit\s*\{\s*display:none/);
+});
+
 test('le modificateur choisi dans la fiche est synchronisé et lu avant le défaut de l arme', () => {
   assert.match(spellsJs, /function _syncSpellStatProxy\(el\)[\s\S]*target\.value = el\.value;[\s\S]*_updateSortPreview\(\);/);
   assert.match(spellsJs, /_syncSpellStatProxy:\s*\(el\)\s*=>\s*_syncSpellStatProxy\(el\)/);
