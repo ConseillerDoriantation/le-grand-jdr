@@ -1472,21 +1472,16 @@ function _bstSlotOpen(el) {
   const inp = el.firstElementChild; inp.focus(); inp.select();
   let done = false;
   const panelSlot = () => document.querySelector('.bst-panel-slot');
-  // Préserve le scroll du corps du panneau : _syncActivePanel réécrit l'innerHTML
-  // et remettrait la fiche en haut à chaque validation.
-  const scrollTop = () => document.querySelector('.bst-pn-b')?.scrollTop || 0;
-  const restoreScroll = (top) => { const b = document.querySelector('.bst-pn-b'); if (b) b.scrollTop = top; };
+  // _syncActivePanel conserve la position de lecture de la fiche.
   const finish = (next) => {
     if (done) return; done = true; _bstEditingSlot = null;
     const v = inp.value;
-    const top = scrollTop();
     if (scope === 'stat') _bstSetStat(cid, slotKey, v);
     else _bstSetDeduction(cid, slotKey, v);
     const slots = panelSlot() ? [...panelSlot().querySelectorAll('.bst-slot')] : [];
     const idx = slots.indexOf(el);
     _syncActivePanel();          // reflète valeur + ligne .done + anneau + compteur
     _bstReplaceCard(cid);        // anneau de carnet sur la vignette
-    restoreScroll(top);
     if (next) {
       const l2 = panelSlot() ? [...panelSlot().querySelectorAll('.bst-slot')] : [];
       const nx = l2[idx + 1] || l2[0];
@@ -1495,7 +1490,7 @@ function _bstSlotOpen(el) {
   };
   inp.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); finish(true); }
-    else if (e.key === 'Escape') { e.preventDefault(); const top = scrollTop(); done = true; _bstEditingSlot = null; _syncActivePanel(); restoreScroll(top); }
+    else if (e.key === 'Escape') { e.preventDefault(); done = true; _bstEditingSlot = null; _syncActivePanel(); }
   });
   inp.addEventListener('blur', () => setTimeout(() => finish(false), 0));
 }
@@ -1695,17 +1690,8 @@ function _render() {
   const searchField = `<div class="bst-srch">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
     <input type="text" id="bst-search" placeholder="Nom, type, environnement, trait, butin…" value="${_esc(STORE.searchVal)}" autocomplete="off" data-bst-action="search" data-bst-on="input">
-    ${STORE.searchVal ? `<button class="clr" data-bst-action="clearSearch" title="Effacer">×</button>` : `<kbd>/</kbd>`}
+    ${_bstSearchAffordanceHtml()}
   </div>`;
-
-  const reorderHint = canReorder
-    ? ` · <span class="bst-drag-key">⠿</span> <b>glisser pour réordonner</b>`
-    : (admin && STORE.bestiaireId === 'main' && hasFilters
-      ? ` · <b>réinitialiser les filtres pour réordonner</b>`
-      : '');
-  const gridnote = admin
-    ? `<span class="kb">/</span> chercher · <span class="kb">↑↓←→</span> parcourir · <span class="kb">↵</span> ouvrir${reorderHint} · <b>clic droit</b> pour gérer une fiche`
-    : `<span class="kb">/</span> chercher · <span class="kb">↵</span> ouvrir · dans la fiche, <b>chaque « ? » se remplit au clic</b> et <span class="kb">↵</span> saute au trou suivant`;
 
   content.innerHTML = `
   <div class="bst-root" id="bst-root">
@@ -1719,18 +1705,17 @@ function _render() {
         </div>
         <div class="bst-fbar">
           ${searchField}${rangSeg}${typeSel}${counterBar}
-          <span class="bst-fcnt"><b>${filtered.length}</b> affichée${filtered.length > 1 ? 's' : ''}</span>
-          ${hasFilters ? `<button class="bst-freset" data-bst-action="resetFilters">Tout réinitialiser</button>` : ''}
+          ${_bstFilterCountHtml(filtered.length, hasFilters)}
         </div>
       </div>
     </div>
     <div class="bst-wrap">
       ${_isViewingPlayer() ? `<div class="bst-view-banner"><span>Vue joueur</span><b>${_esc(STORE.playersList.find(p => p.uid === STORE.viewAsUid)?.pseudo || 'joueur')}</b><button data-bst-action="viewAs" data-uid="">Revenir à mon carnet</button></div>` : ''}
-      <div class="bst-gridnote">${gridnote}</div>
+      <div class="bst-gridnote">${_bstGridnoteHtml(admin, canReorder, hasFilters)}</div>
       <div class="bst-main ${STORE.activeId ? '' : 'solo'}" id="bst-main">
         <section>
           <div class="bst-grid${canReorder ? ' bst-sortable' : ''}">
-            ${filtered.length ? filtered.map(c => _renderCard(c, canReorder)).join('') : `<div class="bst-emptyg"><b>${STORE.creatures.length ? 'Aucun résultat' : 'Recueil vide'}</b>${STORE.searchVal ? `Rien ne correspond à « ${_esc(STORE.searchVal)} ».` : (admin ? 'Ajoute une créature pour commencer.' : 'Reviens quand tu auras rencontré des créatures.')}</div>`}
+            ${_bstGridHtml(filtered, canReorder, admin)}
           </div>
         </section>
         <aside class="bst-panel-slot" id="bst-panel-slot">${STORE.activeId ? _renderPanel(STORE.creatures.find(c => c.id === STORE.activeId)) : ''}</aside>
@@ -1745,14 +1730,48 @@ function _render() {
   _bstBindPanelSpy();
 
   if (sameActive) {
-    const slot = content.querySelector('.bst-pn-b');
-    if (slot && prevSlotTop) slot.scrollTop = prevSlotTop;
+    _bstSetPanelScroll(prevSlotTop);
     if (prevContentTop) content.scrollTop = prevContentTop;
     if (prevWinTop) window.scrollTo(0, prevWinTop);
   }
   _bstRestoreFocusState(content, focusState);
   _bstRenderedActiveId = STORE.activeId;
   _bstRenderSig = _bstSig();
+}
+
+// Morceaux de la barre de filtres / grille, partagés par _render et par la mise
+// à jour ciblée de la recherche (_bstRefreshResults).
+function _bstSearchAffordanceHtml() {
+  return STORE.searchVal ? `<button class="clr" data-bst-action="clearSearch" title="Effacer">×</button>` : `<kbd>/</kbd>`;
+}
+function _bstFilterCountHtml(count, hasFilters) {
+  return `<span class="bst-fcnt"><b>${count}</b> affichée${count > 1 ? 's' : ''}</span>
+          ${hasFilters ? `<button class="bst-freset" data-bst-action="resetFilters">Tout réinitialiser</button>` : ''}`;
+}
+function _bstGridnoteHtml(admin, canReorder, hasFilters) {
+  const reorderHint = canReorder
+    ? ` · <span class="bst-drag-key">⠿</span> <b>glisser pour réordonner</b>`
+    : (admin && STORE.bestiaireId === 'main' && hasFilters
+      ? ` · <b>réinitialiser les filtres pour réordonner</b>`
+      : '');
+  return admin
+    ? `<span class="kb">/</span> chercher · <span class="kb">↑↓←→</span> parcourir · <span class="kb">↵</span> ouvrir${reorderHint} · <b>clic droit</b> pour gérer une fiche`
+    : `<span class="kb">/</span> chercher · <span class="kb">↵</span> ouvrir · dans la fiche, <b>chaque « ? » se remplit au clic</b> et <span class="kb">↵</span> saute au trou suivant`;
+}
+function _bstGridHtml(filtered, canReorder, admin) {
+  return filtered.length
+    ? filtered.map(c => _renderCard(c, canReorder)).join('')
+    : `<div class="bst-emptyg"><b>${STORE.creatures.length ? 'Aucun résultat' : 'Recueil vide'}</b>${STORE.searchVal ? `Rien ne correspond à « ${_esc(STORE.searchVal)} ».` : (admin ? 'Ajoute une créature pour commencer.' : 'Reviens quand tu auras rencontré des créatures.')}</div>`;
+}
+
+// Replace le corps de la fiche à une position SANS l'animation
+// `scroll-behavior: smooth` du panneau (sinon il repart du haut puis redescend).
+function _bstSetPanelScroll(top) {
+  const body = document.querySelector('.bst-pn-b');
+  if (!body || !top) return;
+  body.style.scrollBehavior = 'auto';
+  body.scrollTop = top;
+  body.style.scrollBehavior = '';
 }
 
 function _bstCaptureFocusState(root) {
@@ -2090,6 +2109,11 @@ function _syncActivePanel() {
   });
 
   if (panelSlot) {
+    // Même fiche re-rendue après une modification : on garde la position de
+    // lecture (l'innerHTML recrée le corps défilant, remis tout en haut sinon).
+    const keepTop = activeCreature && STORE.activeId === _bstRenderedActiveId
+      ? panelSlot.querySelector('.bst-pn-b')?.scrollTop || 0
+      : 0;
     try {
       panelSlot.innerHTML = activeCreature ? _renderPanel(activeCreature) : '';
     } catch (err) {
@@ -2101,6 +2125,7 @@ function _syncActivePanel() {
           <div class="bst-hint">Impossible d'afficher toutes les informations de cette créature.</div>
         </div></div></div>` : '';
     }
+    _bstSetPanelScroll(keepTop);
     _bstBindPanelSpy();
   }
   _bstRenderedActiveId = STORE.activeId;
@@ -2200,31 +2225,35 @@ function _bstSelectRang(rang) {
     btn.style.color      = active ? rst.color : 'var(--text-dim)';
   });
 }
-// Recherche : met Ã  jour la valeur et filtre la grille SANS rerender complet
+// Recherche : met à jour la valeur puis, après une courte pause de frappe, la
+// grille seule (pas de rerender complet → focus et curseur du champ intacts).
+let _bstSearchTimer = null;
 function _bstSearchInput(val) {
   STORE.searchVal = val;
-  let visible = 0;
-  // Filtrer en live sans reconstruire toute la page. Index par id construit une
-  // fois (O(n)) plutôt qu'un .find par carte (O(cartes × créatures)) à la frappe.
-  const byId = new Map((STORE.creatures || []).map(c => [c.id, c]));
-  document.querySelectorAll('.bst-card').forEach(card => {
-    const c = byId.get(card.dataset.beastId);
-    if (!c) return;
-    const match = _beastMatchesFilters(c, { search: val });
-    card.style.display = match ? '' : 'none';
-    if (match) visible++;
-  });
-  document.querySelectorAll('[data-bst-visible-count], [data-bst-list-count]').forEach(el => {
-    el.textContent = String(visible);
-  });
-  const plural = document.querySelector('[data-bst-list-plural]');
-  if (plural) plural.textContent = visible > 1 ? 's' : '';
-  const empty = document.querySelector('[data-bst-filter-empty]');
-  const grid = document.querySelector('.bst-grid');
-  if (empty) empty.hidden = visible > 0;
-  if (grid) grid.hidden = visible === 0;
-  const reset = document.querySelector('[data-bst-reset-filters]');
-  if (reset) reset.hidden = !(_norm(val) || STORE.filterType || STORE.filterRang || STORE.filterPrep);
+  clearTimeout(_bstSearchTimer);
+  _bstSearchTimer = setTimeout(() => { _bstSearchTimer = null; _bstRefreshResults(); }, 150);
+}
+
+// Reconstruit les cartes depuis STORE.creatures : une recherche élargie doit
+// faire réapparaître des créatures absentes du DOM depuis le dernier rendu.
+function _bstRefreshResults() {
+  const root = document.getElementById('bst-root');
+  const grid = root?.querySelector('.bst-grid');
+  if (!grid) return;
+  const admin = _isAdminView();
+  const filtered = STORE.creatures.filter(c => _beastMatchesFilters(c));
+  const hasFilters = Boolean(STORE.searchVal || STORE.filterType || STORE.filterRang || STORE.filterPrep);
+  const canReorder = _canReorderBestiary();
+  grid.classList.toggle('bst-sortable', canReorder);
+  grid.innerHTML = _bstGridHtml(filtered, canReorder, admin);
+  _mountBestiarySortable();
+  root.querySelector('.bst-srch .clr, .bst-srch kbd')?.replaceWith(
+    document.createRange().createContextualFragment(_bstSearchAffordanceHtml()));
+  root.querySelectorAll('.bst-fcnt, .bst-freset').forEach(el => el.remove());
+  root.querySelector('.bst-fbar')?.insertAdjacentHTML('beforeend', _bstFilterCountHtml(filtered.length, hasFilters));
+  const note = root.querySelector('.bst-gridnote');
+  if (note) note.innerHTML = _bstGridnoteHtml(admin, canReorder, hasFilters);
+  _bstFocusIdx = -1;
 }
 
 function _bstSearch(val) { STORE.searchVal = val; _render(); } // legacy
