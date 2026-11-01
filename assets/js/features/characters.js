@@ -1819,8 +1819,10 @@ function renderCharCombatV3(c, canEdit) {
     const tierList = tiers.slice().sort((a, b) => a.pieces - b.pieces).map(t => { const p = Math.min(t.pieces, N); const ok = reachedPieces.has(p); return `<li><i>${ok ? '✓' : '○'}</i><span>${p} pièce${p > 1 ? 's' : ''}${ok ? ' · atteint' : ''}</span></li>`; }).join('');
     return row + (isOpen ? `<div class="fs-x"><div class="fs-xcols"><div class="fs-xb"><div class="fs-xh">Paliers</div><ul class="fs-list">${tierList || '<li>Aucun palier configuré.</li>'}</ul></div></div></div>` : '');
   }
+  // Les ensembles sont relatifs aux pièces portées : on les montre dans la
+  // section « Équipement porté », en sous-groupe, plutôt qu'en section à part.
   const combinedEffect = getArmorSetChipText(armorSet, { includeNames: false });
-  const setSection = N ? `<section class="fs-sec"><div class="fs-h"><h3>Ensembles d'armure</h3>${mj ? '<button type="button" class="fs-add" data-action="openArmorSetsAdmin">Gérer</button>' : ''}</div>${materials.length ? materials.map(setRow).join('') + `<div class="fs-total"><span>Effet combiné</span><b>${esc(combinedEffect || 'aucun bonus actif')}</b></div>` : '<p class="fs-note fs-pad">Sans pièce : aucun ensemble actif.</p>'}</section>` : '';
+  const setsBlock = (N && materials.length) ? `<div class="fs-subh"><span>Ensembles d'armure</span>${mj ? '<button type="button" class="fs-add" data-action="openArmorSetsAdmin">Gérer</button>' : ''}</div>${materials.map(setRow).join('')}<div class="fs-total"><span>Effet combiné</span><b>${esc(combinedEffect || 'aucun bonus actif')}</b></div>` : '';
 
   // ── Maîtrises d'arme ──────────────────────────────────────────────────────
   const heldFamilies = weaponSlots.map(s => currentItem(s.id)).filter(i => i?.nom).map(i => _norm(family(i)));
@@ -1853,9 +1855,9 @@ function renderCharCombatV3(c, canEdit) {
   const legend = `<div class="cb-leg">${RARETE_NAMES.map((n, i) => [n, i]).filter(([n, i]) => i >= 2 && n).map(([n]) => `<span style="--rc:${_rareteColor(n) || '#7a8fa8'}">${esc(n)}</span>`).join('')}</div>`;
 
   const weaponSection = weaponSlots.length ? `<section class="fs-sec"><div class="fs-h"><h3>Armes en main</h3></div>${weaponSlots.map(wRow).join('')}${styleRow()}</section>` : '';
-  const gearSection = armorSlots.length ? `<section class="fs-sec"><div class="fs-h"><h3>Équipement porté</h3></div>${armorSlots.map(aRow).join('')}</section>` : '';
+  const gearSection = armorSlots.length ? `<section class="fs-sec"><div class="fs-h"><h3>Équipement porté</h3></div>${armorSlots.map(aRow).join('')}${setsBlock}</section>` : '';
 
-  return `<div class="fs">${weaponSection}${gearSection}${setSection}${masterySection}${elSection}${legend}</div>`;
+  return `<div class="fs">${weaponSection}${gearSection}${masterySection}${elSection}${legend}</div>`;
 }
 
 

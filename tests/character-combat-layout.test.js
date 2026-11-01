@@ -12,10 +12,18 @@ test('combat v16 : feuille à filets, lignes Emplacement · Objet · Valeurs', (
     assert.ok(combat.includes(marker), marker);
   }
   // Ordre de rendu des sections (abstraction faite de l'ordre des déclarations).
-  assert.match(combat, /\$\{weaponSection\}\$\{gearSection\}\$\{setSection\}\$\{masterySection\}\$\{elSection\}/);
+  assert.match(combat, /\$\{weaponSection\}\$\{gearSection\}\$\{masterySection\}\$\{elSection\}/);
   for (const h of ['Armes en main', 'Équipement porté', "Ensembles d'armure", "Maîtrises d'arme", 'Affinités élémentaires']) {
     assert.ok(combat.includes(h), h);
   }
+});
+
+test('les ensembles d’armure sont intégrés à « Équipement porté » (sous-groupe, pas de section à part)', () => {
+  // Plus de section autonome : les ensembles sont un sous-groupe .fs-subh de la section équipement.
+  assert.ok(!combat.includes('setSection'), 'plus de const setSection');
+  assert.match(combat, /fs-subh/);
+  // Le sous-groupe est concaténé dans la section Équipement porté.
+  assert.match(combat, /Équipement porté<\/h3>[\s\S]*?\$\{setsBlock\}<\/section>/);
 });
 
 test('combat v16 : plus de colonnes, cartes « mains », losange de style ni sac en double', () => {

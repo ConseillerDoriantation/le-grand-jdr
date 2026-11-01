@@ -22284,14 +22284,18 @@ body .modal:has(.inv-history-modal-shell) {
    Sections à filets · ligne Emplacement · Objet (+ traits) · Valeurs calculées.
    Remplace l'ancien bloc .cs-v3 .cb-* (seuls .cb-gem / .cb-leg survivent). */
 .cs-v3 .cb-gem { flex: none; display: inline-block; width: 8px; height: 8px; transform: rotate(45deg); border-radius: 1px; background: var(--rc); }
-.cs-v3 .cb-leg { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 0 10px; font-size: .7rem; color: var(--text-dim); }
+.cs-v3 .cb-leg { column-span: all; break-inside: avoid; display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 4px 10px 0; font-size: .7rem; color: var(--text-dim); }
 .cs-v3 .cb-leg span { display: inline-flex; align-items: center; gap: 6px; color: var(--rc); }
 .cs-v3 .cb-leg span::before { content: ""; width: 7px; height: 7px; transform: rotate(45deg); border-radius: 1px; background: var(--rc); }
 .cs-grim-btn.cbx-sm { min-height: 34px; padding: 0 12px; font-size: 12.5px; border-radius: 10px; }
-.cs-v3 .fs { max-width: 940px; display: flex; flex-direction: column; gap: 34px; }
+/* Grand écran : deux colonnes pour remplir la largeur au lieu d'un vide à droite. */
+.cs-v3 .fs { max-width: 1200px; margin-inline: auto; columns: 480px 2; column-gap: 46px; }
 .cs-v3 .fs button { font-family: inherit; }
 .cs-v3 .fs button:focus-visible, .cs-v3 .fs input:focus-visible { outline: 2px solid var(--gold-2); outline-offset: 2px; }
-.cs-v3 .fs-sec { display: flex; flex-direction: column; min-width: 0; }
+.cs-v3 .fs-sec { display: flex; flex-direction: column; min-width: 0; break-inside: avoid; margin-bottom: 30px; }
+.cs-v3 .fs-subh { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; padding: 16px 10px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--text-dim); }
+.cs-v3 .fs-subh > span { color: var(--text-muted); }
+.cs-v3 .fs-subh .fs-add { margin: 0 0 0 auto; padding: 0; letter-spacing: 0; text-transform: none; }
 .cs-v3 .fs-h { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; padding: 0 10px 9px; border-bottom: 1px solid var(--border-strong); }
 .cs-v3 .fs-h h3 { margin: 0; font-family: var(--font-display, 'Cinzel', serif); font-size: 17px; font-weight: 600; letter-spacing: .02em; color: var(--text); }
 .cs-v3 .fs-h p { margin: 0; font-size: 12.5px; color: var(--text-muted); }
@@ -22335,6 +22339,9 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-v3 .fs-cl.up { color: var(--emerald); }
 .cs-v3 .fs-cl.down { color: var(--amber); }
 .cs-v3 .fs-xact { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Bouton « Équiper » d'un candidat : compact et uniforme, aligné en haut du candidat. */
+.cs-v3 .fs-cand > .fs-xact { flex: none; align-self: flex-start; }
+.cs-v3 .fs-cand .cs-grim-btn { min-height: 30px; padding: 0 12px; font-size: 12px; border-radius: 9px; }
 .cs-v3 .fs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 1.45; }
 .cs-v3 .fs-list li { display: flex; gap: 8px; color: var(--text-soft); }
 .cs-v3 .fs-list i { flex: none; width: 14px; font-style: normal; text-align: center; }
