@@ -7,19 +7,38 @@ const sheet = readFileSync(new URL('assets/js/features/characters.js', root), 'u
 const css = readFileSync(new URL('assets/css/characters.css', root), 'utf8');
 const combat = sheet.slice(sheet.indexOf('function renderCharCombatV3'), sheet.indexOf('// ══════════════════════════════════════════════════════════════════════════════\n// V3 — INVENTAIRE'));
 
-test('le combat v11 suit les trois zones et le détail en accordéon', () => {
-  for (const marker of ['cb-hands', 'cb-style', 'cb-list', 'cb-elems', 'cb-cand', 'cb-x']) assert.ok(combat.includes(marker), marker);
-  assert.match(combat, /En main[\s\S]*?Protection[\s\S]*?Savoir-faire/);
-  // Plus de panneau latéral ni de redondance CA/PV/PM dans l'onglet.
-  assert.ok(!combat.includes('cb-detail'), 'plus de panneau latéral cb-detail');
+test('combat v16 : feuille à filets, lignes Emplacement · Objet · Valeurs', () => {
+  for (const marker of ['class="fs"', 'fs-sec', 'fs-row', 'fs-c1', 'fs-c2', 'fs-c3', 'fs-v', 'fs-traits', 'fs-x', 'fs-dl', 'fs-cand', 'fs-total', 'fs-mrow', 'fs-els']) {
+    assert.ok(combat.includes(marker), marker);
+  }
+  // Ordre de rendu des sections (abstraction faite de l'ordre des déclarations).
+  assert.match(combat, /\$\{weaponSection\}\$\{gearSection\}\$\{setSection\}\$\{masterySection\}\$\{elSection\}/);
+  for (const h of ['Armes en main', 'Équipement porté', "Ensembles d'armure", "Maîtrises d'arme", 'Affinités élémentaires']) {
+    assert.ok(combat.includes(h), h);
+  }
+});
+
+test('combat v16 : plus de colonnes, cartes « mains », losange de style ni sac en double', () => {
+  // L'ancien layout v11 a disparu (seuls .cb-gem / .cb-leg survivent).
+  for (const dead of ['cb-hands', 'cb-style', 'cb-zone', 'cb-w', 'cb-roll', 'cb-detail', 'cb-sl']) {
+    assert.ok(!combat.includes(dead), `marqueur v11 retiré : ${dead}`);
+  }
+  // Pas de redondance CA totale / PV / PM dans l'onglet.
   assert.ok(!combat.includes('calcCA(c)'), 'plus de CA totale calculée dans l’onglet');
 });
 
-test('le détail se déplie en accordéon (plus de panneau sticky v8)', () => {
-  assert.match(css, /\.cs-v3 \.cb-x\s*\{[\s\S]*?animation:\s*cbIn/);
-  assert.ok(!css.includes('.cs-v3 .cb-detail'), 'CSS .cb-detail (panneau) retiré');
-  assert.ok(!css.includes('.cs-v3 .main-col:has(.cb-wrap)'), 'overflow:clip du panneau retiré');
-  assert.match(css, /@container \(max-width:\s*640px\)[\s\S]*?\.cs-v3 \.cb-hands/);
+test('combat v16 CSS : filets, accordéon en place, responsive, pas de reliquat v11', () => {
+  assert.match(css, /\.cs-v3 \.fs-row\b/);
+  assert.match(css, /\.cs-v3 \.fs-row\.is-open/);
+  assert.match(css, /\.cs-v3 \.fs-x\b/);
+  assert.match(css, /@media \(max-width:\s*680px\)[\s\S]*?\.cs-v3 \.fs-row/);
+  // Les rareté en losange (partagé Inventaire) et la légende restent.
+  assert.match(css, /\.cs-v3 \.cb-gem\s*\{[^}]*rotate\(45deg\)/);
+  assert.match(css, /\.cs-v3 \.cb-leg span::before/);
+  // Le gros du CSS .cb-* v11 est retiré.
+  for (const dead of ['.cs-v3 .cb-zone', '.cs-v3 .cb-hands', '.cs-v3 .cb-w', '.cs-v3 .cb-detail', '.cs-v3 .cb-sl']) {
+    assert.ok(!css.includes(dead), `CSS v11 retiré : ${dead}`);
+  }
 });
 
 test('les valeurs de combat restent calculées par les helpers métier', () => {
@@ -34,39 +53,43 @@ test('les valeurs de combat restent calculées par les helpers métier', () => {
   assert.ok(!/const PROF\s*=|const ITEMS\s*=\s*\{\s*baton/.test(combat));
 });
 
-test('le set affiché reprend les paliers réellement appliqués', () => {
+test('les ensembles affichent l’effet combiné réellement appliqué (par matière)', () => {
   assert.match(combat, /getArmorSetChipText\(armorSet, \{ includeNames: false \}\)/);
+  // Paliers par matière via la définition et les paliers réellement atteints.
+  assert.match(combat, /getArmorSetDefinition\(mat\)/);
+  assert.match(combat, /armorSetAppliedTiers\(def, count, N\)/);
   assert.doesNotMatch(combat, /activeEffect\?\.chipText/);
 });
 
 test('le style actif est mis en évidence et l’arme calcule son jet', () => {
   assert.match(combat, /k === activeKey/);
-  assert.match(combat, /cur \? '<em>Actif<\/em>'/);
-  assert.match(combat, /<h5>Toucher<\/h5>/);
-  assert.match(combat, /<h5>Dégâts/);
-  assert.match(css, /\.cs-v3 \.cb-sl div\.cur/);
+  assert.match(combat, /cur \? '✓' : '○'/);
+  // Le détail d'arme expose Toucher et Dégâts via la liste de définitions.
+  assert.match(combat, /\['Toucher',/);
+  assert.match(combat, /\['Dégâts',/);
 });
 
 test('rareté en losange (partagé Inventaire) et traits via les helpers', () => {
   assert.match(combat, /cb-gem/);
   assert.match(combat, /_getTraits\(/);
   assert.match(combat, /RARETE_NAMES/);
-  assert.match(css, /\.cs-v3 \.cb-gem\s*\{[^}]*rotate\(45deg\)/);
-  assert.match(css, /\.cs-v3 \.cb-leg span::before/);
 });
 
-test('les actions MJ (maîtrises) sont alignées à droite de leur en-tête', () => {
-  assert.match(css, /\.cs-v3 \.cb-sub \.cb-btn\s*\{[^}]*margin-left:\s*auto/);
+test('les en-têtes de section portent l’action MJ alignée à droite (.fs-add)', () => {
+  assert.match(css, /\.cs-v3 \.fs-h \.fs-add\s*\{[^}]*margin:\s*0 0 0 auto/);
+  // Les actions MJ « Gérer / Ajouter » sont des .fs-add.
+  assert.match(combat, /class="fs-add" data-action="openArmorSetsAdmin"/);
+  assert.match(combat, /class="fs-add" data-action="addMaitrise"/);
 });
 
-test('le joueur choisit son élément par défaut au VTT (étoile éditable, pas MJ-only)', () => {
-  // L'octroi d'un élément reste réservé au MJ…
-  assert.match(combat, /toggleCharElement[^`]*\(MJ\)/);
-  // …mais l'étoile « favori » (élément par défaut au VTT) est ouverte au
-  // propriétaire de la fiche : rendue cliquable dès que canEdit, pas seulement mj.
-  assert.match(combat, /active && canEdit \? `<button[^`]*setFavoriteElement/);
-  assert.ok(!/active && mj \? `<button[^`]*setFavoriteElement/.test(combat),
-    'l’étoile favori ne doit plus être gardée derrière mj');
+test('le joueur choisit son élément par défaut au VTT ; l’octroi reste MJ', () => {
+  // L'octroi d'un élément passe par le mode « Gérer » réservé au MJ.
+  assert.match(combat, /const manage = mj && _combatTabUi\.elManage/);
+  assert.match(combat, /if \(manage\) return `<button[^`]*toggleCharElement/);
+  // L'étoile « favori » (élément par défaut au VTT) est ouverte au propriétaire.
+  assert.match(combat, /const fav = canEdit \? `data-action="setFavoriteElement"/);
+  assert.ok(!/const fav = mj \? `data-action="setFavoriteElement"/.test(combat),
+    'l’étoile favori ne doit pas être gardée derrière mj');
 });
 
 test('Échap ferme le détail ouvert (cohérence avec l’inventaire et les recettes)', () => {
@@ -91,6 +114,8 @@ test('les actions réemploient les mutations existantes', () => {
     'data-action="openCombatStylesAdmin"',
     'data-action="openArmorSetsAdmin"',
     'data-action="stepCombatMastery"',
+    'data-action="deleteMaitrise"',
     'data-action="cbOpen"',
+    'data-action="cbElManage"',
   ]) assert.ok(combat.includes(marker), marker);
 });
