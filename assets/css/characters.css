@@ -12667,7 +12667,6 @@ body .modal:has(.cs-build-modal) {
   gap: 10px;
   padding: 8px 12px;
 }
-.cs-v3 .note-v3-titre { flex: 1; min-width: 0; }
 /* Poignée de drag (réordonner les notes) */
 .cs-v3 .note-v3-drag {
   flex-shrink: 0; cursor: grab; user-select: none;
@@ -12677,6 +12676,25 @@ body .modal:has(.cs-build-modal) {
 .cs-v3 .note-v3-drag:active { cursor: grabbing; }
 .cs-v3 .note-v3.cs-note-ghost { opacity: .35; background: rgba(232,184,75,.10); }
 .cs-v3 .note-v3.cs-note-chosen { box-shadow: 0 6px 22px rgba(0,0,0,.35); }
+/* Clone suivi par le curseur : Sortable le déplace via `transform` à chaque
+   mousemove → toute transition sur transform le faisait traîner derrière la souris. */
+.cs-v3 .note-v3.cs-note-drag,
+.cs-v3 .quest.cs-quete-drag {
+  opacity: .96 !important;
+  cursor: grabbing !important;
+  will-change: transform;
+  background: var(--surface-2) !important;
+  box-shadow: 0 16px 36px rgba(0,0,0,.42);
+}
+.cs-v3 .note-v3.cs-note-drag,
+.cs-v3 .note-v3.cs-note-drag *,
+.cs-v3 .quest.cs-quete-drag,
+.cs-v3 .quest.cs-quete-drag * {
+  transition: none !important;
+  animation: none !important;
+}
+.cs-v3 .is-sorting .note-v3:hover,
+.cs-v3 .is-sorting .quest:hover { transform: none; }
 .cs-v3 .note-v3-toggle {
   background: transparent; border: none; cursor: pointer;
   color: var(--text-muted, #7a8fa8);
@@ -12689,20 +12707,9 @@ body .modal:has(.cs-build-modal) {
   background: var(--surface-2); color: var(--gold-2, #7eb0ff);
 }
 .cs-v3 .note-v3-titre {
-  background: transparent; border: 1px solid transparent; border-radius: 6px;
-  padding: 4px 8px;
   font-family: var(--font-display, 'Cinzel', serif);
   font-size: .92rem; font-weight: 600; color: var(--text);
-  outline: none;
-  width: 100%;
-  transition: border-color .12s, background .12s;
 }
-.cs-v3 .note-v3-titre:hover { border-color: var(--border-md, rgba(255,255,255,.10)); }
-.cs-v3 .note-v3-titre:focus {
-  border-color: rgba(79,140,255,.4);
-  background: rgba(79,140,255,.05);
-}
-.cs-v3 .note-v3-titre-ro { padding: 4px 8px; }
 .cs-v3 .note-v3-date {
   font-size: .66rem; color: var(--text-dim);
   background: var(--surface-2);
@@ -20875,10 +20882,16 @@ body .modal:has(.inv-history-modal-shell) {
 
 .cs-v3 .note-v3-head {
   display: flex;
-  min-height: 49px;
-  padding: 9px 10px 9px 13px;
+  min-height: 42px;
+  padding: 7px 8px 7px 13px;
   align-items: center;
   gap: 7px;
+}
+.cs-v3 .note-v3-head-acts {
+  display: flex;
+  margin-left: auto;
+  align-items: center;
+  gap: 2px;
 }
 
 .cs-v3 .note-v3-marker {
@@ -20896,17 +20909,27 @@ body .modal:has(.inv-history-modal-shell) {
 }
 
 .cs-v3 .note-v3-drag {
-  width: 13px;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 27px;
+  margin-left: -4px;
   padding: 0;
-  opacity: .45;
+  border-radius: 6px;
+  opacity: .5;
+  touch-action: none;
 }
+.cs-v3 .note-v3-drag:hover { opacity: 1; background: rgba(255,255,255,.05); }
 
+/* Titre complet sur 2 lignes max (survol = titre entier). */
 .cs-v3 .note-v3-titre {
-  min-width: 80px;
-  padding: 4px 5px;
+  display: -webkit-box;
   overflow: hidden;
-  font-size: .86rem;
-  text-overflow: ellipsis;
+  font-size: .9rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .cs-v3 .note-v3-date {
@@ -20940,9 +20963,9 @@ body .modal:has(.inv-history-modal-shell) {
   font: inherit;
   text-align: left;
   align-items: stretch;
-  justify-content: space-between;
+  justify-content: flex-start;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
 }
 
 .cs-v3 .note-v3-preview:hover { background: color-mix(in srgb, var(--note-accent) 6%, transparent); }
@@ -20963,6 +20986,8 @@ body .modal:has(.inv-history-modal-shell) {
   font-size: .64rem;
   font-weight: 800;
   letter-spacing: .04em;
+  margin-top: auto;
+  padding-top: 6px;
   align-items: center;
   align-self: flex-end;
   gap: 5px;

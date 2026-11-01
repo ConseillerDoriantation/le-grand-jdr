@@ -54,7 +54,7 @@ import { renderCharCapacites } from './characters/capacites.js';
 import {
   renderCharJournal, getCurrentJournalSub,
   _bindNotesDnd, _bindQuetesDnd,
-  _csV3JournalSub, _csV3ToggleNote, _csV3AddNote, _csV3DeleteNote, _csV3SaveNoteTitle, _csV3CycleNoteCat,
+  _csV3JournalSub, _csV3ToggleNote, _csV3AddNote, _csV3DeleteNote, _csV3CycleNoteCat,
   _csV3SaveOpenNote, _csV3CloseNote,
   _csV3AddRelation, _csV3EditRelation,
   _csV3RelSent, _csV3RelPickNpc, _csV3SaveRelation, _csV3DeleteRelation,
@@ -2591,7 +2591,6 @@ async function _saveCombatMasteryName(el) {
 registerCharBlurActions({
   csV3LedgerSaveField: (el) => _csV3LedgerSaveField(el, el.dataset.kind, Number(el.dataset.idx), el.dataset.field),
   csV3LedgerSaveAmount: (el) => _csV3LedgerSaveAmount(el, el.dataset.kind, Number(el.dataset.idx), Number(el.dataset.sign)),
-  csV3SaveNoteTitle: (el) => _csV3SaveNoteTitle(Number(el.dataset.idx), el.value),
   csV3SaveIdentityValue: (el) => _csV3SaveIdentityValue(el.dataset.id, el.dataset.key, el.value),
   csV3SaveQuote: (el) => { el.classList.toggle('is-empty', !el.value); _csV3SaveQuote(el.dataset.id, el.value); },
 });

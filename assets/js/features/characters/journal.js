@@ -181,6 +181,12 @@ function renderJournalQuetes(c, canEdit) {
   </div>`;
 }
 
+// Pendant un tri, coupe le survol (translateY) des cartes croisées : il entrait en
+// conflit avec l'animation de Sortable et faisait tressauter la liste.
+function _markSorting(evt, on = true) {
+  evt.from?.closest('.quest-board, .notes-stack')?.classList.toggle('is-sorting', on);
+}
+
 // ── Drag & drop des quêtes (SortableJS) ───────────────────────────────────────
 // Deux listes (En cours / Validées) partagent le même `group` → on réordonne ET
 // on bascule l'état validé en glissant une quête d'une liste à l'autre.
@@ -194,6 +200,7 @@ function _bindQuetesDnd(c, canEdit) {
     _questsSortables.push(makeSortable(list, {
       ghostClass: 'cs-quete-ghost',
       chosenClass: 'cs-quete-chosen',
+      dragClass: 'cs-quete-drag',
       group: 'cs-quetes',
       animation: 160,
       draggable: '.quest',
@@ -201,7 +208,8 @@ function _bindQuetesDnd(c, canEdit) {
       // Garde le clone dans .cs-v3 : les cartes sont stylées via cet ancêtre, sinon
       // le clone (déplacé dans <body>) perd toute son apparence pendant le drag.
       fallbackOnBody: false,
-      onEnd: () => _onQuetesReordered(c),
+      onStart: _markSorting,
+      onEnd: (evt) => { _markSorting(evt, false); _onQuetesReordered(c); },
     }));
   });
 }
@@ -254,21 +262,21 @@ function _notePresentation(note = {}, index, canEdit) {
 
 function _renderNoteOverview(note, index, canEdit) {
   const view = _notePresentation(note, index, canEdit);
+  // Titre affiché en entier (2 lignes max) dans la zone cliquable ; il s'édite
+  // dans la note ouverte (modale), un <input> ne pouvant pas passer à la ligne.
   return `<article class="note-v3 note-v3--${view.catKey}${canEdit ? ' is-draggable' : ''}" data-note-idx="${index}">
     <header class="note-v3-head">
       ${canEdit ? '<span class="note-v3-drag" title="Glisser pour réordonner">⠿</span>' : ''}
       <span class="note-v3-marker" aria-hidden="true">${view.marker}</span>
-      ${canEdit
-        ? `<input class="note-v3-titre" type="text" value="${_esc(view.titre)}"
-            data-blur="csV3SaveNoteTitle" data-idx="${index}"
-            data-enter="blur" data-esc="revert-blur" placeholder="Titre de la note">`
-        : `<span class="note-v3-titre note-v3-titre-ro">${_esc(view.titre)}</span>`}
       ${view.tag}
       ${view.date ? `<span class="note-v3-date">${_esc(view.date)}</span>` : ''}
-      ${canEdit ? `<button class="note-v3-del" data-action="csV3DeleteNote" data-idx="${index}" data-stop-propagation title="Supprimer">🗑️</button>` : ''}
-      <button class="note-v3-toggle" data-action="csV3ToggleNote" data-idx="${index}" title="Ouvrir" aria-expanded="false">⌄</button>
+      <span class="note-v3-head-acts">
+        ${canEdit ? `<button class="note-v3-del" data-action="csV3DeleteNote" data-idx="${index}" data-stop-propagation title="Supprimer">🗑️</button>` : ''}
+        <button class="note-v3-toggle" data-action="csV3ToggleNote" data-idx="${index}" title="Ouvrir" aria-expanded="false">⌄</button>
+      </span>
     </header>
     <button type="button" class="note-v3-preview" data-action="csV3ToggleNote" data-idx="${index}">
+      <span class="note-v3-titre" title="${_esc(view.titre)}">${_esc(view.titre)}</span>
       <span class="note-v3-preview-text ${view.excerpt ? '' : 'is-empty'}">${view.excerpt ? _esc(view.excerpt) : 'Cette note ne contient encore aucun texte.'}</span>
       <span class="note-v3-read">Ouvrir <span>›</span></span>
     </button>
@@ -334,13 +342,15 @@ function _bindNotesDnd(c, canEdit) {
   _notesSortable = makeSortable(stack, {
     ghostClass: 'cs-note-ghost',
     chosenClass: 'cs-note-chosen',
+    dragClass: 'cs-note-drag',
     handle: '.note-v3-drag',
     draggable: '.note-v3',
     animation: 160,
     // Garde le clone dans .cs-v3 (cartes stylées via cet ancêtre) → conserve son
     // apparence pendant le drag au lieu de devenir un bloc nu.
     fallbackOnBody: false,
-    onEnd: () => _onNotesReordered(c),
+    onStart: _markSorting,
+    onEnd: (evt) => { _markSorting(evt, false); _onNotesReordered(c); },
   });
 }
 async function _onNotesReordered(c) {
@@ -416,8 +426,7 @@ function _refreshNoteOverview(idx, note) {
   if (!card || !note) return;
   const title = note.titre || 'Note sans titre';
   const titleEl = card.querySelector('.note-v3-titre');
-  if (titleEl instanceof HTMLInputElement) titleEl.value = title;
-  else if (titleEl) titleEl.textContent = title;
+  if (titleEl) { titleEl.textContent = title; titleEl.title = title; }
   const excerpt = _noteExcerpt(note.contenu || '');
   const preview = card.querySelector('.note-v3-preview-text');
   if (preview) {
@@ -476,18 +485,6 @@ async function _csV3DeleteNote(idx) {
     showNotif('Note supprimée.', 'success');
   } catch (e) { console.error('[note delete]', e); showNotif('Erreur lors de la suppression.', 'error'); }
 }
-async function _csV3SaveNoteTitle(idx, value) {
-  const c = STATE.activeChar; if (!c) return;
-  const note = (c.notesList || [])[idx]; if (!note) return;
-  const trimmed = (value || '').trim() || 'Note sans titre';
-  if (note.titre === trimmed) return;
-  note.titre = trimmed;
-  c.notesList[idx] = note;
-  _syncCharNotes(c);
-  try { await updateInCol('characters', c.id, { notesList: c.notesList }); }
-  catch (e) { console.warn('[note title]', e); }
-}
-
 // Aligne la liste de notes sur la référence de perso que le rendu relit
 // (getCurrentChar) + l'entrée du cache STATE.characters. Sans ça, un re-render
 // (ouvrir/replier une note) relisait un ancien objet et le titre/contenu
@@ -674,7 +671,7 @@ async function _csV3DeleteRelation(charId, idx) {
 export {
   renderCharJournal,
   _bindNotesDnd, _bindQuetesDnd,
-  _csV3JournalSub, _csV3ToggleNote, _csV3AddNote, _csV3DeleteNote, _csV3SaveNoteTitle,
+  _csV3JournalSub, _csV3ToggleNote, _csV3AddNote, _csV3DeleteNote,
   _csV3SaveOpenNote, _csV3CloseNote,
   _csV3AddRelation, _csV3EditRelation,
   _csV3RelSent, _csV3RelPickNpc, _csV3SaveRelation, _csV3DeleteRelation,
