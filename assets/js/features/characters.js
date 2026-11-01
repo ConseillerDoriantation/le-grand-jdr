@@ -1857,7 +1857,10 @@ function renderCharCombatV3(c, canEdit) {
   const weaponSection = weaponSlots.length ? `<section class="fs-sec"><div class="fs-h"><h3>Armes en main</h3></div>${weaponSlots.map(wRow).join('')}${styleRow()}</section>` : '';
   const gearSection = armorSlots.length ? `<section class="fs-sec"><div class="fs-h"><h3>Équipement porté</h3></div>${armorSlots.map(aRow).join('')}${setsBlock}</section>` : '';
 
-  return `<div class="fs">${weaponSection}${gearSection}${masterySection}${elSection}${legend}</div>`;
+  // Deux colonnes fixes : chaque section reste dans sa colonne, ouvrir une ligne
+  // ne pousse que le contenu de SA colonne (pas de rebond vers l'autre colonne).
+  // Appairage pour équilibrer les hauteurs : armes+maîtrises | équipement+affinités.
+  return `<div class="fs"><div class="fs-col">${weaponSection}${masterySection}</div><div class="fs-col">${gearSection}${elSection}</div>${legend}</div>`;
 }
 
 

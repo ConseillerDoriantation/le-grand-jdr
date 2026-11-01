@@ -11,11 +11,21 @@ test('combat v16 : feuille à filets, lignes Emplacement · Objet · Valeurs', (
   for (const marker of ['class="fs"', 'fs-sec', 'fs-row', 'fs-c1', 'fs-c2', 'fs-c3', 'fs-v', 'fs-traits', 'fs-x', 'fs-dl', 'fs-cand', 'fs-total', 'fs-mrow', 'fs-els']) {
     assert.ok(combat.includes(marker), marker);
   }
-  // Ordre de rendu des sections (abstraction faite de l'ordre des déclarations).
-  assert.match(combat, /\$\{weaponSection\}\$\{gearSection\}\$\{masterySection\}\$\{elSection\}/);
+  // Deux colonnes fixes : armes+maîtrises | équipement+affinités (chaque section
+  // reste dans sa colonne, pas de rebond au dépliage).
+  assert.match(combat, /<div class="fs-col">\$\{weaponSection\}\$\{masterySection\}<\/div><div class="fs-col">\$\{gearSection\}\$\{elSection\}<\/div>/);
   for (const h of ['Armes en main', 'Équipement porté', "Ensembles d'armure", "Maîtrises d'arme", 'Affinités élémentaires']) {
     assert.ok(combat.includes(h), h);
   }
+});
+
+test('combat v16 : grille à deux colonnes fixes (pas de multicol qui rebondit)', () => {
+  assert.match(css, /\.cs-v3 \.fs \{[^}]*display:\s*grid[^}]*grid-template-columns:\s*1fr 1fr/);
+  assert.match(css, /\.cs-v3 \.fs-col\b/);
+  // Plus de colonnes CSS (multicol) qui rééquilibrent au dépliage.
+  assert.ok(!/\.cs-v3 \.fs \{[^}]*[;{]\s*columns:/.test(css), 'plus de multicol sur .fs');
+  // Repli en une colonne quand l'espace manque.
+  assert.match(css, /@media \(max-width:\s*1100px\)[\s\S]*?\.cs-v3 \.fs \{ grid-template-columns: 1fr/);
 });
 
 test('les ensembles d’armure sont intégrés à « Équipement porté » (sous-groupe, pas de section à part)', () => {
