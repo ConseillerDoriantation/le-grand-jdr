@@ -607,7 +607,9 @@ function _invAccordionDetail(c, group, canEdit, zone) {
           : '';
   const beltBtn = canEdit && !isEquipped && _invIsBeltItem({ ...item, belt: undefined })
     ? `<button class="iv-btn ghost" data-action="_invToggleBelt" data-id="${_esc(c.id)}" data-indices="${b64}" data-belt="${zone !== 'belt'}">${zone === 'belt' ? 'Ranger dans le sac' : 'Garder à portée de main'}</button>` : '';
-  const sellBtn = canEdit && !isQuest && item.source === 'boutique' && resale
+  // Revendable quelle que soit l'origine (boutique, butin, craft, recyclage…) dès
+  // qu'il a une valeur de revente ; les objets forgés/manuels n'ont pas de prix.
+  const sellBtn = canEdit && !isQuest && resale
     ? `<button class="iv-btn ghost" data-action="openSellInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-prix="${resale}" data-name="${_esc(item.nom || '')}">Vendre</button>` : '';
   const giveBtn = canEdit ? `<button class="iv-btn ghost" data-action="openSendInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-name="${_esc(item.nom || '')}">Donner</button>` : '';
   const dropBtn = canEdit && !isQuest ? `<button class="iv-btn ghost danger" data-action="openDeleteInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-name="${_esc(item.nom || '')}">Jeter</button>` : '';
