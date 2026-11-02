@@ -3351,6 +3351,12 @@ const PAGES = {
         return;
       }
       STATE.activeChar = nextActive;
+      // La fiche ouverte doit relire le même objet que le reste de l'app : chaque
+      // snapshot fournit de nouveaux objets, et une édition (relations, notes…)
+      // écrite sur la copie fraîche restait invisible jusqu'au rechargement.
+      if (charSession.getCurrentChar()?.id === nextActive.id) {
+        charSession.set(nextActive, charSession.getCanEditChar(), charSession.getCurrentCharTab());
+      }
       const inventoryChanged = JSON.stringify(previousActive?.inventaire || []) !== JSON.stringify(nextActive.inventaire || []);
       if (inventoryChanged && charSession.getCurrentCharTab() === "inv") {
         renderCharSheet(nextActive, "inv");

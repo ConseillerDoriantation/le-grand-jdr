@@ -6,10 +6,14 @@
 
 import { state, emit } from '../map.state.js';
 
+const MIN_SCALE = 0.10;
+const MAX_SCALE = 5;
+
 let rootEl = null;
 let transformEl = null;
 let imgEl = null;
 let imgNatural = { w: 1200, h: 800 };
+let minScale = MIN_SCALE;
 let detachFns = [];
 
 export function bindViewport(root, transform, image) {
@@ -20,24 +24,32 @@ export function bindViewport(root, transform, image) {
   rootEl = root;
   transformEl = transform;
   imgEl = image;
+  // Taille du placeholder tant qu'aucune image n'est chargée : ne pas hériter
+  // de la taille de l'image d'une visite précédente.
+  imgNatural = { w: 1200, h: 800 };
 
   if (imgEl) {
     const onLoad = () => {
+      if (imgEl !== image) return; // image d'une visite précédente
       imgNatural = {
-        w: imgEl.naturalWidth || 1200,
-        h: imgEl.naturalHeight || 800,
+        w: image.naturalWidth || 1200,
+        h: image.naturalHeight || 800,
       };
-      // Re-applique la transformation maintenant que la taille réelle de
-      // l'image est connue : sans ça, le premier affichage peut différer
-      // du résultat d'un resetView alors que state.viewport est identique.
-      applyTransform();
+      // Cadrage calculé maintenant que la taille réelle de l'image est connue.
+      resetView();
       emit('viewport:ready');
     };
-    if (imgEl.complete && imgEl.naturalWidth) onLoad();
-    else imgEl.addEventListener('load', onLoad, { once: true });
+    // Lien mort / hébergeur qui refuse l'image : sans ça le loader restait
+    // affiché indéfiniment, sans explication.
+    const onError = () => { if (imgEl === image) emit('viewport:error'); };
+    if (image.complete) (image.naturalWidth ? onLoad : onError)();
+    else {
+      image.addEventListener('load', onLoad, { once: true });
+      image.addEventListener('error', onError, { once: true });
+    }
   } else {
     // Pas d'image : on garde des dimensions par défaut pour que le SVG ait un viewBox
-    queueMicrotask(() => emit('viewport:ready'));
+    queueMicrotask(() => { resetView(); emit('viewport:ready'); });
   }
 
   attachPanZoom();
@@ -76,7 +88,7 @@ export function applyTransform() {
 export function zoom(factor, centerClientX, centerClientY) {
   if (!rootEl) return;
   const prev = state.viewport.scale;
-  const next = Math.max(0.10, Math.min(5, prev * factor));
+  const next = Math.max(minScale, Math.min(MAX_SCALE, prev * factor));
   if (next === prev) return;
 
   // Zoom centré sur le pointeur si fourni, sinon centre du root
@@ -91,8 +103,18 @@ export function zoom(factor, centerClientX, centerClientY) {
   emit('viewport:changed');
 }
 
+// Cadre la carte entière, centrée, dans la zone visible (affichage initial et ⌂).
+// Un cadrage figé ne convenait qu'à une seule taille d'image : une carte plus
+// petite (ex. import de fichier ~1400px) se retrouvait entièrement hors champ.
 export function resetView() {
-  state.viewport = { scale: 0.14, offsetX: 25, offsetY: -250 };
+  if (!rootEl) return;
+  const { w, h } = imgNatural;
+  const vw = rootEl.clientWidth || w;
+  const vh = rootEl.clientHeight || h;
+  const scale = Math.min(vw / w, vh / h, MAX_SCALE);
+  // Le dézoom doit toujours pouvoir revenir à ce cadrage (très grandes cartes).
+  minScale = Math.min(MIN_SCALE, scale);
+  state.viewport = { scale, offsetX: (vw - w * scale) / 2, offsetY: (vh - h * scale) / 2 };
   applyTransform();
   emit('viewport:changed');
 }

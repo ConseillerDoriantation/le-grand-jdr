@@ -32,7 +32,7 @@ import { confirmModal } from '../../shared/modal.js';
 import { _esc } from '../../shared/html.js';
 
 let rootContainer = null;
-let stylesInjected = false;
+let stylesReady = null;
 let initSequence = 0;
 
 // ── Entrée publique ──────────────────────────────────────────────────────────
@@ -42,14 +42,16 @@ export async function initMap(containerEl) {
   rootContainer = containerEl;
   if (!rootContainer) return null;
   resetListeners();
-  injectStyles();
+  // La feuille doit être appliquée avant le montage : le cadrage initial se
+  // calcule sur la taille réelle de la zone carte.
+  const stylesPromise = injectStyles();
 
   // Priorité absolue au fond de carte et au fog : les collections parfois
   // lourdes (notamment missions et PNJ) ne partagent pas leur bande passante
   // avant que l'image puisse commencer à charger.
   const mapPromise = loadMap();
   const fogPromise = loadFogZones();
-  const [map, fogZones] = await Promise.all([mapPromise, fogPromise]);
+  const [map, fogZones] = await Promise.all([mapPromise, fogPromise, stylesPromise]);
   if (!isCurrentInit(sequence, containerEl)) return null;
 
   state.map = map;
@@ -62,7 +64,8 @@ export async function initMap(containerEl) {
   state.selection = null;
   state.mode = 'navigate';
   state.modeContext = null;
-  state.viewport = { scale: 0.14, offsetX: 25, offsetY: -250 };
+  // Cadrage réel calculé par resetView() dès que la taille de l'image est connue.
+  state.viewport = { scale: 1, offsetX: 0, offsetY: 0 };
   // La recherche persiste entre deux visites de la page (comme boutique/bestiaire) ;
   // les filtres de type repartent à zéro à chaque ouverture.
   state.filters = { types: new Set(), onlyRevealed: false, query: state.filters?.query || '' };
@@ -79,6 +82,7 @@ export async function initMap(containerEl) {
   // 3. Réactivité (AVANT les binds : bindViewport peut émettre 'viewport:ready'
   //    de façon synchrone si l'image est déjà en cache du navigateur).
   on('viewport:ready',     onViewportReady);
+  on('viewport:error',     onViewportError);
   on('viewport:changed',   onViewportChanged);
   on('places:changed',     () => { renderMarkers(); renderFilters(containerEl); });
   on('types:changed',      () => { renderMarkers(); renderFilters(containerEl); });
@@ -329,6 +333,20 @@ function onViewportReady() {
   rootContainer?.querySelector('#map-root')?.classList.remove('is-loading');
 }
 
+// Image de fond injoignable : le loader devient un message explicite.
+function onViewportError() {
+  const root = rootContainer?.querySelector('#map-root');
+  const loader = root?.querySelector('.map-loader');
+  if (!loader) return;
+  root.classList.remove('is-loading');
+  root.classList.add('is-error');
+  loader.removeAttribute('aria-hidden');
+  loader.setAttribute('role', 'alert');
+  loader.querySelector('.map-loader__text').textContent = STATE.isAdmin
+    ? "Impossible de charger l'image de la carte. Vérifie son lien dans ⚙️ Paramètres."
+    : 'La carte est momentanément indisponible.';
+}
+
 // Pan seul : la transform CSS parent suffit → rien à refaire ici.
 // Zoom : on ne reconstruit pas les SVG, on ne met à jour que le contre-zoom
 // des marqueurs et des ✕ de fog. rAF-throttlé pour encaisser les salves de molette.
@@ -515,10 +533,14 @@ function hideHint() {
 // ── Styles (injectés une seule fois) ─────────────────────────────────────────
 
 function injectStyles() {
-  if (stylesInjected) return;
-  stylesInjected = true;
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = 'assets/js/features/map/map.css';
-  document.head.appendChild(link);
+  if (stylesReady) return stylesReady;
+  stylesReady = new Promise(resolve => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'assets/js/features/map/map.css';
+    // En cas d'échec réseau, on n'empêche pas la carte de s'afficher.
+    link.onload = link.onerror = () => resolve();
+    document.head.appendChild(link);
+  });
+  return stylesReady;
 }
