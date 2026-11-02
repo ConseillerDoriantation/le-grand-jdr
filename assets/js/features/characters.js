@@ -1233,7 +1233,7 @@ function _toggleIdentityPopover(btn) {
         ? side.querySelector('.ids-life') || btn
       : ui.popover === 'builds'
         ? side.querySelector('.ids-build') || btn
-        : side.querySelector('.ids-hero') || btn;
+        : btn;
     const rect = anchor.getBoundingClientRect();
     const halfWidth = popover.offsetWidth / 2;
     const left = Math.max(halfWidth + 12, Math.min(window.innerWidth - halfWidth - 12, rect.left + rect.width / 2 + 10));

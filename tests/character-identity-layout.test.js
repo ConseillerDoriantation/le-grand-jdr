@@ -107,7 +107,8 @@ test('ouvrir les popovers ne reconstruit ni ne redimensionne la fiche', () => {
   assert.doesNotMatch(sidebar, /_identityPopoverHtml/);
   assert.doesNotMatch(toggle, /_rerenderIdentity|renderCharSheet/);
   assert.match(toggle, /side\.querySelector\('\.ids-aura-button'\)/);
-  assert.match(toggle, /side\.querySelector\('\.ids-hero'\)/);
+  assert.match(toggle, /ui\.popover === 'builds'[\s\S]*?side\.querySelector\('\.ids-build'\) \|\| btn[\s\S]*?: btn;/);
+  assert.doesNotMatch(toggle, /side\.querySelector\('\.ids-hero'\)/);
   assert.match(toggle, /popover\.style\.top = `\$\{Math\.round\(rect\.bottom \+ 8\)\}px`/);
   assert.match(toggle, /focus\(\{ preventScroll: true \}\)/);
   assert.match(css, /\.cs-v3 \.ids-pop \{[^}]*position: fixed;/s);
