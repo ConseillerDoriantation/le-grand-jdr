@@ -68,6 +68,16 @@ test('la quantité du butin accepte une saisie directe sans écrire à chaque to
   assert.match(css, /\.vtt-loot-qinput\s*\{/);
 });
 
+test('le MJ peut modifier ou supprimer l or du butin sans écrire pendant la saisie', () => {
+  assert.match(loot, /data-vtt-fn="_vttLootGoldEdit" data-vtt-args="stash\|set"/);
+  assert.match(loot, /data-vtt-fn="_vttLootGoldEdit" data-vtt-args="loot\|set"/);
+  assert.match(loot, /data-vtt-fn="_vttLootGoldRemove" data-vtt-args="stash"/);
+  assert.match(loot, /data-vtt-fn="_vttLootGoldRemove" data-vtt-args="loot"/);
+  assert.match(loot, /if \(amt > 0\) entry\.amount = amt;/);
+  assert.match(loot, /async function _vttLootGoldRemove\(zone\)/);
+  assert.doesNotMatch(loot, /g\.oninput\s*=\s*[^;]*_saveLoot/);
+});
+
 test('une musique active reprend après actualisation sans recréer son lecteur', () => {
   assert.match(music, /Même son déjà chargé[\s\S]*?_audioEl\.paused[\s\S]*?_audioEl\.play\(\)/);
   assert.match(music, /_AUTOPLAY_RESUME_EVENTS = \['pointerdown', 'click', 'keydown', 'touchstart'\]/);

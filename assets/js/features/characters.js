@@ -37,6 +37,7 @@ import {
   // V3 — combat helpers
   getMainWeapon, getWeaponToucherParts, getWeaponDegatsParts,
 } from './characters/data.js';
+import { getArmorSetDefinition, armorSetAppliedTiers } from '../shared/armor-set-settings.js';
 
 import {
   renderCharDeck, bindSortCardsDnd,
@@ -1232,7 +1233,7 @@ function _toggleIdentityPopover(btn) {
         ? side.querySelector('.ids-life') || btn
       : ui.popover === 'builds'
         ? side.querySelector('.ids-build') || btn
-        : side.querySelector('.ids-hero') || btn;
+        : btn;
     const rect = anchor.getBoundingClientRect();
     const halfWidth = popover.offsetWidth / 2;
     const left = Math.max(halfWidth + 12, Math.min(window.innerWidth - halfWidth - 12, rect.left + rect.width / 2 + 10));
@@ -1648,11 +1649,10 @@ function renderCharCombatV3(c, canEdit) {
   };
   const notable = lvl => lvl >= 2 && !!RARETE_NAMES[lvl];
   const gem = lvl => notable(lvl) ? `<i class="cb-gem" style="--rc:${_rareteColor(RARETE_NAMES[lvl]) || '#7a8fa8'}"></i>` : '';
-  const nm = (name, lvl) => `<span class="cb-nm">${gem(lvl)}<b class="${notable(lvl) ? 'r' : ''}" style="--rc:${notable(lvl) ? _rareteColor(RARETE_NAMES[lvl]) : 'inherit'}">${_esc(name)}</b></span>`;
   const family = item => item?.typeArme || item?.sousType || item?.format || '';
   const plainStyleName = style => String(style?.label || style?.name || 'Sans style').replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Sans style';
 
-  if (_combatTabUi.charId !== String(c.id || '')) _combatTabUi = { charId: String(c.id || ''), open: null };
+  if (_combatTabUi.charId !== String(c.id || '')) _combatTabUi = { charId: String(c.id || ''), open: null, elManage: false };
   const open = _combatTabUi.open;
   _bindCombatKeys();
 
@@ -1670,19 +1670,9 @@ function renderCharCombatV3(c, canEdit) {
   const styleColor = activeStyle?.couleur || activeStyle?.color || '#7a8fa8';
   const styleName = activeStyle ? plainStyleName(activeStyle) : 'Aucun style';
   const styleRules = activeStyle ? combatStyleRuleLabels(activeStyle) : [];
-  const ruleTone = t => ({ reaction: 'pos', positive: 'pos', warning: 'warn', arcane: 'arc', muted: 'muted' }[t] || 'muted');
   const statKeyOf = item => item?.statAttaque === 'dexterite' ? 'dexterite' : item?.statAttaque === 'intelligence' ? 'intelligence' : (item?.statAttaque || item?.toucherStat || 'force');
   const toucherOf = item => { try { return item?.nom ? getWeaponToucherParts(c, item, statKeyOf(item)) : null; } catch { return null; } };
   const degatsOf = item => { try { return item?.nom ? getWeaponDegatsParts(c, item, statKeyOf(item)) : null; } catch { return null; } };
-
-  const calc = (rows, total) => `<div class="cb-calc">${rows.filter(Boolean).map(r => `<div><span>${_esc(r[0])}</span><b>${_esc(r[1])}</b></div>`).join('')}<div class="tot"><span>Total</span><b>${_esc(total)}</b></div></div>`;
-  const chips = (vals, cls = '') => vals?.length ? `<div class="cb-chips">${vals.map(v => `<span class="${cls}">${_esc(v)}</span>`).join('')}</div>` : '';
-  const extras = item => {
-    const bonus = _itemBonusBadges(item).map(b => b.lbl);
-    const traits = _getTraits(item) || [];
-    const part = item.particularite || (getItemEffectText(item) && degatsOf(item) ? '' : '');
-    return `${bonus.length || traits.length ? `<div class="cb-sec"><h5>Bonus et traits</h5>${chips(bonus, 'st')}${chips(traits)}</div>` : ''}${item.particularite ? `<div class="cb-sec"><h5>Particularité</h5><p class="edito">${_esc(item.particularite)}</p></div>` : ''}`;
-  };
 
   // Aperçu d'un changement d'arme : nouveau jet + changement de style + objet rangé.
   const weaponPreview = (slot, item, index) => {
@@ -1704,43 +1694,70 @@ function renderCharCombatV3(c, canEdit) {
   const weaponCandidates = slot => inventory.map((item, index) => ({ item, index }))
     .filter(({ item, index }) => item?.nom && equipmentSlotAcceptsItem(weaponSlots.find(s => s.id === slot), item) && !(equippedInvMap.get(index) || []).length && !(slot === secondarySlot && weaponHands(item) === 2));
 
-  function wCard(slotDef) {
+  // ── v16 : briques « feuille » ──────────────────────────────────────────────
+  const esc = _esc;
+  const dl = rows => `<dl class="fs-dl">${rows.filter(Boolean).map(([dt, dd, strong]) => `<dt>${esc(dt)}</dt><dd>${strong ? `<b>${esc(dd)}</b>` : esc(dd)}</dd>`).join('')}</dl>`;
+  const traitsBlock = item => { const t = _getTraits(sourceItem(item?._slot, item)) || _getTraits(item) || []; const parts = [...t]; if (item?.particularite) parts.push(item.particularite); return parts.length ? `<div class="fs-traits">${parts.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : ''; };
+  const fsName = (name, lvl) => `<div class="fs-name${notable(lvl) ? ' r' : ''}"${notable(lvl) ? ` style="--rc:${_rareteColor(RARETE_NAMES[lvl])}"` : ''}>${gem(lvl)}${esc(name)}</div>`;
+  const candName = (name, lvl) => `<b${notable(lvl) ? ` style="--rc:${_rareteColor(RARETE_NAMES[lvl])};color:var(--rc)"` : ''}>${gem(lvl)}${esc(name)}</b>`;
+  const equipBtn = (index, slot, label = 'Équiper') => canEdit ? `<button type="button" class="cs-grim-btn cbx-sm" data-action="equipInventoryItem" data-index="${index}" data-slot="${esc(slot)}" data-render-tab="combat">${label}</button>` : '';
+
+  // ── Armes en main ───────────────────────────────────────────────────────────
+  function wRow(slotDef) {
     const slot = slotDef.id, key = 'w:' + slot, isOpen = open === key;
-    const locked = slot === secondarySlot && weaponHands(currentItem(primarySlot)) === 2;
-    if (locked) return `<div class="cb-w lock"><span class="cb-k">${_esc(slotDef.label)}</span><div class="cb-meta">Occupée : arme à deux mains.</div></div>`;
+    const c1 = `<span class="fs-c1"><span class="fs-ico">${esc(slotDef.icon || '⚔️')}</span>${esc(slotDef.label)}</span>`;
+    if (slot === secondarySlot && weaponHands(currentItem(primarySlot)) === 2) {
+      return `<div class="fs-row">${c1}<span class="fs-c2"><div class="fs-sub">Occupée : arme à deux mains.</div></span><span class="fs-c3"></span></div>`;
+    }
     const item = currentItem(slot);
-    if (!item?.nom) return `<button type="button" class="cb-w empty${isOpen ? ' on' : ''}" data-action="cbOpen" data-k="${key}"><span class="cb-k">${_esc(slotDef.label)}</span><div class="cb-meta">Main libre · <b>Équiper…</b></div></button>`;
+    if (!item?.nom) {
+      const n = weaponCandidates(slot).length;
+      const row = `<button type="button" class="fs-row${isOpen ? ' is-open' : ''}" data-action="cbOpen" data-k="${key}">${c1}<span class="fs-c2"><div class="fs-empty">Rien en main · ${n} objet${n > 1 ? 's' : ''} compatible${n > 1 ? 's' : ''}</div></span><span class="fs-c3"><span class="fs-act">Équiper…</span></span></button>`;
+      return row + (isOpen ? wDetail(slot) : '');
+    }
     const rare = rarityOf(slot, item), dmg = degatsOf(item), hit = toucherOf(item);
     const ctx = damageContextFor(item), type = damageTypes.find(x => x.id === ctx.damageTypeId);
-    const dColor = type?.color || (ctx.isMagic ? '#bca0ff' : 'var(--text-muted)'), dLabel = type?.label || (ctx.isMagic ? 'Magique' : 'Physique');
-    const body = dmg
-      ? `<div class="cb-roll"><b><i>d20</i>${_esc((hit?.roll || '').replace('1d20', '').trim() || '+0')}</b><b style="--dc:${_esc(dColor)}">${_esc(dmg.roll)} <em>${_esc(dLabel)}</em></b></div>`
-      : `<div class="cb-meta" style="color:var(--text-soft)">${_esc(item.particularite || getItemEffectText(item) || 'Objet de soutien.')}</div>`;
-    const meta = [item.portee, weaponHands(item) === 2 ? '2 mains' : '', ...(_getTraits(sourceItem(slot, item)) || [])].filter(Boolean).map(_esc).join(' · ');
-    return `<button type="button" class="cb-w${isOpen ? ' on' : ''}" style="--rc:${_esc(rare.color || 'transparent')}" data-action="cbOpen" data-k="${key}"><span class="cb-k">${_esc(slotDef.label)}</span>${nm(item.nom, rare.level)}${body}${meta ? `<div class="cb-meta">${meta}</div>` : ''}</button>`;
+    const sub = [family(item), weaponHands(item) === 2 ? 'deux mains' : 'une main', item.portee, ctx.isMagic ? (type?.label || 'magique') : ''].filter(Boolean).map(esc).join(' · ');
+    const live = sourceItem(slot, item);
+    const vals = dmg
+      ? `<div class="fs-v"><small>Toucher</small><b>${esc((hit?.roll || '').replace('1d20', '').trim() || '+0')}</b></div><div class="fs-v"><small>Dégâts</small><b>${esc(dmg.roll)}</b></div>`
+      : `<div class="fs-v"><small>Soutien</small><b>—</b></div>`;
+    const row = `<button type="button" class="fs-row${isOpen ? ' is-open' : ''}" data-action="cbOpen" data-k="${key}">${c1}<span class="fs-c2">${fsName(item.nom, rare.level)}<div class="fs-sub">${sub}</div>${traitsBlock(live)}</span><span class="fs-c3">${vals}</span></button>`;
+    return row + (isOpen ? wDetail(slot) : '');
   }
   function wDetail(slot) {
     const item = currentItem(slot), dmg = degatsOf(item), hit = toucherOf(item);
     const cands = weaponCandidates(slot);
-    const candHtml = cands.length ? `<div class="cb-cand">${cands.map(({ item: it, index }) => { const p = weaponPreview(slot, it, index); const r = parseInt(it.rarete) || 0;
-      return `<div class="cb-ci">${nm(it.nom, r)}<span class="d">${_esc(p.line)}</span>${p.sty ? `<span class="d">${_esc(p.sty)}</span>` : ''}${p.warn ? `<span class="warn">${_esc(p.warn)}</span>` : ''}${canEdit ? `<button class="cb-btn" data-action="equipInventoryItem" data-index="${index}" data-slot="${_esc(slot)}" data-render-tab="combat">Équiper</button>` : ''}</div>`; }).join('')}</div>` : '<div class="cb-none">Rien de compatible dans le sac.</div>';
-    let left = '';
+    const candHtml = cands.length ? cands.map(({ item: it, index }) => { const p = weaponPreview(slot, it, index); const r = parseInt(it.rarete) || 0; const tr = (_getTraits(it) || []); if (it.particularite) tr.push(it.particularite);
+      return `<div class="fs-cand"><div>${candName(it.nom, r)}<span class="fs-cl">${esc(p.line)}</span>${p.sty ? `<span class="fs-cl up">${esc(p.sty)}</span>` : ''}${p.warn ? `<span class="fs-cl down">${esc(p.warn)}</span>` : ''}${tr.length ? `<div class="fs-traits">${tr.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : ''}</div><div class="fs-xact">${equipBtn(index, slot)}</div></div>`; }).join('') : '<p class="fs-note">Rien de compatible dans le sac.</p>';
+    const blocks = [];
     if (dmg) {
-      left += `<div class="cb-sec"><h5>Toucher</h5>${calc([['Dé', '1d20'], hit?.statLabel ? [`Modificateur ${hit.statLabel}`, modStr(hit.statMod || 0)] : null, hit?.setBonus ? ['Bonus de set', modStr(hit.setBonus)] : null], hit?.roll || '—')}</div>`;
-      const ctx = damageContextFor(item), t = damageTypes.find(x => x.id === ctx.damageTypeId);
-      left += `<div class="cb-sec"><h5>Dégâts<span style="color:${_esc(t?.color || 'var(--text-muted)')}">${_esc(t?.label || (ctx.isMagic ? 'magique' : 'physique'))}</span></h5>${calc([["Dé de l'arme", item.degats || '—'], dmg.statLabel ? [`Modificateur ${dmg.statLabel}`, modStr(dmg.statMod || 0)] : null, dmg.maitriseBonus ? ['Bonus de maîtrise', modStr(dmg.maitriseBonus)] : null], dmg.roll)}</div>`;
-    } else if (item?.nom) left += `<div class="cb-sec"><h5>Effet</h5><p>${_esc(item.particularite || getItemEffectText(item) || 'Objet de soutien.')}</p></div>`;
-    if (item?.nom) left += extras(item);
-    return `<div class="cb-x">${left ? `<div class="cb-sec" style="gap:14px">${left}</div>` : ''}<div class="cb-sec"><h5>${item?.nom ? 'Changer pour' : 'Équiper'}</h5>${candHtml}</div>${item?.nom && canEdit ? `<div class="cb-acts"><button class="cb-btn danger" data-action="clearEquipSlot" data-slot="${_esc(slot)}" data-render-tab="combat">Ranger dans le sac</button></div>` : ''}</div>`;
+      const ctx = damageContextFor(item), t = damageTypes.find(x => x.id === ctx.damageTypeId), miss = missRuleFor(ctx);
+      blocks.push(`<div class="fs-xb"><div class="fs-xh">Calcul</div>${dl([
+        ['Toucher', `1d20${hit?.statLabel ? ` · ${hit.statLabel} ${modStr(hit.statMod || 0)}` : ''}${hit?.setBonus ? ` · ensemble ${modStr(hit.setBonus)}` : ''} → ${hit?.roll || '—'}`, true],
+        ['Dégâts', `${item.degats || '—'}${dmg.statLabel ? ` · ${dmg.statLabel} ${modStr(dmg.statMod || 0)}` : ''}${dmg.maitriseBonus ? ` · maîtrise ${modStr(dmg.maitriseBonus)}` : ''} → ${dmg.roll}`, true],
+        ['Type', t?.label || (ctx.isMagic ? 'magique' : 'physique')],
+        ['Si la CA résiste', miss.label],
+      ])}${ctx.isMagic ? `<p class="fs-note">Arme magique : élément par défaut ${esc(damageTypes.find(x => x.id === (c.favoriteElement || ctx.damageTypeId))?.label || t?.label || '—')}, éléments au choix au VTT.</p>` : ''}</div>`);
+    } else if (item?.nom) blocks.push(`<div class="fs-xb"><div class="fs-xh">Effet</div><p class="fs-note">${esc(item.particularite || getItemEffectText(item) || 'Objet de soutien.')}</p></div>`);
+    const bonus = _itemBonusBadges(item).map(b => b.lbl);
+    if (bonus.length) blocks.push(`<div class="fs-xb"><div class="fs-xh">Bonus de l'arme</div><ul class="fs-list fs-gain">${bonus.map(b => `<li><i>+</i>${esc(b)}</li>`).join('')}</ul></div>`);
+    blocks.push(`<div class="fs-xb"><div class="fs-xh">${item?.nom ? 'Remplacer par' : 'Équiper'}</div>${candHtml}${item?.nom && canEdit ? `<div class="fs-xact" style="margin-top:8px"><button type="button" class="cs-grim-btn cbx-sm" data-action="clearEquipSlot" data-slot="${esc(slot)}" data-render-tab="combat">Ranger dans l'inventaire</button></div>` : ''}</div>`);
+    return `<div class="fs-x"><div class="fs-xcols">${blocks.join('')}</div></div>`;
+  }
+  function styleRow() {
+    const key = 'style', isOpen = open === key;
+    const rules = styleRules.map(r => esc(r.label)).join(' · ');
+    const row = `<button type="button" class="fs-row${isOpen ? ' is-open' : ''}" data-action="cbOpen" data-k="${key}"><span class="fs-c1"><span class="fs-ico">🎯</span>Style de combat</span><span class="fs-c2"><div class="fs-name" style="--rc:${esc(styleColor)};color:var(--rc)">${esc(styleName)}</div>${rules ? `<div class="fs-sub">${rules}</div>` : ''}</span><span class="fs-c3"></span></button>`;
+    return row + (isOpen ? styleDetail() : '');
   }
   function styleDetail() {
     const activeKey = String(activeStyle?.id || _norm(activeStyle?.label || activeStyle?.name || ''));
     const list = styles.map(s => { const k = String(s?.id || _norm(s?.label || s?.name || '')); const cur = activeKey && k === activeKey;
       const cond = [(s.condPrincipale || []).filter(Boolean).join(', ') || ((s.condPrincipale || []).length ? 'main vide' : 'toute arme'), s.condMains ? `${s.condMains} main${s.condMains === '2' ? 's' : ''}` : '', (s.condSecondaire || []).filter(Boolean).join(', ') || ((s.condSecondaire || []).length ? 'seconde main vide' : '')].filter(Boolean).join(' · ');
-      return `<div class="${cur ? 'cur' : ''}" style="--sc:${_esc(s.couleur || s.color || '#7a8fa8')}"><b>${_esc(plainStyleName(s))}</b><span>${_esc(cond)}</span>${cur ? '<em>Actif</em>' : ''}</div>`; }).join('');
+      return `<li><i>${cur ? '✓' : '○'}</i><span><b style="color:${esc(s.couleur || s.color || '#7a8fa8')}">${esc(plainStyleName(s))}</b>${cur ? ' · actif' : ''} — ${esc(cond)}</span></li>`; }).join('');
     const mainMag = damageContextFor(currentItem(primarySlot)).isMagic;
-    return `<div class="cb-x"><div class="cb-sec"><h5>Effet</h5><p>${_esc(activeStyle?.description || 'Style déduit des armes en main.')}</p><p style="color:var(--text-muted);font-size:.72rem">${mainMag ? 'Arme magique : la moitié des dégâts passe même si la CA résiste.' : 'Arme non magique : aucun dégât si la CA résiste.'}</p></div>
-      <div class="cb-sec"><h5>Tous les styles${mj ? '<span><span class="cb-mj">MJ</span> <button class="cb-btn ghost" data-action="openCombatStylesAdmin">Gérer</button></span>' : ''}</h5><div class="cb-sl">${list}</div></div></div>`;
+    return `<div class="fs-x"><div class="fs-xcols"><div class="fs-xb"><div class="fs-xh">Effet</div><p class="fs-note">${esc(activeStyle?.description || 'Style déduit des armes en main.')}</p><p class="fs-note">${mainMag ? 'Arme magique : la moitié des dégâts passe même si la CA résiste.' : 'Arme non magique : aucun dégât si la CA résiste.'}</p></div><div class="fs-xb"><div class="fs-xh">Tous les styles</div><ul class="fs-list">${list}</ul>${mj ? `<div class="fs-xact" style="margin-top:8px"><button type="button" class="cs-grim-btn cbx-sm" data-action="openCombatStylesAdmin">Gérer les styles</button></div>` : ''}</div></div></div>`;
   }
 
   const armorSet = (() => { try { return getArmorSetData(c) || {}; } catch { return {}; } })();
@@ -1748,89 +1765,102 @@ function renderCharCombatV3(c, canEdit) {
   const armorKey = item => { const ca = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0); return [ca ? `CA +${ca}` : '', ..._itemBonusBadges(item).map(b => b.lbl)].filter(Boolean).join(' · ') || (item.typeArmure || '—'); };
   const armorCandidates = slot => inventory.map((item, index) => ({ item, index }))
     .filter(({ item, index }) => item?.nom && equipmentSlotAcceptsItem(armorSlots.find(s => s.id === slot), item) && !(equippedInvMap.get(index) || []).length);
+  // ── Équipement porté (armures + accessoires) ──────────────────────────────
   function aRow(slotDef) {
     const slot = slotDef.id, key = 'a:' + slot, isOpen = open === key;
     const item = sourceItem(slot, equip[slot] || {});
-    const row = item?.nom
-      ? `<button type="button" class="cb-row${isOpen ? ' on' : ''}" style="--rc:${_esc(rarityOf(slot, item).color || 'transparent')}" data-action="cbOpen" data-k="${key}"><span class="cb-k">${_esc(slotDef.label)}</span>${nm(item.nom, rarityOf(slot, item).level)}<span class="kd">${_esc(armorKey(item))}</span><span class="cb-chev">›</span></button>`
-      : `<button type="button" class="cb-row empty${isOpen ? ' on' : ''}" data-action="cbOpen" data-k="${key}"><span class="cb-k">${_esc(slotDef.label)}</span><span class="cb-nm"><b>Vide</b></span><span class="kd">Équiper…</span><span class="cb-chev">›</span></button>`;
+    const c1 = `<span class="fs-c1"><span class="fs-ico">${esc(slotDef.icon || '✦')}</span>${esc(slotDef.label)}</span>`;
+    if (!item?.nom) {
+      const n = armorCandidates(slot).length;
+      const row = `<button type="button" class="fs-row${isOpen ? ' is-open' : ''}" data-action="cbOpen" data-k="${key}">${c1}<span class="fs-c2"><div class="fs-empty">Vide · ${n} objet${n > 1 ? 's' : ''} compatible${n > 1 ? 's' : ''}</div></span><span class="fs-c3"><span class="fs-act">Équiper…</span></span></button>`;
+      return row + (isOpen ? aDetail(slot) : '');
+    }
+    const rare = rarityOf(slot, item);
+    const ca = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
+    const mat = item.typeArmure ? `<span class="fs-mat" style="--mc:${esc(getArmorTypeMeta(item.typeArmure)?.color || '#7a8fa8')}"><i></i>${esc(item.typeArmure)}${tracked.has(slot) ? ' · ensemble' : ''}</span>` : '';
+    const bonus = _itemBonusBadges(item).map(b => b.lbl);
+    const sub = [mat, bonus.length ? bonus.map(esc).join(' · ') : ''].filter(Boolean).join(' · ');
+    const row = `<button type="button" class="fs-row${isOpen ? ' is-open' : ''}" data-action="cbOpen" data-k="${key}">${c1}<span class="fs-c2">${fsName(item.nom, rare.level)}${sub ? `<div class="fs-sub">${sub}</div>` : ''}${traitsBlock(item)}</span><span class="fs-c3">${ca ? `<div class="fs-v"><small>CA</small><b>+${ca}</b></div>` : ''}</span></button>`;
     return row + (isOpen ? aDetail(slot) : '');
   }
   function aDetail(slot) {
-    const slotDef = armorSlots.find(s => s.id === slot);
     const item = sourceItem(slot, equip[slot] || {});
     const warnOf = it => {
       if (!tracked.has(slot)) return '';
       const t = it.typeArmure;
-      if (armorSet.isActive && armorSet.dominantType && t && _norm(t) !== _norm(armorSet.dominantType)) return `Casse ${armorSet.fullType || armorSet.dominantType}`;
-      const others = (armorSlots.filter(s => tracked.has(s.id) && s.id !== slot)).map(s => sourceItem(s.id, equip[s.id] || {})?.typeArmure).filter(Boolean);
-      if (t && others.length && others.every(x => _norm(x) === _norm(t))) return `Active un ensemble ${t}`;
+      if (armorSet.isActive && armorSet.dominantType && t && _norm(t) !== _norm(armorSet.dominantType)) return { cls: 'down', txt: `Casse l'ensemble ${armorSet.fullType || armorSet.dominantType}` };
+      const others = armorSlots.filter(s => tracked.has(s.id) && s.id !== slot).map(s => sourceItem(s.id, equip[s.id] || {})?.typeArmure).filter(Boolean);
+      if (t && others.length && others.every(x => _norm(x) === _norm(t))) return { cls: 'up', txt: `Renforce l'ensemble ${t}` };
       return '';
     };
     const cands = armorCandidates(slot);
-    const candHtml = cands.length ? `<div class="cb-cand">${cands.map(({ item: it, index }) => { const w = warnOf(it); const r = parseInt(it.rarete) || 0;
-      return `<div class="cb-ci">${nm(it.nom, r)}<span class="d">${_esc(armorKey(it))}${it.typeArmure ? ' · ' + _esc(it.typeArmure) : ''}</span>${w ? `<span class="${w.startsWith('Casse') ? 'warn' : 'd'}">${_esc(w)}</span>` : ''}${canEdit ? `<button class="cb-btn" data-action="equipInventoryItem" data-index="${index}" data-slot="${_esc(slot)}" data-render-tab="combat">Équiper</button>` : ''}</div>`; }).join('')}</div>` : '<div class="cb-none">Rien pour cet emplacement dans le sac.</div>';
-    let left = '';
-    if (item?.nom) {
-      if (item.typeArmure) left += `<div class="cb-sec"><h5>Matière</h5><p>${_esc(item.typeArmure)}${tracked.has(slot) ? ' · compte pour un ensemble' : ''}</p></div>`;
-      left += extras(item);
-    }
-    return `<div class="cb-x">${left ? `<div class="cb-sec" style="gap:14px">${left}</div>` : ''}<div class="cb-sec"><h5>${item?.nom ? 'Changer pour' : 'Équiper'}</h5>${candHtml}</div>${item?.nom && canEdit ? `<div class="cb-acts"><button class="cb-btn danger" data-action="clearEquipSlot" data-slot="${_esc(slot)}" data-render-tab="combat">Retirer</button></div>` : ''}</div>`;
+    const candHtml = cands.length ? cands.map(({ item: it, index }) => { const w = warnOf(it); const r = parseInt(it.rarete) || 0; const tr = (_getTraits(it) || []); if (it.particularite) tr.push(it.particularite);
+      return `<div class="fs-cand"><div>${candName(it.nom, r)}<span class="fs-cl">${esc(armorKey(it))}${it.typeArmure ? ' · ' + esc(it.typeArmure) : ''}</span>${w ? `<span class="fs-cl ${w.cls}">${esc(w.txt)}</span>` : ''}${tr.length ? `<div class="fs-traits">${tr.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : ''}</div><div class="fs-xact">${equipBtn(index, slot)}</div></div>`; }).join('') : '<p class="fs-note">Rien pour cet emplacement dans le sac.</p>';
+    return `<div class="fs-x"><div class="fs-xcols"><div class="fs-xb"><div class="fs-xh">${item?.nom ? 'Remplacer par' : 'Équiper'}</div>${candHtml}${item?.nom && canEdit ? `<div class="fs-xact" style="margin-top:8px"><button type="button" class="cs-grim-btn cbx-sm" data-action="clearEquipSlot" data-slot="${esc(slot)}" data-render-tab="combat">Ranger dans l'inventaire</button></div>` : ''}</div></div></div>`;
   }
 
-  // Protection : état d'ensemble (pips + nom/effet ou n/3).
-  const setPips = (armorSet.slots || []).map(e => `<i class="${e.equipped ? 'on' : ''}" style="--pc:${_esc(e.type ? (getArmorTypeMeta(e.type)?.color || '#7a8fa8') : '')}"></i>`).join('');
-  const activeSetName = [...new Set((armorSet.activeSets || []).map(a => a?.set?.label || a?.type).filter(Boolean))].join(' + ') || armorSet.fullType || '';
-  const activeSetEffect = getArmorSetChipText(armorSet, { includeNames: false });
-  const setH = (armorSet.trackedSlots || []).length
-    ? (armorSet.isActive
-      ? `<span class="cb-set ok" title="${_esc(activeSetEffect)}"><span class="cb-pips">${setPips}</span><b>${_esc(activeSetName)}</b>${activeSetEffect ? _esc(activeSetEffect) : ''}</span>`
-      : `<span class="cb-set"><span class="cb-pips">${setPips}</span><b>Ensemble ${armorSet.equippedCount || 0}/${armorSet.trackedSlots.length}</b>tête, torse, bottes de même matière</span>`)
-    : '';
+  // ── Ensembles d'armure (cumulés par matière) ──────────────────────────────
+  const N = (armorSet.trackedSlots || []).length;
+  const counts = armorSet.counts || {};
+  const materials = Object.keys(counts);
+  const activeByType = new Map((armorSet.activeSets || []).map(a => [_norm(a.type), a]));
+  function setRow(mat) {
+    const count = counts[mat], key = 's:' + mat, isOpen = open === key;
+    const def = (() => { try { return getArmorSetDefinition(mat); } catch { return null; } })();
+    const tiers = def?.tiers || [];
+    const reached = def ? armorSetAppliedTiers(def, count, N) : [];
+    const reachedPieces = new Set(reached.map(t => Math.min(t.pieces, N)));
+    const active = activeByType.get(_norm(mat));
+    const effect = active ? getArmorSetChipText({ isActive: true, modifiers: active.modifiers }, { includeNames: false }) : 'aucun bonus pour l’instant';
+    const nextP = tiers.map(t => Math.min(t.pieces, N)).filter(p => p > count).sort((a, b) => a - b)[0];
+    const col = getArmorTypeMeta(mat)?.color || '#7a8fa8';
+    const sub2 = `${count} pièce${count > 1 ? 's' : ''} sur ${N} emplacement${N > 1 ? 's' : ''} d'armure${nextP ? ` · prochain palier à ${nextP}` : (reached.length ? ' · palier maximal' : '')}`;
+    const row = `<button type="button" class="fs-row${isOpen ? ' is-open' : ''}" data-action="cbOpen" data-k="${key}"><span class="fs-c1"><span class="fs-mat" style="--mc:${esc(col)}"><i></i></span>${esc(mat)}</span><span class="fs-c2"><div class="fs-sub">${esc(effect)}</div><div class="fs-sub">${esc(sub2)}</div></span><span class="fs-c3"><div class="fs-v"><small>Pièces</small><b>${count}/${N}</b></div></span></button>`;
+    const tierList = tiers.slice().sort((a, b) => a.pieces - b.pieces).map(t => { const p = Math.min(t.pieces, N); const ok = reachedPieces.has(p); return `<li><i>${ok ? '✓' : '○'}</i><span>${p} pièce${p > 1 ? 's' : ''}${ok ? ' · atteint' : ''}</span></li>`; }).join('');
+    return row + (isOpen ? `<div class="fs-x"><div class="fs-xcols"><div class="fs-xb"><div class="fs-xh">Paliers</div><ul class="fs-list">${tierList || '<li>Aucun palier configuré.</li>'}</ul></div></div></div>` : '');
+  }
+  // Les ensembles sont relatifs aux pièces portées : on les montre dans la
+  // section « Équipement porté », en sous-groupe, plutôt qu'en section à part.
+  const combinedEffect = getArmorSetChipText(armorSet, { includeNames: false });
+  const setsBlock = (N && materials.length) ? `<div class="fs-subh"><span>Ensembles d'armure</span>${mj ? '<button type="button" class="fs-add" data-action="openArmorSetsAdmin">Gérer</button>' : ''}</div>${materials.map(setRow).join('')}<div class="fs-total"><span>Effet combiné</span><b>${esc(combinedEffect || 'aucun bonus actif')}</b></div>` : '';
 
-  // Savoir-faire : maîtrises (édition MJ) + éléments.
+  // ── Maîtrises d'arme ──────────────────────────────────────────────────────
   const heldFamilies = weaponSlots.map(s => currentItem(s.id)).filter(i => i?.nom).map(i => _norm(family(i)));
-  const mrows = (c.maitrises || []).map((m, i) => {
+  function masteryRow(m, i) {
     const name = m.typeArme || m.nom || m.name || 'Sans type';
     const level = Math.max(0, Math.min(5, parseInt(m.niveau) || 0));
     const inHand = heldFamilies.some(v => v && (v.includes(_norm(name)) || _norm(name).includes(v)));
-    const isOpen = open === 'm:' + i;
-    const pips = [0, 1, 2, 3, 4].map(k => `<i class="${k < level ? 'on' : ''}"></i>`).join('');
-    const lvl = mj
-      ? `<span class="cb-lvl"><button class="cb-step" data-action="stepCombatMastery" data-idx="${i}" data-delta="-1" ${level <= 0 ? 'disabled' : ''}>−</button><span class="cb-mp">${pips}</span><button class="cb-step" data-action="stepCombatMastery" data-idx="${i}" data-delta="1" ${level >= 5 ? 'disabled' : ''}>+</button></span>`
-      : `<span class="cb-lvl"><span class="cb-mp">${pips}</span></span>`;
-    const head = `<div class="cb-m${isOpen ? ' on' : ''}">${mj ? `<button class="cb-m-n" data-action="cbOpen" data-k="m:${i}"><span>${_esc(name)}</span>${inHand ? '<em>En main</em>' : ''}</button>` : `<span class="cb-m-n"><span>${_esc(name)}</span>${inHand ? '<em>En main</em>' : ''}</span>`}<span class="cb-m-fx">${level ? `+${level} dégât${level > 1 ? 's' : ''}` : 'Initié'}</span>${lvl}</div>`;
-    const editor = (mj && isOpen) ? `<div class="cb-mx"><div class="cb-mx-r"><input class="cb-inp" data-change="saveCombatMasteryName" data-idx="${i}" value="${_esc(name === 'Sans type' ? '' : name)}" placeholder="Type d'arme, ex. Épées longues"><button class="cb-btn danger" data-action="deleteMaitrise" data-idx="${i}">Supprimer</button></div><input class="cb-inp" data-change="saveCombatMasteryNote" data-idx="${i}" value="${_esc(m.note || '')}" placeholder="Note : où, avec qui…"></div>` : '';
-    return head + editor;
-  }).join('');
+    const dots = [0, 1, 2, 3, 4].map(k => `<i class="${k < level ? 'on' : ''}"></i>`).join('');
+    const nameCell = mj
+      ? `<input class="fs-in" data-change="saveCombatMasteryName" data-idx="${i}" value="${esc(name === 'Sans type' ? '' : name)}" placeholder="Type d'arme, ex. Épées longues"><input class="fs-in" data-change="saveCombatMasteryNote" data-idx="${i}" value="${esc(m.note || '')}" placeholder="Note : où, avec qui…" style="font-weight:400;font-size:12px">`
+      : `<b>${esc(name)}</b>${m.note ? `<small>${esc(m.note)}</small>` : ''}`;
+    const step = mj ? `<div class="fs-step"><button type="button" data-action="stepCombatMastery" data-idx="${i}" data-delta="-1" ${level <= 0 ? 'disabled' : ''}>−</button><button type="button" data-action="stepCombatMastery" data-idx="${i}" data-delta="1" ${level >= 5 ? 'disabled' : ''}>+</button><button type="button" data-action="deleteMaitrise" data-idx="${i}" title="Supprimer">×</button></div>` : '';
+    return `<div class="fs-mrow"><div class="fs-mname">${nameCell}</div><div class="fs-mlv"><span class="fs-dots">${dots}</span><span class="fs-mb">${level ? `+${level} dégât${level > 1 ? 's' : ''}` : 'Initié'}</span>${inHand ? '<span class="fs-mb fs-on">en main</span>' : ''}</div>${step}</div>`;
+  }
+  const masterySection = `<section class="fs-sec"><div class="fs-h"><h3>Maîtrises d'arme</h3>${mj ? '<button type="button" class="fs-add" data-action="addMaitrise">+ Ajouter une maîtrise</button>' : ''}</div>${(c.maitrises || []).length ? (c.maitrises || []).map(masteryRow).join('') : '<p class="fs-note fs-pad">Aucune maîtrise.</p>'}</section>`;
+
+  // ── Affinités élémentaires ────────────────────────────────────────────────
   const charElements = c.elements || [];
-  const els = (damageTypes.length ? getMagicTypes(damageTypes) : []).filter(t => mj || charElements.includes(t.id)).map(t => {
+  const magicTypes = damageTypes.length ? getMagicTypes(damageTypes) : [];
+  const manage = mj && _combatTabUi.elManage;
+  const elList = manage ? magicTypes : magicTypes.filter(t => charElements.includes(t.id));
+  const elHtml = elList.map(t => {
     const active = charElements.includes(t.id), favorite = active && c.favoriteElement === t.id;
-    const toggle = mj ? `data-action="toggleCharElement" data-id="${_esc(c.id)}" data-elem="${_esc(t.id)}" title="${active ? 'Retirer' : 'Accorder'} (MJ)"` : '';
-    // Octroi d'un élément = MJ. Mais choisir son élément par défaut au VTT parmi
-    // ceux déjà maîtrisés est une préférence du propriétaire de la fiche
-    // (setFavoriteElement est ouvert au joueur). On rend donc l'étoile cliquable
-    // dès que la fiche est éditable, pas seulement pour le MJ.
-    const fav = active && canEdit ? `<button class="${favorite ? 'fav' : ''}" data-action="setFavoriteElement" data-id="${_esc(c.id)}" data-elem="${_esc(t.id)}" title="${favorite ? 'Élément par défaut au VTT' : 'Définir par défaut au VTT'}">${favorite ? '★' : '☆'}</button>` : (favorite ? '<span class="fav">★</span>' : '');
-    return `<span class="cb-el${active ? ' on' : ''}" style="--c:${_esc(t.color || '#9ca3af')}" ${toggle}><i></i>${_esc(t.label)}${fav}</span>`;
+    if (manage) return `<button type="button" class="fs-el${active ? '' : ' is-off'}" data-action="toggleCharElement" data-id="${esc(c.id)}" data-elem="${esc(t.id)}">${active ? '✓ ' : '+ '}${esc(t.label)}</button>`;
+    const fav = canEdit ? `data-action="setFavoriteElement" data-id="${esc(c.id)}" data-elem="${esc(t.id)}"` : '';
+    return `<button type="button" class="fs-el${favorite ? ' is-fav' : ''}" ${fav}><i>${favorite ? '★' : '☆'}</i>${esc(t.label)}</button>`;
   }).join('');
+  const elSection = `<section class="fs-sec"><div class="fs-h"><h3>Affinités élémentaires</h3><p>★ proposé par défaut au VTT</p>${mj ? `<button type="button" class="fs-add" data-action="cbElManage">${manage ? 'Terminé' : 'Gérer'}</button>` : ''}</div><div class="fs-els">${elHtml || '<p class="fs-empty" style="padding:2px 3px">Aucun élément accordé.</p>'}</div></section>`;
 
-  const legend = `<div class="cb-leg">${RARETE_NAMES.map((n, i) => [n, i]).filter(([n, i]) => i >= 2 && n).map(([n, i]) => `<span style="--rc:${_rareteColor(n) || '#7a8fa8'}">${_esc(n)}</span>`).join('')}</div>`;
-  const wOpen = typeof open === 'string' && open.startsWith('w:') ? wDetail(open.slice(2)) : '';
+  const legend = `<div class="cb-leg">${RARETE_NAMES.map((n, i) => [n, i]).filter(([n, i]) => i >= 2 && n).map(([n]) => `<span style="--rc:${_rareteColor(n) || '#7a8fa8'}">${esc(n)}</span>`).join('')}</div>`;
 
-  return `<div class="cb">
-    <section class="cb-zone"><div class="cb-zh"><h3>En main</h3></div><div class="cb-zb">
-      <div class="cb-hands">${weaponSlots.map(wCard).join('')}</div>${wOpen}
-      <button type="button" class="cb-style${open === 'style' ? ' on' : ''}" style="--sc:${_esc(styleColor)}" data-action="cbOpen" data-k="style"><span class="cb-k">Style</span><b>${_esc(styleName)}</b>${styleRules.map(r => `<span class="cb-rule ${ruleTone(r.tone)}" title="${_esc(r.detail || '')}">${_esc(r.label)}</span>`).join('')}<span class="cb-chev">›</span></button>
-      ${open === 'style' ? styleDetail() : ''}</div></section>
-    <section class="cb-zone"><div class="cb-zh"><h3>Protection</h3><div class="cb-zh-r">${setH}${mj ? '<button type="button" class="cb-btn ghost" data-action="openArmorSetsAdmin">Sets <span class="cb-mj">MJ</span></button>' : ''}</div></div><div class="cb-zb"><div class="cb-list">${armorSlots.map(aRow).join('')}</div></div></section>
-    <section class="cb-zone"><div class="cb-zh"><h3>Savoir-faire</h3></div><div class="cb-zb">
-      <div class="cb-sub">Maîtrises d'arme${mj ? '<span class="cb-mj">MJ</span><button type="button" class="cb-btn ghost" data-action="addMaitrise">+ Maîtrise</button>' : ''}</div>
-      <div class="cb-list cb-mlist">${mrows || '<div class="cb-none">Aucune maîtrise.</div>'}</div>
-      <div class="cb-sub">Éléments${mj ? '<span class="cb-mj">MJ</span>' : ''}<span style="margin-left:auto;letter-spacing:0;text-transform:none;font-weight:500">★ par défaut au VTT</span></div>
-      <div class="cb-elems">${els || '<div class="cb-none">Aucun élément.</div>'}</div></div></section>
-    ${legend}
-  </div>`;
+  const weaponSection = weaponSlots.length ? `<section class="fs-sec"><div class="fs-h"><h3>Armes en main</h3></div>${weaponSlots.map(wRow).join('')}${styleRow()}</section>` : '';
+  const gearSection = armorSlots.length ? `<section class="fs-sec"><div class="fs-h"><h3>Équipement porté</h3></div>${armorSlots.map(aRow).join('')}${setsBlock}</section>` : '';
+
+  // Deux colonnes fixes : chaque section reste dans sa colonne, ouvrir une ligne
+  // ne pousse que le contenu de SA colonne (pas de rebond vers l'autre colonne).
+  // Appairage pour équilibrer les hauteurs : armes+maîtrises | équipement+affinités.
+  return `<div class="fs"><div class="fs-col">${weaponSection}${masterySection}</div><div class="fs-col">${gearSection}${elSection}</div>${legend}</div>`;
 }
 
 
@@ -2578,8 +2608,6 @@ async function _saveCombatMasteryName(el) {
   const previous = c.maitrises;
   const maitrises = previous.map((entry, i) => i === index ? { ...entry, typeArme: name } : entry);
   c.maitrises = maitrises;
-  const row = el.closest('.cb-mx')?.previousElementSibling?.querySelector('.cb-m-n span');
-  if (row) row.textContent = name || 'Sans type';
   try { await updateInCol('characters', c.id, { maitrises }); }
   catch (error) {
     c.maitrises = previous;
@@ -2706,6 +2734,7 @@ registerActions({
   toggleCharElement:        (btn)   => toggleCharElement(btn.dataset.id, btn.dataset.elem),
   setFavoriteElement:       (btn)   => setFavoriteElement(btn.dataset.id, btn.dataset.elem),
   cbOpen:                   (btn)   => { const k = btn.dataset.k; _combatTabUi.open = _combatTabUi.open === k ? null : k; _rerenderCombatTab(); },
+  cbElManage:               ()      => { _combatTabUi.elManage = !_combatTabUi.elManage; _rerenderCombatTab(); },
   stepCombatMastery:        (btn)   => _stepCombatMastery(Number(btn.dataset.idx), Number(btn.dataset.delta)),
 
   // Maîtrises

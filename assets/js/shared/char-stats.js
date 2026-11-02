@@ -552,17 +552,30 @@ export function computeEquipAllSkillBonuses(equip = {}) {
 // Le champ `isDefault` reste géré par setDefaultCharacter() (un seul par
 // joueur) mais n'influe plus sur l'ordre d'affichage.
 // ══════════════════════════════════════════════════════════════════
+// Le TRI (localeCompare, coûteux) est mémoïsé par identité du tableau source :
+// cette fonction est appelée de façon redondante avec le MÊME tableau (ex. par
+// carte de haut-fait → O(cartes × N log N)), et STATE.characters est remplacé
+// (jamais trié en place) à chaque mise à jour → clé stable, pas de péremption.
+// On renvoie une COPIE (le tri est réutilisé) pour que l'appelant reste libre de
+// muter le résultat — contrat historique préservé (cf. STATE.characters = sort…).
+const _sortCharCache = new WeakMap(); // tableau source → tableau trié (réutilisé)
 export function sortCharactersForDisplay(chars = []) {
-  return [...(chars || [])].sort((a, b) => {
-    const na = (a?.nom || '').toLowerCase();
-    const nb = (b?.nom || '').toLowerCase();
-    if (na !== nb) {
-      if (!na) return 1;   // sans nom → en dernier
-      if (!nb) return -1;
-      return na.localeCompare(nb, 'fr');
-    }
-    return (a?.id || '').localeCompare(b?.id || '');   // tiebreak stable
-  });
+  const src = chars || [];
+  let sorted = _sortCharCache.get(src);
+  if (!sorted) {
+    sorted = [...src].sort((a, b) => {
+      const na = (a?.nom || '').toLowerCase();
+      const nb = (b?.nom || '').toLowerCase();
+      if (na !== nb) {
+        if (!na) return 1;   // sans nom → en dernier
+        if (!nb) return -1;
+        return na.localeCompare(nb, 'fr');
+      }
+      return (a?.id || '').localeCompare(b?.id || '');   // tiebreak stable
+    });
+    _sortCharCache.set(src, sorted);
+  }
+  return [...sorted];
 }
 
 /** Retourne le personnage par défaut d'un joueur, ou son premier sinon. */

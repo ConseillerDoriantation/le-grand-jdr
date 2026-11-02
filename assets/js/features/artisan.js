@@ -26,7 +26,7 @@ import {
   _getTraits, _getBaseTraits, _getAddedTraits,
   syncEquipmentAfterInventoryMutation, buildEquippedItemFromInventory,
 } from '../shared/equipment-utils.js';
-import { loadUpgradeSettings, getUpgradeSettings } from '../shared/upgrade-settings.js';
+import { loadUpgradeSettings, getUpgradeSettings, rarityCapFor } from '../shared/upgrade-settings.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { characterBuildsForStorage, patchBuildLocally } from '../shared/character-builds.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
@@ -77,7 +77,8 @@ export function getItemTraitsSlotCount(item = {}) {
   const s = getUpgradeSettings();
   const cat = getItemFragmentCategory(item);
   if (!cat) return 0;
-  return s.caps?.traitsPerItem?.[cat] ?? 1;
+  // Plafond effectif = min(plafond catégorie, plafond rareté). La rareté borne dur.
+  return Math.min(s.caps?.traitsPerItem?.[cat] ?? 1, rarityCapFor('traits', item.rarete, s));
 }
 
 // ══════════════════════════════════════════════
@@ -1185,7 +1186,7 @@ function _renderRingStats(item, invIndex, c) {
 
 function _renderAmuletStats(item, invIndex, c) {
   const s = getUpgradeSettings();
-  const cap = s.caps?.amulet ?? 3;
+  const cap = Math.min(s.caps?.amulet ?? 3, rarityCapFor('stats', item.rarete, s));
   const used = _getUpgradedStatEntries(item);
   const usedSet = new Set(used.map(e => e.meta.full));
   const slotN = used.length + 1;
@@ -1208,7 +1209,7 @@ function _renderAmuletStats(item, invIndex, c) {
 function _renderWeaponStats(item, invIndex, c) {
   const s = getUpgradeSettings();
   const is2H = weaponHands(item) === 2;
-  const cap = is2H ? (s.caps?.weapon2H ?? 4) : (s.caps?.weapon1H ?? 2);
+  const cap = Math.min(is2H ? (s.caps?.weapon2H ?? 4) : (s.caps?.weapon1H ?? 2), rarityCapFor('stats', item.rarete, s));
   const tariff = is2H ? (s.weapon?.['2H'] || {}) : (s.weapon?.['1H'] || {});
   const used = _getUpgradedStatEntries(item);
   const total = used.reduce((a, e) => a + e.val, 0);
@@ -1315,7 +1316,7 @@ async function _artisanAmuletAddStat(invIndex, statFullKey) {
   if (!meta) return;
 
   const s = getUpgradeSettings();
-  const cap = s.caps?.amulet ?? 3;
+  const cap = Math.min(s.caps?.amulet ?? 3, rarityCapFor('stats', item.rarete, s));
 
   const used = _getUpgradedStatEntries(item);
   if (used.length >= cap) { showNotif(`Plafond amulette atteint (${cap}).`, 'error'); return; }
@@ -1362,7 +1363,7 @@ async function _artisanWeaponAddPoint(invIndex, statFullKey) {
 
   const s = getUpgradeSettings();
   const is2H = weaponHands(item) === 2;
-  const cap = is2H ? (s.caps?.weapon2H ?? 4) : (s.caps?.weapon1H ?? 2);
+  const cap = Math.min(is2H ? (s.caps?.weapon2H ?? 4) : (s.caps?.weapon1H ?? 2), rarityCapFor('stats', item.rarete, s));
   const tariffTable = is2H ? (s.weapon?.['2H'] || {}) : (s.weapon?.['1H'] || {});
 
   const sb = item.upgrades?.statBonus || {};

@@ -55,6 +55,7 @@ const _LOOT_SPRITE = `<svg id="vtt-loot-sprite" width="0" height="0" style="posi
 <symbol id="il-left" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><path d="M11 6l-6 6 6 6"/></symbol>
 <symbol id="il-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
 <symbol id="il-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></symbol>
+<symbol id="il-edit" viewBox="0 0 24 24"><path d="M4 20h4l11-11-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
 <symbol id="il-coin" viewBox="0 0 24 24"><ellipse cx="12" cy="7" rx="8" ry="3.5"/><path d="M4 7v5c0 1.9 3.6 3.5 8 3.5s8-1.6 8-3.5V7"/><path d="M4 12v5c0 1.9 3.6 3.5 8 3.5s8-1.6 8-3.5v-5"/></symbol>
 <symbol id="il-scale" viewBox="0 0 24 24"><line x1="12" y1="3" x2="12" y2="21"/><line x1="7" y1="21" x2="17" y2="21"/><path d="M4 7h16"/><path d="M4 7l-2.5 6a3 3 0 0 0 5 0z"/><path d="M20 7l-2.5 6a3 3 0 0 0 5 0z"/></symbol>
 <symbol id="il-dice" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/></symbol>
@@ -114,7 +115,8 @@ let _lootMe     = null;       // charId choisi une fois pour la vue joueur (sess
 let _qa         = '';         // texte d'ajout rapide
 let _qaOpen     = false;
 let _qaIdx      = 0;
-let _goldEdit   = false;      // champ d'or inline ouvert (réserve)
+let _goldEdit   = null;       // colonne dont le champ d'or inline est ouvert
+let _goldMode   = 'add';      // 'add' (ajouter) | 'set' (remplacer le montant)
 let _goldVal    = '';
 let _qtyEdit    = null;       // id d'entrée dont le stepper qty est ouvert
 let _cSel       = 'recent';   // rail catalogue : 'recent' | 'crea' | 'all' | <categorieId>
@@ -344,21 +346,24 @@ const _lootQtySum = (zone) => _lootItems(zone).reduce((s, e) => s + (e.qty || 0)
 function _lootPurse(zone) {
   const mj = STATE.isAdmin;
   const a = _lootGold(zone);
-  // Champ d'ajout inline (réserve, MJ).
-  if (mj && zone === 'stash' && _goldEdit) {
+  // Champ d'ajout/modification inline. La persistance ne se fait qu'à la
+  // validation, jamais pendant la saisie.
+  if (mj && _goldEdit === zone) {
     const r = _goldVal ? _rollGoldFormula(_goldVal) : null;
     const info = _goldRange(_goldVal);
+    const editing = _goldMode === 'set';
+    const valid = _goldVal !== '' && r != null && (editing ? r >= 0 : r > 0);
     return `<div class="vtt-loot-purse"><span class="vtt-loot-coin">${_li('coin')}</span>
-      <div class="vtt-loot-gform"><input id="vtt-loot-gval" placeholder="200 ou 5d4+10" value="${_esc(_goldVal)}" autocomplete="off"><small>${info}</small></div>
-      <button class="vtt-loot-btn sm" data-vtt-fn="_vttLootGoldOk" ${_goldVal && r != null ? '' : 'disabled'}>Ajouter</button>
+      <div class="vtt-loot-gform"><input id="vtt-loot-gval" inputmode="numeric" placeholder="200 ou 5d4+10" value="${_esc(_goldVal)}" autocomplete="off"><small>${info}</small></div>
+      <button class="vtt-loot-btn sm" data-vtt-fn="_vttLootGoldOk" ${valid ? '' : 'disabled'}>${editing ? 'Enregistrer' : 'Ajouter'}</button>
       <button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldCancel" data-tip="Annuler">${_li('x')}</button></div>`;
   }
   const amt = a
     ? `<b>${_fmtPo(a)}</b><span>pièces d'or</span>`
     : `<b>${zone === 'stash' ? 'Pas d\'or en réserve' : 'Pas d\'or sur la table'}</b>`;
   let acts = '';
-  if (mj && zone === 'stash') acts = `<button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldEdit" data-tip="Ajouter de l'or (nombre ou dés)">${_li('plus')}</button>${a ? `<button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldMove" data-vtt-args="stash" data-tip="Tout poser sur la table">${_li('right')}</button>` : ''}`;
-  else if (mj && zone === 'loot' && a) acts = `<button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldMove" data-vtt-args="loot" data-tip="Remettre en réserve">${_li('left')}</button><button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldSplit" data-tip="Partager en parts égales entre les présents">${_li('scale')}</button>`;
+  if (mj && zone === 'stash') acts = `<button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldEdit" data-vtt-args="stash|add" data-tip="Ajouter de l'or (nombre ou dés)">${_li('plus')}</button>${a ? `<button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldEdit" data-vtt-args="stash|set" data-tip="Modifier le montant">${_li('edit')}</button><button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldMove" data-vtt-args="stash" data-tip="Tout poser sur la table">${_li('right')}</button><button class="vtt-loot-ib sm danger" data-vtt-fn="_vttLootGoldRemove" data-vtt-args="stash" data-tip="Supprimer l'or">${_li('trash')}</button>` : ''}`;
+  else if (mj && zone === 'loot' && a) acts = `<button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldEdit" data-vtt-args="loot|set" data-tip="Modifier le montant">${_li('edit')}</button><button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldMove" data-vtt-args="loot" data-tip="Remettre en réserve">${_li('left')}</button><button class="vtt-loot-ib sm" data-vtt-fn="_vttLootGoldSplit" data-tip="Partager en parts égales entre les présents">${_li('scale')}</button><button class="vtt-loot-ib sm danger" data-vtt-fn="_vttLootGoldRemove" data-vtt-args="loot" data-tip="Supprimer l'or">${_li('trash')}</button>`;
   else if (!mj && zone === 'loot' && a) {
     const g = _loot.loot.find(e => e.kind === 'gold');
     acts = g ? `<button class="vtt-loot-btn sm ghost" data-vtt-fn="_vttLootToggleTake" data-vtt-args="${g.id}">Prendre</button>` : '';
@@ -623,7 +628,7 @@ function _bindLootInputs() {
   }
   const g = document.getElementById('vtt-loot-gval');
   if (g) {
-    g.oninput = e => { _goldVal = e.target.value; const s = document.querySelector('.vtt-loot-gform small'); if (s) s.textContent = _goldRange(_goldVal); const ok = document.querySelector('[data-vtt-fn="_vttLootGoldOk"]'); if (ok) ok.disabled = !(_goldVal && _rollGoldFormula(_goldVal) != null); };
+    g.oninput = e => { _goldVal = e.target.value; const s = document.querySelector('.vtt-loot-gform small'); if (s) s.textContent = _goldRange(_goldVal); const ok = document.querySelector('[data-vtt-fn="_vttLootGoldOk"]'); const rolled = _goldVal === '' ? null : _rollGoldFormula(_goldVal); if (ok) ok.disabled = !(rolled != null && (_goldMode === 'set' ? rolled >= 0 : rolled > 0)); };
     g.onkeydown = e => { if (e.key === 'Enter') _vttLootGoldOk(); else if (e.key === 'Escape') { e.stopPropagation(); _vttLootGoldCancel(); } };
   }
   const cq = document.getElementById('vtt-loot-cq');
@@ -760,16 +765,45 @@ function _lootMerge(to, src) {
   else { const copy = { ...src, id: crypto.randomUUID() }; delete copy.vote; _loot[to].push(copy); }
 }
 
-// ── Or : ajout inline, déplacement, partage ─────────────────────────
-function _vttLootGoldEdit() { if (!STATE.isAdmin) return; _goldEdit = true; _goldVal = ''; _renderLootPanel(); setTimeout(() => document.getElementById('vtt-loot-gval')?.focus(), 20); }
-function _vttLootGoldCancel() { _goldEdit = false; _goldVal = ''; _renderLootPanel(); }
-function _vttLootGoldOk() {
+// ── Or : ajout, modification, suppression, déplacement, partage ─────
+function _vttLootGoldEdit(zone = 'stash', mode = 'add') {
+  if (!STATE.isAdmin || !['stash', 'loot'].includes(zone)) return;
+  const amount = _lootGold(zone);
+  if (mode === 'set' && !amount) return;
+  _goldEdit = zone;
+  _goldMode = mode === 'set' ? 'set' : 'add';
+  _goldVal = _goldMode === 'set' ? String(amount) : '';
+  _renderLootPanel();
+  setTimeout(() => { const input = document.getElementById('vtt-loot-gval'); input?.focus(); input?.select(); }, 20);
+}
+function _vttLootGoldCancel() { _goldEdit = null; _goldMode = 'add'; _goldVal = ''; _renderLootPanel(); }
+async function _vttLootGoldOk() {
   if (!STATE.isAdmin) return;
   const amt = _rollGoldFormula(_goldVal);
-  if (!amt) { showNotif('Montant invalide', 'error'); return; }
-  _goldEdit = false; _goldVal = '';
-  _vttLootAddGoldToStash(amt);
+  const zone = _goldEdit || 'stash';
+  const mode = _goldMode;
+  if (amt == null || (mode === 'add' && amt <= 0)) { showNotif('Montant invalide', 'error'); return; }
+  _goldEdit = null; _goldMode = 'add'; _goldVal = '';
+  if (mode === 'set') {
+    const entry = _loot[zone]?.find(e => e.kind === 'gold');
+    if (!entry) { _renderLootPanel(); return; }
+    if (amt > 0) entry.amount = amt;
+    else _loot[zone] = _loot[zone].filter(e => e !== entry);
+    await _saveLoot();
+    showNotif(amt > 0 ? `🪙 Montant remplacé par ${amt} or` : 'Or supprimé', 'success');
+    return;
+  }
+  await _vttLootAddGoldToStash(amt);
   showNotif(`🪙 +${amt} or → réserve`, 'success');
+}
+async function _vttLootGoldRemove(zone) {
+  if (!STATE.isAdmin || !['stash', 'loot'].includes(zone)) return;
+  const before = _loot[zone]?.length || 0;
+  _loot[zone] = (_loot[zone] || []).filter(e => e.kind !== 'gold');
+  if (_loot[zone].length === before) return;
+  if (_goldEdit === zone) { _goldEdit = null; _goldMode = 'add'; _goldVal = ''; }
+  await _saveLoot();
+  showNotif('Or supprimé du butin', 'success');
 }
 function _vttLootGoldMove(from) { _lootMoveGold(from); }
 async function _vttLootGoldSplit() {
@@ -1411,7 +1445,7 @@ function _resetLootState() {
   for (const k of Object.keys(_lootTakeState)) delete _lootTakeState[k];
   _loot = { stash: [], loot: [], voteClaims: {}, log: [] };
   _lootView = 'main'; _qa = ''; _qaOpen = false; _qaIdx = 0;
-  _goldEdit = false; _goldVal = ''; _qtyEdit = null;
+  _goldEdit = null; _goldMode = 'add'; _goldVal = ''; _qtyEdit = null;
   _cSel = 'recent'; _cQ = ''; _cRar = ''; _basket = {}; _creatureDraws = {};
   _flash = null;
   _shopLoaded = false; _raritiesReady = false; _rarByVal = {};
@@ -1460,6 +1494,7 @@ export {
   _vttLootGoldEdit,
   _vttLootGoldCancel,
   _vttLootGoldOk,
+  _vttLootGoldRemove,
   _vttLootGoldMove,
   _vttLootGoldSplit,
   _vttLootStashMenu,

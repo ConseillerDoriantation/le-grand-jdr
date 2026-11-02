@@ -3962,10 +3962,4 @@ registerActions({
 });
 
 // ── Exports legacy (pour ne pas casser pages.js ailleurs) ──────────────────
-export const BASTION_EVENTS = [];
-export function calculerRevenuBastion() {
-  return { brut: 0, fondateurs: 0, base: 0, nbAmelios: 0, evt: { id: 'calme', nom: 'Calme', emoji: '☁️', description: '', badgeClass: 'badge-blue', badgeText: '±0', couleur: 'neutral', modificateur: 1, bonus: 0 } };
-}
-export function getDefaultBastion() { return _defaultBastion(); }
-
 export default renderBastionPage;

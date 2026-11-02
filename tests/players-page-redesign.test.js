@@ -110,6 +110,8 @@ test('la vue Liens utilise le réseau déterministe et ouvre les compagnons', ()
   assert.match(css, /\.pp-relations-screen\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\) 330px/s);
   assert.match(css, /@media \(max-width:980px\)/);
   assert.match(css, /\.pp-relations-stage\s*\{[^}]*cursor:\s*grab[^}]*touch-action:\s*none/s);
+  assert.match(css, /\.pp-relations-stage\s*\{[^}]*width:\s*100%[^}]*height:\s*100%[^}]*place-items:\s*stretch/s);
+  assert.match(css, /\.pp-relations-svg\s*\{[^}]*width:\s*100%[^}]*max-width:\s*none[^}]*height:\s*100%/s);
   assert.match(css, /\.pp-rel-edge-label-visual,\.pp-rel-node-visual\s*\{[^}]*scale\(var\(--u,1\)\)/s);
 });
 
