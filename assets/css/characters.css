@@ -23148,8 +23148,11 @@ body .modal:has(.cs) > #modal-body { padding: 0 !important; height: auto !import
 .dt-rl-c { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
 @media (max-width: 720px) { .dt-rl { grid-template-columns: minmax(0, 1fr); } .dt-rl-c { justify-content: flex-start; } }
 
-/* ── Inventaire v10 « lisible d'abord » ─────────────────────────────────────── */
-.cs-v3 .iv { display: flex; flex-direction: column; gap: 22px; width: 100%; }
+/* ── Inventaire v11 « une liste + une fiche » ────────────────────────────────
+   Liste (Équipé · À portée de main · Sac en familles) + fiche de l'objet, même
+   grammaire que l'onglet Sorts. Large : fiche collée à droite. Étroit
+   (.is-narrow, posé par ResizeObserver) : panneau latéral ; mobile : panneau du bas. */
+.cs-v3 .iv { display: flex; flex-direction: column; gap: 18px; width: 100%; }
 .cs-v3 .iv-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .cs-v3 .iv-search { flex: 1; min-width: 200px; position: relative; }
 .cs-v3 .iv-search input { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-full); padding: 9px 14px 9px 36px; color: var(--text); font: 400 .86rem var(--font-body); outline: none; }
@@ -23163,70 +23166,153 @@ body .modal:has(.cs) > #modal-body { padding: 0 !important; height: auto !import
 .cs-v3 .iv-bar .inv-history-trigger:hover { border-color: var(--border-bright); color: var(--text); background: var(--surface-3); }
 .cs-v3 .iv-bar .inv-recipe-trigger b, .cs-v3 .iv-bar .inv-history-trigger b { font-size: inherit; color: inherit; }
 .cs-v3 .iv-bar .inv-recipe-trigger span, .cs-v3 .iv-bar .inv-history-trigger span { width: auto; height: auto; border: 0; background: transparent; }
-.cs-v3 .iv-bar .inv-history-trigger em { min-width: 18px; opacity: .7; }
-.cs-v3 .iv-btn.pri { background: var(--gold); border-color: var(--gold); color: #1a1a1a; }
-.cs-v3 .iv-btn.ghost { background: none; border-color: transparent; color: var(--text-muted); }
-.cs-v3 .iv-btn.ghost:hover { background: var(--surface-2); color: var(--text); }
-.cs-v3 .iv-btn.ghost.danger:hover { color: var(--crimson-light); background: rgba(255, 90, 126, .08); }
-/* Colonnes fluides : 1 colonne en étroit, 2–3 selon la largeur. Remplit l'écran
-   et garde des rangées compactes (plus de grand vide au milieu des lignes). */
-.cs-v3 .iv-body { column-width: 480px; column-gap: 34px; }
-.cs-v3 .iv-sec { display: block; margin: 0 0 24px; }
-.cs-v3 .iv-sec:last-of-type { margin-bottom: 10px; }
-.cs-v3 .iv-sec.iv-whole { break-inside: avoid; }
-.cs-v3 .iv-grp { break-inside: avoid; }
-.cs-v3 .iv-sh { break-after: avoid; }
-.cs-v3 .iv-gh { break-inside: avoid; break-after: avoid; }
-.cs-v3 .iv-row { break-inside: avoid; }
-.cs-v3 .iv-row.open { break-after: avoid; }
-.cs-v3 .iv-det { break-inside: avoid; break-before: avoid; }
-.cs-v3 .iv-free { break-inside: avoid; }
-.cs-v3 .iv-leg { column-span: all; margin-top: 8px; }
-.cs-v3 .iv-sh { display: flex; align-items: baseline; gap: 10px; padding: 0 4px 8px; border-bottom: 1px solid var(--border-md); }
-.cs-v3 .iv-sh h3 { margin: 0; font: 600 .95rem var(--font-display); letter-spacing: .03em; color: var(--text); }
-.cs-v3 .iv-sh span { font-size: .74rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.cs-v3 .iv-gh { padding: 14px 4px 4px; font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; color: var(--text-dim); }
-.cs-v3 .iv-row { display: flex; align-items: center; gap: 12px; min-height: 42px; padding: 0 8px 0 4px; border-bottom: 1px solid var(--border); cursor: pointer; }
-.cs-v3 .iv-row:hover { background: rgba(255, 255, 255, .025); }
-.cs-v3 .iv-row.open { background: var(--surface-2); border-bottom-color: transparent; }
-.cs-v3 .iv-n { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; }
-.cs-v3 .iv-n small { flex: none; width: 104px; font-size: .66rem; letter-spacing: .06em; color: var(--text-dim); }
-.cs-v3 .iv-n b { font-size: .88rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cs-v3 .iv-n i { font-style: normal; font-size: .8rem; color: var(--text-muted); font-variant-numeric: tabular-nums; flex: none; }
-.cs-v3 .iv-k { flex: 0 1 auto; min-width: 0; font-size: .78rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
-.cs-v3 .iv-row[data-r] .iv-n b { color: var(--iv-rc); }
-.cs-v3 .iv-gem { flex: none; align-self: center; width: 8px; height: 8px; transform: rotate(45deg); border-radius: 1px; background: var(--iv-rc); box-shadow: 0 0 6px color-mix(in srgb, var(--iv-rc) 55%, transparent); }
-.cs-v3 .iv-row[data-top] .iv-gem { width: 9px; height: 9px; box-shadow: 0 0 10px var(--iv-rc); }
-.cs-v3 .iv-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); flex: none; align-self: center; }
-.cs-v3 .iv-use { flex: none; font: 600 .72rem var(--font-body); padding: 6px 12px; border-radius: var(--r-sm); border: 1px solid rgba(34, 195, 142, .35); background: rgba(34, 195, 142, .08); color: var(--emerald); cursor: pointer; }
-.cs-v3 .iv-use:hover { background: rgba(34, 195, 142, .16); }
-.cs-v3 .iv-det { padding: 4px 14px 14px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
-.cs-v3 .iv-meta { font-size: .74rem; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 4px 12px; }
-.cs-v3 .iv-meta b { font-weight: 600; color: var(--iv-rc); }
-.cs-v3 .iv-cmp { font-size: .76rem; color: var(--text-muted); padding: 7px 10px; border-radius: var(--r-sm); background: var(--surface-sunken); border: 1px solid var(--border); max-width: 62ch; }
-.cs-v3 .iv-cmp b { font-weight: 600; color: var(--text-soft); }
-.cs-v3 .iv-det > p { margin: 0; font-size: .84rem; line-height: 1.55; color: var(--text-soft); max-width: 62ch; text-wrap: pretty; }
-.cs-v3 .iv-det > p.edito { font-family: var(--font-edito, var(--font-display)); font-style: italic; font-size: .95rem; }
-.cs-v3 .iv-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.cs-v3 .iv-acts .sp { flex: 1; }
-.cs-v3 .iv-free { padding: 10px 4px 0; font-size: .74rem; color: var(--text-dim); }
-.cs-v3 .iv-empty { padding: 28px 4px; text-align: center; color: var(--text-dim); font-size: .84rem; }
-.cs-v3 .iv-leg { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 2px 4px; font-size: .7rem; color: var(--text-dim); }
-.cs-v3 .iv-leg span { display: inline-flex; align-items: center; gap: 6px; color: var(--iv-rc); }
-.cs-v3 .iv-leg span::before { content: ""; width: 7px; height: 7px; transform: rotate(45deg); border-radius: 1px; background: var(--iv-rc); }
-.cs-v3 .iv-leg em { font-style: normal; } .cs-v3 .iv-leg .nog::before { display: none; }
+.cs-v3 .iv-bar .inv-history-trigger em { min-width: 18px; opacity: .7; color: inherit; }
+.cs-v3 .iv-sum { display: none; }
+.cs-v3 .iv.is-narrow .iv-sum { display: inline-flex; }
+
+.cs-v3 .iv-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 400px); gap: 22px; align-items: start; }
+.cs-v3 .iv.is-narrow .iv-body { grid-template-columns: minmax(0, 1fr); }
+.cs-v3 .iv-list { min-width: 0; display: flex; flex-direction: column; gap: 28px; }
+/* .main-col en overflow:hidden piège le sticky de la fiche → clip (même découpe). */
+#char-sheet-area .main-col:has(.iv) { overflow: clip; }
+
+/* Sections et familles */
+.cs-v3 .iv-sh { display: flex; align-items: baseline; gap: 10px; padding: 0 6px 9px; border-bottom: 1px solid var(--border-md); }
+.cs-v3 .iv-sh h3 { margin: 0; font: 600 .98rem var(--font-display); letter-spacing: .03em; color: var(--text); }
+.cs-v3 .iv-sh > span { font-size: .76rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.cs-v3 .iv-sh small { margin-left: auto; font-size: .72rem; color: var(--text-dim); }
+.cs-v3 .iv-fh { display: flex; align-items: baseline; gap: 8px; padding: 18px 6px 6px; font-size: .64rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--text-soft); }
+.cs-v3 .iv-fh span { color: var(--text-dim); letter-spacing: .02em; font-weight: 600; }
+
+/* Ligne : [emplacement] ◆ nom / ce que c'est · nombres · quantité · action */
+.cs-v3 .iv-row { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); transition: background .12s; }
+.cs-v3 .iv-row:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
+.cs-v3 .iv-row.is-sel { background: color-mix(in srgb, var(--gold) 9%, transparent); box-shadow: inset 3px 0 0 var(--gold); }
+.cs-v3 .iv-pick { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 50px; padding: 6px 10px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cs-v3 .iv-pick.is-static { cursor: default; }
+.cs-v3 .iv :is(.iv-pick, .iv-opt-pick, .iv-fresh button, .iv-sheet-x):focus-visible { outline: 2px solid color-mix(in srgb, var(--gold) 60%, transparent); outline-offset: -2px; border-radius: 8px; }
+.cs-v3 .iv .cs-grim-btn:focus-visible { outline: 2px solid var(--gold-2); outline-offset: 2px; }
+.cs-v3 .iv-slot { flex: none; width: 118px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .68rem; letter-spacing: .05em; color: var(--text-dim); }
+.cs-v3 .iv-gem { flex: none; display: inline-block; width: 8px; height: 8px; transform: rotate(45deg); border-radius: 1px; background: var(--iv-rc, transparent); }
+.cs-v3 [data-r] .iv-gem { box-shadow: 0 0 7px color-mix(in srgb, var(--iv-rc) 60%, transparent); }
+.cs-v3 .iv-txt { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cs-v3 .iv-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.cs-v3 .iv-name b { min-width: 0; font-size: .92rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-v3 .iv-row[data-r] .iv-name b { color: var(--iv-rc); }
+.cs-v3 .iv-new { flex: none; padding: 1px 6px; border-radius: 999px; font-style: normal; font-size: .6rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--emerald); background: color-mix(in srgb, var(--emerald) 12%, transparent); }
+.cs-v3 .iv-line { font-size: .76rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-v3 .iv-eff { color: var(--text-dim); }
+.cs-v3 .iv-side { flex: none; display: flex; align-items: center; gap: 5px; }
+.cs-v3 .iv-chip { font-style: normal; font-size: .72rem; font-weight: 600; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border-md); background: var(--surface-2); color: var(--text-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cs-v3 .iv-chip:is(.stat-tone, .derived-tone) { border-color: rgba(var(--equip-stat-rgb), .42); background: rgba(var(--equip-stat-rgb), .13); color: var(--equip-stat); }
+.cs-v3 .iv-chip.is-dmg { color: var(--crimson-light); border-color: color-mix(in srgb, var(--crimson) 40%, transparent); background: color-mix(in srgb, var(--crimson) 10%, transparent); }
+.cs-v3 .iv-qty { min-width: 36px; text-align: right; font-size: .88rem; font-weight: 600; color: var(--text-soft); font-variant-numeric: tabular-nums; }
+.cs-v3 .iv-use { flex: none; margin-right: 8px; min-height: 34px; padding: 0 13px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--emerald) 40%, transparent); background: transparent; color: var(--emerald); font: 600 .74rem var(--font-body); cursor: pointer; }
+.cs-v3 .iv-use:hover { background: color-mix(in srgb, var(--emerald) 12%, transparent); }
+.cs-v3 .iv-row.is-free .iv-name em { font-style: normal; font-size: .86rem; color: var(--text-dim); }
+.cs-v3 .iv-row.is-free .iv-line { color: var(--text-dim); }
+.cs-v3 .iv-row.is-free .iv-gem { width: 7px; height: 7px; background: none; border: 1px dashed var(--border-strong); }
+.cs-v3 .iv-empty { margin: 0; padding: 22px 6px; text-align: center; color: var(--text-dim); font-size: .84rem; }
 .cs-v3 .iv mark { background: rgba(244, 196, 48, .25); color: inherit; border-radius: 2px; }
-/* Thème clair : assombrit le texte de rareté pour garder un contraste lisible
-   (≥ 4.5:1) sans changer la teinte ; les losanges restent vifs. */
-[data-theme="light"] .cs-v3 .iv-row[data-r] .iv-n b,
-[data-theme="light"] .cs-v3 .iv-meta b,
-[data-theme="light"] .cs-v3 .iv-leg span { color: color-mix(in srgb, var(--iv-rc) 58%, #11161f); }
-@media (max-width: 560px) {
-  .cs-v3 .iv-n small { width: auto; }
-  .cs-v3 .iv-n { flex-wrap: wrap; row-gap: 0; }
-  .cs-v3 .iv-row.worn .iv-n small { flex-basis: 100%; padding-top: 6px; }
-  .cs-v3 .iv-k { max-width: 42%; }
+
+/* Fiche : collée sous l'en-tête de la fiche perso, défile en interne */
+.cs-v3 .iv-sheet { position: relative; min-width: 0; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px; padding: 18px; border-radius: 18px; background: var(--surface-1); border: 1px solid var(--border-md); box-shadow: var(--elev-2); }
+.cs-v3 .iv:not(.is-narrow) .iv-sheet { position: sticky; top: calc(var(--top-h) + 14px); max-height: calc(100vh - var(--top-h) - 28px); overflow-y: auto; scrollbar-width: thin; }
+.cs-v3 .iv-sheet-x { position: absolute; top: 12px; right: 12px; z-index: 2; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border-radius: 10px; border: 1px solid transparent; background: none; color: var(--text-dim); font-size: 14px; cursor: pointer; }
+.cs-v3 .iv-sheet-x:hover { color: var(--text); background: var(--surface-2); border-color: var(--border-md); }
+.cs-v3 .iv:not(.is-narrow) .iv-sheet.is-summary .iv-sheet-x { display: none; }
+.cs-v3 .iv-sheet-head { display: flex; gap: 14px; align-items: center; padding-right: 30px; }
+.cs-v3 .iv-sheet-ic { flex: none; width: 62px; height: 62px; box-sizing: border-box; border-radius: 16px; display: grid; place-items: center; overflow: hidden; background: color-mix(in srgb, var(--iv-rc, var(--text-dim)) 13%, var(--surface-2)); border: 1px solid color-mix(in srgb, var(--iv-rc, var(--text-dim)) 40%, transparent); }
+.cs-v3 .iv-sheet-ic img { width: 100%; height: 100%; object-fit: cover; }
+.cs-v3 .iv-sheet-ic i { width: 15px; height: 15px; transform: rotate(45deg); border-radius: 2px; background: var(--iv-rc, var(--text-dim)); box-shadow: 0 0 16px color-mix(in srgb, var(--iv-rc, transparent) 65%, transparent); }
+.cs-v3 .iv-sheet-ic.is-empty i { background: none; border: 1.5px dashed var(--border-strong); box-shadow: none; }
+.cs-v3 .iv-sheet-id { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.cs-v3 .iv-kicker { font-size: .64rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); }
+.cs-v3 .iv-kicker b { color: var(--iv-rc, var(--text-soft)); font-weight: 800; }
+.cs-v3 .iv-sheet-id h3 { margin: 0; font-family: 'Cinzel', serif; font-size: 1.22rem; line-height: 1.25; color: var(--text); overflow-wrap: anywhere; }
+.cs-v3 .iv-status { font-size: .8rem; color: var(--text-muted); }
+.cs-v3 .iv-status.is-worn { color: var(--emerald); font-weight: 600; }
+.cs-v3 .iv-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 6px; }
+.cs-v3 .iv-facts > div { min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--border); }
+.cs-v3 .iv-facts span { font-size: .6rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }
+.cs-v3 .iv-facts b { font-size: .88rem; font-weight: 600; color: var(--text); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.cs-v3 .iv-sheet.is-summary .iv-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cs-v3 .iv-part { display: flex; flex-direction: column; gap: 7px; margin: 0; }
+.cs-v3 .iv-part h4,
+.cs-v3 .iv-h { margin: 0; font-size: .64rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); }
+.cs-v3 .iv-part p { margin: 0; font-size: .86rem; line-height: 1.55; color: var(--text-soft); text-wrap: pretty; white-space: pre-line; }
+.cs-v3 .iv-part p.is-edito { font-style: italic; color: var(--text-muted); }
+.cs-v3 .iv-part p.iv-dim { color: var(--text-dim); }
+.cs-v3 .iv-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-v3 .iv-tags .iv-chip { font-size: .78rem; padding: 4px 10px; }
+.cs-v3 .iv-tag { padding: 4px 10px; border-radius: 999px; font-size: .78rem; font-weight: 600; color: var(--text-soft); background: color-mix(in srgb, var(--arcane) 12%, transparent); border: 1px solid color-mix(in srgb, var(--arcane) 38%, transparent); }
+/* « Si tu l'équipes » */
+.cs-v3 .iv-cmp { padding: 11px 12px; border-radius: 12px; background: var(--surface-sunken); border: 1px solid var(--border); }
+.cs-v3 .iv-cmp p small { color: var(--text-dim); }
+.cs-v3 .iv-cmp ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.cs-v3 .iv-cmp li { display: flex; align-items: baseline; gap: 8px; font-size: .82rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.cs-v3 .iv-cmp li > span { min-width: 56px; color: var(--text-dim); font-weight: 700; font-size: .72rem; letter-spacing: .06em; }
+.cs-v3 .iv-cmp li s { min-width: 26px; text-align: right; color: var(--text-dim); text-decoration: none; }
+.cs-v3 .iv-cmp li i { font-style: normal; color: var(--text-dim); }
+.cs-v3 .iv-cmp li b { min-width: 26px; color: var(--text); }
+.cs-v3 .iv-cmp li em { font-style: normal; font-size: .7rem; }
+.cs-v3 .iv-cmp li.is-up :is(b, em) { color: var(--emerald); }
+.cs-v3 .iv-cmp li.is-down :is(b, em) { color: var(--crimson-light); }
+.cs-v3 .iv-note textarea { box-sizing: border-box; width: 100%; min-height: 40px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border-md); background: var(--surface-2); color: var(--text); font: inherit; font-size: .84rem; line-height: 1.45; resize: vertical; }
+.cs-v3 .iv-note textarea:focus { outline: none; border-color: color-mix(in srgb, var(--gold) 55%, transparent); }
+.cs-v3 .iv-note textarea.is-saving { opacity: .7; }
+.cs-v3 .iv-note textarea.is-saved { border-color: color-mix(in srgb, var(--emerald) 60%, transparent); }
+/* Actions toujours visibles : collées en bas de la fiche quand elle défile. */
+.cs-v3 .iv-acts { position: sticky; bottom: -18px; z-index: 1; display: flex; flex-direction: column; gap: 8px; margin: 0 -18px -18px; padding: 14px 18px 16px; border-top: 1px solid var(--border); background: var(--surface-1); border-radius: 0 0 18px 18px; }
+.cs-v3 .iv-acts-main { display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-v3 .iv-acts-main .cs-grim-btn { flex: 1 1 auto; }
+.cs-v3 .iv-acts-more { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 -6px; }
+.cs-v3 .iv .cs-grim-btn small { font-weight: 500; opacity: .75; }
+.cs-v3 .iv .cs-grim-btn.is-ghost { background: none; border-color: transparent; color: var(--text-muted); }
+.cs-v3 .iv .cs-grim-btn.is-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.cs-v3 .iv .cs-grim-btn.is-danger:hover:not(:disabled) { color: var(--crimson-light); background: color-mix(in srgb, var(--crimson) 8%, transparent); }
+/* Emplacement libre : objets compatibles du sac */
+.cs-v3 .iv-opts { display: flex; flex-direction: column; gap: 6px; }
+.cs-v3 .iv-opt { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+.cs-v3 .iv-opt-pick { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 9px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cs-v3 .iv-opt-pick:hover { background: var(--surface-3); }
+.cs-v3 .iv-opt .iv-txt b { font-size: .86rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-v3 .iv-opt[data-r] .iv-txt b { color: var(--iv-rc); }
+.cs-v3 .iv-opt .iv-txt small { font-size: .72rem; color: var(--text-muted); }
+/* Vue d'ensemble */
+.cs-v3 .iv-fresh { display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-v3 .iv-fresh button { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--border-md); background: var(--surface-2); color: var(--text-soft); font: inherit; font-size: .78rem; cursor: pointer; }
+.cs-v3 .iv-fresh button[data-r] { color: var(--iv-rc); }
+.cs-v3 .iv-fresh button:hover { border-color: var(--border-bright); }
+.cs-v3 .iv-fresh small { color: var(--text-dim); }
+.cs-v3 .iv-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .74rem; }
+.cs-v3 .iv-legend span { display: inline-flex; align-items: center; gap: 7px; color: var(--iv-rc); }
+.cs-v3 .iv-legend .is-common { color: var(--text-dim); }
+
+/* Largeur réduite (portable, barre latérale ouverte) : la fiche s'ouvre en
+   panneau latéral, refermable (✕ / Échap) ; les boutons flottants s'effacent. */
+.cs-v3 .iv.is-narrow .iv-sheet { display: none; }
+.cs-v3 .iv.is-narrow.is-sheet-open .iv-sheet { display: flex; position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100vw); overflow-y: auto; overscroll-behavior: contain; z-index: var(--z-picker, 999); border-radius: 18px 0 0 18px; padding-top: 20px; box-shadow: -24px 0 60px rgba(0, 0, 0, .55); }
+.cs-v3 .iv.is-narrow .iv-sheet-x { width: 38px; height: 38px; border-color: var(--border-md); background: var(--surface-2); color: var(--text-muted); }
+body:has(.cs-v3 .iv.is-narrow.is-sheet-open) :is(.global-back-top, #chat-widget) { visibility: hidden; }
+@media (max-width: 640px) {
+  .cs-v3 .iv.is-narrow.is-sheet-open .iv-sheet { top: auto; left: 0; width: auto; max-height: 82vh; border-radius: 20px 20px 0 0; padding: 16px 16px calc(18px + env(safe-area-inset-bottom)); box-shadow: 0 -20px 50px rgba(0, 0, 0, .55); }
+  .cs-v3 .iv.is-narrow .iv-acts { bottom: calc(-18px - env(safe-area-inset-bottom)); margin: 0 -16px calc(-18px - env(safe-area-inset-bottom)); padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .cs-v3 .iv-sh { flex-wrap: wrap; row-gap: 2px; }
+  .cs-v3 .iv-sh small { flex-basis: 100%; margin-left: 0; }
+  /* Ligne sur grille : l'emplacement au-dessus, un seul nombre à droite. */
+  .cs-v3 .iv-pick { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; row-gap: 2px; }
+  .cs-v3 .iv-slot { grid-column: 1 / -1; width: auto; }
+  .cs-v3 .iv-side .iv-chip:nth-child(n+2) { display: none; }
 }
+/* Thème clair : assombrit le texte de rareté et des bonus pour garder un
+   contraste lisible (≥ 4.5:1) sans changer la teinte ; les losanges restent vifs. */
+[data-theme="light"] .cs-v3 .iv-row[data-r] .iv-name b,
+[data-theme="light"] .cs-v3 .iv-sheet[data-r] .iv-kicker b,
+[data-theme="light"] .cs-v3 .iv-opt[data-r] .iv-txt b,
+[data-theme="light"] .cs-v3 .iv-fresh button[data-r],
+[data-theme="light"] .cs-v3 .iv-legend span:not(.is-common) { color: color-mix(in srgb, var(--iv-rc) 58%, #11161f); }
+[data-theme="light"] .cs-v3 .iv-chip:is(.stat-tone, .derived-tone) { color: color-mix(in srgb, var(--equip-stat) 62%, #11161f); }
 /* ══════════════════════════════════════════════════════════════════════════
    ONGLET SORTS — une liste + une fiche (.cs-grim) · file de validation MJ
    (.cs-review) · navigation ‹ › de la forge (.cs-forge-nav).

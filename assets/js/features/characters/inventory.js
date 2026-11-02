@@ -7,8 +7,11 @@ import { openModal, pushModal, closeModal, modalSection } from '../../shared/mod
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _norm } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
-import { RARETE_NAMES, _rareteColor, _rareteLabel } from '../../shared/rarity.js';
-import { ITEM_STAT_META, statShort, getItemStatBonus, calcOr, getItemEffectText } from '../../shared/char-stats.js';
+import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
+import {
+  ITEM_STAT_META, statShort, getItemStatBonus, calcOr, getItemEffectText,
+  computeEquipDerivedBonus, computeEquipAllSkillBonuses,
+} from '../../shared/char-stats.js';
 import { useGold, useGoldMulti } from '../../shared/economy.js';
 import {
   shopItemToInvEntry,
@@ -28,7 +31,7 @@ import { isFeatureEnabled } from '../../shared/features.js';
 import { recipeBookButton } from '../recipes.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
-import { characterBuildsForStorage, patchBuildLocally } from '../../shared/character-builds.js';
+import { characterBuildsForStorage, getActiveBuild, patchBuildLocally } from '../../shared/character-builds.js';
 import { mergeCharacterTransferTargets } from '../../shared/character-transfer-targets.js';
 import {
   _getTraits,
@@ -39,12 +42,18 @@ import {
   equipmentSlotAcceptsItem,
   getEquipmentSlot,
   getEquipmentSlots,
+  getPrimaryWeaponSlotId,
+  getSecondaryWeaponSlotId,
   resolveEquipmentSlotForItem,
 } from '../../shared/equipment-slots.js';
+import { weaponHands, weaponHandsLabel } from '../../shared/weapon-family.js';
 
 import { canControlCharacter, getCharacterById } from '../../shared/character-state.js';
 let _charInvSearch = '';
 let _invSelected = '';
+let _invSheetOpen = false; // panneau de la fiche ouvert (écran étroit)
+let _invSelCharId = '';
+let _invLastCanEdit = false; // droits du dernier rendu (fiche re-rendue seule)
 let _sellRefundsCum = [];
 let _modalCharTargets = [];
 let _shopItemsCache = null;
@@ -58,23 +67,6 @@ let _lootFilter = () => {};
 let _lootSelect = () => {};
 let _lootSaveRecent = null;
 let _lootRenderGrid = null;
-
-const _inventoryStatChips = item => ITEM_STAT_META.flatMap(stat => {
-  const value = getItemStatBonus(item, stat.full);
-  return value ? [{ ...stat, value, cls: `stat-tone stat-${stat.full}` }] : [];
-});
-
-const _inventoryStatBadgesHtml = item => _inventoryStatChips(item)
-  .map(stat => `<span class="badge-chip ${stat.cls}">${stat.short.toUpperCase()} ${stat.value > 0 ? '+' : ''}${stat.value}</span>`)
-  .join('');
-
-function _invLooksMechanicalEffect(text = '') {
-  const raw = String(text || '').trim();
-  if (!raw || raw.length > 90) return false;
-  const n = _norm(raw);
-  if (/[+\-]?\d/.test(raw)) return true;
-  return /\b(pv|pm|ca|degat|degats|soin|vitesse|portee|toucher|critique|avantage|desavantage|relance|dd|etat|reaction|action bonus|resistance|immunite|mana)\b/.test(n);
-}
 
 function _inventoryCatalogSnapshot() {
   const live = getCachedCollection('shop');
@@ -244,197 +236,12 @@ function _itemDegatsStatsShorts(item) {
 }
 
 // ══════════════════════════════════════════════
-// INVENTAIRE BOUTIQUE (section dans renderCharSheet)
+// INVENTAIRE PRINCIPAL — v11 « une liste + une fiche »
 // ══════════════════════════════════════════════
-export function _renderInventaireBoutique(char) {
-  const invRaw = (char.inventaire || []).map((item, i) => ({ item, i })).filter(({ item }) => item.source === 'boutique');
-  if (!invRaw.length) return '';
-
-  const canEdit = charSession.getCanEditChar() ?? STATE.isAdmin;
-
-  // ── Regrouper par itemId + nom ──────────────────────────────────────────
-  const grouped = [];
-  invRaw.forEach(({ item, i }) => {
-    const key = (item.itemId||'') + '||' + (item.nom||'');
-    const existing = grouped.find(g => g.key === key);
-    if (existing) {
-      existing.qte += parseInt(item.qte)||1;
-      existing.indices.push(i);
-    } else {
-      grouped.push({ key, item: {...item}, qte: parseInt(item.qte)||1, indices: [i] });
-    }
-  });
-
-  const cards = grouped.map(g => {
-    const item = g.item;
-    const indicesB64 = btoa(JSON.stringify(g.indices));
-    const rareteN  = parseInt(item.rarete) || 0;
-    const rareteL  = RARETE_NAMES[rareteN] || '';
-    const rareteC  = _rareteColor(rareteL) || '#555';
-    const prixAchat = parseFloat(item.prixAchat) || 0;
-    const prixVente = parseFloat(item.prixVente) || Math.round(prixAchat * 0.6);
-
-    const infos = [];
-    const statBonuses = _inventoryStatChips(item);
-    if (item.format)      infos.push({ label: 'Type d’arme', val: item.format });
-    if (item.mains)       infos.push({ label: 'Maniement', val: item.mains });
-    if (item.slotArmure)  infos.push({ label: 'Slot',      val: item.slotArmure });
-    if (item.slotBijou)   infos.push({ label: 'Slot',      val: item.slotBijou });
-    if (item.typeArmure)  infos.push({ label: 'Type',      val: item.typeArmure });
-    if (item.degats) {
-      const shs = _itemDegatsStatsShorts(item);
-      infos.push({ label: '⚔️ Dégâts', val: `${item.degats}${shs.length ? ` + ${shs.join(' + ')}` : ''}`, color: '#ff6b6b' });
-    }
-    if (item.toucherStat) infos.push({ label: 'Toucher',    val: statShort(item.toucherStat), color: '#e8b84b' });
-    else if (item.toucher) infos.push({ label: 'Toucher',   val: item.toucher, color: '#e8b84b' });
-    {
-      const caTot = (parseInt(item.ca)||0) + (parseInt(item.caBonus)||0);
-      if (caTot || item.ca === 0 || item.caBonus === 0) infos.push({ label: '🛡️ CA', val: caTot });
-    }
-    _getTraits(item).forEach(t => infos.push({ label: 'Trait', val: t, color: '#b47fff', italic: true }));
-    if (item.type)        infos.push({ label: 'Type',       val: item.type });
-    { const eff = getItemEffectText(item); if (eff) infos.push({ label: 'Effet', val: eff }); }
-    if (item.description) infos.push({ label: 'Desc.',      val: item.description, muted: true });
-    statBonuses.forEach(stat => infos.push({
-      label: 'Stat',
-      val: `${stat.short.toUpperCase()} ${stat.value > 0 ? '+' : ''}${stat.value}`,
-      cls: stat.cls,
-    }));
-
-    return `
-    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
-      padding:.85rem 1rem;display:flex;flex-direction:column;gap:.5rem;border-left:3px solid ${rareteC}">
-
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
-        <div>
-          <div style="font-family:'Cinzel',serif;font-size:.88rem;color:var(--text);font-weight:600;line-height:1.2">
-            ${item.nom || '?'}
-          </div>
-          ${rareteL ? `<div style="font-size:.68rem;color:${rareteC};margin-top:1px">${_rareteLabel(rareteN)}</div>` : ''}
-        </div>
-        <span style="font-size:.72rem;background:var(--bg-elevated);border:1px solid var(--border);
-          border-radius:999px;padding:2px 8px;color:var(--text-muted);flex-shrink:0">×${g.qte}</span>
-      </div>
-
-      ${infos.length ? `
-      <div style="display:flex;flex-wrap:wrap;gap:.3rem .75rem">
-        ${infos.map(info => `
-          <div style="display:flex;align-items:baseline;gap:.3rem;font-size:.78rem">
-            <span style="color:var(--text-dim);font-size:.68rem;text-transform:uppercase;letter-spacing:.5px">${info.label}</span>
-            <span class="${info.cls || ''}" style="${info.color ? `color:${info.color};` : ''}${info.italic?'font-style:italic;':''}font-weight:${info.color || info.cls ?'700':'400'}">${info.val}</span>
-          </div>`).join('')}
-      </div>` : ''}
-
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:.25rem;
-        padding-top:.5rem;border-top:1px solid var(--border)">
-        <div style="font-size:.72rem;color:var(--text-dim)">
-          <span title="Prix d'achat">💰 ${prixAchat} or</span>
-          <span style="margin:0 .3rem;opacity:.4">·</span>
-          <span title="Prix de revente" style="color:var(--gold)">🔄 ${prixVente} or/u</span>
-        </div>
-        ${canEdit ? `
-        <div style="display:flex;gap:.4rem;align-items:center">
-          <button data-action="openSellInvModal" data-id="${char.id}" data-indices="${indicesB64}" data-prix="${prixVente}" data-name="${_esc(item.nom||'')}"
-            style="background:rgba(232,184,75,.08);border:1px solid rgba(232,184,75,.3);
-            border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
-            color:var(--gold);transition:all .15s"
-            data-hov-bg="rgba(232,184,75,.15)">
-            🔄 Vendre
-          </button>
-          <button data-action="openSendInvModal" data-id="${char.id}" data-indices="${indicesB64}" data-name="${_esc(item.nom||'')}"
-            style="background:rgba(79,140,255,.08);border:1px solid rgba(79,140,255,.3);
-            border-radius:999px;padding:3px 10px;cursor:pointer;font-size:.72rem;
-            color:#4f8cff;transition:all .15s"
-            data-hov-bg="rgba(79,140,255,.15)"
-            title="Envoyer">
-            📤 Envoyer
-          </button>
-        </div>` : ''}
-      </div>
-    </div>`;
-  }).join('');
-
-  return `
-  <div style="margin-bottom:1.5rem">
-    <div style="font-size:.72rem;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;
-      margin-bottom:.75rem;padding-bottom:.4rem;border-bottom:1px solid var(--border)">
-      🛒 Inventaire Boutique
-      <span style="font-size:.65rem;background:var(--bg-elevated);border:1px solid var(--border);
-        border-radius:999px;padding:1px 7px;margin-left:.4rem;color:var(--text-dim)">${grouped.reduce((s,g)=>s+g.qte,0)}</span>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:.6rem">${cards}</div>
-  </div>`;
-}
-
-// ══════════════════════════════════════════════
-// INVENTAIRE PRINCIPAL
-// ══════════════════════════════════════════════
-
-// ── Catégorisation ────────────────────────────
-// Catégorie d'un objet pour le filtre d'inventaire.
-// • L'ÉQUIPEMENT est regroupé en 3 rubriques fixes : toutes les armes → Armes,
-//   toutes les armures → Armures, bagues/amulettes → Bijoux (quel que soit leur
-//   sous-type).
-// • TOUT LE RESTE forme une rubrique par `type` d'objet (champ libre : « Potion »,
-//   « Parchemin », « Pierre précieuse »…) → les rubriques affichées dépendent des
-//   objets réellement possédés, pas d'une liste figée.
-function _invCategory(item) {
-  const tpl = (item.template || '').toLowerCase();
-  const hay = _norm([item.type, item.categorie, item.nom, item.sousType, item.sousCategorie].filter(Boolean).join(' '));
-  const has = (...keys) => keys.some(k => hay.includes(k));
-  if (tpl === 'arme'   || item.degats || item.toucherStat || item.toucher) return { id: 'armes',   label: 'Armes',                icon: '⚔️' };
-  if (tpl === 'armure' || item.slotArmure || item.typeArmure || (item.ca != null && item.ca !== '')) return { id: 'armures', label: 'Armures', icon: '🛡️' };
-  if (tpl === 'bijou'  || item.slotBijou || has('anneau','amulette','bijou','talisman','pendentif','bague'))
-    return { id: 'bijoux', label: 'Bijoux & Accessoires', icon: '💍' };
-  // Sinon : rubrique dynamique d'après le type de l'objet.
-  const type = (item.type || '').trim();
-  if (type) return { id: 'type:' + _norm(type), label: type, icon: _typeIcon(type) };
-  return { id: 'divers', label: 'Divers', icon: '📦' };
-}
-
-// Icône d'agrément d'une rubrique de type (cosmétique ; le libellé reste le type réel).
-function _typeIcon(type) {
-  const t = _norm(type);
-  if (/potion|consommable|elixir|antidote|nourriture|herbe|ingredient|ressource|materiau/.test(t)) return '🧪';
-  if (/parchemin|grimoire|rouleau|scroll|livre/.test(t)) return '📜';
-  if (/precieux|gemme|joyau|pierre|tresor|lingot|diamant|rubis|saphir|emeraude|perle|cristal|pepite|relique|valeur/.test(t)) return '💎';
-  if (/cle|clef|outil|kit|piege/.test(t)) return '🔧';
-  return '📦';
-}
-
-// ── Chips compactes pour une ligne (max 3) ────
-function _invRowChips(item) {
-  const chips = [];
-  const statChips = _inventoryStatChips(item).map(stat => ({
-    val: `${stat.short.toUpperCase()} ${stat.value > 0 ? '+' : ''}${stat.value}`,
-    cls: stat.cls,
-  }));
-  if (item.degats) {
-    const shs = _itemDegatsStatsShorts(item);
-    chips.push({ val: shs.length ? `${item.degats}+${shs.join('+')}` : item.degats, color: '#ff6b6b' });
-  }
-  if (item.toucherStat || (item.toucher && !item.degats))
-    chips.push({ val: item.toucherStat ? statShort(item.toucherStat) : item.toucher, color: '#e8b84b' });
-  {
-    const caTot = (parseInt(item.ca)||0) + (parseInt(item.caBonus)||0);
-    if (caTot !== 0 || (item.ca != null && item.ca !== ''))
-      chips.push({ val: `CA+${caTot}`, color: '#4f8cff' });
-  }
-  if (item.slotArmure)       chips.push({ val: item.slotArmure, color: '#4f8cff' });
-  else if (item.slotBijou)   chips.push({ val: item.slotBijou,  color: '#c084fc' });
-  if (item.typeArmure) {
-    const armorMeta = getArmorTypeMeta(item.typeArmure);
-    chips.push({ val: armorMeta?.label || item.typeArmure, color: armorMeta?.color || '#22c38e' });
-  }
-  if (chips.length < 2 && item.sousType) chips.push({ val: item.sousType, color: '#a0aec0' });
-  if (chips.length < 2 && item.format)   chips.push({ val: item.format,   color: '#a0aec0' });
-  if (chips.length === 0 && item.effet)
-    chips.push({ val: item.effet.length > 42 ? item.effet.slice(0,42)+'…' : item.effet, color: 'var(--text-muted)' });
-  if (chips.length === 0 && item.type)
-    chips.push({ val: item.type, color: 'var(--text-dim)' });
-  if (!statChips.length) return chips.slice(0, 3);
-  return [...chips.slice(0, 2), ...statChips.slice(0, 3)];
-}
+// Une liste dans un ordre fixe (Équipé · À portée de main · Sac en 5 familles)
+// et la fiche complète de l'objet sélectionné, même grammaire que l'onglet
+// Sorts. Une ligne = nom / ce que c'est / nombres. La sélection reste locale
+// (aucune lecture Firestore) ; les actions sont celles de l'inventaire.
 
 function _invItemKey(item = {}) {
   return `${item.itemId || ''}||${item.nom || ''}||${item.template || item.type || ''}`;
@@ -470,20 +277,6 @@ function _invIsBeltItem(item = {}) {
   return /potion|consommable|elixir|antidote|parchemin|scroll|munition|fleche|carreau/.test(hay);
 }
 
-function _invKeyInfo(item = {}) {
-  const chips = _invRowChips(item);
-  if (chips[0]?.val) return String(chips[0].val);
-  const readable = getInventoryReadableDocument(item, getInventoryCatalogItem(item.itemId));
-  if (readable) return 'Lisible';
-  const effect = String(getItemEffectText(item) || '').trim();
-  if (effect) return effect.length > 54 ? `${effect.slice(0, 51).trim()}…` : effect;
-  return item.type || item.categorie || 'Objet';
-}
-
-function _invSearchValue(item = {}) {
-  return _norm(`${item.nom || ''} ${item.notePerso || ''} ${_invKeyInfo(item)} ${item.type || ''} ${item.categorie || ''}`);
-}
-
 function _invHighlight(text, query = _charInvSearch) {
   const raw = String(text || '');
   const q = _norm(query || '');
@@ -516,111 +309,380 @@ function _invRecentAt(group, recentMap) {
   return recentMap.get(`id:${group.item.itemId}`) || recentMap.get(`name:${_norm(group.item.nom)}`) || 0;
 }
 
-function _invCategoryGroups(groups) {
-  const map = new Map();
-  groups.forEach(group => {
-    const cat = _invIsQuestItem(group.item)
-      ? { id: 'quest', label: 'Objets de quête', icon: '✦' }
-      : _invCategory(group.item);
-    if (!map.has(cat.id)) map.set(cat.id, { ...cat, items: [] });
-    map.get(cat.id).items.push(group);
-  });
-  const fixed = ['quest', 'armes', 'armures', 'bijoux'];
-  return [
-    ...fixed.map(id => map.get(id)).filter(Boolean),
-    ...[...map.values()].filter(cat => !fixed.includes(cat.id) && cat.id !== 'divers')
-      .sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' })),
-    ...(map.get('divers') ? [map.get('divers')] : []),
-  ];
-}
-
-// ── Inventaire v10 « lisible d'abord » : trois listes en une colonne, une ligne
-// = nom + quantité + une info clé, détail en accordéon. Réutilise toute la
-// logique métier existante (équipement, vente, envoi, suppression, historique).
 const _IV_RAR = item => Math.max(0, parseInt(item?.rarete ?? item?.rare ?? 0) || 0);
 // Barème réel 1-indexé (Commun = 1). « Notable » = au-dessus du commun → marque
 // + couleur ; 0/1 = aucune marque (volontaire, pour ne pas charger la liste).
 const _IV_NOTABLE = rare => rare >= 2 && !!RARETE_NAMES[rare];
 const _ivRareColor = rare => _IV_NOTABLE(rare) ? (_rareteColor(RARETE_NAMES[rare]) || '#7a8fa8') : '';
+const _ivRareAttrs = rare => _IV_NOTABLE(rare) ? ` data-r="${rare}" style="--iv-rc:${_ivRareColor(rare)}"` : '';
 function _ivOrder(recentMap) {
   return (a, b) => (_invRecentAt(b, recentMap) ? 1 : 0) - (_invRecentAt(a, recentMap) ? 1 : 0)
     || _IV_RAR(b.item) - _IV_RAR(a.item)
     || String(a.item.nom || '').localeCompare(String(b.item.nom || ''), 'fr', { sensitivity: 'base' });
 }
-function _ivLegendHtml() {
-  // Liste les raretés notables (index ≥ 2) ; le commun (1) reste « sans marque ».
-  const tiers = RARETE_NAMES.map((n, i) => [n, i]).filter(([n, i]) => i >= 2 && n);
-  if (!tiers.length) return '';
-  return `<div class="iv-leg" aria-label="Légende des raretés">Rareté :${tiers
-    .map(([n]) => `<span style="--iv-rc:${_rareteColor(n) || '#7a8fa8'}"><em>${_esc(n)}</em></span>`).join('')}<span class="nog" style="--iv-rc:var(--text-dim)"><em>Commun : sans marque</em></span></div>`;
+
+const _ivQty = item => parseInt(item?.quantite || item?.qte || 1) || 1;
+const _ivSigned = n => `${n > 0 ? '+' : ''}${n}`;
+const _ivGold = n => `${Number(n || 0).toLocaleString('fr-FR')} or`;
+const _ivB64 = indices => btoa(JSON.stringify(indices));
+const _ivCatalog = item => getInventoryCatalogItem(item?.itemId);
+const _ivReadable = item => !!getInventoryReadableDocument(item, _ivCatalog(item));
+
+// ── Nature de l'objet ─────────────────────────
+const _ivTpl = item => String(item?.template || '').toLowerCase();
+const _ivIsWeapon = item => _ivTpl(item) === 'arme' || !!(item.degats || item.toucher || item.toucherStat);
+const _ivIsArmor = item => _ivTpl(item) === 'armure' || !!(item.slotArmure || item.typeArmure) || (item.ca != null && item.ca !== '');
+const _ivIsJewel = item => _ivTpl(item) === 'bijou' || !!item.slotBijou;
+const _ivLooksJewel = item => /\b(bijou|bijoux|anneau|bague|amulette|collier|pendentif|talisman)\b/.test(_norm(`${item.nom || ''} ${item.type || ''}`));
+
+// Familles du sac : 5 rubriques FIXES (le type libre reste lu sur la ligne).
+// Signaux d'équipement d'abord, puis matériaux, puis noms de bijoux : une
+// armure de cuir reste une armure, « Mat. bijou » est un matériau.
+const _IV_FAMILIES = [
+  { id: 'equip', label: 'Équipement' },
+  { id: 'conso', label: 'Consommables' },
+  { id: 'mat',   label: 'Matériaux' },
+  { id: 'quest', label: 'Quête & clés' },
+  { id: 'misc',  label: 'Divers' },
+];
+function _ivFamily(item) {
+  const hay = _norm(`${item.type || ''} ${item.categorie || ''} ${item.sousType || ''} ${item.template || ''}`);
+  if (_invIsQuestItem(item) || _ivReadable(item) || /\b(cle|clef|cles|clefs|document|lettre|missive)\b/.test(hay)) return 'quest';
+  if (_ivIsWeapon(item) || _ivIsArmor(item) || _ivIsJewel(item)) return 'equip';
+  if (/\bmat\b|materiau|composant|ressource|ingredient|reactif|plante|herbe|minerai|lingot|cuir|bois|tissu|metal/.test(hay)) return 'mat';
+  if (_ivLooksJewel(item)) return 'equip';
+  if (/potion|consommable|elixir|antidote|parchemin|scroll|munition|fleche|carreau|nourriture|ration|repas|boisson|poison/.test(hay)) return 'conso';
+  return 'misc';
 }
-function _ivRowHtml(c, group, zone, canEdit, recentMap, slotLabel = '') {
+
+// « Ce que c'est » : une ligne courte et constante selon la nature de l'objet.
+function _ivKind(item) {
+  if (_ivIsWeapon(item)) {
+    return [item.format || item.sousType || 'Arme', weaponHands(item) === 2 ? weaponHandsLabel(item) : '',
+      item.portee && !/contact/i.test(item.portee) ? `portée ${item.portee}` : ''].filter(Boolean).join(' · ');
+  }
+  if (_ivIsArmor(item)) {
+    const type = item.typeArmure ? (getArmorTypeMeta(item.typeArmure)?.label || item.typeArmure) : '';
+    return [type ? `Armure ${String(type).toLowerCase()}` : 'Armure', item.slotArmure].filter(Boolean).join(' · ');
+  }
+  if (_ivIsJewel(item) || _ivLooksJewel(item)) return item.slotBijou || item.type || 'Bijou';
+  return item.type || item.categorie || 'Objet';
+}
+
+// « Ce que ça fait » : uniquement des nombres. Mêmes calculs que la fiche
+// (paliers d'amélioration compris) ; zéros inclus, ordre fixe pour comparer.
+const _IV_DERIVED = [
+  ['pvMaxBonus', 'PV', 'derived-pv'],
+  ['pmMaxBonus', 'PM', 'derived-pm'],
+  ['vitesseBonus', 'Vit.', 'derived-speed'],
+  ['initiativeBonus', 'Init.', 'derived-init'],
+];
+function _ivBonuses(item = {}) {
+  const derived = computeEquipDerivedBonus({ item });
+  return [
+    { k: 'CA', v: (parseInt(item.ca) || 0) + derived.caBonus, cls: 'derived-tone derived-ca' },
+    ...ITEM_STAT_META.map(s => ({ k: s.short.toUpperCase(), v: getItemStatBonus(item, s.full), cls: `stat-tone stat-${s.full}` })),
+    ..._IV_DERIVED.map(([key, k, tone]) => ({ k, v: derived[key], cls: `derived-tone ${tone}` })),
+    ...Object.entries(computeEquipAllSkillBonuses({ item })).map(([k, v]) => ({ k, v, cls: '' })),
+  ];
+}
+function _ivDamage(item) {
+  const stats = _itemDegatsStatsShorts(item);
+  return stats.length ? `${item.degats} + ${stats.join(' + ')}` : String(item.degats);
+}
+const _ivChips = item => [
+  ...(item.degats ? [{ t: _ivDamage(item), cls: 'is-dmg' }] : []),
+  ..._ivBonuses(item).filter(b => b.v).map(b => ({ t: `${b.k} ${_ivSigned(b.v)}`, cls: b.cls })),
+];
+const _ivChipHtml = chip => `<i class="iv-chip ${chip.cls}">${_esc(chip.t)}</i>`;
+// Main secondaire « prise » par une arme à 2 mains : jamais une cible d'équipement.
+const _ivSlotTaken = (c, slot) => !!c.equipement?.[slot.id]
+  || (slot.id === getSecondaryWeaponSlotId() && weaponHands(c.equipement?.[getPrimaryWeaponSlotId()]) === 2);
+
+// ── Modèle de l'onglet (la liste et la fiche lisent la même chose) ──
+function _ivModel(c) {
+  const inv = Array.isArray(c.inventaire) ? c.inventaire : [];
+  const eqMap = getEquippedInventoryIndexMap(c);
+  const loose = inv.map((_, index) => index).filter(index => !eqMap.has(index));
+  const belt = new Set(loose.filter(index => _invIsBeltItem(inv[index])));
+  const recent = _invRecentAcquisitions(c);
+  const order = _ivOrder(recent);
+  const slots = getEquipmentSlots().map(slot => {
+    const index = [...eqMap.entries()].find(([, ids]) => ids.includes(slot.id))?.[0];
+    const item = Number.isInteger(index) ? inv[index] : null;
+    return { slot, group: item ? { key: _invItemKey(item), item, indices: [index], qte: _ivQty(item) } : null };
+  });
+  return {
+    inv, eqMap, recent, slots,
+    beltGroups: _groupInventoryEntries(inv, [...belt]).sort(order),
+    bagGroups: _groupInventoryEntries(inv, loose.filter(index => !belt.has(index))).sort(order),
+  };
+}
+
+// ── Sélection ─────────────────────────────────
+// Clés : « worn::<emplacement>::<objet> », « belt::<objet> », « bag::<objet> »
+// ou « slot::<emplacement> » (emplacement libre). Si la clé n'existe plus
+// (objet équipé, rangé, consommé…), la fiche suit l'objet là où il se trouve.
+const _ivWornKey = entry => `worn::${entry.slot.id}::${entry.group.key}`;
+function _ivResolveSel(m, sel) {
+  if (!sel) return null;
+  const [zone, head = '', ...rest] = sel.split('::');
+  const worn = entry => entry?.group ? { zone: 'worn', slot: entry.slot, group: entry.group, key: _ivWornKey(entry) } : null;
+  const loose = (id, groups, itemKey) => {
+    const group = groups.find(g => g.key === itemKey);
+    return group ? { zone: id, group, key: `${id}::${group.key}` } : null;
+  };
+  if (zone === 'slot') {
+    const entry = m.slots.find(e => e.slot.id === head);
+    return entry ? (worn(entry) || { zone: 'slot', slot: entry.slot, key: sel }) : null;
+  }
+  const itemKey = zone === 'worn' ? rest.join('::') : [head, ...rest].join('::');
+  const exact = zone === 'worn' ? worn(m.slots.find(e => e.slot.id === head && e.group?.key === itemKey))
+    : zone === 'belt' ? loose('belt', m.beltGroups, itemKey)
+      : zone === 'bag' ? loose('bag', m.bagGroups, itemKey) : null;
+  return exact || worn(m.slots.find(e => e.group?.key === itemKey))
+    || loose('belt', m.beltGroups, itemKey) || loose('bag', m.bagGroups, itemKey);
+}
+
+// ── Liste ─────────────────────────────────────
+const _ivSearchValue = item => _norm(`${item.nom || ''} ${item.notePerso || ''} ${_ivKind(item)} ${item.type || ''} ${item.categorie || ''}`);
+
+function _ivRowHtml(c, m, group, zone, canEdit, slot = null) {
   const item = group.item;
   const rare = _IV_RAR(item);
-  const key = `${zone}::${group.key}`;
-  const open = _invSelected === key;
-  const fresh = !!_invRecentAt(group, recentMap);
-  const notable = _IV_NOTABLE(rare);
-  const b64 = btoa(JSON.stringify(group.indices));
-  return `<div class="iv-row ${zone}${open ? ' open' : ''}" data-action="_invToggleRow" data-key="${_esc(key)}" role="button" tabindex="0" aria-expanded="${open}"${notable ? ` data-r="${rare}"${rare >= RARETE_NAMES.length - 1 ? ' data-top="1"' : ''} style="--iv-rc:${_ivRareColor(rare)}" title="${_esc(RARETE_NAMES[rare])}"` : ''}>
-    <span class="iv-n">${zone === 'worn' && slotLabel ? `<small>${_esc(slotLabel)}</small>` : ''}${fresh ? '<span class="iv-dot" title="Nouveau"></span>' : ''}${notable ? '<span class="iv-gem" aria-hidden="true"></span>' : ''}<b>${_invHighlight(item.nom || 'Sans nom')}</b>${group.qte > 1 ? `<i>×${group.qte}</i>` : ''}</span>
-    <span class="iv-k">${_invHighlight(_invKeyInfo(item))}</span>
-    ${zone === 'belt' && canEdit ? `<button class="iv-use" data-action="_invConsumeOne" data-id="${_esc(c.id)}" data-indices="${b64}">Utiliser</button>` : ''}
-  </div>${open ? _invAccordionDetail(c, group, canEdit, zone) : ''}`;
-}
-function _invAccordionDetail(c, group, canEdit, zone) {
-  const item = group.item;
-  const b64 = btoa(JSON.stringify(group.indices));
-  const catalogItem = getInventoryCatalogItem(item.itemId);
-  const price = getInventoryItemValue(item, catalogItem);
-  const resale = getInventoryItemResaleValue(item, catalogItem);
-  const rare = _IV_RAR(item);
-  const isQuest = _invIsQuestItem(item);
-  const equippedMap = getEquippedInventoryIndexMap(c);
-  const equippedSlots = [...new Set(group.indices.flatMap(i => equippedMap.get(i) || []))];
-  const isEquipped = equippedSlots.length > 0;
-  const compatibleSlots = getEquipmentSlots().filter(slot => equipmentSlotAcceptsItem(slot, item));
-  const preferredSlotId = resolveEquipmentSlotForItem(item);
-  const targetSlot = compatibleSlots.find(slot => !c.equipement?.[slot.id])
-    || compatibleSlots.find(slot => slot.id === preferredSlotId) || compatibleSlots[0] || null;
-  const equipIndex = group.indices.find(i => !(equippedMap.get(i) || []).length) ?? group.indices[0];
-  const readable = getInventoryReadableDocument(item, catalogItem);
-  const effect = String(getItemEffectText(item) || '').trim();
-  const description = String(item.description || '').trim();
-  const occupant = targetSlot && !isEquipped ? c.equipement?.[targetSlot.id] : null;
-  const meta = [
-    _IV_NOTABLE(rare) ? `<b>◆ ${_esc(RARETE_NAMES[rare])}</b>` : '',
-    _esc(_invCategory(item).label),
-    item.mains ? _esc(item.mains) : '',
-    (item.toucher || item.toucherStat) ? `Toucher ${_esc(item.toucher || statShort(item.toucherStat))}` : '',
-    item.portee ? `Portée ${_esc(item.portee)}` : '',
-    price ? `${price} or${group.qte > 1 ? ' / u.' : ''}` : '',
-    item.set ? `Set ${_esc(item.set)}` : '',
-  ].filter(Boolean);
-  const txt = effect || description;
-  const txtEdito = !effect && description;
-  const mainBtn = zone === 'belt'
-    ? (canEdit ? `<button class="iv-btn pri" data-action="_invConsumeOne" data-id="${_esc(c.id)}" data-indices="${b64}">Utiliser</button>` : '')
-    : readable && canEdit ? `<button class="iv-btn pri" data-action="openInventoryReadableContent" data-id="${_esc(c.id)}" data-indices="${b64}">Lire</button>`
-      : isEquipped && canEdit ? `<button class="iv-btn" data-action="clearEquipSlot" data-slot="${_esc(equippedSlots[0])}" data-render-tab="inventaire">Retirer</button>`
-        : targetSlot && canEdit ? `<button class="iv-btn pri" data-action="equipInventoryItem" data-index="${equipIndex}" data-slot="${_esc(targetSlot.id)}" data-render-tab="inventaire">Équiper${occupant ? ' à la place de ' + _esc(occupant.nom || 'X') : ''}</button>`
-          : '';
-  const beltBtn = canEdit && !isEquipped && _invIsBeltItem({ ...item, belt: undefined })
-    ? `<button class="iv-btn ghost" data-action="_invToggleBelt" data-id="${_esc(c.id)}" data-indices="${b64}" data-belt="${zone !== 'belt'}">${zone === 'belt' ? 'Ranger dans le sac' : 'Garder à portée de main'}</button>` : '';
-  // Revendable quelle que soit l'origine (boutique, butin, craft, recyclage…) dès
-  // qu'il a une valeur de revente ; les objets forgés/manuels n'ont pas de prix.
-  const sellBtn = canEdit && !isQuest && resale
-    ? `<button class="iv-btn ghost" data-action="openSellInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-prix="${resale}" data-name="${_esc(item.nom || '')}">Vendre</button>` : '';
-  const giveBtn = canEdit ? `<button class="iv-btn ghost" data-action="openSendInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-name="${_esc(item.nom || '')}">Donner</button>` : '';
-  const dropBtn = canEdit && !isQuest ? `<button class="iv-btn ghost danger" data-action="openDeleteInvModal" data-id="${_esc(c.id)}" data-indices="${b64}" data-name="${_esc(item.nom || '')}">Jeter</button>` : '';
-  return `<div class="iv-det" style="--iv-rc:${_ivRareColor(rare) || 'var(--text-dim)'}">
-    <div class="iv-meta">${meta.map(m => `<span>${m}</span>`).join('')}</div>
-    ${occupant ? `<div class="iv-cmp">Actuellement équipé (${_esc(getEquipmentSlot(targetSlot.id)?.label || targetSlot.label)}) : <b>${_esc(occupant.nom || 'objet')}</b> · ${_esc(_invKeyInfo(occupant))} → remplacé par <b>${_esc(_invKeyInfo(item) || item.nom)}</b></div>` : ''}
-    ${txt ? `<p class="${txtEdito ? 'edito' : ''}">${_esc(txt)}</p>` : ''}
-    ${canEdit ? `<div class="iv-note-wrap">${renderInvPersonalLine(c, group.indices, b64, 'row', canEdit)}</div>` : ''}
-    <div class="iv-acts">${mainBtn}${beltBtn}<span class="sp"></span>${sellBtn}${giveBtn}${dropBtn}</div>
+  const key = slot ? _ivWornKey({ slot, group }) : `${zone}::${group.key}`;
+  const sel = _invSelected === key;
+  const chips = _ivChips(item).slice(0, 3);
+  const effect = !slot && _ivFamily(item) !== 'equip' ? String(getItemEffectText(item) || item.description || '').trim() : '';
+  return `<div class="iv-row${sel ? ' is-sel' : ''}"${_ivRareAttrs(rare)}>
+    <button type="button" class="iv-pick" data-action="_invSelect" data-key="${_esc(key)}" aria-pressed="${sel}">
+      ${slot ? `<span class="iv-slot">${_esc(slot.label)}</span>` : ''}
+      <span class="iv-gem"${_IV_NOTABLE(rare) ? ` title="${_esc(RARETE_NAMES[rare])}"` : ''}></span>
+      <span class="iv-txt">
+        <span class="iv-name"><b>${_invHighlight(item.nom || 'Sans nom')}</b>${_invRecentAt(group, m.recent) ? '<em class="iv-new">Nouveau</em>' : ''}</span>
+        <span class="iv-line">${_invHighlight(_ivKind(item))}${_ivReadable(item) ? ' · lisible' : ''}${effect ? `<span class="iv-eff"> — ${_esc(effect)}</span>` : ''}</span>
+      </span>
+      <span class="iv-side">${chips.map(_ivChipHtml).join('')}${slot ? '' : `<span class="iv-qty">${group.qte > 1 ? `×${group.qte}` : ''}</span>`}</span>
+    </button>
+    ${zone === 'belt' && canEdit ? `<button type="button" class="iv-use" data-action="_invConsumeOne" data-id="${_esc(c.id)}" data-indices="${_ivB64(group.indices)}" title="Consommer 1 ${_esc(item.nom || 'objet')}">Utiliser</button>` : ''}
   </div>`;
 }
+
+function _ivFreeRowHtml(c, m, slot) {
+  const head = `<span class="iv-slot">${_esc(slot.label)}</span><span class="iv-gem"></span>`;
+  const primary = slot.id === getSecondaryWeaponSlotId() ? c.equipement?.[getPrimaryWeaponSlotId()] : null;
+  if (primary && weaponHands(primary) === 2) {
+    return `<div class="iv-row is-free"><div class="iv-pick is-static">${head}
+      <span class="iv-txt"><span class="iv-name"><em>Prise</em></span><span class="iv-line">${_esc(primary.nom || 'Arme')} se manie à 2 mains</span></span>
+    </div></div>`;
+  }
+  const n = m.bagGroups.filter(g => equipmentSlotAcceptsItem(slot, g.item)).length;
+  const key = `slot::${slot.id}`;
+  const sel = _invSelected === key;
+  return `<div class="iv-row is-free${sel ? ' is-sel' : ''}">
+    <button type="button" class="iv-pick" data-action="_invSelect" data-key="${_esc(key)}" aria-pressed="${sel}">${head}
+      <span class="iv-txt"><span class="iv-name"><em>Libre</em></span><span class="iv-line">${n ? `${n} objet${n > 1 ? 's' : ''} compatible${n > 1 ? 's' : ''} dans le sac` : 'Aucun objet compatible dans le sac'}</span></span>
+    </button>
+  </div>`;
+}
+
+function _ivListHtml(c, m, canEdit) {
+  const q = _norm(_charInvSearch || '');
+  const matches = group => !q || _ivSearchValue(group.item).includes(q);
+  const qty = groups => groups.reduce((sum, group) => sum + group.qte, 0);
+  const head = (title, count, note = '') => `<header class="iv-sh"><h3>${title}</h3><span>${count}</span>${note ? `<small>${note}</small>` : ''}</header>`;
+  const build = Array.isArray(c.builds) && c.builds.length > 1 ? getActiveBuild(c)?.name : '';
+  const wornRows = m.slots.map(({ slot, group }) => group
+    ? (matches(group) ? _ivRowHtml(c, m, group, 'worn', canEdit, slot) : '')
+    : (q ? '' : _ivFreeRowHtml(c, m, slot))).join('');
+  const belt = m.beltGroups.filter(matches);
+  const fams = _IV_FAMILIES
+    .map(fam => ({ ...fam, items: m.bagGroups.filter(group => matches(group) && _ivFamily(group.item) === fam.id) }))
+    .filter(fam => fam.items.length);
+  const bagHtml = fams.length
+    ? fams.map(fam => `<div class="iv-fam"><div class="iv-fh">${fam.label}<span>${qty(fam.items)}</span></div>${fam.items.map(group => _ivRowHtml(c, m, group, 'bag', canEdit)).join('')}</div>`).join('')
+    : (!q && !m.bagGroups.length ? '<p class="iv-empty">Sac vide.</p>' : '');
+  const html = [
+    wornRows ? `<section class="iv-sec">${head('Équipé', `${m.slots.filter(e => e.group).length} / ${m.slots.length}`, build ? `Build ${_esc(build)}` : '')}${wornRows}</section>` : '',
+    belt.length ? `<section class="iv-sec">${head('À portée de main', qty(m.beltGroups), 'consommables prêts à l’emploi')}${belt.map(group => _ivRowHtml(c, m, group, 'belt', canEdit)).join('')}</section>` : '',
+    bagHtml ? `<section class="iv-sec">${head('Sac', qty(m.bagGroups))}${bagHtml}</section>` : '',
+  ].join('');
+  return html || `<p class="iv-empty">${q ? `Rien ne correspond à « ${_esc(_charInvSearch)} ».` : 'Inventaire vide.'}</p>`;
+}
+
+// ── Fiches ────────────────────────────────────
+const _ivFact = (label, value) => (value === '' || value == null) ? '' : `<div><span>${_esc(label)}</span><b>${_esc(String(value))}</b></div>`;
+const _ivBtn = (label, action, attrs = '', cls = '') => `<button type="button" class="cs-grim-btn ${cls}" data-action="${action}" ${attrs}>${label}</button>`;
+const _ivTagsHtml = (title, html) => html ? `<section class="iv-part"><h4>${title}</h4><div class="iv-tags">${html}</div></section>` : '';
+const _IV_SHEET_X = '<button type="button" class="iv-sheet-x" data-action="_invCloseSheet" aria-label="Fermer la fiche" title="Fermer (Échap)">✕</button>';
+
+// « Si tu l'équipes » : seuls les nombres qui changent (▲ gain, ▼ perte).
+function _ivCompareHtml(item, occupant, slotLabel) {
+  if (!occupant) return '';
+  const before = new Map(_ivBonuses(occupant).map(b => [b.k, b.v]));
+  const rows = [];
+  _ivBonuses(item).forEach(b => {
+    const was = before.get(b.k) || 0;
+    before.delete(b.k);
+    if (was !== b.v) rows.push([b.k, was, b.v]);
+  });
+  before.forEach((was, k) => { if (was) rows.push([k, was, 0]); });
+  const dmgBefore = occupant.degats ? _ivDamage(occupant) : '—';
+  const dmgAfter = item.degats ? _ivDamage(item) : '—';
+  if (dmgBefore !== dmgAfter) rows.unshift(['Dégâts', dmgBefore, dmgAfter]);
+  const fmt = v => typeof v === 'number' ? _ivSigned(v) : v;
+  return `<section class="iv-part iv-cmp"><h4>Si tu l'équipes</h4>
+    <p>Remplace <b>${_esc(occupant.nom || 'objet')}</b> <small>(${_esc(slotLabel)})</small></p>
+    ${rows.length ? `<ul>${rows.map(([k, a, b]) => {
+      const dir = typeof a === 'number' ? (b > a ? 'up' : 'down') : '';
+      return `<li${dir ? ` class="is-${dir}"` : ''}><span>${_esc(k)}</span><s>${_esc(fmt(a))}</s><i>→</i><b>${_esc(fmt(b))}</b>${dir ? `<em>${dir === 'up' ? '▲' : '▼'}</em>` : ''}</li>`;
+    }).join('')}</ul>` : '<p class="iv-dim">Aucun changement de bonus.</p>'}
+  </section>`;
+}
+
+function _ivItemSheetHtml(c, m, sel, canEdit) {
+  const { zone, group } = sel;
+  const item = group.item;
+  const cat = _ivCatalog(item);
+  const rare = _IV_RAR(item);
+  const ids = `data-id="${_esc(c.id)}" data-indices="${_ivB64(group.indices)}"`;
+  const named = `${ids} data-name="${_esc(item.nom || '')}"`;
+  const worn = [...new Set(group.indices.flatMap(index => m.eqMap.get(index) || []))];
+  const per = group.qte > 1 ? ' / u.' : '';
+  const price = getInventoryItemValue(item, cat);
+  const resale = getInventoryItemResaleValue(item, cat);
+  const image = getInventoryItemImage(item, cat);
+  const readable = !!getInventoryReadableDocument(item, cat);
+  const quest = _invIsQuestItem(item);
+  const armor = _ivIsArmor(item);
+  const bonuses = _ivBonuses(item);
+  const traits = _getTraits(item);
+  const effect = String(getItemEffectText(item) || '').trim();
+  const description = String(item.description || '').trim();
+  const note = getInvPersonalLineForIndices(c.inventaire || [], group.indices);
+  // Emplacement visé : le premier libre parmi les compatibles, sinon le préféré.
+  const compatible = worn.length ? [] : getEquipmentSlots().filter(slot => equipmentSlotAcceptsItem(slot, item));
+  const preferred = resolveEquipmentSlotForItem(item);
+  const target = compatible.find(slot => !_ivSlotTaken(c, slot)) || compatible.find(slot => slot.id === preferred) || compatible[0] || null;
+  const facts = [
+    _ivFact('Dégâts', item.degats ? _ivDamage(item) : ''),
+    _ivFact('Toucher', item.toucher || (item.toucherStat ? statShort(item.toucherStat) : '')),
+    _ivFact('Portée', item.portee),
+    _ivFact('Maniement', _ivIsWeapon(item) ? weaponHandsLabel(item) : ''),
+    _ivFact('CA', armor ? _ivSigned(bonuses[0].v) : ''),
+    _ivFact('Set', item.set),
+    _ivFact('Valeur', price ? _ivGold(price) + per : ''),
+    _ivFact('Revente', resale ? _ivGold(resale) + per : ''),
+  ].join('');
+  // CA d'une armure : déjà dans les faits, pas répétée dans les bonus.
+  const bonusHtml = bonuses.filter(b => b.v && !(armor && b.k === 'CA'))
+    .map(b => _ivChipHtml({ t: `${b.k} ${_ivSigned(b.v)}`, cls: b.cls })).join('');
+  const status = worn.length
+    ? `<span class="iv-status is-worn">✓ Équipé · ${_esc(worn.map(id => getEquipmentSlot(id)?.label || id).join(', '))}</span>`
+    : `<span class="iv-status">${zone === 'belt' ? 'À portée de main' : 'Dans le sac'}${group.qte > 1 ? ` · ×${group.qte}` : ''}</span>`;
+  const noteHtml = canEdit
+    ? `<label class="iv-part iv-note"><span class="iv-h">Note perso</span><textarea data-change="saveInvPersonalLine" ${ids} data-original-note="${_esc(note.multiple ? '' : note.text)}" rows="2" maxlength="180" placeholder="${note.multiple ? 'Notes différentes : écrire ici remplacera tout le groupe.' : 'Ajouter une note…'}">${note.multiple ? '' : _esc(note.text)}</textarea></label>`
+    : (note.text ? `<section class="iv-part"><h4>Note perso</h4><p>${_esc(note.text)}</p></section>` : '');
+  const main = [
+    zone === 'belt' ? _ivBtn(`Utiliser${group.qte > 1 ? ` <small>reste ${group.qte}</small>` : ''}`, '_invConsumeOne', ids, 'is-primary') : '',
+    readable ? _ivBtn('Lire', 'openInventoryReadableContent', ids, 'is-primary') : '',
+    worn.length ? _ivBtn('Retirer', 'clearEquipSlot', `data-slot="${_esc(worn[0])}" data-render-tab="inv"`)
+      : target ? _ivBtn(`Équiper · ${_esc(target.label)}`, 'equipInventoryItem', `data-index="${group.indices[0]}" data-slot="${_esc(target.id)}" data-render-tab="inv"`, zone === 'belt' || readable ? '' : 'is-primary') : '',
+    !worn.length && _invIsBeltItem({ ...item, belt: undefined })
+      ? _ivBtn(zone === 'belt' ? 'Ranger dans le sac' : 'Mettre à portée de main', '_invToggleBelt', `${ids} data-belt="${zone !== 'belt'}"`) : '',
+  ].join('');
+  const more = [
+    !quest && resale ? _ivBtn(`Vendre <small>${_ivGold(resale)}</small>`, 'openSellInvModal', `${named} data-prix="${resale}"`, 'is-ghost') : '',
+    _ivBtn('Donner', 'openSendInvModal', named, 'is-ghost'),
+    item.source === 'custom' ? _ivBtn('Modifier', 'openCreateItemModal', `data-id="${_esc(c.id)}" data-index="${group.indices[0]}"`, 'is-ghost') : '',
+    !quest ? _ivBtn('Jeter', 'openDeleteInvModal', named, 'is-ghost is-danger') : '',
+  ].join('');
+  return `<aside class="iv-sheet"${_ivRareAttrs(rare)} aria-label="Fiche de ${_esc(item.nom || 'l’objet')}">
+    ${_IV_SHEET_X}
+    <header class="iv-sheet-head">
+      <div class="iv-sheet-ic">${image ? `<img src="${_esc(image)}" alt="" loading="lazy">` : '<i></i>'}</div>
+      <div class="iv-sheet-id">
+        <span class="iv-kicker"><b>${_esc(_IV_NOTABLE(rare) ? RARETE_NAMES[rare] : (RARETE_NAMES[1] || 'Commun'))}</b> · ${_esc(_ivKind(item))}</span>
+        <h3>${_esc(item.nom || 'Sans nom')}</h3>
+        ${status}
+      </div>
+    </header>
+    ${facts ? `<div class="iv-facts">${facts}</div>` : ''}
+    ${_ivTagsHtml('Bonus', bonusHtml)}
+    ${_ivTagsHtml('Traits', traits.map(trait => `<span class="iv-tag">${_esc(trait)}</span>`).join(''))}
+    ${effect ? `<section class="iv-part"><h4>Effet</h4><p>${_esc(effect)}</p></section>` : ''}
+    ${description && description !== effect ? `<section class="iv-part"><h4>Description</h4><p class="is-edito">${_esc(description)}</p></section>` : ''}
+    ${target ? _ivCompareHtml(item, c.equipement?.[target.id], target.label) : ''}
+    ${noteHtml}
+    ${canEdit ? `<footer class="iv-acts">${main ? `<div class="iv-acts-main">${main}</div>` : ''}<div class="iv-acts-more">${more}</div></footer>` : ''}
+  </aside>`;
+}
+
+function _ivSlotSheetHtml(c, m, slot, canEdit) {
+  const options = m.bagGroups.filter(group => equipmentSlotAcceptsItem(slot, group.item));
+  return `<aside class="iv-sheet" aria-label="Emplacement ${_esc(slot.label)}">
+    ${_IV_SHEET_X}
+    <header class="iv-sheet-head">
+      <div class="iv-sheet-ic is-empty"><i></i></div>
+      <div class="iv-sheet-id">
+        <span class="iv-kicker">Emplacement libre</span>
+        <h3>${_esc(slot.label)}</h3>
+        <span class="iv-status">${options.length ? 'Choisis un objet du sac à équiper.' : 'Rien de compatible dans le sac pour l’instant.'}</span>
+      </div>
+    </header>
+    ${options.length ? `<section class="iv-part"><h4>Compatibles</h4><div class="iv-opts">${options.map(group => `<div class="iv-opt"${_ivRareAttrs(_IV_RAR(group.item))}>
+      <button type="button" class="iv-opt-pick" data-action="_invSelect" data-key="${_esc(`bag::${group.key}`)}" title="Voir la fiche">
+        <span class="iv-gem"></span>
+        <span class="iv-txt"><b>${_esc(group.item.nom || 'Sans nom')}</b><small>${_esc(_ivKind(group.item))}</small></span>
+        <span class="iv-side">${_ivChips(group.item).slice(0, 2).map(_ivChipHtml).join('')}</span>
+      </button>
+      ${canEdit ? _ivBtn('Équiper', 'equipInventoryItem', `data-index="${group.indices[0]}" data-slot="${_esc(slot.id)}" data-render-tab="inv"`, 'is-primary cbx-sm') : ''}
+    </div>`).join('')}</div></section>` : ''}
+  </aside>`;
+}
+
+// Sans sélection : vue d'ensemble (totaux, bonus portés, nouveautés, légende).
+function _ivSummarySheetHtml(c, m) {
+  const total = fn => m.inv.reduce((sum, item) => sum + fn(item) * _ivQty(item), 0);
+  const worn = m.slots.filter(entry => entry.group);
+  const sums = new Map();
+  worn.forEach(entry => _ivBonuses(entry.group.item).forEach(b => {
+    if (b.v) sums.set(b.k, { ...b, v: (sums.get(b.k)?.v || 0) + b.v });
+  }));
+  const fresh = [
+    ...worn.map(entry => [_ivWornKey(entry), entry.group]),
+    ...m.beltGroups.map(group => [`belt::${group.key}`, group]),
+    ...m.bagGroups.map(group => [`bag::${group.key}`, group]),
+  ].map(([key, group]) => ({ key, group, at: _invRecentAt(group, m.recent) }))
+    .filter(entry => entry.at).sort((a, b) => b.at - a.at);
+  const tiers = RARETE_NAMES.map((name, index) => [name, index]).filter(([name, index]) => index >= 2 && name);
+  return `<aside class="iv-sheet is-summary" aria-label="Vue d'ensemble de l'inventaire">
+    ${_IV_SHEET_X}
+    <header class="iv-sheet-id">
+      <span class="iv-kicker">Vue d'ensemble</span>
+      <h3>Inventaire de ${_esc(c.nom || 'ce personnage')}</h3>
+      <span class="iv-status">Sélectionne un objet pour voir sa fiche complète.</span>
+    </header>
+    <div class="iv-facts">
+      ${_ivFact('Objets', total(() => 1))}
+      ${_ivFact('Emplacements', `${worn.length} / ${m.slots.length}`)}
+      ${_ivFact('Valeur', _ivGold(total(item => getInventoryItemValue(item, _ivCatalog(item)))))}
+      ${_ivFact('Revente', _ivGold(total(item => getInventoryItemResaleValue(item, _ivCatalog(item)))))}
+    </div>
+    ${_ivTagsHtml('Bonus de l’équipement', [...sums.values()].filter(b => b.v).map(b => _ivChipHtml({ t: `${b.k} ${_ivSigned(b.v)}`, cls: b.cls })).join(''))}
+    ${fresh.length ? `<section class="iv-part"><h4>Nouveautés · 14 jours</h4><div class="iv-fresh">${fresh.map(({ key, group }) =>
+      `<button type="button" data-action="_invSelect" data-key="${_esc(key)}"${_ivRareAttrs(_IV_RAR(group.item))}><span class="iv-gem"></span>${_esc(group.item.nom || 'Sans nom')}${group.qte > 1 ? ` <small>×${group.qte}</small>` : ''}</button>`).join('')}</div></section>` : ''}
+    ${tiers.length ? `<section class="iv-part"><h4>Rareté</h4><div class="iv-legend">${tiers.map(([name]) =>
+      `<span style="--iv-rc:${_rareteColor(name) || '#7a8fa8'}"><i class="iv-gem"></i>${_esc(name)}</span>`).join('')}<span class="is-common">${_esc(RARETE_NAMES[1] || 'Commun')} : sans marque</span></div></section>` : ''}
+  </aside>`;
+}
+
+function _ivSheetHtml(c, m, sel, canEdit) {
+  if (!sel) return _ivSummarySheetHtml(c, m);
+  return sel.zone === 'slot' ? _ivSlotSheetHtml(c, m, sel.slot, canEdit) : _ivItemSheetHtml(c, m, sel, canEdit);
+}
+
+// ── Montage ───────────────────────────────────
 let _ivKeysBound = false;
 function _ivBindInventoryKeys() {
   if (_ivKeysBound) return; _ivKeysBound = true;
@@ -629,106 +691,82 @@ function _ivBindInventoryKeys() {
     if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) {
       const input = document.querySelector('.iv-search input');
       if (input) { e.preventDefault(); input.focus(); }
-    } else if (e.key === 'Escape' && _invSelected && e.target.tagName !== 'TEXTAREA') {
-      _invSelected = ''; _rerenderInventoryView();
+    } else if (e.key === 'Escape' && (_invSelected || _invSheetOpen) && e.target.tagName !== 'TEXTAREA'
+      && !document.getElementById('modal-overlay')?.classList.contains('show')) {
+      _invCloseSheet();
     }
   });
 }
 
-// Construit UNIQUEMENT le contenu de la liste (.iv-body). Isolé du cadre (barre
-// de recherche + boutons) pour permettre une mise à jour ciblée à la frappe :
-// on remplace le seul innerHTML de .iv-body sans toucher à l'input (plus de
-// perte de focus/caret ni de reconstruction de tout l'onglet).
-function _ivBuildListHtml(c, canEdit) {
-  const inv = Array.isArray(c.inventaire) ? c.inventaire : [];
-  const allIndices = inv.map((_, index) => index);
-  const equippedMap = getEquippedInventoryIndexMap(c);
-  const equippedIndices = new Set(equippedMap.keys());
-  const beltIndices = allIndices.filter(index => !equippedIndices.has(index) && _invIsBeltItem(inv[index]));
-  const bagIndices = allIndices.filter(index => !equippedIndices.has(index) && !beltIndices.includes(index));
-  const recentMap = _invRecentAcquisitions(c);
-  const q = _norm(_charInvSearch || '');
-  const matches = group => !q || _invSearchValue(group.item).includes(q);
-  const sortGroups = groups => [...groups].sort(_ivOrder(recentMap));
-
-  const slots = getEquipmentSlots();
-  const wornEntries = slots.map(slot => {
-    const index = [...equippedMap.entries()].find(([, ids]) => ids.includes(slot.id))?.[0];
-    if (!Number.isInteger(index)) return { slot, group: null };
-    const item = inv[index];
-    return { slot, group: { key: `${slot.id}:${_invItemKey(item)}`, item, indices: [index], qte: parseInt(item.quantite || item.qte || 1) || 1 } };
-  });
-  const wornAll = wornEntries.filter(e => e.group);
-  const wornShown = wornAll.filter(e => matches(e.group));
-  const freeSlots = wornEntries.filter(e => !e.group).map(e => e.slot.label);
-
-  const beltGroups = _groupInventoryEntries(inv, beltIndices);
-  const beltShown = sortGroups(beltGroups.filter(matches));
-
-  const bagGroups = _groupInventoryEntries(inv, bagIndices);
-  const bagCats = _invCategoryGroups(bagGroups)
-    .map(cat => ({ ...cat, items: sortGroups(cat.items.filter(matches)) }))
-    .filter(cat => cat.items.length);
-
-  // Nettoie une sélection devenue invalide (objet consommé / déplacé).
-  const allKeys = new Set([
-    ...wornAll.map(e => `worn::${e.group.key}`),
-    ...beltGroups.map(g => `belt::${g.key}`),
-    ...bagGroups.map(g => `bag::${g.key}`),
-  ]);
-  if (_invSelected && !allKeys.has(_invSelected)) _invSelected = '';
-
-  const head = (title, count) => `<div class="iv-sh"><h3>${title}</h3><span>${count}</span></div>`;
-  let listHtml = '';
-  if (wornShown.length || (!q && freeSlots.length)) {
-    listHtml += `<section class="iv-sec iv-whole">${head('Sur moi', wornAll.length)}`
-      + wornShown.map(e => _ivRowHtml(c, e.group, 'worn', canEdit, recentMap, e.slot.label)).join('')
-      + (!q && freeSlots.length ? `<div class="iv-free">Libre : ${_esc(freeSlots.join(' · '))}</div>` : '')
-      + `</section>`;
+// Largeur RÉELLE de l'onglet (barre latérale ouverte, portable…) : en dessous,
+// la fiche quitte la colonne et s'ouvre en panneau. Classe posée par
+// ResizeObserver plutôt que @container : elle sert aussi hors de l'onglet
+// (boutons flottants masqués via body:has).
+const _IV_NARROW = 820;
+let _ivResizeObs = null;
+function _ivWatchWidth() {
+  const root = document.querySelector('#char-tab-content .iv');
+  if (!root || typeof ResizeObserver === 'undefined') return;
+  if (!_ivResizeObs) {
+    _ivResizeObs = new ResizeObserver(entries => entries.forEach(({ target, contentRect }) => {
+      if (contentRect.width) target.classList.toggle('is-narrow', contentRect.width < _IV_NARROW);
+    }));
   }
-  if (beltShown.length) {
-    listHtml += `<section class="iv-sec iv-whole">${head('À portée de main', beltGroups.reduce((s, g) => s + g.qte, 0))}`
-      + beltShown.map(g => _ivRowHtml(c, g, 'belt', canEdit, recentMap)).join('') + `</section>`;
-  }
-  // Chaque catégorie du sac = un bloc insécable (ne se coupe pas entre colonnes).
-  const bagInner = bagCats.map(cat => `<div class="iv-grp"><div class="iv-gh">${_esc(cat.label)}</div>`
-    + cat.items.map(g => _ivRowHtml(c, g, 'bag', canEdit, recentMap)).join('') + `</div>`).join('');
-  if (bagInner) {
-    listHtml += `<section class="iv-sec">${head('Sac', bagGroups.reduce((s, g) => s + g.qte, 0))}${bagInner}</section>`;
-  }
-  if (listHtml) listHtml += _ivLegendHtml();
-  else listHtml = `<div class="iv-empty">${q ? `Rien ne correspond à « ${_esc(_charInvSearch)} ».` : 'Inventaire vide.'}</div>`;
-  return listHtml;
+  _ivResizeObs.disconnect();
+  _ivResizeObs.observe(root);
 }
 
 export function renderCharInventaire(c, canEdit) {
-  const listHtml = _ivBuildListHtml(c, canEdit);
+  if (_invSelCharId !== c.id) { _invSelCharId = c.id; _invSelected = ''; _invSheetOpen = false; }
+  _invLastCanEdit = !!canEdit;
+  const m = _ivModel(c);
+  const sel = _ivResolveSel(m, _invSelected);
+  if (_invSelected && !sel) _invSheetOpen = false; // objet parti (vendu, consommé…)
+  _invSelected = sel?.key || '';
+  const width = document.getElementById('char-tab-content')?.clientWidth || 0;
   setTimeout(_ivBindInventoryKeys, 0);
-  return `<div class="iv">
+  queueMicrotask(_ivWatchWidth);
+  return `<div class="iv${width && width < _IV_NARROW ? ' is-narrow' : ''}${_invSheetOpen ? ' is-sheet-open' : ''}">
     <div class="iv-bar">
       <label class="iv-search"><span aria-hidden="true">🔍</span><input type="search" value="${_esc(_charInvSearch)}" placeholder="Chercher un objet…  ( / )" data-input="_charInvSearch" autocomplete="off" aria-label="Rechercher dans l’inventaire"></label>
       ${canEdit ? `<button class="iv-btn" data-action="addInvItem" data-id="${_esc(c.id)}">+ Ajouter</button>` : ''}
       ${isFeatureEnabled('recettes') ? recipeBookButton(c) : ''}
       ${inventoryHistoryButton(c)}
+      <button type="button" class="iv-btn iv-sum" data-action="_invSelect" data-key="">Résumé</button>
     </div>
-    <div class="iv-body">${listHtml}</div>
+    <div class="iv-body">
+      <div class="iv-list">${_ivListHtml(c, m, canEdit)}</div>
+      ${_ivSheetHtml(c, m, sel, canEdit)}
+    </div>
   </div>`;
 }
 
+// Sélection : mise à jour CIBLÉE (fiche + surbrillance), sans re-rendre la
+// liste → ni saut de défilement ni perte de focus.
+function _invSelect(key, { open = true } = {}) {
+  const c = charSession.getCurrentChar?.() || STATE.activeChar;
+  const root = document.querySelector('.iv');
+  if (open) _invSheetOpen = true;
+  if (!c || !root) { _invSelected = key; _rerenderInventoryView(); return; }
+  const m = _ivModel(c);
+  const sel = _ivResolveSel(m, key);
+  _invSelected = sel?.key || '';
+  const sheet = root.querySelector('.iv-sheet');
+  if (sheet) sheet.outerHTML = _ivSheetHtml(c, m, sel, _invLastCanEdit);
+  root.querySelectorAll('.iv-row.is-sel').forEach(row => {
+    row.classList.remove('is-sel');
+    row.querySelector('.iv-pick')?.setAttribute('aria-pressed', 'false');
+  });
+  const pick = _invSelected ? root.querySelector(`.iv-pick[data-key="${CSS.escape(_invSelected)}"]`) : null;
+  pick?.setAttribute('aria-pressed', 'true');
+  pick?.closest('.iv-row')?.classList.add('is-sel');
+  root.classList.toggle('is-sheet-open', _invSheetOpen);
+}
 
-// ── Filtrage live par recherche ───────────────
-export function filterInvRows(val) {
-  const q = _norm(val || '');
-  document.querySelectorAll('.inv5-filterable, .inv5-slot[data-search]').forEach(row => {
-    row.classList.toggle('inv-row--hidden', !!(q && !(row.dataset.search || '').includes(q)));
-  });
-  document.querySelectorAll('.inv5-filter-group').forEach(group => {
-    const anyVisible = [...group.querySelectorAll('.inv5-filterable')].some(row => !row.classList.contains('inv-row--hidden'));
-    group.classList.toggle('inv-row--hidden', !anyVisible);
-  });
-  document.querySelectorAll('.inv5-searchable').forEach(node => {
-    node.innerHTML = _invHighlight(node.dataset.plain || '', val);
-  });
+// ✕ / Échap : referme le panneau (écran étroit) et revient à la vue d'ensemble.
+function _invCloseSheet() {
+  _invSheetOpen = false;
+  _invSelect('', { open: false });
 }
 
 // ══════════════════════════════════════════════
@@ -745,138 +783,6 @@ function getInvPersonalLineForIndices(inv, indices) {
   if (notes.length === 0) return { text: '', multiple: false };
   if (notes.length === 1) return { text: notes[0], multiple: false };
   return { text: 'Notes différentes selon les exemplaires.', multiple: true };
-}
-
-export async function openInventoryItemDetail(charId, indicesB64) {
-  const c = getCharacterById(charId);
-  const indices = _decodeIndices(indicesB64);
-  const item = c?.inventaire?.[indices[0]];
-  if (!c || !item || !indices.length) return;
-
-  await ensureInventoryCatalog();
-  const catalogItem = getInventoryCatalogItem(item.itemId);
-  const readableDocument = getInventoryReadableDocument(item, catalogItem);
-  const canReadDocument = !!readableDocument && canControlCharacter(c);
-  const quantity = indices.reduce((sum, idx) =>
-    sum + (parseInt(c.inventaire?.[idx]?.quantite || c.inventaire?.[idx]?.qte || 1) || 1), 0);
-  const rarityIndex = Math.max(0, parseInt(item.rarete || item.rare || 0) || 0);
-  const rarityName = RARETE_NAMES[rarityIndex] || '';
-  const rarityColor = _rareteColor(rarityName) || '#7a8fa8';
-  const equippedMap = getEquippedInventoryIndexMap(c);
-  const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
-  const equipSlotId = resolveEquipmentSlotForItem(item);
-  const equipSlot = equipSlotId ? getEquipmentSlot(equipSlotId) : null;
-  const equipIndex = indices.find(idx => !(equippedMap.get(idx) || []).length) ?? indices[0];
-  const equippedInTarget = !!equipSlotId && indices.some(idx => (equippedMap.get(idx) || []).includes(equipSlotId));
-  const canEquip = !!equipSlot && canControlCharacter(c);
-  const replacedName = equipSlotId && !equippedInTarget ? c.equipement?.[equipSlotId]?.nom : '';
-  const traits = _getTraits(item);
-  const statBonusHtml = _inventoryStatBadgesHtml(item);
-  const rawEffectText = String(getItemEffectText(item) || '').trim();
-  const descriptionText = String(item.description || '').trim();
-  const effectCandidateText = rawEffectText && _norm(rawEffectText) !== _norm(descriptionText)
-    ? rawEffectText
-    : '';
-  const effectText = _invLooksMechanicalEffect(effectCandidateText) ? effectCandidateText : '';
-  const detailDescription = descriptionText || (!effectText ? effectCandidateText : '');
-  const personal = getInvPersonalLineForIndices(c.inventaire || [], indices);
-  const price = getInventoryItemValue(item, catalogItem);
-  const resale = getInventoryItemResaleValue(item, catalogItem);
-  const image = getInventoryItemImage(item, catalogItem);
-  // Seuls les objets FORGES sont modifiables : ceux issus de la boutique/du
-  // catalogue sont partages, les retoucher ici serait trompeur.
-  const canEditItem = item.source === 'custom'
-    && canControlCharacter(c);
-
-  const facts = [
-    ['Catégorie', item.type || item.categorie],
-    // Type d'arme = format : le sous-type n'est affiché que s'il apporte une info.
-    ['Sous-type', [item.sousType, item.typeArme].find(v => v && v !== item.format) || ''],
-    ['Type d’arme', item.format],
-    ['Maniement', item.mains],
-    ['Armure', item.typeArmure],
-    ['Emplacement', item.slotArmure || item.slotBijou],
-    ['Dégâts', item.degats],
-    ['Toucher', item.toucher || (item.toucherStat ? statShort(item.toucherStat) : '')],
-    ['Portée', item.portee],
-    ['CA', (() => {
-      const value = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
-      return value ? (value > 0 ? `+${value}` : value) : '';
-    })()],
-    ['Valeur', price ? `${price} or` : ''],
-    ['Revente', resale ? `${resale} or / unité` : ''],
-    ['Quantité', quantity],
-  ].filter(([, value]) => value !== '' && value !== undefined && value !== null);
-
-  const factHtml = facts.map(([label, value]) => `
-    <div class="inv-detail-fact">
-      <span>${_esc(label)}</span>
-      <strong>${_esc(String(value))}</strong>
-    </div>`).join('');
-
-  openModal(`ⓘ ${item.nom || 'Objet'}`, `
-    <div class="inv-detail" style="--inv-detail-accent:${rarityColor}">
-      <header class="inv-detail-hero">
-        ${image
-          ? `<img src="${_esc(image)}" alt="${_esc(item.nom || 'Objet')}">`
-          : `<div class="inv-detail-placeholder" aria-hidden="true">◇</div>`}
-        <div class="inv-detail-identity">
-          <div class="inv-detail-kicker">${_esc(rarityName || 'Objet')}</div>
-          <h3>${_esc(item.nom || 'Sans nom')}</h3>
-          <div class="inv-detail-status">
-            <span>×${quantity}</span>
-            ${equippedSlots.length
-              ? `<span class="is-equipped">Équipé sur ce build · ${_esc(equippedSlots.join(', '))}</span>`
-              : '<span>Non équipé</span>'}
-          </div>
-        </div>
-      </header>
-
-      <div class="inv-detail-facts">${factHtml}</div>
-
-      ${statBonusHtml || effectText ? `<section class="inv-detail-section">
-        <h4>Effets</h4>
-        ${statBonusHtml ? `<div class="inv-detail-stat-badges">${statBonusHtml}</div>` : ''}
-        ${effectText ? `<p>${_esc(effectText)}</p>` : ''}
-      </section>` : ''}
-
-      ${traits.length ? `<section class="inv-detail-section">
-        <h4>Traits</h4>
-        <div class="inv-detail-traits">${traits.map(trait => `<span>${_esc(trait)}</span>`).join('')}</div>
-      </section>` : ''}
-
-      ${detailDescription ? `<section class="inv-detail-section">
-        <h4>Description</h4>
-        <p>${_esc(detailDescription)}</p>
-      </section>` : ''}
-
-      ${personal.text ? `<section class="inv-detail-section inv-detail-note">
-        <h4>Note personnelle</h4>
-        <p>${_esc(personal.text)}</p>
-      </section>` : ''}
-
-      <footer class="inv-detail-footer">
-        ${canReadDocument ? `<button class="btn btn-outline inv-detail-read" data-action="openInventoryReadableContent"
-          data-id="${_esc(c.id)}" data-indices="${_esc(indicesB64)}">
-          📖 Lire
-        </button>` : ''}
-        ${canEquip ? `<button class="btn ${equippedInTarget ? 'btn-outline is-equipped' : 'btn-gold'}" data-action="equipInventoryItem"
-          data-index="${equipIndex}" data-slot="${_esc(equipSlotId)}" data-close-modal="true" data-render-tab="inv"
-          ${equippedInTarget ? 'disabled' : ''}
-          title="${equippedInTarget
-            ? `Déjà équipé dans ${_esc(equipSlot.label)}`
-            : `Équiper dans ${_esc(equipSlot.label)}${replacedName ? ` et remplacer ${_esc(replacedName)}` : ''}`}">
-          ${equippedInTarget ? '✓ Déjà équipé' : `⚔️ Équiper · ${_esc(equipSlot.label)}`}
-        </button>` : ''}
-        ${canEditItem ? `<button class="btn btn-outline" data-action="openCreateItemModal"
-          data-id="${_esc(c.id)}" data-index="${indices[0]}"
-          title="Modifier cet objet dans la forge">🛠️ Modifier</button>` : ''}
-        <button class="btn btn-primary" data-action="close-modal">Fermer</button>
-      </footer>
-    </div>`, {
-    subtitle: 'Fiche complète de l’objet',
-    accent: rarityColor,
-  });
 }
 
 /** Ouvre le texte privé d'un objet uniquement depuis l'inventaire qui le possède. */
@@ -920,28 +826,6 @@ export async function openInventoryReadableContent(charId, indicesB64) {
     subtitle: item.nom || 'Lecture',
     accent: '#9d6fff',
   });
-}
-
-export function renderInvPersonalLine(c, indices, indicesB64, variant = 'row', canEdit = false) {
-  const { text, multiple } = getInvPersonalLineForIndices(c.inventaire || [], indices);
-  const noteCls = variant === 'card' ? 'inv-card-note' : 'inv-row-note';
-
-  if (!canEdit) {
-    return text ? '<div class="' + noteCls + (multiple ? ' ' + noteCls + '--mixed' : '') + '">✎ ' + _esc(text) + '</div>' : '';
-  }
-
-  const placeholder = multiple ? 'Notes différentes : écrire ici remplacera tout le groupe.' : 'Ligne personnelle...';
-  return [
-    '<div class="' + noteCls + ' inv-note-editable' + (multiple ? ' ' + noteCls + '--mixed inv-note-editable--mixed' : '') + '">',
-    '<span class="inv-note-prefix">✎</span>',
-    '<textarea class="inv-note-field" data-change="saveInvPersonalLine"',
-    ' data-id="' + c.id + '" data-indices="' + indicesB64 + '"',
-    ' data-original-note="' + _esc(multiple ? '' : text) + '" rows="1" maxlength="180"',
-    ' placeholder="' + _esc(placeholder) + '">',
-    multiple ? '' : _esc(text),
-    '</textarea>',
-    '</div>',
-  ].join('');
 }
 
 export async function saveInvPersonalLine(charId, indicesB64, sourceEl = null) {
@@ -1805,13 +1689,13 @@ export async function saveInvItem(idx) {
   _renderInventoryChar(c, 'inventaire');
 }
 
-// Mise à jour CIBLÉE de la liste : ne reconstruit que .iv-body, laisse la barre
-// de recherche (et son input focalisé) intacte. Utilisée à la frappe.
+// Mise à jour CIBLÉE de la liste : ne reconstruit que .iv-list, laisse la barre
+// de recherche (et son input focalisé) et la fiche intactes. Utilisée à la frappe.
 function _ivUpdateList() {
   const c = charSession.getCurrentChar?.() || STATE.activeChar;
-  const body = document.querySelector('.iv .iv-body');
-  if (!c || !body) return;
-  body.innerHTML = _ivBuildListHtml(c, charSession.getCanEditChar?.() ?? STATE.isAdmin);
+  const list = document.querySelector('.iv .iv-list');
+  if (!c || !list) return;
+  list.innerHTML = _ivListHtml(c, _ivModel(c), _invLastCanEdit);
 }
 // Débounce : coalesce les reconstructions pendant une frappe rapide. L'input
 // reste vivant et réactif ; seule la liste filtrée se met à jour après la pause.
@@ -1847,7 +1731,6 @@ async function _invToggleBelt(charId, indicesB64, belt) {
   if (!await trySave('characters', c.id, { inventaire: inv })) return;
   c.inventaire = inv;
   if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
-  _invSelected = '';
   showNotif(belt ? 'Objet placé dans la ceinture.' : 'Objet rangé dans le sac.', 'success');
   _rerenderInventoryView();
 }
@@ -1891,14 +1774,14 @@ async function _invConsumeOne(charId, indicesB64) {
   }
   if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
   _patchInventoryHistoryLocal(c, historyPatch.inventoryHistory);
-  _invSelected = '';
   showNotif(`${item.nom || 'Objet'} utilisé.`, 'success');
   _rerenderInventoryView();
 }
 
 registerActions({
-  _charInvSearch:      (el)  => { _charInvSearch = el.value; _invSelected = ''; _ivDebouncedListUpdate(); },
-  _invToggleRow:       (btn) => { const key = btn.dataset.key || ''; _invSelected = _invSelected === key ? '' : key; _rerenderInventoryView(); },
+  _charInvSearch:      (el)  => { _charInvSearch = el.value; _ivDebouncedListUpdate(); },
+  _invSelect:          (btn) => _invSelect(btn.dataset.key || ''),
+  _invCloseSheet:      ()    => _invCloseSheet(),
   _sendTargetFilter:   (el)  => _sendTargetFilter(el),
   _sellRefreshTotal:   (el)  => _sellRefreshTotal(el, Number(el.dataset.prix), Number(el.dataset.max)),
   _invmStep:          (btn) => _invmStep(btn.dataset.input, Number(btn.dataset.delta), Number(btn.dataset.max), btn.dataset.context),
