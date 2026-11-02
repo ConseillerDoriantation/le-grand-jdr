@@ -21979,7 +21979,11 @@ body .modal:has(.inv-history-modal-shell) {
 .cs-v3 .ids-vital-value mark { margin-left: 3px; padding: 0; background: transparent; color: var(--crimson-light); font-size: .62rem; font-weight: 700; }
 .cs-v3 .ids-vital-value > button,
 .cs-v3 .ids-vital-value > b { padding: 0; border: 0; background: transparent; color: var(--text); font-size: 1.24rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
-.cs-v3 .ids-vital-value > button { cursor: pointer; }
+/* Valeur courante saisissable (clic → champ) : même repère que l'XP (pointillé,
+   curseur texte) ; cible élargie par marge négative, sans décaler la ligne. */
+.cs-v3 .ids-vital-value > button { position: relative; cursor: text; margin: -4px -6px -3px; padding: 4px 6px 2px; border-bottom: 1px dashed var(--border-strong); }
+.cs-v3 .ids-vital-value > button:hover,
+.cs-v3 .ids-vital-value > button:focus-visible { border-bottom-color: var(--gold-2); color: var(--gold-2); }
 .cs-v3 .ids-vital-value > em { color: var(--text-dim); font-size: .7rem; font-style: normal; }
 .cs-v3 .ids-vital.danger .ids-vital-value > button,
 .cs-v3 .ids-vital.danger .ids-vital-value > b { color: var(--crimson-light); }
