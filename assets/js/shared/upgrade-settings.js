@@ -12,6 +12,8 @@ import { openModal, closeModalDirect, confirmModal } from './modal.js';
 import { registerActions } from '../core/actions.js';
 import { showNotif } from './notifications.js';
 import { _esc } from './html.js';
+import { getRarities, loadRarities } from './rarity.js';
+import { DEFAULT_RARITY_CAPS, rarityCapFromTable } from './rarity-caps.js';
 
 let _settings = null;
 
@@ -46,6 +48,11 @@ export const DEFAULT_UPGRADE_SETTINGS = {
       'Objet magique': 1,
     },
   },
+  // Plafonds imposés par la RARETÉ (valeur 1..N, cf. rarity.js). C'est le plafond
+  // DUR : le plafond effectif d'un objet = min(plafond catégorie ci-dessus,
+  // plafond rareté ici). Une 1★ ne peut donc jamais égaler une 5★ — on ne fait
+  // que remplir le budget de sa rareté, défini par le MJ. 0/rareté non définie = commun (1).
+  rarityCaps: DEFAULT_RARITY_CAPS, // table pure dans rarity-caps.js (testable)
   // Drapeau optionnel : rembourser X% du coût total des upgrades à la revente
   // ex : 0.2 = 20% remboursés. 0 = perte totale.
   refundUpgradeRatio: 0,
@@ -69,8 +76,21 @@ function _mergeDefaults(stored = {}) {
       ring: Math.min(stored.caps?.ring ?? d.caps.ring, 1),
       traitsPerItem: { ...d.caps.traitsPerItem, ...(stored.caps?.traitsPerItem || {}) },
     },
+    rarityCaps: {
+      traits: { ...d.rarityCaps.traits, ...(stored.rarityCaps?.traits || {}) },
+      stats:  { ...d.rarityCaps.stats,  ...(stored.rarityCaps?.stats  || {}) },
+    },
     refundUpgradeRatio: stored.refundUpgradeRatio ?? d.refundUpgradeRatio,
   };
+}
+
+// ── Plafond imposé par la rareté ─────────────────────────────────────────
+// kind: 'traits' (slots) | 'stats' (points). rarete 0/non définie → commun (1).
+// Rareté au-delà de la table → on prend la valeur définie la plus proche en dessous.
+export function rarityCapFor(kind, rarete, settings = null) {
+  const s = settings || getUpgradeSettings();
+  const table = s?.rarityCaps?.[kind] || DEFAULT_RARITY_CAPS[kind];
+  return rarityCapFromTable(table, rarete);
 }
 
 export async function loadUpgradeSettings() {
@@ -138,7 +158,7 @@ export function hasUpgrades(item = {}) {
 // ══════════════════════════════════════════════
 
 export async function openUpgradeSettingsAdmin() {
-  await loadUpgradeSettings();
+  await Promise.all([loadUpgradeSettings(), loadRarities().catch(() => null)]);
   _renderUpgradeSettingsModal();
 }
 
@@ -161,6 +181,19 @@ function _renderUpgradeSettingsModal() {
       <input type="number" class="sh-admin-row-input small" value="${value}" min="0" step="1"
         data-input="_upgField" data-field="${field}">
       ${unit ? `<span class="sh-admin-row-unit">${unit}</span>` : '<span class="sh-admin-row-unit"></span>'}
+    </div>`;
+
+  // Row "plafond par rareté" : label rareté + slots de traits + points de stats.
+  const rarities = getRarities();
+  const rarityRow = (r) => `
+    <div class="sh-admin-row-line">
+      <span class="sh-admin-row-lbl">${'★'.repeat(r.value)} ${_esc(r.name)}</span>
+      <input type="number" class="sh-admin-row-input small" value="${s.rarityCaps?.traits?.[r.value] ?? 0}" min="0" step="1"
+        data-input="_upgField" data-field="rarityCaps.traits.${r.value}">
+      <span class="sh-admin-row-unit">traits</span>
+      <input type="number" class="sh-admin-row-input small" value="${s.rarityCaps?.stats?.[r.value] ?? 0}" min="0" step="1"
+        data-input="_upgField" data-field="rarityCaps.stats.${r.value}">
+      <span class="sh-admin-row-unit">stats</span>
     </div>`;
 
   openModal('', `
@@ -247,6 +280,15 @@ function _renderUpgradeSettingsModal() {
           ${capRow('💍 Anneau',                   s.caps.traitsPerItem['Anneau'],        'caps.traitsPerItem.Anneau')}
           ${capRow('🔮 Objet magique',            s.caps.traitsPerItem['Objet magique'], 'caps.traitsPerItem.Objet magique')}
         </div>
+      </div>
+
+      <!-- ── Plafonds par rareté (plafond DUR) ─────────────── -->
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">⭐ Plafonds par rareté</div>
+        <p class="sh-admin-section-hint">Plafond <b style="color:var(--text)">dur</b> imposé par la rareté : le plafond réel d'un objet = <em>min(plafond de catégorie ci-dessus, plafond de rareté ici)</em>. Empêche une 1★ d'égaler une 5★. Les armes 1 main restent bornées par le plafond « Arme 1M ».</p>
+        ${rarities.length
+          ? rarities.map(rarityRow).join('')
+          : '<p class="sh-admin-section-hint">Aucune rareté définie — configure-les d’abord dans l’admin des raretés.</p>'}
       </div>
 
       <!-- ── Revente ───────────────────────────────────────── -->
