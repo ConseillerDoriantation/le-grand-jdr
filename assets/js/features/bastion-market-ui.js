@@ -1,38 +1,42 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// BASTION-MARKET-UI — Vente d'objets sur le mur du Bastion
+// BASTION-MARKET-UI — Marché du Bastion : mise en vente, achat, retrait, onglet
 // ──────────────────────────────────────────────────────────────────────────────
 // Une vente est une annonce « Offre » du mur qui porte l'objet en dépôt (règles
-// pures : shared/bastion-market.js). Ce module rend l'objet joint dans le fil, sa
-// fiche (modale « Voir l'objet ») et la modale de mise en vente — ouvrable aussi
-// depuis la fiche objet de l'Inventaire, sans que le Bastion soit chargé.
-// bastion.js injecte son contexte (initBastionMarket).
+// pures : shared/bastion-market.js). Ce module rend sa carte dans le fil,
+// l'onglet Marché (une liste + une fiche, comme l'Inventaire v11) et la modale de
+// mise en vente — ouvrable aussi depuis la fiche objet de l'Inventaire, sans que
+// le Bastion soit chargé. bastion.js injecte son contexte (initBastionMarket).
 // Chaque opération = UNE transaction (annonce + fiches) : tout ou rien.
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { _ensureFeatureCss } from '../core/navigation.js';
 import { addToCol, getCachedCollection } from '../data/firestore.js';
-import { newDocId, runDocsTransaction } from '../data/firestore-transactions.js';
+import { newDocId, runDocsTransaction, subscribeWhereEquals } from '../data/firestore-transactions.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal, promptModal, updateModalContent } from '../shared/modal.js';
-import { _esc } from '../shared/html.js';
+import { _esc, _searchIncludes } from '../shared/html.js';
 import { timeAgo } from '../shared/relative-time.js';
 import { calcOr, getDefaultCharForUser, getItemEffectText, statShort } from '../shared/char-stats.js';
 import { RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
-import { getInventoryItemImage, getInventoryItemResaleValue, getInventoryItemValue } from '../shared/inventory-utils.js';
+import {
+  getInventoryItemImage, getInventoryItemResaleValue, getInventoryItemValue, getInventoryReadableDocument,
+} from '../shared/inventory-utils.js';
 import { getItemTraits, resolveEquippedInventoryIndices } from '../shared/equipment-utils.js';
 import { characterBuildsForStorage, patchBuildLocally } from '../shared/character-builds.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { charSession } from '../shared/char-session.js';
 import { touchBastionWallActivity } from '../shared/bastion-signal.js';
+import { normalizeBastionWallPost } from '../shared/bastion-wall.js';
 import { weaponHandsLabel } from '../shared/weapon-family.js';
 import {
-  isArmorItem, isQuestItem, isWeaponItem, itemBonuses, itemChips, itemCompareRows,
-  itemCompareSlot, itemDamageText, itemKind, itemRarity, itemSigned,
+  ITEM_FAMILIES, isArmorItem, isQuestItem, isWeaponItem, itemBonuses, itemChips, itemCompareRows,
+  itemCompareSlot, itemDamageText, itemFamily, itemKind, itemRarity, itemSigned,
 } from '../shared/item-facts.js';
 import {
   MARKET_PRICE_MAX, MarketError, buildMarketListing, isMarketListing, marketItemKey, marketListingView,
-  normalizeMarketPrice, planMarketListing, planMarketPrice, planMarketPurchase, planMarketWithdraw,
+  mergeMarketPosts, normalizeMarketPrice, planMarketListing, planMarketPrice, planMarketPurchase,
+  planMarketWithdraw, sortMarketViews,
 } from '../shared/bastion-market.js';
 
 export { isMarketListing };
@@ -46,15 +50,45 @@ const MK = {
     rerender: () => {},
     patchPost: () => {},
     onPosted: () => {},
+    openPost: () => {},
+    openTab: () => {},
     draftText: () => '',
     clearDraft: () => {},
   },
+  offers: [],      // ventes ouvertes (flux dédié, page Bastion seulement)
+  stopFeed: null,
+  ui: { family: 'all', query: '', sort: 'recent', sel: '', sheetOpen: false, history: false },
   busy: false,
   sell: null,      // état de la modale de mise en vente
 };
 
 export function initBastionMarket(ctx = {}) {
   MK.ctx = { ...MK.ctx, ...ctx };
+}
+
+// Changement d'aventure : rien ne doit survivre d'une table à l'autre.
+export function resetBastionMarket() {
+  MK.stopFeed?.();
+  MK.offers = [];
+  MK.ui = { family: 'all', query: '', sort: 'recent', sel: '', sheetOpen: false, history: false };
+}
+
+// Le mur ne garde que ses 80 posts récents : ce flux borné aux ventes OUVERTES
+// garantit qu'une vieille vente ne quitte jamais le Marché (ni ne reste bloquée,
+// objet en dépôt, sans bouton Retirer). Deux égalités, aucun tri → index
+// mono-champ fusionnés, rien à créer. Coupé à la navigation suivante.
+export function startMarketFeed() {
+  MK.stopFeed?.();
+  const stop = subscribeWhereEquals(COL, { type: 'offre', status: 'active' }, { max: 100 }, docs => {
+    MK.offers = (docs || []).map(normalizeBastionWallPost).filter(isMarketListing);
+    _rerender();
+  }, { onUnavailable: () => { MK.offers = []; } });
+  const own = () => {
+    stop();
+    if (MK.stopFeed === own) MK.stopFeed = null;
+  };
+  MK.stopFeed = own;
+  document.addEventListener('app:page-changed', own, { once: true });
 }
 
 // ── Données ───────────────────────────────────
@@ -69,7 +103,14 @@ const _rerender = () => { if (STATE.currentPage === 'bastion') MK.ctx.rerender()
 const _char = id => (STATE.characters || []).find(c => c.id === id) || null;
 const _catalog = item => (item?.itemId ? (getCachedCollection('shop') || []).find(entry => entry.id === item.itemId) : null) || null;
 const _lot = view => `${view.name}${view.qty > 1 ? ` ×${view.qty}` : ''}`;
-const _post = id => (MK.ctx.posts() || []).find(post => post.id === id && isMarketListing(post)) || null;
+
+function _posts() {
+  return mergeMarketPosts(MK.offers, (MK.ctx.posts() || []).filter(isMarketListing)).filter(isMarketListing);
+}
+const _post = id => _posts().find(post => post.id === id) || null;
+function _views() {
+  return _posts().map(marketListingView);
+}
 const _isMine = view => !!view && view.sellerUid === _uid();
 const _canManage = view => _isMine(view) || !!STATE.isAdmin;
 
@@ -81,6 +122,10 @@ function _buyer() {
   return getDefaultCharForUser(chars, _uid()) || chars[0] || null;
 }
 
+function _familyOf(item) {
+  return itemFamily(item, { readable: !!getInventoryReadableDocument(item, _catalog(item)) });
+}
+
 // Mise à jour locale immédiate (les listeners confirment ensuite).
 function _patchLocalChar(id, patch) {
   const current = charSession.getCurrentChar?.();
@@ -90,6 +135,10 @@ function _patchLocalChar(id, patch) {
     current?.id === id ? current : null,
   ].filter(Boolean)).forEach(c => Object.assign(c, patch));
 }
+function _patchLocalPost(id, patch) {
+  MK.offers = MK.offers.map(post => (post.id === id ? normalizeBastionWallPost({ ...post, ...patch }) : post));
+  MK.ctx.patchPost(id, patch);
+}
 
 function _txError(error, fallback) {
   if (error instanceof MarketError || error?.name === 'MarketError') {
@@ -97,17 +146,11 @@ function _txError(error, fallback) {
     return;
   }
   if (error?.code === 'permission-denied') {
-    console.warn('[vente] refusé par les règles Firestore (voir docs/firestore-rules.md)', error);
-    showNotif('Refusé par Firestore : le MJ doit déployer les règles de vente du Bastion.', 'error');
+    console.warn('[marché] refusé par les règles Firestore (voir docs/firestore-rules.md)', error);
+    showNotif('Refusé par Firestore : le MJ doit déployer les règles du Marché du Bastion.', 'error');
     return;
   }
   notifySaveError(error, fallback);
-}
-
-// Fin d'opération : la modale « Voir l'objet » se ferme, le fil se redessine.
-function _afterWrite() {
-  if (document.querySelector('#modal-overlay.show #modal-body > .bs-mk-sheet')) closeModalDirect();
-  _rerender();
 }
 
 // ── Petits rendus partagés ────────────────────
@@ -154,7 +197,7 @@ export function marketWallBlockHtml(post) {
     actions = `<span class="bs-mk-state is-${view.state}">${_stateLine(view)}</span>`;
   }
   return `<div class="bs-mk-lot${view.state !== 'open' ? ' is-closed' : ''}"${_rareAttrs(view.rarity)}>
-    <button type="button" class="bs-mk-lot-item" data-action="_mkView" data-id="${_esc(view.id)}" title="Voir l’objet">
+    <button type="button" class="bs-mk-lot-item" data-action="_mkOpenListing" data-id="${_esc(view.id)}" title="Voir la fiche au Marché">
       ${_icon(item)}
       <span class="bs-mk-txt"><span class="bs-mk-name"><b>${_esc(view.name)}</b>${view.qty > 1 ? `<em>×${view.qty}</em>` : ''}</span><span class="bs-mk-line">${_esc(_rareName(view.rarity))} · ${_esc(itemKind(item))}</span></span>
       ${chips ? `<span class="bs-mk-chips">${chips}</span>` : ''}
@@ -172,9 +215,57 @@ export function marketSideLabel(post) {
   return `${_lot(view)} · ${_gold(view.price)}`;
 }
 
+export function marketOpenCount() {
+  return _views().filter(view => view.state === 'open').length;
+}
+
 // ══════════════════════════════════════════════
-// FICHE DE L'OBJET — modale « Voir l'objet »
+// ONGLET MARCHÉ — une liste + une fiche
 // ══════════════════════════════════════════════
+function _matches(view) {
+  if (MK.ui.family !== 'all' && _familyOf(view.item) !== MK.ui.family) return false;
+  return _searchIncludes(`${view.name} ${itemKind(view.item)} ${view.item.type || ''} ${view.sellerName}`, MK.ui.query);
+}
+
+function _rowHtml(view) {
+  const sel = MK.ui.sel === view.id;
+  const chips = itemChips(view.item).slice(0, 2).map(_chipHtml).join('');
+  const who = view.state === 'open'
+    ? `${_esc(_isMine(view) ? 'Ta vente' : view.sellerName)}${view.ts ? ` · ${_ago(view.ts)}` : ''}`
+    : _stateLine(view);
+  return `<button type="button" class="bs-mk-row${sel ? ' is-sel' : ''}${view.state !== 'open' ? ' is-closed' : ''}"${_rareAttrs(view.rarity)} data-action="_mkSelect" data-id="${_esc(view.id)}" aria-pressed="${sel}">
+    <span class="bs-mk-gem"></span>
+    <span class="bs-mk-txt"><span class="bs-mk-name"><b>${_esc(view.name)}</b>${view.qty > 1 ? `<em>×${view.qty}</em>` : ''}</span><span class="bs-mk-line">${_esc(itemKind(view.item))} · ${who}</span></span>
+    ${chips ? `<span class="bs-mk-chips">${chips}</span>` : ''}
+    <span class="bs-mk-price">${_esc(_gold(view.price))}</span>
+  </button>`;
+}
+
+function _section(title, views, empty = '') {
+  if (!views.length && !empty) return '';
+  return `<section class="bs-mk-sec"><h3 class="bs-mk-sh">${title}<span>${views.length}</span></h3>
+    ${views.length ? `<div class="bs-mk-rows">${views.map(_rowHtml).join('')}</div>` : `<p class="bs-mk-empty">${empty}</p>`}
+  </section>`;
+}
+
+function _listHtml(all) {
+  const open = sortMarketViews(all.filter(view => view.state === 'open' && _matches(view)), MK.ui.sort);
+  const closed = all.filter(view => view.state !== 'open' && _matches(view))
+    .sort((a, b) => (b.soldAt || b.ts) - (a.soldAt || a.ts)).slice(0, 30);
+  const filtering = MK.ui.family !== 'all' || !!MK.ui.query;
+  const forSale = open.filter(view => !_isMine(view));
+  const mine = open.filter(_isMine);
+  const emptyForSale = all.some(view => view.state === 'open')
+    ? (filtering ? 'Aucune vente ne correspond.' : 'Aucune vente d’un autre aventurier pour l’instant.')
+    : 'Le marché est vide. Mets un objet en vente : il apparaîtra ici et sur le mur.';
+  return `${_section('En vente', forSale, emptyForSale)}
+    ${_section('Mes ventes', mine)}
+    ${closed.length ? `<section class="bs-mk-sec">
+      <button type="button" class="bs-mk-sh bs-mk-hist-toggle" data-action="_mkHistory" aria-expanded="${MK.ui.history}">◷ Historique<span>${closed.length}</span><i aria-hidden="true">${MK.ui.history ? '▾' : '▸'}</i></button>
+      ${MK.ui.history ? `<div class="bs-mk-rows">${closed.map(_rowHtml).join('')}</div>` : ''}
+    </section>` : ''}`;
+}
+
 function _compareHtml(buyer, item) {
   const slot = itemCompareSlot(buyer, item);
   if (!slot) return '';
@@ -191,7 +282,8 @@ function _compareHtml(buyer, item) {
 }
 
 function _sheetActions(view) {
-  if (view.state !== 'open') return '';
+  const jump = `<button type="button" class="bs-w-btn bs-w-sm bs-mk-ghost" data-action="_mkJumpPost" data-id="${_esc(view.id)}">Voir l’annonce</button>`;
+  if (view.state !== 'open') return `<footer class="bs-mk-acts"><div class="bs-mk-acts-row">${jump}</div></footer>`;
   const buyer = _buyer();
   let main = '';
   let hint = '';
@@ -208,14 +300,16 @@ function _sheetActions(view) {
     hint = 'Il faut un personnage de cette aventure pour acheter.';
   }
   const moderate = !_isMine(view) && STATE.isAdmin
-    ? `<div class="bs-mk-acts-row"><button type="button" class="bs-w-btn bs-w-sm bs-mk-ghost" data-action="_mkWithdraw" data-id="${_esc(view.id)}">Retirer (MJ)</button></div>` : '';
+    ? `<button type="button" class="bs-w-btn bs-w-sm bs-mk-ghost" data-action="_mkWithdraw" data-id="${_esc(view.id)}">Retirer (MJ)</button>` : '';
   return `<footer class="bs-mk-acts">
     <div class="bs-mk-acts-price"><b>${_esc(_gold(view.price))}</b>${view.qty > 1 ? `<small>${_esc(_gold(view.unitPrice))} / u.</small>` : ''}</div>
     ${main ? `<div class="bs-mk-acts-main">${main}</div>` : ''}
     ${hint ? `<p class="bs-mk-hint">${hint}</p>` : ''}
-    ${moderate}
+    <div class="bs-mk-acts-row">${jump}${moderate}</div>
   </footer>`;
 }
+
+const _SHEET_X = '<button type="button" class="bs-mk-sheet-x" data-action="_mkCloseSheet" aria-label="Fermer la fiche" title="Fermer (Échap)">✕</button>';
 
 function _sheetHtml(view) {
   const item = view.item;
@@ -241,7 +335,8 @@ function _sheetHtml(view) {
   ].join('');
   const bonusHtml = bonuses.filter(b => b.v && !(armor && b.k === 'CA'))
     .map(b => _chipHtml({ t: `${b.k} ${itemSigned(b.v)}`, cls: b.cls })).join('');
-  return `<div class="bs-mk-sheet"${_rareAttrs(view.rarity)} aria-label="Fiche de ${_esc(view.name)}">
+  return `<aside class="bs-mk-sheet"${_rareAttrs(view.rarity)} id="bs-mk-sheet" aria-label="Fiche de ${_esc(view.name)}">
+    ${_SHEET_X}
     <header class="bs-mk-head">
       ${_icon(item)}
       <div class="bs-mk-id">
@@ -258,14 +353,85 @@ function _sheetHtml(view) {
     ${description && description !== effect ? `<section class="bs-mk-part"><h4>Description</h4><p class="is-edito">${_esc(description)}</p></section>` : ''}
     ${buyer ? _compareHtml(buyer, item) : ''}
     ${_sheetActions(view)}
+  </aside>`;
+}
+
+function _summarySheetHtml(all) {
+  const buyer = _buyer();
+  const open = all.filter(view => view.state === 'open');
+  const sold = all.filter(view => view.state === 'sold');
+  return `<aside class="bs-mk-sheet is-summary" id="bs-mk-sheet" aria-label="Le Marché du Bastion">
+    <header class="bs-mk-id">
+      <span class="bs-mk-kicker">Marché du Bastion</span>
+      <h3>Achat immédiat entre aventuriers</h3>
+      <span class="bs-mk-status">Sélectionne un objet pour voir sa fiche et le comparer à ton équipement.</span>
+    </header>
+    <div class="bs-mk-facts">
+      ${_fact('En vente', open.filter(view => !_isMine(view)).length)}
+      ${_fact('Mes ventes', open.filter(_isMine).length)}
+      ${_fact('Ventes conclues', sold.length)}
+      ${buyer ? _fact(`Bourse de ${buyer.nom || '?'}`, _gold(calcOr(buyer))) : ''}
+    </div>
+    <section class="bs-mk-part"><h4>Comment ça marche</h4>
+      <p>L’objet mis en vente quitte l’inventaire du vendeur (en dépôt). À l’achat, l’or et l’objet changent de main en une seule opération, et le vendeur est prévenu. Retirer la vente rend l’objet.</p>
+    </section>
+    ${buyer ? `<footer class="bs-mk-acts"><div class="bs-mk-acts-main"><button type="button" class="bs-w-btn bs-w-go" data-action="_mkOpenSell">＋ Mettre un objet en vente</button></div></footer>` : ''}
+  </aside>`;
+}
+
+export function renderMarketTab() {
+  const all = _views();
+  const sel = all.find(view => view.id === MK.ui.sel) || null;
+  if (!sel) MK.ui.sel = '';
+  const open = all.filter(view => view.state === 'open');
+  const counts = { all: open.length };
+  open.forEach(view => { const f = _familyOf(view.item); counts[f] = (counts[f] || 0) + 1; });
+  const families = ITEM_FAMILIES.filter(f => counts[f.id] || MK.ui.family === f.id);
+  const sorts = [['recent', 'Récent'], ['price-asc', 'Prix ↑'], ['price-desc', 'Prix ↓'], ['rarity', 'Rareté']];
+  return `<div class="bs-mk${sel && MK.ui.sheetOpen ? ' is-sheet-open' : ''}">
+    <div class="bs-v-tools bs-mk-tools">
+      <label class="bs-v-search">🔍<input id="bs-mk-q" type="search" placeholder="Objet ou vendeur…" value="${_esc(MK.ui.query)}" data-input="_mkSearch" autocomplete="off" aria-label="Rechercher au Marché"></label>
+      <div class="bs-w-fchips" role="group" aria-label="Filtrer par famille">
+        <button type="button" class="bs-w-fchip${MK.ui.family === 'all' ? ' on' : ''}" data-action="_mkFamily" data-family="all" aria-pressed="${MK.ui.family === 'all'}">Tout<span>${counts.all}</span></button>
+        ${families.map(f => `<button type="button" class="bs-w-fchip${MK.ui.family === f.id ? ' on' : ''}" data-action="_mkFamily" data-family="${f.id}" aria-pressed="${MK.ui.family === f.id}">${_esc(f.label)}<span>${counts[f.id] || 0}</span></button>`).join('')}
+      </div>
+      <label class="bs-mk-sort"><span>Trier</span><select data-change="_mkSort" aria-label="Trier les ventes">${sorts.map(([id, label]) => `<option value="${id}"${MK.ui.sort === id ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
+      ${_buyer() ? '<button type="button" class="bs-w-btn bs-w-go bs-v-deposit" data-action="_mkOpenSell">＋ Mettre en vente</button>' : ''}
+    </div>
+    <div class="bs-mk-body">
+      <div class="bs-mk-list" id="bs-mk-list">${_listHtml(all)}</div>
+      ${sel ? _sheetHtml(sel) : _summarySheetHtml(all)}
+    </div>
   </div>`;
 }
 
-function _openView(id) {
-  const post = _post(id);
-  if (!post) return;
-  openModal('🪙 Objet en vente', _sheetHtml(marketListingView(post)), { subtitle: 'Annonce du mur du Bastion', accent: '#22c38e' });
+function _select(id) {
+  MK.ui.sel = id;
+  MK.ui.sheetOpen = true;
+  _rerender();
 }
+function _closeSheet() {
+  MK.ui.sel = '';
+  MK.ui.sheetOpen = false;
+  _rerender();
+}
+
+// Depuis le fil : l'onglet Marché s'ouvre sur la fiche de l'objet.
+function _openListing(id) {
+  const view = _views().find(entry => entry.id === id);
+  if (view && view.state !== 'open') MK.ui.history = true;
+  MK.ui.family = 'all';
+  MK.ui.query = '';
+  MK.ui.sel = id;
+  MK.ui.sheetOpen = true;
+  MK.ctx.openTab('marche');
+}
+
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || STATE.currentPage !== 'bastion' || !document.querySelector('.bs-mk.is-sheet-open')) return;
+  if (document.getElementById('modal-overlay')?.classList.contains('show')) return;
+  _closeSheet();
+});
 
 // ══════════════════════════════════════════════
 // TRANSACTIONS — achat, retrait, prix
@@ -281,7 +447,7 @@ async function _buy(id, shownPrice) {
   const expectedPrice = Number.isFinite(Number(shownPrice)) ? Number(shownPrice) : view.price;
   const ok = await confirmModal(`<b>${_esc(_lot(view))}</b> vendu par <b>${_esc(view.sellerName)}</b><br>
     <span style="display:inline-block;margin-top:.45rem">Bourse de ${_esc(buyer.nom || '?')} : ${_esc(_gold(balance))} → <b>${_esc(_gold(balance - expectedPrice))}</b></span>`, {
-    title: 'Acheter',
+    title: 'Acheter au Marché',
     confirmLabel: `Acheter · ${_gold(expectedPrice)}`,
     danger: false,
     icon: '🪙',
@@ -310,14 +476,14 @@ async function _buy(id, shownPrice) {
     });
     _patchLocalChar(buyer.id, result.buyerPatch);
     _patchLocalChar(view.sellerCharId, result.sellerPatch);
-    MK.ctx.patchPost(id, result.postPatch);
+    _patchLocalPost(id, result.postPatch);
     void _notifySale(result.view, buyer, id, result.sellerOwnerUid || result.view.sellerUid);
     showNotif(`🪙 ${_lot(result.view)} rejoint l’inventaire de ${buyer.nom || '?'} · −${_gold(result.view.price)}`, 'success');
   } catch (error) {
     _txError(error, 'L’achat n’a pas abouti.');
   } finally {
     MK.busy = false;
-    _afterWrite();
+    _rerender();
   }
 }
 
@@ -333,7 +499,7 @@ async function _notifySale(view, buyer, postId, targetUid) {
     kind: 'sale',
     text: `${_lot(view)} · ${_gold(view.price)}`.slice(0, 180),
     ts: Date.now(),
-  }, { silent: true }).catch(error => console.debug('[vente] notification indisponible', error?.code || error));
+  }, { silent: true }).catch(error => console.debug('[marché] notification de vente indisponible', error?.code || error));
 }
 
 // Rend l'objet au vendeur. `confirm: false` : appelant qui a déjà demandé
@@ -366,7 +532,7 @@ export async function withdrawMarketListing(id, { confirm = true } = {}) {
       };
     });
     _patchLocalChar(view.sellerCharId, plan.sellerPatch);
-    MK.ctx.patchPost(id, plan.postPatch);
+    _patchLocalPost(id, plan.postPatch);
     showNotif(`↩️ ${_lot(plan.view)} est revenu dans l’inventaire de ${view.sellerName}.`, 'success');
     return true;
   } catch (error) {
@@ -374,7 +540,7 @@ export async function withdrawMarketListing(id, { confirm = true } = {}) {
     return false;
   } finally {
     MK.busy = false;
-    _afterWrite();
+    _rerender();
   }
 }
 
@@ -396,18 +562,18 @@ async function _editPrice(id) {
       const result = planMarketPrice({ post: fresh, price, now: Date.now() });
       return { writes: [{ col: COL, id, data: result.postPatch }], result };
     });
-    MK.ctx.patchPost(id, plan.postPatch);
+    _patchLocalPost(id, plan.postPatch);
     showNotif(`Nouveau prix : ${_gold(plan.price)}.`, 'success');
   } catch (error) {
     _txError(error, 'Le prix n’a pas été modifié.');
   } finally {
     MK.busy = false;
-    _afterWrite();
+    _rerender();
   }
 }
 
 // ══════════════════════════════════════════════
-// MISE EN VENTE — modale (composeur du mur ou fiche Inventaire)
+// MISE EN VENTE — modale (Bastion, composeur du mur ou fiche Inventaire)
 // ══════════════════════════════════════════════
 function _sellGroups(char) {
   const inventory = Array.isArray(char?.inventaire) ? char.inventaire : [];
@@ -468,7 +634,7 @@ function _sellHtml() {
 }
 
 const _SELL_TITLE = '🪙 Mettre en vente au Bastion';
-const _SELL_OPTS = { subtitle: 'L’annonce paraît sur le mur du Bastion', accent: '#22c38e' };
+const _SELL_OPTS = { subtitle: 'L’annonce paraît sur le mur et au Marché', accent: '#22c38e' };
 function _paintSell({ open = false } = {}) {
   if (open) openModal(_SELL_TITLE, _sellHtml(), _SELL_OPTS);
   else updateModalContent(_SELL_TITLE, _sellHtml(), _SELL_OPTS);
@@ -548,11 +714,15 @@ async function _submitSell() {
       };
     });
     _patchLocalChar(char.id, result.payload);
-    MK.ctx.onPosted({ id, ...result.post });
+    const created = { id, ...result.post };
+    MK.offers = mergeMarketPosts(MK.offers, [normalizeBastionWallPost(created)]);
+    MK.ctx.onPosted(created);
     touchBastionWallActivity();
     if (s.fromComposer) MK.ctx.clearDraft();
     MK.sell = null;
     closeModalDirect();
+    MK.ui.sel = id;
+    MK.ui.sheetOpen = false;
     const lot = `${result.plan.items[0]?.nom || 'Objet'}${result.plan.qty > 1 ? ` ×${result.plan.qty}` : ''}`;
     showNotif(`🪙 ${lot} mis en vente au Bastion · ${_gold(result.plan.price)}${result.plan.unequipped ? ' (déséquipé)' : ''}`, 'success');
     if (STATE.currentPage === 'characters') {
@@ -568,7 +738,19 @@ async function _submitSell() {
 }
 
 registerActions({
-  _mkView:        (btn) => _openView(btn.dataset.id || ''),
+  _mkSelect:      (btn) => _select(btn.dataset.id || ''),
+  _mkCloseSheet:  () => _closeSheet(),
+  _mkOpenListing: (btn) => _openListing(btn.dataset.id || ''),
+  _mkJumpPost:    (btn) => MK.ctx.openPost(btn.dataset.id || ''),
+  _mkFamily:      (btn) => { MK.ui.family = btn.dataset.family || 'all'; _rerender(); },
+  _mkSort:        (el) => { MK.ui.sort = el.value || 'recent'; _rerender(); },
+  _mkHistory:     () => { MK.ui.history = !MK.ui.history; _rerender(); },
+  // Saisie : seule la liste est redessinée (le champ garde le focus).
+  _mkSearch:      (el) => {
+    MK.ui.query = el.value || '';
+    const list = document.getElementById('bs-mk-list');
+    if (list) list.innerHTML = _listHtml(_views());
+  },
   _mkBuy:         (btn) => _buy(btn.dataset.id || '', btn.dataset.price),
   _mkWithdraw:    (btn) => withdrawMarketListing(btn.dataset.id || ''),
   _mkPrice:       (btn) => _editPrice(btn.dataset.id || ''),
