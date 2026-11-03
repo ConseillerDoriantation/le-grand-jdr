@@ -15,7 +15,7 @@ import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser
 import { loadStats, peekStats, applyStatsLegacyRollup, resetStats, deleteCharStats, deleteCharDateStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
 import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, mergeVttRollDetails, normalizeSkillStats, topStatTies, vttLogTimeMs } from '../shared/stats-analysis.js';
 import { MVP_AXIS_GUIDE, MVP_SCORING_GUIDE, scoreMvpView } from '../shared/stats-mvp.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
 import { confirmModal, openModal, promptModal, closeModalDirect } from '../shared/modal.js';
 import { watch, watchDoc } from '../shared/realtime.js';
@@ -3010,6 +3010,12 @@ const PAGES = {
           || (order[a.slot] ?? 9) - (order[b.slot] ?? 9));
       return _sessionsMemo;
     };
+    // Utilisée par la séance, les séances suivantes et les cartes de groupe : la
+    // retirer fait planter chaque paint dès qu'un groupe existe (tableau de bord
+    // figé sur son premier rendu, mur du Bastion compris).
+    const charForParticipant = participant => allChars.find(char => char.id === participant?.charId)
+      || allChars.find(char => char.uid === participant?.uid)
+      || { nom: participant?.nom || 'Personnage', uid: participant?.uid || '' };
     const avatar = (entity, className = '', live = false) => {
       const sizes = { sm: 24, lg: 46, xl: 56 };
       const sizeClass = className.split(/\s+/).find(value => sizes[value]);
