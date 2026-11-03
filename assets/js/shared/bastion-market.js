@@ -9,14 +9,15 @@
 // Les ventes v1 (avant le 2026-11-04) ont mis l'objet en dépôt : on les honore
 // telles quelles (l'achat ne touche pas l'inventaire du vendeur, le retrait le rend).
 // Statut du post = état de la vente : active = en vente · resolved = vendue ·
-// cancelled = retirée (ou enchère invendue). Une vente close ne se rouvre jamais.
+// cancelled = retirée. Une vente close ne se rouvre jamais.
 //
-// Enchère (`listing.mode = 'auction'`) : `price` = prix de départ, `endsAt`,
-// `buyNow` facultatif, `bid` = meilleure offre { uid, charId, name, amount, at }.
-// L'or de la meilleure offre est BLOQUÉ (débité) ; l'enchérisseur battu est
-// remboursé dans la même transaction. À l'échéance, le premier client qui la
-// voit la clôture : objet au gagnant, or au vendeur (ou remboursement si l'objet
-// n'est plus disponible). Une offre dans les 2 dernières minutes prolonge de 2 min.
+// Enchère (`listing.mode = 'auction'`) : `price` = prix de départ, `buyNow`
+// facultatif, `bid` = meilleure offre { uid, charId, name, amount, at }. Pas
+// d'échéance : le vendeur l'adjuge quand l'offre lui convient (objet au meilleur
+// enchérisseur, or au vendeur) ou la retire. L'or de la meilleure offre est
+// BLOQUÉ (débité) ; il est rendu, dans la même transaction, à l'enchérisseur
+// battu ou si l'enchère est retirée. (Le `endsAt` des enchères du 2026-11-04
+// est ignoré.)
 //
 // Les plans calculent les écritures exactes d'une transaction à partir des
 // documents FRAIS qu'elle a lus ; ils lèvent MarketError (message prêt pour le
@@ -30,13 +31,6 @@ import { isQuestItem, itemGroupKey, itemRarity } from './item-facts.js';
 export const MARKET_PRICE_MAX = 1_000_000;
 export const MARKET_QTY_MAX = 50;
 export const MARKET_SOURCE = 'Marché du Bastion';
-export const AUCTION_DURATIONS = [
-  { id: '1h', label: '1 heure', ms: 3_600_000 },
-  { id: '24h', label: '24 heures', ms: 86_400_000 },
-  { id: '3d', label: '3 jours', ms: 3 * 86_400_000 },
-  { id: '7d', label: '7 jours', ms: 7 * 86_400_000 },
-];
-export const AUCTION_SNIPE_MS = 120_000;
 
 export class MarketError extends Error {
   constructor(code, message) {
@@ -92,7 +86,6 @@ export function marketListingView(post = {}) {
     // v1 : unités déjà retirées de l'inventaire à la publication (dépôt).
     escrow: (Number(listing.v) || 1) < 2,
     auction: listing.mode === 'auction',
-    endsAt: Number(listing.endsAt) || 0,
     buyNow: Math.max(0, Math.round(Number(listing.buyNow) || 0)),
     bid: listing.bid && typeof listing.bid === 'object' && Number(listing.bid.amount) > 0 ? {
       uid: String(listing.bid.uid || ''),
@@ -102,6 +95,7 @@ export function marketListingView(post = {}) {
       at: Number(listing.bid.at) || 0,
     } : null,
     bidCount: Math.max(0, Math.round(Number(listing.bidCount) || 0)),
+    // Enchères closes par l'ancienne échéance : affichage seulement.
     unsold: listing.unsold === true,
     failed: String(listing.failed || ''),
     ts: Number(post.ts) || 0,
@@ -127,8 +121,6 @@ export function sortMarketViews(views = [], sort = 'recent') {
   if (sort === 'price-asc') return list.sort((a, b) => a.price - b.price || b.ts - a.ts);
   if (sort === 'price-desc') return list.sort((a, b) => b.price - a.price || b.ts - a.ts);
   if (sort === 'rarity') return list.sort((a, b) => b.rarity - a.rarity || b.ts - a.ts);
-  // Enchères d'abord, de la plus proche de sa fin ; ventes à prix fixe ensuite.
-  if (sort === 'ending') return list.sort((a, b) => (a.auction ? a.endsAt : Infinity) - (b.auction ? b.endsAt : Infinity) || b.ts - a.ts);
   return list.sort((a, b) => b.ts - a.ts);
 }
 
@@ -215,7 +207,6 @@ export function buildMarketListing({ items, price, sellerUid, sellerCharId, auct
   return {
     ...listing,
     mode: 'auction',
-    endsAt: Math.round(Number(auction.endsAt) || 0),
     ...(buyNow > listing.price ? { buyNow } : {}),
     bid: null,
     bidCount: 0,
@@ -228,8 +219,6 @@ export function marketMinBid(view) {
   return Math.max(view.bid.amount + 1, Math.ceil(view.bid.amount * 1.05));
 }
 
-export const auctionEnded = (view, now = Date.now()) => view.auction && view.endsAt > 0 && now >= view.endsAt;
-
 function _assertOpen(post, { sold, withdrawn }) {
   if (!post || !isMarketListing(post)) throw new MarketError('gone', 'Cette vente n’existe plus.');
   const view = marketListingView(post);
@@ -241,15 +230,17 @@ function _assertOpen(post, { sold, withdrawn }) {
 // Achat : écritures acheteur (objet + paiement), vendeur (encaissement) et
 // post (vendu). `expectedPrice` = prix affiché au clic : un prix modifié
 // entre-temps annule l'achat au lieu de débiter un autre montant.
-export function planMarketPurchase({ post, buyer, seller, prevBidder = null, buyerUid = '', expectedPrice = null, now = Date.now(), date = '', actor = {} } = {}) {
+export function planMarketPurchase({ post, buyer, seller, prevBidder, buyerUid = '', expectedPrice = null, now = Date.now(), date = '', actor = {} } = {}) {
   const base = _assertOpen(post, {
     sold: v => (v.buyerName ? `Déjà vendu à ${v.buyerName}.` : 'Déjà vendu.'),
     withdrawn: () => 'Le vendeur a retiré cette vente.',
   });
-  // Enchère : seul l'achat immédiat passe ici, avant l'échéance ; le prix payé
-  // est celui d'achat immédiat et la meilleure offre en cours est remboursée.
-  if (base.auction && (!base.buyNow || auctionEnded(base, now))) {
-    throw new MarketError('auction', auctionEnded(base, now) ? 'L’enchère est terminée.' : 'Pas d’achat immédiat sur cette enchère.');
+  // Enchère : seul l'achat immédiat passe ici, tant qu'aucune offre ne l'a
+  // atteint ; le prix payé est celui d'achat immédiat et la meilleure offre en
+  // cours est remboursée.
+  if (base.auction && !base.buyNow) throw new MarketError('auction', 'Pas d’achat immédiat sur cette enchère.');
+  if (base.auction && base.bid && base.bid.amount >= base.buyNow) {
+    throw new MarketError('auction', 'Les offres ont dépassé le prix d’achat immédiat.');
   }
   const view = base.auction ? { ...base, price: base.buyNow } : base;
   if (!buyer) throw new MarketError('buyer', 'Choisis le personnage qui achète.');
@@ -311,18 +302,14 @@ export function planMarketPurchase({ post, buyer, seller, prevBidder = null, buy
 
 // Retrait : la vente passe « retirée ». Rien à rendre (v2 : l'objet n'a jamais
 // quitté l'inventaire) ; une vente v1 rend ses unités en dépôt au vendeur.
-// Enchère avec offres : seul le MJ (`force`) l'annule, en remboursant la
-// meilleure offre (`bidder` = sa fiche).
-export function planMarketWithdraw({ post, seller, bidder = null, force = false, now = Date.now(), date = '', actor = {} } = {}) {
+// Enchère avec offre : la meilleure offre est remboursée (`bidder` = sa fiche).
+export function planMarketWithdraw({ post, seller, bidder, now = Date.now(), date = '', actor = {} } = {}) {
   const view = _assertOpen(post, {
     sold: v => `Déjà vendu${v.buyerName ? ` à ${v.buyerName}` : ''} : l’objet a changé de main.`,
     withdrawn: () => 'Cette vente est déjà retirée.',
   });
   const postPatch = { status: 'cancelled', updatedAt: now };
-  if (view.auction && view.bid) {
-    if (!force) throw new MarketError('bids', 'Des offres ont été faites : seul le MJ peut annuler cette enchère.');
-    return { view, sellerPatch: null, refund: _refund(view, bidder, date), postPatch };
-  }
+  if (view.auction && view.bid) return { view, sellerPatch: null, refund: _refund(view, bidder, date), postPatch };
   if (!view.escrow) return { view, sellerPatch: null, postPatch };
   if (!seller) throw new MarketError('seller', 'Le personnage vendeur n’existe plus.');
   return {
@@ -349,9 +336,13 @@ export function planMarketPrice({ post, price, now = Date.now() } = {}) {
 }
 
 // Remboursement de la meilleure offre (or bloqué rendu à son auteur).
+// `bidder` = sa fiche FRAÎCHE, lue d'après l'offre affichée : si une autre offre
+// l'a remplacée entre-temps (ou si elle n'a pas été lue), on n'écrit rien —
+// sinon on rembourserait la mauvaise fiche. Fiche supprimée (null) : personne
+// à rembourser.
 function _refund(view, bidder, date) {
-  if (!view.bid) return null;
-  if (!bidder) throw new MarketError('bidder', 'Le personnage de la meilleure offre n’existe plus.');
+  if (!view.bid || bidder === null) return null;
+  if (bidder?.id !== view.bid.charId) throw new MarketError('changed', 'L’enchère vient de changer : vérifie et réessaie.');
   return {
     charId: view.bid.charId,
     uid: view.bid.uid,
@@ -361,13 +352,12 @@ function _refund(view, bidder, date) {
 
 // Offre sur une enchère : l'or est bloqué, l'enchérisseur battu remboursé.
 // Remonter sa propre offre ne bloque que la différence.
-export function planMarketBid({ post, bidder, prevBidder = null, amount, buyerUid = '', now = Date.now(), date = '' } = {}) {
+export function planMarketBid({ post, bidder, prevBidder, amount, buyerUid = '', now = Date.now(), date = '' } = {}) {
   const view = _assertOpen(post, {
     sold: v => `Enchère terminée${v.buyerName ? ` : adjugée à ${v.buyerName}` : ''}.`,
     withdrawn: () => 'Cette enchère est annulée.',
   });
   if (!view.auction) throw new MarketError('auction', 'Ce n’est pas une enchère.');
-  if (auctionEnded(view, now)) throw new MarketError('ended', 'L’enchère est terminée.');
   if (!bidder) throw new MarketError('buyer', 'Choisis le personnage qui enchérit.');
   if (bidder.id === view.sellerCharId || (buyerUid && buyerUid === view.sellerUid)) {
     throw new MarketError('own', 'Tu ne peux pas enchérir sur ta propre vente.');
@@ -381,11 +371,9 @@ export function planMarketBid({ post, bidder, prevBidder = null, amount, buyerUi
   if (balance < due) throw new MarketError('funds', `Il manque ${_gold(due - balance)} à ${bidder.nom || 'ce personnage'}.`);
   const lot = _lotLabel(view);
   const name = String(bidder.nom || 'Personnage').slice(0, 80);
-  const endsAt = view.endsAt - now < AUCTION_SNIPE_MS ? now + AUCTION_SNIPE_MS : view.endsAt;
   return {
     view,
     amount: value,
-    extended: endsAt !== view.endsAt,
     outbid: view.bid && !self ? view.bid : null,
     bidderPatch: { compte: marketLedgerPayload(bidder, -due, `Enchère · ${lot} (bloqué)`, date) },
     refund: self ? null : _refund(view, prevBidder, date),
@@ -394,41 +382,38 @@ export function planMarketBid({ post, bidder, prevBidder = null, amount, buyerUi
         ...post.listing,
         bid: { uid: buyerUid, charId: String(bidder.id || ''), name, amount: value, at: now },
         bidCount: view.bidCount + 1,
-        endsAt,
       },
       updatedAt: now,
     },
   };
 }
 
-// Clôture d'une enchère échue (par n'importe quel membre). Avec une offre :
-// l'objet passe au gagnant (exemplaires rangés seulement) et l'or bloqué au
-// vendeur ; objet indisponible → gagnant remboursé, enchère annulée. Sans
-// offre : invendue. `failed` : 'worn' | 'missing' quand l'objet manque.
-export function planMarketClose({ post, seller, winner, now = Date.now(), date = '', actor = {} } = {}) {
-  const view = _assertOpen(post, { sold: () => 'Déjà adjugée.', withdrawn: () => 'Déjà close.' });
+// Adjudication, quand le vendeur (ou le MJ) le décide : l'objet passe au
+// meilleur enchérisseur (exemplaires rangés seulement) et son or bloqué au
+// vendeur. Sans offre, rien à adjuger ; objet porté ou absent : refus, rien
+// n'est écrit (le vendeur le range, ou retire l'enchère). `expectedBid` = offre
+// affichée au clic : une nouvelle offre arrivée entre-temps annule l'adjudication.
+export function planMarketClose({ post, seller, winner, expectedBid = null, now = Date.now(), date = '', actor = {} } = {}) {
+  const view = _assertOpen(post, { sold: () => 'Déjà adjugée.', withdrawn: () => 'Cette enchère est retirée.' });
   if (!view.auction) throw new MarketError('auction', 'Ce n’est pas une enchère.');
-  if (!auctionEnded(view, now)) throw new MarketError('running', 'L’enchère n’est pas terminée.');
-  if (!view.bid) {
-    return { view, outcome: 'unsold', postPatch: { status: 'cancelled', listing: { ...post.listing, unsold: true }, updatedAt: now } };
+  if (!view.bid) throw new MarketError('nobid', 'Aucune offre à accepter pour l’instant.');
+  if ((expectedBid != null && view.bid.amount !== Number(expectedBid)) || (winner && winner.id !== view.bid.charId)) {
+    throw new MarketError('changed', `Nouvelle offre : ${_gold(view.bid.amount)} (${view.bid.name}). Vérifie avant d’adjuger.`);
   }
-  if (!winner) throw new MarketError('bidder', 'Le personnage gagnant n’existe plus.');
+  if (!seller) throw new MarketError('seller', 'Le personnage vendeur n’existe plus.');
+  if (!winner) throw new MarketError('bidder', 'Le personnage de la meilleure offre n’existe plus : retire l’enchère.');
   const lot = _lotLabel(view);
-  const sellerName = String(seller?.nom || view.sellerName).slice(0, 80);
+  const sellerName = String(seller.nom || view.sellerName).slice(0, 80);
   const { inventory, free, worn } = _units(seller, marketItemKey(view.item));
-  if (!seller || free.length < view.qty) {
-    const failed = seller && free.length + worn.length >= view.qty ? 'worn' : 'missing';
-    return {
-      view, outcome: 'failed', failed,
-      refund: _refund(view, winner, date),
-      postPatch: { status: 'cancelled', listing: { ...post.listing, failed }, updatedAt: now },
-    };
+  if (free.length < view.qty) {
+    throw free.length + worn.length >= view.qty
+      ? new MarketError('worn', `${sellerName} porte encore cet objet : il faut le déséquiper pour l’adjuger.`)
+      : new MarketError('missing', `${sellerName} n’a plus cet objet : retire l’enchère, l’offre sera remboursée.`);
   }
   const taken = new Set(free.slice(0, view.qty).map(m => m.index));
   const winnerName = view.bid.name;
   return {
     view,
-    outcome: 'sold',
     winnerPatch: {
       inventaire: [...(Array.isArray(winner.inventaire) ? winner.inventaire : []), ..._copies(inventory.filter((_, i) => taken.has(i)))],
       ...inventoryHistoryPayload(winner, [makeInventoryHistoryEntry('receive', view.item, view.qty, {

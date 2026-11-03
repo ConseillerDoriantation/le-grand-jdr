@@ -383,17 +383,15 @@ function marketCreateAllowed(data) {
     data.listing.get('buyerUid', '') == '' &&
     (data.listing.get('mode', 'fixed') != 'auction' || (
       data.listing.get('bid', null) == null &&
-      data.listing.get('bidCount', 0) == 0 &&
-      data.listing.get('endsAt', 0) is int &&
-      data.listing.endsAt > request.time.toMillis() &&
-      data.listing.endsAt <= request.time.toMillis() + 691200000
+      data.listing.get('bidCount', 0) == 0
     ))
   );
 }
 // Auteur : texte libre ; dans `listing`, seul le prix change, et seulement tant
-// que la vente est ouverte. Le statut ne va que de « en vente » à « retirée » :
-// rouvrir une vente close dupliquerait l'objet déjà vendu (ou rendu en v1).
-// Une annonce ordinaire ne peut pas devenir une vente après coup.
+// que la vente est ouverte (jamais pour une enchère). Le statut ne va que de
+// « en vente » à « retirée » (l'offre d'une enchère est alors remboursée dans la
+// même transaction) : rouvrir une vente close dupliquerait l'objet déjà vendu
+// (ou rendu en v1). Une annonce ordinaire ne peut pas devenir une vente après coup.
 function marketAuthorUpdateAllowed(before, after) {
   return (!isMarketListing(before) && after.get('listing', null) == before.get('listing', null)) || (
     isMarketListing(before) &&
@@ -404,9 +402,7 @@ function marketAuthorUpdateAllowed(before, after) {
     (after.get('status', 'active') == before.get('status', 'active') ||
       (before.get('status', 'active') == 'active' && after.get('status', '') == 'cancelled')) &&
     (before.listing.get('mode', 'fixed') != 'auction' ||
-      after.listing.get('price', 0) == before.listing.get('price', 0)) &&
-    (before.listing.get('bid', null) == null ||
-      after.get('status', 'active') == before.get('status', 'active'))
+      after.listing.get('price', 0) == before.listing.get('price', 0))
   );
 }
 // Acheteur (tout membre sauf l'auteur) : une vente ouverte passe « vendue » ;
@@ -423,22 +419,20 @@ function marketPurchaseAllowed(before, after) {
          after.listing.get('buyerUid', '') == request.auth.uid &&
          (before.listing.get('mode', 'fixed') != 'auction' || (
            before.listing.get('buyNow', 0) is int &&
-           before.listing.get('buyNow', 0) > 0 &&
-           request.time.toMillis() < before.listing.endsAt
+           before.listing.get('buyNow', 0) > 0
          ));
 }
-// Enchère : un membre (pas l'auteur) pose une offre à son nom, plus haute que
-// la précédente et au moins égale au départ, avant l'échéance. Seuls bid,
-// bidCount et (prolongation de dernière minute) endsAt changent.
+// Enchère (sans durée) : un membre (pas l'auteur) pose une offre à son nom,
+// plus haute que la précédente et au moins égale au départ. Seuls bid et
+// bidCount changent.
 function marketBidAllowed(adventureId, before, after) {
   return isMarketListing(before) &&
          before.listing.get('mode', 'fixed') == 'auction' &&
          before.get('status', 'active') == 'active' &&
          before.get('uid', '') != request.auth.uid &&
-         request.time.toMillis() < before.listing.endsAt &&
          after.diff(before).affectedKeys().hasOnly(['listing', 'updatedAt']) &&
          isMarketListing(after) &&
-         after.listing.diff(before.listing).affectedKeys().hasOnly(['bid', 'bidCount', 'endsAt']) &&
+         after.listing.diff(before.listing).affectedKeys().hasOnly(['bid', 'bidCount']) &&
          after.listing.get('bid', null) is map &&
          after.listing.bid.get('uid', '') == request.auth.uid &&
          canControlAdventureCharacter(adventureId, after.listing.bid.get('charId', '')) &&
@@ -446,31 +440,24 @@ function marketBidAllowed(adventureId, before, after) {
          after.listing.bid.amount >= before.listing.price &&
          after.listing.bid.amount <= 1000000 &&
          (before.listing.get('bid', null) == null || after.listing.bid.amount > before.listing.bid.amount) &&
-         after.listing.get('bidCount', 0) == before.listing.get('bidCount', 0) + 1 &&
-         (after.listing.endsAt == before.listing.endsAt ||
-           (after.listing.endsAt > before.listing.endsAt &&
-            after.listing.endsAt <= request.time.toMillis() + 300000));
+         after.listing.get('bidCount', 0) == before.listing.get('bidCount', 0) + 1;
 }
-// Clôture d'une enchère échue, par n'importe quel membre (pas de serveur) :
-// adjugée au meilleur enchérisseur, ou close sans vente (aucune offre / objet
-// indisponible). Rien d'autre ne change dans l'annonce.
-function marketCloseAllowed(before, after) {
+// Adjudication : le vendeur (auteur) accepte la meilleure offre quand il le
+// décide ; l'annonce passe « vendue » au nom du meilleur enchérisseur. L'objet
+// et l'or passent par la clause « Don entre membres », dans la même transaction.
+function marketAdjudicateAllowed(before, after) {
   return isMarketListing(before) &&
          before.listing.get('mode', 'fixed') == 'auction' &&
          before.get('status', 'active') == 'active' &&
-         request.time.toMillis() >= before.listing.endsAt &&
+         before.get('uid', '') == request.auth.uid &&
+         before.listing.get('bid', null) is map &&
          after.diff(before).affectedKeys().hasOnly(['status', 'listing', 'updatedAt']) &&
+         after.get('status', '') == 'resolved' &&
          isMarketListing(after) &&
-         (
-           (after.get('status', '') == 'resolved' &&
-            before.listing.get('bid', null) is map &&
-            after.listing.diff(before.listing).affectedKeys()
-              .hasOnly(['buyerUid', 'buyerCharId', 'buyerName', 'soldAt']) &&
-            after.listing.get('buyerUid', '') == before.listing.bid.get('uid', '') &&
-            after.listing.get('buyerCharId', '') == before.listing.bid.get('charId', '')) ||
-           (after.get('status', '') == 'cancelled' &&
-            after.listing.diff(before.listing).affectedKeys().hasOnly(['unsold', 'failed']))
-         );
+         after.listing.diff(before.listing).affectedKeys()
+           .hasOnly(['buyerUid', 'buyerCharId', 'buyerName', 'soldAt']) &&
+         after.listing.get('buyerUid', '') == before.listing.bid.get('uid', '') &&
+         after.listing.get('buyerCharId', '') == before.listing.bid.get('charId', '');
 }
 // ── Collections LEGACY top-level — ADMIN ONLY ───────────────────────────
 // Toutes les données « métier » sont désormais scopées par aventure
@@ -722,7 +709,7 @@ match /adventures/{adventureId} {
         .hasOnly(['reactions', 'commentCount', 'updatedAt']) ||
       marketPurchaseAllowed(resource.data, request.resource.data) ||
       marketBidAllowed(adventureId, resource.data, request.resource.data) ||
-      marketCloseAllowed(resource.data, request.resource.data)
+      marketAdjudicateAllowed(resource.data, request.resource.data)
     );
     allow delete: if inAdventure(adventureId) && (
       isAdvAdmin(adventureId) || resource.data.get('uid', '') == request.auth.uid

@@ -217,29 +217,32 @@ test('faits d’objet partagés : famille, nature et écarts « Si tu l’équip
 });
 
 // ── Enchères ─────────────────────────────────────────────────────────────────
-import { AUCTION_SNIPE_MS, auctionEnded, marketMinBid, planMarketBid, planMarketClose } from '../assets/js/shared/bastion-market.js';
+import { marketMinBid, planMarketBid, planMarketClose } from '../assets/js/shared/bastion-market.js';
 
 const H = 3_600_000;
 function auctionPost(overrides = {}, listingOverrides = {}) {
-  const listing = { ...buildMarketListing({ items: [ring], price: 100, sellerUid: 'u-aria', sellerCharId: 'aria', auction: { endsAt: 10 * H, buyNow: 400 } }), ...listingOverrides };
+  const listing = { ...buildMarketListing({ items: [ring], price: 100, sellerUid: 'u-aria', sellerCharId: 'aria', auction: { buyNow: 400 } }), ...listingOverrides };
   return { id: 'auc-1', kind: 'post', type: 'offre', status: 'active', uid: 'u-aria', charId: 'aria', charName: 'Aria', ts: 0, listing, ...overrides };
 }
 const kael = () => ({ id: 'kael', nom: 'Kael', uid: 'u-kael', inventaire: [], compte: ledger(300) });
 const withBid = (amount = 150, who = { uid: 'u-kael', charId: 'kael', name: 'Kael' }) => auctionPost({}, { bid: { ...who, amount, at: 1 }, bidCount: 1 });
 
-test('enchère : départ puis +5 % (au moins +1), fin à l’échéance', () => {
+test('enchère sans durée : départ puis +5 % (au moins +1)', () => {
+  const listing = auctionPost().listing;
+  assert.equal(listing.mode, 'auction');
+  assert.equal('endsAt' in listing, false, 'aucune échéance');
+  assert.deepEqual([listing.bid, listing.bidCount], [null, 0]);
   const view = marketListingView(auctionPost());
   assert.equal(view.auction, true);
   assert.equal(view.buyNow, 400);
   assert.equal(marketMinBid(view), 100);
   assert.equal(marketMinBid(marketListingView(withBid(150))), 158);
   assert.equal(marketMinBid(marketListingView(withBid(10))), 11);
-  assert.equal(auctionEnded(view, 10 * H - 1), false);
-  assert.equal(auctionEnded(view, 10 * H), true);
+  assert.equal('buyNow' in buildMarketListing({ items: [ring], price: 100, auction: { buyNow: 80 } }), false, 'achat immédiat ≤ départ ignoré');
 });
 
-test('offre : or bloqué, enchérisseur battu remboursé, offre trop basse ou après la fin refusée', () => {
-  const plan = planMarketBid({ post: withBid(150), bidder: buyer(), prevBidder: kael(), amount: 200, buyerUid: 'u-borin', now: H, date: 'd' });
+test('offre : or bloqué, enchérisseur battu remboursé, même longtemps après la mise en vente', () => {
+  const plan = planMarketBid({ post: withBid(150), bidder: buyer(), prevBidder: kael(), amount: 200, buyerUid: 'u-borin', now: 400 * H, date: 'd' });
   assert.equal(calcOr({ compte: plan.bidderPatch.compte }), 220);
   assert.equal(plan.refund.charId, 'kael');
   assert.equal(calcOr({ compte: plan.refund.patch.compte }), 450);
@@ -247,49 +250,63 @@ test('offre : or bloqué, enchérisseur battu remboursé, offre trop basse ou ap
   assert.equal(plan.postPatch.listing.bidCount, 2);
   assert.equal(plan.outbid.uid, 'u-kael');
   const changed = Object.keys(plan.postPatch.listing).filter(k => JSON.stringify(plan.postPatch.listing[k]) !== JSON.stringify(withBid(150).listing[k]));
-  assert.deepEqual(changed.sort(), ['bid', 'bidCount'], 'seuls bid/bidCount (et endsAt si prolongée) changent');
+  assert.deepEqual(changed.sort(), ['bid', 'bidCount'], 'seuls bid/bidCount changent (règles Firestore)');
+  // Ancienne enchère à échéance dépassée : l'échéance est ignorée et recopiée telle quelle.
+  const legacy = planMarketBid({ post: auctionPost({}, { endsAt: 1 }), bidder: buyer(), amount: 120, buyerUid: 'u-borin', now: 10 * H });
+  assert.equal(legacy.postPatch.listing.endsAt, 1);
   assert.throws(() => planMarketBid({ post: withBid(150), bidder: buyer(), prevBidder: kael(), amount: 155, now: H }), /offre minimale est de 158 or/);
-  assert.throws(() => planMarketBid({ post: auctionPost(), bidder: buyer(), amount: 120, now: 10 * H }), { code: 'ended' });
   assert.throws(() => planMarketBid({ post: auctionPost(), bidder: seller(), amount: 120, now: H }), { code: 'own' });
   assert.throws(() => planMarketBid({ post: auctionPost(), bidder: { ...buyer(), compte: ledger(50) }, amount: 120, now: H }), /Il manque 70 or/);
 });
 
-test('remonter sa propre offre ne bloque que la différence ; offre de dernière minute = prolongation', () => {
+test('une offre arrivée entre-temps n’est jamais remboursée sur la mauvaise fiche', () => {
+  const mira = { id: 'mira', nom: 'Mira', uid: 'u-mira', compte: ledger(500) };
+  // Fiche lue d'après l'offre affichée (Kael) alors que Mira l'a battue : rien n'est écrit.
+  const fresh = withBid(200, { uid: 'u-mira', charId: 'mira', name: 'Mira' });
+  assert.throws(() => planMarketBid({ post: fresh, bidder: buyer(), prevBidder: kael(), amount: 250, buyerUid: 'u-borin' }), { code: 'changed' });
+  assert.throws(() => planMarketBid({ post: fresh, bidder: buyer(), amount: 250, buyerUid: 'u-borin' }), { code: 'changed' }, 'fiche non lue');
+  assert.throws(() => planMarketPurchase({ post: fresh, buyer: buyer(), seller: freeSeller(), prevBidder: kael(), buyerUid: 'u-borin' }), { code: 'changed' });
+  assert.throws(() => planMarketWithdraw({ post: fresh, bidder: kael() }), { code: 'changed' });
+  assert.equal(planMarketBid({ post: fresh, bidder: buyer(), prevBidder: mira, amount: 250, buyerUid: 'u-borin' }).refund.charId, 'mira');
+  // Fiche du meilleur enchérisseur supprimée (lue, absente) : personne à rembourser.
+  assert.equal(planMarketWithdraw({ post: fresh, bidder: null }).refund, null);
+});
+
+test('remonter sa propre offre ne bloque que la différence', () => {
   const self = planMarketBid({ post: withBid(150, { uid: 'u-borin', charId: 'borin', name: 'Borin' }), bidder: buyer(), amount: 200, buyerUid: 'u-borin', now: H });
   assert.equal(calcOr({ compte: self.bidderPatch.compte }), 370);
   assert.equal(self.refund, null);
-  const late = planMarketBid({ post: auctionPost(), bidder: buyer(), amount: 100, buyerUid: 'u-borin', now: 10 * H - 30_000 });
-  assert.equal(late.extended, true);
-  assert.equal(late.postPatch.listing.endsAt, 10 * H - 30_000 + AUCTION_SNIPE_MS);
 });
 
-test('clôture : objet au gagnant, or bloqué au vendeur ; sans offre = invendue ; objet porté = remboursé', () => {
+test('adjuger : objet au gagnant, or bloqué au vendeur ; refus sans offre, objet porté ou offre changée', () => {
   const s = freeSeller();
-  const plan = planMarketClose({ post: withBid(150), seller: s, winner: kael(), now: 10 * H, date: 'd' });
-  assert.equal(plan.outcome, 'sold');
+  const plan = planMarketClose({ post: withBid(150), seller: s, winner: kael(), expectedBid: 150, now: H, date: 'd' });
   assert.equal(plan.winnerPatch.inventaire.at(-1).nom, 'Anneau de Force');
   assert.equal(plan.sellerPatch.inventaire.some(i => i.nom === 'Anneau de Force'), false);
   assert.equal(calcOr({ compte: plan.sellerPatch.compte }), 250);
   assert.equal(plan.winnerPatch.compte, undefined, 'l’or du gagnant était déjà bloqué');
+  assert.equal(plan.postPatch.status, 'resolved');
   assert.equal(plan.postPatch.listing.buyerUid, 'u-kael');
-  const unsold = planMarketClose({ post: auctionPost(), seller: s, winner: null, now: 10 * H });
-  assert.equal(unsold.outcome, 'unsold');
-  assert.equal(unsold.postPatch.listing.unsold, true);
-  const worn = planMarketClose({ post: withBid(150), seller: seller(), winner: kael(), now: 10 * H, date: 'd' });
-  assert.equal(worn.outcome, 'failed');
-  assert.equal(worn.failed, 'worn');
-  assert.equal(calcOr({ compte: worn.refund.patch.compte }), 450);
-  assert.throws(() => planMarketClose({ post: withBid(150), seller: s, winner: kael(), now: H }), { code: 'running' });
+  assert.equal(plan.postPatch.listing.buyerCharId, 'kael');
+  const keys = Object.keys(plan.postPatch.listing).filter(k => JSON.stringify(plan.postPatch.listing[k]) !== JSON.stringify(withBid(150).listing[k]));
+  assert.deepEqual(keys.sort(), ['buyerCharId', 'buyerName', 'buyerUid', 'soldAt'], 'seuls les champs acheteur changent (règles Firestore)');
+  assert.throws(() => planMarketClose({ post: auctionPost(), seller: s, winner: kael() }), { code: 'nobid' });
+  assert.throws(() => planMarketClose({ post: withBid(150), seller: seller(), winner: kael() }), { code: 'worn' }, 'vendeur qui porte encore l’anneau');
+  assert.throws(() => planMarketClose({ post: withBid(150), seller: { ...s, inventaire: [] }, winner: kael() }), { code: 'missing' });
+  assert.throws(() => planMarketClose({ post: withBid(200), seller: s, winner: kael(), expectedBid: 150 }), /Nouvelle offre : 200 or/);
+  assert.throws(() => planMarketClose({ post: withBid(150), seller: s, winner: buyer() }), { code: 'changed' }, 'fiche lue ≠ meilleure offre');
+  assert.throws(() => planMarketClose({ post: withBid(150), seller: s, winner: null }), { code: 'bidder' });
 });
 
-test('achat immédiat : prix d’achat immédiat, meilleure offre remboursée ; annulation réservée au MJ', () => {
+test('achat immédiat tant qu’aucune offre ne l’atteint ; retrait = offre remboursée', () => {
   const plan = planMarketPurchase({ post: withBid(150), buyer: buyer(), seller: freeSeller(), prevBidder: kael(), buyerUid: 'u-borin', now: H, date: 'd' });
   assert.equal(calcOr({ compte: plan.buyerPatch.compte }), 20);
   assert.equal(calcOr({ compte: plan.refund.patch.compte }), 450);
   assert.throws(() => planMarketPurchase({ post: auctionPost({}, { buyNow: undefined }), buyer: buyer(), seller: freeSeller(), now: H }), { code: 'auction' });
-  assert.throws(() => planMarketWithdraw({ post: withBid(150) }), { code: 'bids' });
-  const mj = planMarketWithdraw({ post: withBid(150), bidder: kael(), force: true, date: 'd' });
-  assert.equal(calcOr({ compte: mj.refund.patch.compte }), 450);
-  assert.equal(planMarketWithdraw({ post: auctionPost() }).postPatch.status, 'cancelled', 'sans offre, le vendeur peut retirer');
+  assert.throws(() => planMarketPurchase({ post: withBid(400), buyer: buyer(), seller: freeSeller(), prevBidder: kael() }), /dépassé le prix d’achat immédiat/);
+  const back = planMarketWithdraw({ post: withBid(150), bidder: kael(), date: 'd' });
+  assert.equal(back.postPatch.status, 'cancelled');
+  assert.equal(calcOr({ compte: back.refund.patch.compte }), 450);
+  assert.equal(planMarketWithdraw({ post: auctionPost() }).postPatch.status, 'cancelled', 'sans offre, rien à rembourser');
   assert.throws(() => planMarketPrice({ post: auctionPost(), price: 120 }), { code: 'auction' });
 });

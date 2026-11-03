@@ -30,13 +30,13 @@ import { touchBastionWallActivity } from '../shared/bastion-signal.js';
 import { normalizeBastionWallPost } from '../shared/bastion-wall.js';
 import { weaponHandsLabel } from '../shared/weapon-family.js';
 import { getUpgradeSettings, hasUpgrades, loadUpgradeSettings } from '../shared/upgrade-settings.js';
-import { upgradeResaleBonus, upgradeTariffValue } from '../shared/upgrade-value.js';
+import { upgradeResaleBonus } from '../shared/upgrade-value.js';
 import {
   ITEM_FAMILIES, isArmorItem, isQuestItem, isWeaponItem, itemBonuses, itemChips, itemCompareRows,
   itemCompareSlot, itemDamageText, itemFamily, itemKind, itemRarity, itemSigned,
 } from '../shared/item-facts.js';
 import {
-  AUCTION_DURATIONS, MARKET_PRICE_MAX, MarketError, auctionEnded, buildMarketListing, isMarketListing, marketAvailability,
+  MARKET_PRICE_MAX, MarketError, buildMarketListing, isMarketListing, marketAvailability,
   marketItemKey, marketListingView, marketMinBid, planMarketBid, planMarketClose,
   mergeMarketPosts, normalizeMarketPrice, planMarketListing, planMarketPrice, planMarketPurchase,
   planMarketWithdraw, sortMarketViews,
@@ -44,8 +44,13 @@ import {
 
 export { isMarketListing };
 
-// Vente v1 : objet déjà sorti de l'inventaire (dépôt) → à rendre si on supprime.
-export const isEscrowListing = post => isMarketListing(post) && marketListingView(post).escrow;
+// Vente qui tient quelque chose en dépôt : l'objet (v1, déjà sorti de
+// l'inventaire) ou l'or bloqué d'une offre d'enchère → à rendre si on supprime.
+export const isEscrowListing = post => {
+  if (!isMarketListing(post)) return false;
+  const view = marketListingView(post);
+  return view.escrow || (view.auction && !!view.bid);
+};
 
 const COL = 'bastionAnnonces';
 const MK = {
@@ -91,18 +96,9 @@ export function startMarketFeed() {
   const stop = subscribeWhereEquals(COL, { type: 'offre', status: 'active' }, { max: 100 }, docs => {
     MK.offers = (docs || []).map(normalizeBastionWallPost).filter(isMarketListing);
     _rerender();
-    void _closeDueAuctions();
   }, { onUnavailable: () => { MK.offers = []; } });
-  // Toutes les 30 s (onglet visible) : comptes à rebours à jour, enchères échues
-  // clôturées par ce client s'il est le premier à les voir.
-  const tick = setInterval(() => {
-    if (document.hidden || STATE.currentPage !== 'bastion') return;
-    document.querySelectorAll('[data-mk-ends]').forEach(el => { el.textContent = _countdown(Number(el.dataset.mkEnds)); });
-    void _closeDueAuctions();
-  }, 30_000);
   const own = () => {
     stop();
-    clearInterval(tick);
     if (MK.stopFeed === own) MK.stopFeed = null;
   };
   MK.stopFeed = own;
@@ -142,9 +138,8 @@ function _view(post) {
 }
 
 // Revente d'un exemplaire : même calcul que l'Inventaire (prix de reprise +
-// part de ses améliorations au tarif actuel) ; valeur de ses améliorations.
+// part de ses améliorations au tarif actuel).
 const _resale = item => getInventoryItemResaleValue(item, _catalog(item)) + upgradeResaleBonus(item, getUpgradeSettings());
-const _upgradesValue = item => upgradeTariffValue(item, getUpgradeSettings());
 // Tarifs d'amélioration (world/upgrade_settings) lus une fois, seulement si un
 // objet affiché est amélioré ; `onLoaded` redessine si les tarifs ont changé.
 let _upgradeLoad = null;
@@ -218,20 +213,11 @@ const _ago = ts => timeAgo(ts, { invalid: '', prefix: 'il y a ' });
 
 // Prix affiché : offre en cours (ou départ) pour une enchère.
 const _shown = view => (view.auction && view.bid ? view.bid.amount : view.price);
-function _countdown(endsAt) {
-  const left = endsAt - Date.now();
-  if (left <= 0) return 'terminée';
-  const min = Math.ceil(left / 60_000);
-  if (min < 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  return h < 24 ? `${h} h ${String(min % 60).padStart(2, '0')}` : `${Math.floor(h / 24)} j ${h % 24} h`;
-}
+const _bidCount = view => (view.bidCount ? `${view.bidCount} offre${view.bidCount > 1 ? 's' : ''}` : 'aucune offre');
 function _auctionLine(view) {
   if (!view.auction || view.state !== 'open') return '';
-  const offer = view.bid ? `Offre ${_esc(_gold(view.bid.amount))} · ${_esc(view.bid.name)}` : `Départ ${_esc(_gold(view.price))} · aucune offre`;
-  const count = view.bidCount ? ` · ${view.bidCount} offre${view.bidCount > 1 ? 's' : ''}` : '';
-  const end = auctionEnded(view) ? 'terminée, clôture en cours…' : `fin dans <span data-mk-ends="${view.endsAt}">${_countdown(view.endsAt)}</span>`;
-  return `<span class="bs-mk-auc">⚖ ${offer}${count} · ⏳ ${end}</span>`;
+  const offer = view.bid ? `Meilleure offre ${_esc(_gold(view.bid.amount))} · ${_esc(view.bid.name)}` : `Départ ${_esc(_gold(view.price))}`;
+  return `<span class="bs-mk-auc">⚖ ${offer} · ${_bidCount(view)}</span>`;
 }
 
 function _stateLine(view) {
@@ -251,7 +237,7 @@ function _availWarn(view) {
   const { ok, reason } = _avail(view);
   if (ok) return '';
   const mine = _isMine(view);
-  if (reason === 'worn' && view.auction) return mine ? 'Tu portes cet objet : range-le avant la fin, sinon l’enchère sera annulée.' : `${view.sellerName} porte encore cet objet : il doit le ranger avant la fin de l’enchère.`;
+  if (reason === 'worn' && view.auction) return mine ? 'Tu portes cet objet : range-le pour pouvoir l’adjuger.' : `${view.sellerName} porte encore cet objet : il devra le ranger pour l’adjuger.`;
   if (reason === 'worn') return mine ? 'Tu portes cet objet : déséquipe-le pour qu’il puisse être acheté.' : `${view.sellerName} porte encore cet objet : achat possible quand il l’aura rangé.`;
   return mine ? 'Cet objet n’est plus dans ton inventaire : retire la vente.' : `${view.sellerName} n’a plus cet objet.`;
 }
@@ -274,7 +260,7 @@ function _buyButton(view, cls = '') {
 // Enchère : bouton « Enchérir » (offre minimale proposée) + achat immédiat.
 function _bidButtons(view, cls = '') {
   const buyer = _buyer();
-  if (!buyer || view.state !== 'open' || auctionEnded(view)) return '';
+  if (!buyer || view.state !== 'open') return '';
   const min = marketMinBid(view);
   const self = view.bid && view.bid.charId === buyer.id;
   const missing = min - calcOr(buyer) - (self ? view.bid.amount : 0);
@@ -285,10 +271,21 @@ function _bidButtons(view, cls = '') {
   return lead + bid + (view.buyNow > _shown(view) ? _buyButton(view, cls) : '');
 }
 
-// Actions du vendeur : une enchère avec offres ne se retire plus (MJ seulement).
+// Bouton « Adjuger » (vendeur ou MJ) : désactivé, avec la raison, si l'objet
+// n'est pas rangé chez le vendeur.
+function _adjudicateButton(view, cls = '', label = 'Adjuger') {
+  if (!view.auction || !view.bid) return '';
+  const warn = _availWarn(view);
+  return warn
+    ? `<button type="button" class="bs-w-btn bs-w-go ${cls}" disabled title="${_esc(warn)}">${label} · ${_esc(_gold(view.bid.amount))}</button>`
+    : `<button type="button" class="bs-w-btn bs-w-go ${cls}" data-action="_mkAdjudicate" data-id="${_esc(view.id)}" data-amount="${view.bid.amount}" title="Accepter l’offre de ${_esc(view.bid.name)}">${label} · ${_esc(_gold(view.bid.amount))}</button>`;
+}
+
+// Actions du vendeur. Enchère : il adjuge quand l'offre lui convient, ou la
+// retire (la meilleure offre est remboursée).
 function _sellerButtons(view, cls = '') {
   if (view.auction) {
-    return view.bid ? '' : `<button type="button" class="bs-w-btn ${cls}" data-action="_mkWithdraw" data-id="${_esc(view.id)}">Retirer</button>`;
+    return `${_adjudicateButton(view, cls)}<button type="button" class="bs-w-btn ${cls}" data-action="_mkWithdraw" data-id="${_esc(view.id)}">Retirer</button>`;
   }
   return `<button type="button" class="bs-w-btn ${cls}" data-action="_mkPrice" data-id="${_esc(view.id)}">Modifier le prix</button><button type="button" class="bs-w-btn ${cls}" data-action="_mkWithdraw" data-id="${_esc(view.id)}">Retirer</button>`;
 }
@@ -347,7 +344,7 @@ function _rowHtml(view) {
   const avail = view.state === 'open' && _isMine(view) ? _avail(view) : { ok: true };
   const warn = avail.ok ? '' : ` · <em class="bs-mk-row-warn">⚠ ${avail.reason === 'worn' ? 'porté' : 'plus dans l’inventaire'}</em>`;
   const who = view.state !== 'open' ? _stateLine(view)
-    : view.auction ? `${_esc(_isMine(view) ? 'Ton enchère' : view.sellerName)} · ⏳ <span data-mk-ends="${view.endsAt}">${_countdown(view.endsAt)}</span>${view.bidCount ? ` · ${view.bidCount} offre${view.bidCount > 1 ? 's' : ''}` : ''}`
+    : view.auction ? `${_esc(_isMine(view) ? 'Ton enchère' : view.sellerName)} · ${_bidCount(view)}`
       : `${_esc(_isMine(view) ? 'Ta vente' : view.sellerName)}${view.ts ? ` · ${_ago(view.ts)}` : ''}`;
   const line = `${_esc(itemKind(view.item))} · ${who}${warn}`;
   return `<button type="button" class="bs-mk-row${sel ? ' is-sel' : ''}${view.state !== 'open' ? ' is-closed' : ''}"${_rareAttrs(view.rarity)} data-action="_mkSelect" data-id="${_esc(view.id)}" aria-pressed="${sel}">
@@ -406,11 +403,12 @@ function _sheetActions(view) {
   let hint = '';
   if (_isMine(view)) {
     main = _sellerButtons(view);
-    hint = _availWarn(view) || (view.auction && view.bid ? 'Des offres ont été faites : l’enchère ira à son terme.' : 'Ta vente : l’objet reste dans ton inventaire jusqu’à l’achat.');
+    hint = _availWarn(view) || (!view.auction ? 'Ta vente : l’objet reste dans ton inventaire jusqu’à l’achat.'
+      : view.bid ? `Adjuge quand l’offre te convient : l’objet part à ${_esc(view.bid.name)} et ${_esc(_gold(view.bid.amount))} arrivent dans ta bourse.`
+        : 'Ton enchère : l’objet reste dans ton inventaire jusqu’à ce que tu l’adjuges.');
   } else if (buyer && view.auction) {
     main = _bidButtons(view, 'bs-mk-buy');
-    hint = _availWarn(view) || (auctionEnded(view) ? 'Enchère terminée : clôture en cours.'
-      : 'Ton or est bloqué tant que ton offre est la meilleure ; il te revient si quelqu’un surenchérit.');
+    hint = _availWarn(view) || 'Ton or est bloqué tant que ton offre est la meilleure ; il te revient si quelqu’un surenchérit ou si l’enchère est retirée. Le vendeur adjuge quand il le décide.';
   } else if (buyer) {
     const missing = view.price - calcOr(buyer);
     main = _buyButton(view, 'bs-mk-buy');
@@ -421,7 +419,7 @@ function _sheetActions(view) {
     hint = 'Il faut un personnage de cette aventure pour acheter.';
   }
   const moderate = !_isMine(view) && STATE.isAdmin
-    ? `<button type="button" class="bs-w-btn bs-w-sm bs-mk-ghost" data-action="_mkWithdraw" data-id="${_esc(view.id)}">${view.auction && view.bid ? 'Annuler l’enchère (MJ)' : 'Retirer (MJ)'}</button>` : '';
+    ? `${_adjudicateButton(view, 'bs-w-sm', 'Adjuger (MJ)')}<button type="button" class="bs-w-btn bs-w-sm bs-mk-ghost" data-action="_mkWithdraw" data-id="${_esc(view.id)}">${view.auction && view.bid ? 'Annuler l’enchère (MJ)' : 'Retirer (MJ)'}</button>` : '';
   return `<footer class="bs-mk-acts">
     <div class="bs-mk-acts-price"><b>${_esc(_gold(_shown(view)))}</b>${view.qty > 1 && !view.auction ? `<small>${_esc(_gold(view.unitPrice))} / u.</small>` : ''}</div>
     ${_auctionLine(view)}
@@ -443,7 +441,6 @@ function _sheetHtml(view) {
   const description = String(item.description || '').trim();
   const value = getInventoryItemValue(item, cat);
   const resale = _resale(item);
-  const upgrades = _upgradesValue(item);
   const buyer = view.state === 'open' && !_isMine(view) ? _buyer() : null;
   const per = view.qty > 1 ? ' / u.' : '';
   const facts = [
@@ -454,7 +451,6 @@ function _sheetHtml(view) {
     _fact('CA', armor ? itemSigned(bonuses[0].v) : ''),
     _fact('Set', item.set),
     _fact('Valeur', value ? _gold(value) + per : ''),
-    _fact('Améliorations', upgrades ? _gold(upgrades) + per : ''),
     _fact('Revente', resale ? _gold(resale) + per : ''),
   ].join('');
   const bonusHtml = bonuses.filter(b => b.v && !(armor && b.k === 'CA'))
@@ -498,7 +494,7 @@ function _summarySheetHtml(all) {
     </div>
     <section class="bs-mk-part"><h4>Comment ça marche</h4>
       <p>L’objet mis en vente reste dans l’inventaire du vendeur jusqu’à l’achat. À l’achat, l’or et l’objet changent de main en une seule opération, et le vendeur est prévenu. Un objet porté doit être rangé pour être acheté.</p>
-      <p>Enchère : chaque offre bloque l’or de son auteur (rendu s’il est surenchéri) ; à la fin, l’objet part au meilleur enchérisseur.</p>
+      <p>Enchère : chaque offre bloque l’or de son auteur (rendu s’il est surenchéri ou si l’enchère est retirée). Pas de durée : le vendeur adjuge quand l’offre lui convient, et l’objet part au meilleur enchérisseur.</p>
     </section>
     ${buyer ? `<footer class="bs-mk-acts"><div class="bs-mk-acts-main"><button type="button" class="bs-w-btn bs-w-go" data-action="_mkOpenSell">＋ Mettre un objet en vente</button></div></footer>` : ''}
   </aside>`;
@@ -513,7 +509,7 @@ export function renderMarketTab() {
   const counts = { all: open.length };
   open.forEach(view => { const f = _familyOf(view.item); counts[f] = (counts[f] || 0) + 1; });
   const families = ITEM_FAMILIES.filter(f => counts[f.id] || MK.ui.family === f.id);
-  const sorts = [['recent', 'Récent'], ['ending', 'Fin proche'], ['price-asc', 'Prix ↑'], ['price-desc', 'Prix ↓'], ['rarity', 'Rareté']];
+  const sorts = [['recent', 'Récent'], ['price-asc', 'Prix ↑'], ['price-desc', 'Prix ↓'], ['rarity', 'Rareté']];
   const auctions = open.filter(view => view.auction).length;
   return `<div class="bs-mk${sel && MK.ui.sheetOpen ? ' is-sheet-open' : ''}">
     <div class="bs-v-tools bs-mk-tools">
@@ -592,7 +588,7 @@ async function _buy(id, shownPrice) {
       ...(prevId ? [{ col: 'characters', id: prevId }] : []),
     ], ([freshPost, freshBuyer, freshSeller, freshPrev]) => {
       const plan = planMarketPurchase({
-        post: freshPost, buyer: freshBuyer, seller: freshSeller, prevBidder: freshPrev || null, buyerUid: _uid(),
+        post: freshPost, buyer: freshBuyer, seller: freshSeller, prevBidder: freshPrev, buyerUid: _uid(),
         expectedPrice, now, date: _today(), actor: _actor(),
       });
       return {
@@ -646,7 +642,7 @@ async function _bid(id, minShown) {
   const post = _post(id);
   const view = post ? marketListingView(post) : null;
   const bidder = _buyer();
-  if (!view || view.state !== 'open' || auctionEnded(view)) { showNotif('Cette enchère est terminée.', 'error'); return; }
+  if (!view || view.state !== 'open') { showNotif('Cette enchère n’est plus ouverte.', 'error'); return; }
   if (!bidder) { showNotif('Choisis le personnage qui enchérit (« Je joue »).', 'error'); return; }
   const min = Math.max(marketMinBid(view), Number(minShown) || 0);
   const value = await promptModal(`<b>${_esc(_lot(view))}</b> — ${view.bid ? `offre actuelle ${_esc(_gold(view.bid.amount))} (${_esc(view.bid.name)})` : `départ ${_esc(_gold(view.price))}`}.<br>Ton offre, en or (minimum ${_esc(_gold(min))}). L’or de ${_esc(bidder.nom || '?')} est bloqué tant que l’offre est la meilleure.`, {
@@ -662,7 +658,7 @@ async function _bid(id, minShown) {
       { col: 'characters', id: bidder.id },
       ...(prevId ? [{ col: 'characters', id: prevId }] : []),
     ], ([freshPost, freshBidder, freshPrev]) => {
-      const result = planMarketBid({ post: freshPost, bidder: freshBidder, prevBidder: freshPrev || null, amount: value, buyerUid: _uid(), now, date: _today() });
+      const result = planMarketBid({ post: freshPost, bidder: freshBidder, prevBidder: freshPrev, amount: value, buyerUid: _uid(), now, date: _today() });
       return {
         writes: [
           { col: 'characters', id: bidder.id, data: result.bidderPatch },
@@ -677,7 +673,7 @@ async function _bid(id, minShown) {
     _patchLocalPost(id, plan.postPatch);
     if (plan.outbid) void _notify(plan.outbid.uid, { actor: bidder, postId: id, kind: 'outbid', text: `${_lot(plan.view)} · ${_gold(plan.amount)} (ton offre t’est rendue)` });
     void _notify(plan.view.sellerUid, { actor: bidder, postId: id, kind: 'bid', text: `${_lot(plan.view)} · ${_gold(plan.amount)}` });
-    showNotif(`⚖ Offre de ${_gold(plan.amount)} sur ${_lot(plan.view)}${plan.extended ? ' · enchère prolongée de 2 min' : ''}`, 'success');
+    showNotif(`⚖ Offre de ${_gold(plan.amount)} sur ${_lot(plan.view)}`, 'success');
   } catch (error) {
     _txError(error, 'L’offre n’a pas abouti.');
   } finally {
@@ -686,58 +682,62 @@ async function _bid(id, minShown) {
   }
 }
 
-// Clôture des enchères échues : faite par le premier client qui les voit
-// (aucun serveur). Une transaction par enchère ; si un autre client l'a déjà
-// close, la transaction relit le post et abandonne sans rien écrire.
-const _closing = new Set();
-async function _closeDueAuctions() {
-  if (!STATE.user?.uid) return;
-  const due = _views().filter(view => view.state === 'open' && auctionEnded(view) && !_closing.has(view.id));
-  for (const view of due) {
-    _closing.add(view.id);
-    try {
-      const winnerId = view.bid?.charId || '';
-      const plan = await runDocsTransaction([
-        { col: COL, id: view.id },
-        { col: 'characters', id: view.sellerCharId },
-        ...(winnerId ? [{ col: 'characters', id: winnerId }] : []),
-      ], ([freshPost, freshSeller, freshWinner]) => {
-        const result = planMarketClose({ post: freshPost, seller: freshSeller, winner: freshWinner || null, now: Date.now(), date: _today(), actor: _actor() });
-        return {
-          writes: [
-            ...(result.sellerPatch ? [{ col: 'characters', id: view.sellerCharId, data: result.sellerPatch }] : []),
-            ...(result.winnerPatch ? [{ col: 'characters', id: winnerId, data: result.winnerPatch }] : []),
-            ...(result.refund ? [{ col: 'characters', id: result.refund.charId, data: result.refund.patch }] : []),
-            { col: COL, id: view.id, data: result.postPatch },
-          ],
-          result: { ...result, sellerOwnerUid: String(freshSeller?.uid || view.sellerUid) },
-        };
+// Adjuger : le vendeur (ou le MJ) accepte la meilleure offre, quand il le
+// décide. L'objet passe au gagnant, son or bloqué au vendeur (une transaction).
+async function _adjudicate(id, shownAmount) {
+  if (MK.busy) return;
+  const post = _post(id);
+  const view = post ? marketListingView(post) : null;
+  if (!view || view.state !== 'open' || !view.auction || !view.bid) { showNotif('Aucune offre à accepter.', 'error'); return; }
+  if (!_canManage(view)) { showNotif('Seul le vendeur (ou le MJ) peut adjuger cette enchère.', 'error'); return; }
+  const expectedBid = Number(shownAmount) || view.bid.amount;
+  const ok = await confirmModal(`Adjuger <b>${_esc(_lot(view))}</b> à <b>${_esc(view.bid.name)}</b> pour <b>${_esc(_gold(expectedBid))}</b> ?<br>
+    <span style="display:inline-block;margin-top:.45rem">L’objet quitte l’inventaire de ${_esc(view.sellerName)} et l’or arrive dans sa bourse.</span>`, {
+    title: 'Adjuger l’enchère', confirmLabel: `Adjuger · ${_gold(expectedBid)}`, danger: false, icon: '⚖',
+  }).catch(() => false);
+  if (!ok) return;
+  MK.busy = true;
+  try {
+    const winnerId = view.bid.charId;
+    const plan = await runDocsTransaction([
+      { col: COL, id },
+      { col: 'characters', id: view.sellerCharId },
+      { col: 'characters', id: winnerId },
+    ], ([freshPost, freshSeller, freshWinner]) => {
+      const result = planMarketClose({
+        post: freshPost, seller: freshSeller, winner: freshWinner, expectedBid, now: Date.now(), date: _today(), actor: _actor(),
       });
-      if (plan.sellerPatch) _patchLocalChar(view.sellerCharId, plan.sellerPatch);
-      if (plan.winnerPatch) _patchLocalChar(winnerId, plan.winnerPatch);
-      if (plan.refund) _patchLocalChar(plan.refund.charId, plan.refund.patch);
-      _patchLocalPost(view.id, plan.postPatch);
-      const lot = _lot(plan.view);
-      const seller = { id: view.sellerCharId, nom: view.sellerName };
-      if (plan.outcome === 'sold') {
-        void _notify(plan.sellerOwnerUid, { actor: plan.view.bid, postId: view.id, kind: 'sale', text: `${lot} · ${_gold(plan.view.bid.amount)} (enchère)` });
-        void _notify(plan.view.bid.uid, { actor: seller, postId: view.id, kind: 'won', text: `${lot} · ${_gold(plan.view.bid.amount)}` });
-      } else if (plan.outcome === 'failed') {
-        void _notify(plan.view.bid.uid, { actor: seller, postId: view.id, kind: 'auction-failed', text: `${lot} : objet indisponible, ton or t’est rendu` });
-      } else {
-        void _notify(plan.sellerOwnerUid, { actor: seller, postId: view.id, kind: 'auction-unsold', text: `${lot} : aucune offre` });
-      }
-    } catch (error) {
-      // Déjà close par un autre client, ou règles non déployées : rien à faire ici.
-      if (!(error instanceof MarketError)) console.debug('[marché] clôture d’enchère reportée', error?.code || error);
-    }
+      return {
+        writes: [
+          { col: 'characters', id: view.sellerCharId, data: result.sellerPatch },
+          { col: 'characters', id: winnerId, data: result.winnerPatch },
+          { col: COL, id, data: result.postPatch },
+        ],
+        result: { ...result, sellerOwnerUid: String(freshSeller?.uid || view.sellerUid) },
+      };
+    });
+    _patchLocalChar(view.sellerCharId, plan.sellerPatch);
+    _patchLocalChar(winnerId, plan.winnerPatch);
+    _patchLocalPost(id, plan.postPatch);
+    const lot = _lot(plan.view);
+    const amount = _gold(plan.view.bid.amount);
+    void _notify(plan.view.bid.uid, { actor: { id: view.sellerCharId, nom: view.sellerName }, postId: id, kind: 'won', text: `${lot} · ${amount}` });
+    // MJ qui adjuge pour un vendeur : le vendeur est prévenu (cloche « vente »).
+    void _notify(plan.sellerOwnerUid, { actor: plan.view.bid, postId: id, kind: 'sale', text: `${lot} · ${amount} (enchère)` });
+    showNotif(`⚖ ${lot} adjugé à ${plan.view.bid.name} · +${amount}`, 'success');
+  } catch (error) {
+    _txError(error, 'L’adjudication n’a pas abouti.');
+  } finally {
+    MK.busy = false;
+    _rerender();
   }
-  if (due.length) _rerender();
 }
 
-// Retire la vente (l'objet n'a pas bougé ; une vente v1 rend son dépôt).
-// `confirm: false` : appelant qui a déjà demandé. Renvoie true si c'est fait.
-export async function withdrawMarketListing(id, { confirm = true } = {}) {
+// Retire la vente (l'objet n'a pas bougé ; une vente v1 rend son dépôt, une
+// enchère rembourse sa meilleure offre). `confirm: false` : appelant qui a déjà
+// demandé ; `deleting` : l'annonce va être supprimée avec ses notifications,
+// le remboursement est donc signalé sans lien vers elle. Renvoie true si c'est fait.
+export async function withdrawMarketListing(id, { confirm = true, deleting = false } = {}) {
   if (MK.busy) return false;
   const post = _post(id);
   const view = post ? marketListingView(post) : null;
@@ -758,8 +758,8 @@ export async function withdrawMarketListing(id, { confirm = true } = {}) {
     ];
     const plan = await runDocsTransaction(reads, ([freshPost, freshChar]) => {
       const result = planMarketWithdraw({
-        post: freshPost, seller: view.escrow ? freshChar : null, bidder: bidderId ? freshChar : null,
-        force: !!STATE.isAdmin, now: Date.now(), date: _today(), actor: _actor(),
+        post: freshPost, seller: view.escrow ? freshChar : null, bidder: bidderId ? freshChar : undefined,
+        now: Date.now(), date: _today(), actor: _actor(),
       });
       return {
         writes: [
@@ -773,7 +773,8 @@ export async function withdrawMarketListing(id, { confirm = true } = {}) {
     if (plan.sellerPatch) _patchLocalChar(view.sellerCharId, plan.sellerPatch);
     if (plan.refund) {
       _patchLocalChar(plan.refund.charId, plan.refund.patch);
-      void _notify(plan.refund.uid, { actor: { nom: 'Le MJ' }, postId: id, kind: 'auction-failed', text: `${_lot(plan.view)} : enchère annulée, ton or t’est rendu` });
+      const actor = _isMine(view) ? { id: view.sellerCharId, nom: view.sellerName } : { nom: 'Le MJ' };
+      void _notify(plan.refund.uid, { actor, postId: deleting ? '' : id, kind: 'auction-failed', text: `${_lot(plan.view)} · ton or t’est rendu` });
     }
     _patchLocalPost(id, plan.postPatch);
     showNotif(plan.sellerPatch ? `↩️ ${_lot(plan.view)} est revenu dans l’inventaire de ${view.sellerName}.` : `Vente de ${_lot(plan.view)} retirée.`, 'success');
@@ -867,9 +868,8 @@ function _sellHtml() {
   const cat = group ? _catalog(group.item) : null;
   const value = group ? getInventoryItemValue(group.item, cat) : 0;
   const resale = group ? _resale(group.item) : 0;
-  const upgrades = group ? _upgradesValue(group.item) : 0;
   if (group) _ensureUpgradeSettings([group.item], () => { if (MK.sell && _sellOpen()) _paintSell(); });
-  const refs = [value ? `valeur ${_gold(value)}` : '', upgrades ? `améliorations ${_gold(upgrades)}` : '', resale ? `revente boutique ${_gold(resale)}` : ''].filter(Boolean).join(' · ');
+  const refs = [value ? `valeur ${_gold(value)}` : '', resale ? `revente boutique ${_gold(resale)}` : ''].filter(Boolean).join(' · ');
   const wornTaken = group ? Math.max(0, s.qty - (group.count - group.worn)) : 0;
   const canSubmit = !!group && !!normalizeMarketPrice(s.price);
   const auction = s.mode === 'auction';
@@ -893,19 +893,18 @@ function _sellHtml() {
         <span class="bs-mk-qty"><span class="bs-v-step"><button type="button" data-action="_mkSellQty" data-delta="-1" aria-label="Moins"${s.qty <= 1 ? ' disabled' : ''}>−</button><span>${s.qty}</span><button type="button" data-action="_mkSellQty" data-delta="1" aria-label="Plus"${s.qty >= group.count ? ' disabled' : ''}>+</button></span><small>sur ${group.count}</small></span>
       </div>
       <label class="bs-mk-field"><span>${auction ? 'Prix de départ' : 'Prix du lot'}</span>
-        <span class="bs-mk-price-in"><input id="bs-mk-sell-price" type="number" min="1" max="${MARKET_PRICE_MAX}" step="1" inputmode="numeric" value="${_esc(s.price)}" placeholder="${(value + upgrades) || resale || ''}" data-input="_mkSellPrice" data-modal-initial-focus><b>or</b></span>
+        <span class="bs-mk-price-in"><input id="bs-mk-sell-price" type="number" min="1" max="${MARKET_PRICE_MAX}" step="1" inputmode="numeric" value="${_esc(s.price)}" placeholder="${value || resale || ''}" data-input="_mkSellPrice" data-modal-initial-focus><b>or</b></span>
         ${refs ? `<small>${_esc(refs)}${s.qty > 1 ? ' (par unité)' : ''}</small>` : ''}
       </label>
     </div>
     ${auction ? `<div class="bs-mk-sell-row">
-      <label class="bs-mk-field"><span>Durée</span><select class="input-field" data-change="_mkSellDuration">${AUCTION_DURATIONS.map(d => `<option value="${d.id}"${s.duration === d.id ? ' selected' : ''}>${d.label}</option>`).join('')}</select></label>
       <label class="bs-mk-field"><span>Achat immédiat <em>facultatif</em></span>
         <span class="bs-mk-price-in"><input type="number" min="1" max="${MARKET_PRICE_MAX}" step="1" inputmode="numeric" value="${_esc(s.buyNow)}" placeholder="—" data-input="_mkSellBuyNow"><b>or</b></span>
         <small>Doit dépasser le prix de départ.</small>
       </label>
     </div>` : ''}
     <label class="bs-mk-field"><span>Message <em>facultatif</em></span><textarea class="input-field" rows="2" maxlength="1000" data-input="_mkSellText" placeholder="Parfait pour un guerrier, à débattre en réponse…">${_esc(s.text)}</textarea></label>
-    <p class="bs-mk-note">ⓘ L’objet <b>reste dans l’inventaire</b> de ${_esc(char?.nom || '?')} jusqu’à ${auction ? 'la fin de l’enchère : il passe alors au meilleur enchérisseur, et son or (bloqué pendant l’enchère) arrive dans sa bourse. Une offre dans les 2 dernières minutes prolonge de 2 min ; dès la première offre, l’enchère ne se retire plus' : 'l’achat : c’est seulement là qu’il passe à l’acheteur, et l’or arrive dans sa bourse'}.${wornTaken ? ' <b>Il est porté</b> : déséquipe-le pour qu’il puisse être acheté.' : ''}${group.reserved ? ` (${group.reserved} déjà en vente.)` : ''}</p>` : ''}
+    <p class="bs-mk-note">ⓘ L’objet <b>reste dans l’inventaire</b> de ${_esc(char?.nom || '?')} jusqu’à ${auction ? 'ce que tu l’adjuges à la meilleure offre, quand elle te convient : il passe alors à l’enchérisseur, et son or (bloqué pendant l’enchère) arrive dans ta bourse. Tu peux aussi retirer l’enchère, l’offre est alors remboursée' : 'l’achat : c’est seulement là qu’il passe à l’acheteur, et l’or arrive dans sa bourse'}.${wornTaken ? ` <b>Il est porté</b> : déséquipe-le pour qu’il puisse être ${auction ? 'adjugé' : 'acheté'}.` : ''}${group.reserved ? ` (${group.reserved} déjà en vente.)` : ''}</p>` : ''}
     <div class="bs-mk-sell-ft">
       <button type="button" class="bs-w-btn" data-action="close-modal">Annuler</button>
       <button type="button" class="bs-w-btn bs-w-go" id="bs-mk-sell-go" data-action="_mkSellSubmit"${canSubmit ? '' : ' disabled'}>${auction ? 'Lancer l’enchère' : 'Mettre en vente'}</button>
@@ -938,7 +937,6 @@ export async function openMarketSellModal({ charId = '', indices = [], fromCompo
     qty: 1,
     price: '',
     mode: 'fixed',
-    duration: '24h',
     buyNow: '',
     text: fromComposer ? String(MK.ctx.draftText() || '') : '',
     fromComposer,
@@ -982,9 +980,7 @@ async function _submitSell() {
         status: 'active', pinned: false, commentCount: 0, reactions: {}, ts: now,
         listing: buildMarketListing({
           items: plan.items, price: plan.price, sellerUid: identity.uid, sellerCharId: char.id,
-          auction: s.mode === 'auction'
-            ? { endsAt: now + (AUCTION_DURATIONS.find(d => d.id === s.duration) || AUCTION_DURATIONS[1]).ms, buyNow: s.buyNow }
-            : null,
+          auction: s.mode === 'auction' ? { buyNow: s.buyNow } : null,
         }),
       };
       return {
@@ -1002,7 +998,7 @@ async function _submitSell() {
     MK.ui.sel = id;
     MK.ui.sheetOpen = false;
     const lot = `${result.plan.items[0]?.nom || 'Objet'}${result.plan.qty > 1 ? ` ×${result.plan.qty}` : ''}`;
-    showNotif(`🪙 ${lot} mis en vente au Bastion · ${_gold(result.plan.price)}${result.plan.worn ? ' — pense à le déséquiper avant l’achat' : ''}`, 'success');
+    showNotif(`🪙 ${lot} mis en vente au Bastion · ${_gold(result.plan.price)}${result.plan.worn ? ` — pense à le déséquiper avant ${s.mode === 'auction' ? 'de l’adjuger' : 'l’achat'}` : ''}`, 'success');
     _rerender();
   } catch (error) {
     _txError(error, 'La mise en vente n’a pas abouti.');
@@ -1028,6 +1024,7 @@ registerActions({
   },
   _mkBuy:         (btn) => _buy(btn.dataset.id || '', btn.dataset.price),
   _mkBid:         (btn) => _bid(btn.dataset.id || '', btn.dataset.min),
+  _mkAdjudicate:  (btn) => _adjudicate(btn.dataset.id || '', btn.dataset.amount),
   _mkWithdraw:    (btn) => withdrawMarketListing(btn.dataset.id || ''),
   _mkPrice:       (btn) => _editPrice(btn.dataset.id || ''),
   _mkOpenSell:    (btn) => openMarketSellModal({ fromComposer: btn?.dataset?.from === 'composer' }),
@@ -1037,7 +1034,6 @@ registerActions({
   _mkSellPrice:   (el) => { if (MK.sell) { MK.sell.price = el.value; _refreshSellSubmit(); } },
   _mkSellText:    (el) => { if (MK.sell) MK.sell.text = el.value || ''; },
   _mkSellMode:    (btn) => { if (MK.sell) { MK.sell.mode = btn.dataset.mode === 'auction' ? 'auction' : 'fixed'; _paintSell(); } },
-  _mkSellDuration:(el) => { if (MK.sell) MK.sell.duration = el.value || '24h'; },
   _mkSellBuyNow:  (el) => { if (MK.sell) MK.sell.buyNow = el.value || ''; },
   _mkSellSubmit:  () => _submitSell(),
 });
