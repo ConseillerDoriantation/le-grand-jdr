@@ -1,18 +1,22 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // BASTION-MARKET — Marché du Bastion : logique pure (ni DOM ni Firebase)
 // ──────────────────────────────────────────────────────────────────────────────
-// Une vente = une publication `offre` du mur qui porte `listing` : les unités
-// MISES EN DÉPÔT (retirées de l'inventaire du vendeur à la publication), le prix
-// du lot et, une fois vendue, l'acheteur. Le statut du post EST l'état de la
-// vente : active = en vente · resolved = vendue · cancelled = retirée (objet
-// rendu). Une vente close ne se rouvre jamais : l'objet a déjà changé de main.
+// Une vente = une publication `offre` du mur qui porte `listing` : l'objet vendu
+// (copie pour l'affichage), le prix du lot et, une fois vendue, l'acheteur.
+// L'objet RESTE dans l'inventaire du vendeur tant qu'il n'est pas vendu (v2) :
+// c'est l'achat qui le retire de sa fiche et le donne à l'acheteur. S'il l'a
+// vendu, donné ou jeté entre-temps, la vente n'est simplement plus achetable.
+// Les ventes v1 (avant le 2026-11-04) ont mis l'objet en dépôt : on les honore
+// telles quelles (l'achat ne touche pas l'inventaire du vendeur, le retrait le rend).
+// Statut du post = état de la vente : active = en vente · resolved = vendue ·
+// cancelled = retirée. Une vente close ne se rouvre jamais.
 //
 // Les plans calculent les écritures exactes d'une transaction à partir des
 // documents FRAIS qu'elle a lus ; ils lèvent MarketError (message prêt pour le
 // joueur) quand la vente n'est plus possible — la transaction n'écrit alors rien.
 // ══════════════════════════════════════════════════════════════════════════════
 import { calcOr } from './char-stats.js';
-import { resolveEquippedInventoryIndices, syncEquipmentAfterInventoryMutation } from './equipment-utils.js';
+import { resolveEquippedInventoryIndices } from './equipment-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from './inventory-history.js';
 import { isQuestItem, itemGroupKey, itemRarity } from './item-facts.js';
 
@@ -71,9 +75,32 @@ export function marketListingView(post = {}) {
     buyerCharId: String(listing.buyerCharId || ''),
     buyerName: String(listing.buyerName || ''),
     soldAt: Number(listing.soldAt) || 0,
+    // v1 : unités déjà retirées de l'inventaire à la publication (dépôt).
+    escrow: (Number(listing.v) || 1) < 2,
     ts: Number(post.ts) || 0,
     text: String(post.text || ''),
   };
+}
+
+// Un même post peut arriver par deux flux (mur récent + ventes ouvertes) :
+// la version la plus récemment modifiée l'emporte.
+export function mergeMarketPosts(...lists) {
+  const byId = new Map();
+  lists.flat().forEach(post => {
+    if (!post?.id) return;
+    const known = byId.get(post.id);
+    const at = p => Math.max(Number(p?.updatedAt) || 0, Number(p?.ts) || 0);
+    if (!known || at(post) >= at(known)) byId.set(post.id, post);
+  });
+  return [...byId.values()];
+}
+
+export function sortMarketViews(views = [], sort = 'recent') {
+  const list = [...views];
+  if (sort === 'price-asc') return list.sort((a, b) => a.price - b.price || b.ts - a.ts);
+  if (sort === 'price-desc') return list.sort((a, b) => b.price - a.price || b.ts - a.ts);
+  if (sort === 'rarity') return list.sort((a, b) => b.rarity - a.rarity || b.ts - a.ts);
+  return list.sort((a, b) => b.ts - a.ts);
 }
 
 // Livre de compte après une ligne de marché. Très anciennes fiches à champ `or`
@@ -94,42 +121,60 @@ export function marketLedgerPayload(character, delta, libelle, date) {
 const _lotLabel = view => `${view.name}${view.qty > 1 ? ` ×${view.qty}` : ''}`;
 const _copies = items => items.map(item => JSON.parse(JSON.stringify(item)));
 
-// Mise en vente : prend `qty` unités du lot `key` (rangées d'abord, équipées
-// ensuite) dans l'inventaire FRAIS du vendeur. `equipSync` indique s'il faut
-// réécrire l'équipement (objet porté retiré, index décalés).
-export function planMarketListing({ seller, key, qty = 1, price, now = Date.now(), actor = {} } = {}) {
+// Unités du lot `key` dans l'inventaire du vendeur : rangées puis portées.
+function _units(seller, key) {
+  const inventory = Array.isArray(seller?.inventaire) ? seller.inventaire : [];
+  const worn = new Set(resolveEquippedInventoryIndices(seller || {}).values());
+  const matching = inventory.map((item, index) => ({ item, index }))
+    .filter(({ item }) => item && typeof item === 'object' && marketItemKey(item) === key);
+  return {
+    inventory,
+    matching,
+    free: matching.filter(m => !worn.has(m.index)),
+    worn: matching.filter(m => worn.has(m.index)),
+  };
+}
+
+// La vente est-elle achetable avec l'inventaire actuel du vendeur ? Un objet
+// porté doit être déséquipé avant (l'acheteur ne peut pas toucher l'équipement
+// d'un autre). `reason` : 'missing' (plus assez d'exemplaires) ou 'worn'.
+export function marketAvailability(view, seller) {
+  if (view.escrow) return { ok: true, free: view.qty, worn: 0, reason: '' };
+  const { free, worn } = _units(seller, marketItemKey(view.item));
+  const ok = free.length >= view.qty;
+  const reason = ok ? '' : (free.length + worn.length >= view.qty ? 'worn' : 'missing');
+  return { ok, free: free.length, worn: worn.length, reason };
+}
+
+// Mise en vente : rien ne quitte l'inventaire. On vérifie seulement que le
+// vendeur possède `qty` exemplaires non déjà proposés (`reserved` = unités du
+// même lot dans ses autres ventes ouvertes) ; la copie sert à l'affichage.
+export function planMarketListing({ seller, key, qty = 1, price, reserved = 0 } = {}) {
   const amount = normalizeMarketPrice(price);
   if (!amount) throw new MarketError('price', `Indique un prix entre 1 et ${_gold(MARKET_PRICE_MAX)}.`);
   const wanted = Math.max(1, Math.min(MARKET_QTY_MAX, Math.floor(Number(qty) || 1)));
-  const inventory = Array.isArray(seller?.inventaire) ? seller.inventaire : [];
-  const matching = inventory.map((item, index) => ({ item, index }))
-    .filter(({ item }) => item && typeof item === 'object' && marketItemKey(item) === key);
+  const { matching, free, worn } = _units(seller, key);
   if (matching.some(({ item }) => isQuestItem(item))) throw new MarketError('quest', 'Un objet de quête ne se vend pas.');
-  const worn = new Set(resolveEquippedInventoryIndices(seller || {}).values());
-  const ordered = [...matching.filter(m => !worn.has(m.index)), ...matching.filter(m => worn.has(m.index))];
-  if (!ordered.length) throw new MarketError('missing', 'Cet objet n’est plus dans l’inventaire.');
-  if (ordered.length < wanted) throw new MarketError('missing', `Il ne reste que ${ordered.length} exemplaire${ordered.length > 1 ? 's' : ''} dans l’inventaire.`);
-  const taken = ordered.slice(0, wanted).map(m => m.index);
-  const takenSet = new Set(taken);
-  const items = _copies(taken.map(index => inventory[index]));
+  if (!matching.length) throw new MarketError('missing', 'Cet objet n’est plus dans l’inventaire.');
+  const left = matching.length - Math.max(0, Number(reserved) || 0);
+  if (left < wanted) {
+    throw new MarketError('missing', left > 0
+      ? `Il ne reste que ${left} exemplaire${left > 1 ? 's' : ''} à proposer (les autres sont déjà en vente).`
+      : 'Tous tes exemplaires sont déjà en vente.');
+  }
+  const ordered = [...free, ...worn].slice(0, wanted);
   return {
-    items,
+    items: _copies(ordered.map(m => m.item)),
     qty: wanted,
     price: amount,
-    removedIndices: taken,
-    unequipped: taken.some(index => worn.has(index)),
-    inventaire: inventory.filter((_, index) => !takenSet.has(index)),
-    equipSync: syncEquipmentAfterInventoryMutation(seller, taken),
-    ...inventoryHistoryPayload(seller, [makeInventoryHistoryEntry('send', items[0], wanted, {
-      ...actor, at: now, source: MARKET_SOURCE, targetName: 'Mise en vente', note: _gold(amount),
-    })]),
+    worn: Math.max(0, wanted - free.length),
   };
 }
 
 // Champs `listing` d'une nouvelle vente (les champs acheteur arrivent à la vente).
 export function buildMarketListing({ items, price, sellerUid, sellerCharId }) {
   return {
-    v: 1,
+    v: 2,
     items: _copies(items),
     price: normalizeMarketPrice(price),
     name: String(items[0]?.nom || 'Objet').slice(0, 90),
@@ -168,16 +213,32 @@ export function planMarketPurchase({ post, buyer, seller, buyerUid = '', expecte
   const lot = _lotLabel(view);
   const buyerName = String(buyer.nom || 'Personnage').slice(0, 80);
   const sellerName = String(seller.nom || view.sellerName).slice(0, 80);
+  // v2 : les exemplaires RÉELS (améliorations comprises) quittent maintenant la
+  // fiche du vendeur, rangés seulement — jamais un objet qu'il porte.
+  let sold = view.items;
+  let sellerInventory = null;
+  if (!view.escrow) {
+    const { inventory, free, worn } = _units(seller, marketItemKey(view.item));
+    if (free.length < view.qty) {
+      throw free.length + worn.length >= view.qty
+        ? new MarketError('worn', `${sellerName} porte encore cet objet : il doit le déséquiper pour que la vente se conclue.`)
+        : new MarketError('missing', `${sellerName} n’a plus cet objet : la vente n’est plus possible.`);
+    }
+    const taken = new Set(free.slice(0, view.qty).map(m => m.index));
+    sold = inventory.filter((_, index) => taken.has(index));
+    sellerInventory = inventory.filter((_, index) => !taken.has(index));
+  }
   return {
     view,
     buyerPatch: {
-      inventaire: [...(Array.isArray(buyer.inventaire) ? buyer.inventaire : []), ..._copies(view.items)],
+      inventaire: [...(Array.isArray(buyer.inventaire) ? buyer.inventaire : []), ..._copies(sold)],
       compte: marketLedgerPayload(buyer, -view.price, `Marché · ${lot} (${sellerName})`, date),
       ...inventoryHistoryPayload(buyer, [makeInventoryHistoryEntry('receive', view.item, view.qty, {
         ...actor, at: now, source: MARKET_SOURCE, targetName: sellerName, note: _gold(view.price),
       })]),
     },
     sellerPatch: {
+      ...(sellerInventory ? { inventaire: sellerInventory } : {}),
       compte: marketLedgerPayload(seller, view.price, `Marché · ${lot} → ${buyerName}`, date),
       ...inventoryHistoryPayload(seller, [makeInventoryHistoryEntry('sell', view.item, view.qty, {
         ...actor, at: now, source: MARKET_SOURCE, targetName: buyerName, note: `+${_gold(view.price)}`,
@@ -192,12 +253,15 @@ export function planMarketPurchase({ post, buyer, seller, buyerUid = '', expecte
   };
 }
 
-// Retrait : les unités en dépôt reviennent au vendeur, le post passe « retirée ».
+// Retrait : la vente passe « retirée ». Rien à rendre (v2 : l'objet n'a jamais
+// quitté l'inventaire) ; une vente v1 rend ses unités en dépôt au vendeur.
 export function planMarketWithdraw({ post, seller, now = Date.now(), actor = {} } = {}) {
   const view = _assertOpen(post, {
     sold: v => `Déjà vendu${v.buyerName ? ` à ${v.buyerName}` : ''} : l’objet a changé de main.`,
     withdrawn: () => 'Cette vente est déjà retirée.',
   });
+  const postPatch = { status: 'cancelled', updatedAt: now };
+  if (!view.escrow) return { view, sellerPatch: null, postPatch };
   if (!seller) throw new MarketError('seller', 'Le personnage vendeur n’existe plus.');
   return {
     view,
@@ -207,7 +271,7 @@ export function planMarketWithdraw({ post, seller, now = Date.now(), actor = {} 
         ...actor, at: now, source: MARKET_SOURCE, note: 'Retiré de la vente',
       })]),
     },
-    postPatch: { status: 'cancelled', updatedAt: now },
+    postPatch,
   };
 }
 
