@@ -357,11 +357,12 @@ function canUseCharacterResourceViaToken(adventureId, charId, tokenId) {
          );
 }
 // ── Marché du Bastion ───────────────────────────────────────────────────
-// Une vente = une annonce `offre` de bastionAnnonces portant `listing` : les
-// objets EN DÉPÔT (déjà retirés de l'inventaire du vendeur), le prix et, une
-// fois vendue, l'acheteur. Le statut EST l'état de la vente : active = en vente,
-// resolved = vendue, cancelled = retirée (objet rendu). L'or et l'objet passent
-// par la clause « Don entre membres » de characters, dans la MÊME transaction.
+// Une vente = une annonce `offre` de bastionAnnonces portant `listing` : l'objet
+// (copie d'affichage), le prix et, une fois vendue, l'acheteur. L'objet reste
+// dans l'inventaire du vendeur jusqu'à l'achat (v2 ; les ventes v1 l'avaient mis
+// en dépôt). Le statut EST l'état de la vente : active = en vente, resolved =
+// vendue, cancelled = retirée. À l'achat, l'objet et l'or passent par la clause
+// « Don entre membres » de characters, dans la MÊME transaction.
 function isMarketListing(data) {
   return data.get('type', '') == 'offre' && data.get('listing', null) is map;
 }
@@ -384,8 +385,8 @@ function marketCreateAllowed(data) {
 }
 // Auteur : texte libre ; dans `listing`, seul le prix change, et seulement tant
 // que la vente est ouverte. Le statut ne va que de « en vente » à « retirée » :
-// rouvrir une vente close dupliquerait l'objet déjà rendu ou déjà vendu. Une
-// annonce ordinaire ne peut pas devenir une vente après coup (pas de dépôt).
+// rouvrir une vente close dupliquerait l'objet déjà vendu (ou rendu en v1).
+// Une annonce ordinaire ne peut pas devenir une vente après coup.
 function marketAuthorUpdateAllowed(before, after) {
   return (!isMarketListing(before) && after.get('listing', null) == before.get('listing', null)) || (
     isMarketListing(before) &&

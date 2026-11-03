@@ -1,8 +1,9 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // BASTION-MARKET-UI — Marché du Bastion : mise en vente, achat, retrait, onglet
 // ──────────────────────────────────────────────────────────────────────────────
-// Une vente est une annonce « Offre » du mur qui porte l'objet en dépôt (règles
-// pures : shared/bastion-market.js). Ce module rend sa carte dans le fil,
+// Une vente est une annonce « Offre » du mur qui porte l'objet vendu ; il reste
+// dans l'inventaire du vendeur jusqu'à l'achat (règles pures :
+// shared/bastion-market.js). Ce module rend sa carte dans le fil,
 // l'onglet Marché (une liste + une fiche, comme l'Inventaire v11) et la modale de
 // mise en vente — ouvrable aussi depuis la fiche objet de l'Inventaire, sans que
 // le Bastion soit chargé. bastion.js injecte son contexte (initBastionMarket).
@@ -23,7 +24,6 @@ import {
   getInventoryItemImage, getInventoryItemResaleValue, getInventoryItemValue, getInventoryReadableDocument,
 } from '../shared/inventory-utils.js';
 import { getItemTraits, resolveEquippedInventoryIndices } from '../shared/equipment-utils.js';
-import { characterBuildsForStorage, patchBuildLocally } from '../shared/character-builds.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { charSession } from '../shared/char-session.js';
 import { touchBastionWallActivity } from '../shared/bastion-signal.js';
@@ -34,12 +34,15 @@ import {
   itemCompareSlot, itemDamageText, itemFamily, itemKind, itemRarity, itemSigned,
 } from '../shared/item-facts.js';
 import {
-  MARKET_PRICE_MAX, MarketError, buildMarketListing, isMarketListing, marketItemKey, marketListingView,
+  MARKET_PRICE_MAX, MarketError, buildMarketListing, isMarketListing, marketAvailability, marketItemKey, marketListingView,
   mergeMarketPosts, normalizeMarketPrice, planMarketListing, planMarketPrice, planMarketPurchase,
   planMarketWithdraw, sortMarketViews,
 } from '../shared/bastion-market.js';
 
 export { isMarketListing };
+
+// Vente v1 : objet déjà sorti de l'inventaire (dépôt) → à rendre si on supprime.
+export const isEscrowListing = post => isMarketListing(post) && marketListingView(post).escrow;
 
 const COL = 'bastionAnnonces';
 const MK = {
@@ -74,8 +77,8 @@ export function resetBastionMarket() {
 }
 
 // Le mur ne garde que ses 80 posts récents : ce flux borné aux ventes OUVERTES
-// garantit qu'une vieille vente ne quitte jamais le Marché (ni ne reste bloquée,
-// objet en dépôt, sans bouton Retirer). Deux égalités, aucun tri → index
+// garantit qu'une vieille vente ne quitte jamais le Marché (ni ne reste
+// ouverte sans bouton Retirer). Deux égalités, aucun tri → index
 // mono-champ fusionnés, rien à créer. Coupé à la navigation suivante.
 export function startMarketFeed() {
   MK.stopFeed?.();
@@ -171,11 +174,25 @@ function _stateLine(view) {
   return `Vendu par ${_esc(view.sellerName)}${view.ts ? ` · ${_ago(view.ts)}` : ''}`;
 }
 
+// L'objet est-il encore achetable (présent et rangé chez le vendeur) ? Lu sur la
+// fiche locale ; la transaction d'achat revérifie sur la fiche fraîche.
+const _avail = view => marketAvailability(view, _char(view.sellerCharId));
+function _availWarn(view) {
+  if (view.state !== 'open') return '';
+  const { ok, reason } = _avail(view);
+  if (ok) return '';
+  const mine = _isMine(view);
+  if (reason === 'worn') return mine ? 'Tu portes cet objet : déséquipe-le pour qu’il puisse être acheté.' : `${view.sellerName} porte encore cet objet : achat possible quand il l’aura rangé.`;
+  return mine ? 'Cet objet n’est plus dans ton inventaire : retire la vente.' : `${view.sellerName} n’a plus cet objet.`;
+}
+
 // Bouton d'achat : désactivé (avec la raison) plutôt qu'une erreur au clic.
 function _buyButton(view, cls = '') {
   const buyer = _buyer();
   if (!buyer) return '';
   const missing = view.price - calcOr(buyer);
+  const warn = _availWarn(view);
+  if (warn) return `<button type="button" class="bs-w-btn bs-w-go ${cls}" disabled title="${_esc(warn)}">Acheter</button>`;
   return missing > 0
     ? `<button type="button" class="bs-w-btn bs-w-go ${cls}" disabled title="Il manque ${_esc(_gold(missing))} à ${_esc(buyer.nom || 'ce personnage')}">Acheter</button>`
     : `<button type="button" class="bs-w-btn bs-w-go ${cls}" data-action="_mkBuy" data-id="${_esc(view.id)}" data-price="${view.price}" title="Acheter avec ${_esc(buyer.nom || 'ce personnage')}">Acheter</button>`;
@@ -206,6 +223,7 @@ export function marketWallBlockHtml(post) {
       <span class="bs-mk-price">${_esc(_gold(view.price))}${view.qty > 1 ? `<small>${_esc(_gold(view.unitPrice))} / u.</small>` : ''}</span>
       <span class="bs-mk-lot-acts">${actions}</span>
     </div>
+    ${_availWarn(view) ? `<p class="bs-mk-warn">⚠ ${_esc(_availWarn(view))}</p>` : ''}
   </div>`;
 }
 
@@ -289,13 +307,13 @@ function _sheetActions(view) {
   let hint = '';
   if (_isMine(view)) {
     main = `<button type="button" class="bs-w-btn" data-action="_mkPrice" data-id="${_esc(view.id)}">Modifier le prix</button><button type="button" class="bs-w-btn" data-action="_mkWithdraw" data-id="${_esc(view.id)}">Retirer de la vente</button>`;
-    hint = 'Ta vente : l’objet est en dépôt jusqu’à l’achat ou au retrait.';
+    hint = _availWarn(view) || 'Ta vente : l’objet reste dans ton inventaire jusqu’à l’achat.';
   } else if (buyer) {
     const missing = view.price - calcOr(buyer);
     main = _buyButton(view, 'bs-mk-buy');
-    hint = missing > 0
+    hint = _availWarn(view) || (missing > 0
       ? `Il manque ${_esc(_gold(missing))} à ${_esc(buyer.nom || 'ce personnage')}.`
-      : `${_esc(buyer.nom || 'Ton personnage')} : ${_esc(_gold(calcOr(buyer)))} → ${_esc(_gold(calcOr(buyer) - view.price))}`;
+      : `${_esc(buyer.nom || 'Ton personnage')} : ${_esc(_gold(calcOr(buyer)))} → ${_esc(_gold(calcOr(buyer) - view.price))}`);
   } else {
     hint = 'Il faut un personnage de cette aventure pour acheter.';
   }
@@ -373,7 +391,7 @@ function _summarySheetHtml(all) {
       ${buyer ? _fact(`Bourse de ${buyer.nom || '?'}`, _gold(calcOr(buyer))) : ''}
     </div>
     <section class="bs-mk-part"><h4>Comment ça marche</h4>
-      <p>L’objet mis en vente quitte l’inventaire du vendeur (en dépôt). À l’achat, l’or et l’objet changent de main en une seule opération, et le vendeur est prévenu. Retirer la vente rend l’objet.</p>
+      <p>L’objet mis en vente reste dans l’inventaire du vendeur jusqu’à l’achat. À l’achat, l’or et l’objet changent de main en une seule opération, et le vendeur est prévenu. Un objet porté doit être rangé pour être acheté.</p>
     </section>
     ${buyer ? `<footer class="bs-mk-acts"><div class="bs-mk-acts-main"><button type="button" class="bs-w-btn bs-w-go" data-action="_mkOpenSell">＋ Mettre un objet en vente</button></div></footer>` : ''}
   </aside>`;
@@ -502,8 +520,8 @@ async function _notifySale(view, buyer, postId, targetUid) {
   }, { silent: true }).catch(error => console.debug('[marché] notification de vente indisponible', error?.code || error));
 }
 
-// Rend l'objet au vendeur. `confirm: false` : appelant qui a déjà demandé
-// (suppression de l'annonce). Renvoie true si l'objet est bien revenu.
+// Retire la vente (l'objet n'a pas bougé ; une vente v1 rend son dépôt).
+// `confirm: false` : appelant qui a déjà demandé. Renvoie true si c'est fait.
 export async function withdrawMarketListing(id, { confirm = true } = {}) {
   if (MK.busy) return false;
   const post = _post(id);
@@ -511,29 +529,27 @@ export async function withdrawMarketListing(id, { confirm = true } = {}) {
   if (!view || view.state !== 'open') return false;
   if (!_canManage(view)) { showNotif('Seul le vendeur (ou le MJ) peut retirer cette vente.', 'error'); return false; }
   if (confirm) {
-    const ok = await confirmModal(`Retirer <b>${_esc(_lot(view))}</b> de la vente ?<br>L’objet revient dans l’inventaire de ${_esc(view.sellerName)}.`, {
+    const ok = await confirmModal(`Retirer <b>${_esc(_lot(view))}</b> de la vente ?<br>${view.escrow ? `L’objet revient dans l’inventaire de ${_esc(view.sellerName)}.` : 'L’objet reste dans l’inventaire, rien ne change sur la fiche.'}`, {
       title: 'Retirer de la vente', confirmLabel: 'Retirer', danger: true, icon: '↩️',
     }).catch(() => false);
     if (!ok) return false;
   }
   MK.busy = true;
   try {
-    const plan = await runDocsTransaction([
-      { col: COL, id },
-      { col: 'characters', id: view.sellerCharId },
-    ], ([freshPost, freshSeller]) => {
+    const reads = [{ col: COL, id }, ...(view.escrow ? [{ col: 'characters', id: view.sellerCharId }] : [])];
+    const plan = await runDocsTransaction(reads, ([freshPost, freshSeller]) => {
       const result = planMarketWithdraw({ post: freshPost, seller: freshSeller, now: Date.now(), actor: _actor() });
       return {
         writes: [
-          { col: 'characters', id: view.sellerCharId, data: result.sellerPatch },
+          ...(result.sellerPatch ? [{ col: 'characters', id: view.sellerCharId, data: result.sellerPatch }] : []),
           { col: COL, id, data: result.postPatch },
         ],
         result,
       };
     });
-    _patchLocalChar(view.sellerCharId, plan.sellerPatch);
+    if (plan.sellerPatch) _patchLocalChar(view.sellerCharId, plan.sellerPatch);
     _patchLocalPost(id, plan.postPatch);
-    showNotif(`↩️ ${_lot(plan.view)} est revenu dans l’inventaire de ${view.sellerName}.`, 'success');
+    showNotif(plan.sellerPatch ? `↩️ ${_lot(plan.view)} est revenu dans l’inventaire de ${view.sellerName}.` : `Vente de ${_lot(plan.view)} retirée.`, 'success');
     return true;
   } catch (error) {
     _txError(error, 'Le retrait n’a pas abouti.');
@@ -575,9 +591,18 @@ async function _editPrice(id) {
 // ══════════════════════════════════════════════
 // MISE EN VENTE — modale (Bastion, composeur du mur ou fiche Inventaire)
 // ══════════════════════════════════════════════
+// Exemplaires de chaque lot déjà proposés dans les ventes ouvertes (v2) du perso.
+function _reserved(charId) {
+  const out = new Map();
+  _views().filter(v => v.state === 'open' && !v.escrow && v.sellerCharId === charId)
+    .forEach(v => { const key = marketItemKey(v.item); out.set(key, (out.get(key) || 0) + v.qty); });
+  return out;
+}
+
 function _sellGroups(char) {
   const inventory = Array.isArray(char?.inventaire) ? char.inventaire : [];
   const worn = new Set(resolveEquippedInventoryIndices(char || {}).values());
+  const reserved = _reserved(char?.id);
   const groups = new Map();
   inventory.forEach((item, index) => {
     if (!item || typeof item !== 'object' || isQuestItem(item)) return;
@@ -587,7 +612,10 @@ function _sellGroups(char) {
     if (worn.has(index)) group.worn += 1;
     groups.set(key, group);
   });
-  return [...groups.values()].sort((a, b) => itemRarity(b.item) - itemRarity(a.item)
+  return [...groups.values()]
+    .map(g => ({ ...g, reserved: reserved.get(g.key) || 0, count: g.count - (reserved.get(g.key) || 0) }))
+    .filter(g => g.count > 0)
+    .sort((a, b) => itemRarity(b.item) - itemRarity(a.item)
     || String(a.item.nom || '').localeCompare(String(b.item.nom || ''), 'fr', { sensitivity: 'base' }));
 }
 
@@ -625,7 +653,7 @@ function _sellHtml() {
       </label>
     </div>
     <label class="bs-mk-field"><span>Message <em>facultatif</em></span><textarea class="input-field" rows="2" maxlength="1000" data-input="_mkSellText" placeholder="Parfait pour un guerrier, à débattre en réponse…">${_esc(s.text)}</textarea></label>
-    <p class="bs-mk-note">ⓘ L’objet part <b>en dépôt</b> : il quitte l’inventaire de ${_esc(char?.nom || '?')}${wornTaken ? ' et <b>sera déséquipé</b>' : ''}, puis revient si tu retires la vente. Vendu, l’or arrive directement dans sa bourse.</p>` : ''}
+    <p class="bs-mk-note">ⓘ L’objet <b>reste dans l’inventaire</b> de ${_esc(char?.nom || '?')} jusqu’à l’achat : c’est seulement là qu’il passe à l’acheteur, et l’or arrive dans sa bourse.${wornTaken ? ' <b>Il est porté</b> : déséquipe-le pour qu’il puisse être acheté.' : ''}${group.reserved ? ` (${group.reserved} déjà en vente.)` : ''}</p>` : ''}
     <div class="bs-mk-sell-ft">
       <button type="button" class="bs-w-btn" data-action="close-modal">Annuler</button>
       <button type="button" class="bs-w-btn bs-w-go" id="bs-mk-sell-go" data-action="_mkSellSubmit"${canSubmit ? '' : ' disabled'}>Mettre en vente</button>
@@ -688,17 +716,8 @@ async function _submitSell() {
   try {
     const result = await runDocsTransaction([{ col: 'characters', id: char.id }], ([fresh]) => {
       if (!fresh) throw new MarketError('seller', 'Personnage introuvable.');
-      const plan = planMarketListing({ seller: fresh, key: s.key, qty: s.qty, price, now, actor: _actor() });
-      const payload = { inventaire: plan.inventaire, inventoryHistory: plan.inventoryHistory };
-      if (plan.equipSync.changed) {
-        // Même séquence que « Donner » : équipement réindexé + build actif à jour.
-        const copy = { ...fresh };
-        payload.equipement = plan.equipSync.equipement;
-        payload.statsBonus = plan.equipSync.statsBonus;
-        patchBuildLocally(copy, { equipement: plan.equipSync.equipement, statsBonus: plan.equipSync.statsBonus });
-        payload.builds = characterBuildsForStorage(copy);
-        payload.activeBuildId = copy.activeBuildId;
-      }
+      // Rien ne quitte la fiche : on vérifie seulement qu'il reste assez d'exemplaires.
+      const plan = planMarketListing({ seller: fresh, key: s.key, qty: s.qty, price, reserved: _reserved(char.id).get(s.key) || 0 });
       const post = {
         kind: 'post', ...identity, type: 'offre', text: String(s.text || '').trim().slice(0, 4000),
         mediaId: '', imageCount: 0, imagePreview: '',
@@ -706,14 +725,10 @@ async function _submitSell() {
         listing: buildMarketListing({ items: plan.items, price: plan.price, sellerUid: identity.uid, sellerCharId: char.id }),
       };
       return {
-        writes: [
-          { col: 'characters', id: char.id, data: payload },
-          { col: COL, id, data: post, op: 'set' },
-        ],
-        result: { post, payload, plan },
+        writes: [{ col: COL, id, data: post, op: 'set' }],
+        result: { post, plan },
       };
     });
-    _patchLocalChar(char.id, result.payload);
     const created = { id, ...result.post };
     MK.offers = mergeMarketPosts(MK.offers, [normalizeBastionWallPost(created)]);
     MK.ctx.onPosted(created);
@@ -724,10 +739,7 @@ async function _submitSell() {
     MK.ui.sel = id;
     MK.ui.sheetOpen = false;
     const lot = `${result.plan.items[0]?.nom || 'Objet'}${result.plan.qty > 1 ? ` ×${result.plan.qty}` : ''}`;
-    showNotif(`🪙 ${lot} mis en vente au Bastion · ${_gold(result.plan.price)}${result.plan.unequipped ? ' (déséquipé)' : ''}`, 'success');
-    if (STATE.currentPage === 'characters') {
-      charSession.renderSheet?.(_char(char.id) || char, charSession.getCurrentCharTab() || 'inventaire');
-    }
+    showNotif(`🪙 ${lot} mis en vente au Bastion · ${_gold(result.plan.price)}${result.plan.worn ? ' — pense à le déséquiper avant l’achat' : ''}`, 'success');
     _rerender();
   } catch (error) {
     _txError(error, 'La mise en vente n’a pas abouti.');

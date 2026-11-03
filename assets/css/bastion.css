@@ -3077,3 +3077,5 @@
 [data-theme="light"] .bs-mk-chip:is(.stat-tone, .derived-tone) { color: color-mix(in srgb, var(--mk-tone, #5b6474) 62%, #11161f); }
 /* --gold-2 n'a pas de variante claire : prix et lien en --gold-dark. */
 [data-theme="light"] :is(.bs-mk-price, .bs-mk-acts-price b, .bs-mk-price-in b, .bs-side-link) { color: var(--gold-dark); }
+/* Vente non achetable pour l'instant (objet porté ou plus dans l'inventaire). */
+.bs-mk-warn { margin: 0; padding: 7px 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--amber); background: color-mix(in srgb, var(--amber) 7%, transparent); }

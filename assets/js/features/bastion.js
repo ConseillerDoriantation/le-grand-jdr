@@ -54,7 +54,7 @@ import { bastionEqualShare, bastionRoomProjects, roomFundingPlan, roomInvestment
 import { touchBastionWallActivity, refreshBastionWallDot } from '../shared/bastion-signal.js';
 import { normalizeEmoteCatalog } from '../shared/emote-admin.js';
 import {
-  initBastionMarket, isMarketListing, marketOpenCount, marketSideLabel, marketWallBlockHtml,
+  initBastionMarket, isEscrowListing, isMarketListing, marketOpenCount, marketSideLabel, marketWallBlockHtml,
   renderMarketTab, resetBastionMarket, startMarketFeed, withdrawMarketListing,
 } from './bastion-market-ui.js';
 
@@ -3222,8 +3222,8 @@ function _wallPostMenu(post) {
     <button type="button" class="is-danger" data-action="_bastionDeleteAnnonce" data-id="${_esc(post.id)}">🗑 Supprimer cette ancienne publication</button>
   </div>` : '';
   const mine = post.uid === STATE.user?.uid;
-  // Une vente ne se « clôt » pas à la main : rouvrir une vente retirée
-  // dupliquerait l'objet déjà rendu au vendeur.
+  // Une vente ne se « clôt » pas à la main : elle se conclut par l'achat ou se
+  // retire, et une vente close ne se rouvre jamais.
   const statusActions = post.type === 'message' || isMarketListing(post) ? '' : Object.entries(BASTION_WALL_STATUSES)
     .filter(([id]) => id !== post.status)
     .map(([id, status]) => `<button type="button" data-action="_bastionWallSetStatus" data-id="${_esc(post.id)}" data-status="${id}">${status.icon} ${status.label}</button>`).join('');
@@ -3577,9 +3577,9 @@ async function _bastionDeleteAnnonce(id) {
   const post = _wallPostById(id);
   const canDelete = post && (STATE.isAdmin || (!post.legacy && post.uid === STATE.user?.uid));
   if (!canDelete) { showNotif('Tu ne peux supprimer que tes publications.', 'error'); return; }
-  // Vente ouverte : l'objet en dépôt revient d'abord au vendeur, sinon il
-  // disparaîtrait avec l'annonce.
-  const openSale = isMarketListing(post) && post.status === 'active';
+  // Ancienne vente ouverte (v1, objet en dépôt) : l'objet revient d'abord au
+  // vendeur, sinon il disparaîtrait avec l'annonce. En v2 il n'a jamais bougé.
+  const openSale = isEscrowListing(post) && post.status === 'active';
   const confirmed = await confirmModal(openSale
     ? `Retirer la vente et supprimer la publication ?<br>L’objet revient dans l’inventaire de ${_esc(post.charName || 'son vendeur')}.`
     : 'Supprimer définitivement cette publication et toutes ses réponses ?', { title: 'Supprimer la publication', confirmLabel: 'Supprimer', danger: true }).catch(() => false);
