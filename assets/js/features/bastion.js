@@ -2465,28 +2465,28 @@ function _renderHeader(b) {
       ];
 
   return `
-    <header class="ag-top bs-top">
-      <div class="ag-top-in">
-        <div class="ag-top-row">
-          <div class="ag-brand">
-            <span aria-hidden="true" style="font-size:20px">${_esc(b.emoji || '🏰')}</span>
+    <header class="bs-page-top">
+      <div class="bs-page-top-in">
+        <div class="bs-page-top-row">
+          <div class="bs-page-brand">
             <h1>${_esc(b.nom || 'Le Bastion')}</h1>
-            <small>${b.lieu ? _esc(b.lieu) : 'Quartier général'}</small>
+            <small>Bastion · ${b.lieu ? _esc(b.lieu) : 'Quartier général'}</small>
           </div>
-          <div style="flex:1"></div>
-          <div class="ag-scope bs-scope">
-            <div class="ag-sc-btn"><small>Période</small><span>${b.semaine || 1}</span></div>
-            <div class="ag-sc-btn"><small>Trésor</small><span>${bastionOr} or</span></div>
-            ${hasChar ? `<label class="ag-sc-btn bs-scope-character"><small>Je joue</small><select data-change="_bastionSetScopeChar" aria-label="Personnage qui cotise">${chars.map(char => `<option value="${_esc(char.id)}"${char.id === _bastionScopeChar()?.id ? ' selected' : ''}>${_esc(char.nom || '?')}</option>`).join('')}</select></label><div class="ag-sc-btn bs-scope-wallet"><small>Ma bourse</small><span>${calcOr(_bastionScopeChar())} or</span></div>` : ''}
+          <div class="bs-page-stats" aria-label="Résumé du Bastion">
+            <span><b>${b.semaine || 1}</b> période</span>
+            <span><b>${bastionOr} or</b> trésor</span>
+            ${hasChar ? `<label class="bs-page-character"><small>Je joue</small><select data-change="_bastionSetScopeChar" aria-label="Personnage qui cotise">${chars.map(char => `<option value="${_esc(char.id)}"${char.id === _bastionScopeChar()?.id ? ' selected' : ''}>${_esc(char.nom || '?')}</option>`).join('')}</select></label><span class="bs-page-wallet"><b>${calcOr(_bastionScopeChar())} or</b> bourse</span>` : ''}
           </div>
-          ${hasChar ? `<div class="bs-scope-tx">
-            <button class="btn btn-outline btn-sm" data-action="_bastionOpenTransfer" data-dir="deposit">＋ Verser</button>
-            ${bastionOr > 0 ? `<button class="btn btn-outline btn-sm" data-action="_bastionOpenTransfer" data-dir="withdraw">− Retirer</button>` : ''}
-          </div>` : ''}
-          <details class="ag-menu bs-menu">
-            <summary class="ag-menu-btn" title="Actions du Bastion" aria-label="Actions du Bastion">⋯</summary>
-            <div class="ag-menu-pop">${menuItems.filter(Boolean).join('')}</div>
-          </details>
+          <div class="bs-page-actions">
+            ${hasChar ? `
+              <button class="bs-page-btn is-primary" data-action="_bastionOpenTransfer" data-dir="deposit">＋ Verser</button>
+              ${bastionOr > 0 ? `<button class="bs-page-btn" data-action="_bastionOpenTransfer" data-dir="withdraw">− Retirer</button>` : ''}
+            ` : ''}
+            <details class="ag-menu bs-menu">
+              <summary class="ag-menu-btn" title="Actions du Bastion" aria-label="Actions du Bastion">⋯</summary>
+              <div class="ag-menu-pop">${menuItems.filter(Boolean).join('')}</div>
+            </details>
+          </div>
         </div>
         <nav class="ag-tabs bs-tabs" aria-label="Sections du Bastion">
           ${_BS_TABS.map(([k, ic, lbl]) => {

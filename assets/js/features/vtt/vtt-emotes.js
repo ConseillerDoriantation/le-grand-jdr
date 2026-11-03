@@ -394,9 +394,11 @@ function _emoteBodyHtml(list, favs, query) {
 
 // La recherche ne reconstruit que les résultats. L'input conserve ainsi son
 // nœud DOM, son focus et son curseur pendant toute la saisie.
-function _refreshEmoteSearchResults() {
+function _refreshEmoteSearchResults({ preserveScroll = false } = {}) {
   const picker = document.getElementById('vtt-emote-picker');
   if (!picker) return;
+  const body = picker.querySelector('.vtt-emote-body');
+  const scrollTop = preserveScroll ? body?.scrollTop || 0 : 0;
   const favs = _getFavs();
   const query = _emoteQuery.trim();
   const list = _emoteListFor();
@@ -404,6 +406,7 @@ function _refreshEmoteSearchResults() {
   const grid = picker.querySelector('#vtt-emote-grid');
   if (tabs) tabs.innerHTML = _emoteTabsHtml(list, favs, query);
   if (grid) grid.innerHTML = _emoteBodyHtml(list, favs, query);
+  if (preserveScroll && body) body.scrollTop = scrollTop;
   if (_emoteHover) { _emoteHover = null; _refreshEmoteFoot(); }
 }
 
@@ -497,7 +500,7 @@ export function _vttToggleFav(name) {
   if (had) favs.splice(idx, 1); else favs.push(name);
   _setFavs(favs);
   showNotif(had ? 'Retirée de la roue' : (favs.length > 8 ? 'Ajoutée — la roue affiche les 8 premières' : `Ajoutée à la roue · touche ${favs.length}`), 'info');
-  _renderEmotePicker();
+  _refreshEmoteSearchResults({ preserveScroll: true });
 }
 
 // ── Ouverture / fermeture. Le glisser démarre dans le panneau, donc la fermeture

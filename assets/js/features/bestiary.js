@@ -976,7 +976,7 @@ function _bstLootOrRow(c) {
   </div>`;
 }
 
-// Ligne d'objet : pastille de rareté · nom · rareté · Qté · Chance (pastille) · retirer.
+// Ligne d'objet : pastille de rareté · nom · rareté · Qté · Chance (pastille) · actions.
 // `.bst-p-row` conservé → _bstSaveArr (scrape) et removeRow fonctionnent inchangés ;
 // la chance vit dans un input caché synchronisé avec la pastille.
 function _bstLootRow(b = {}, id, i) {
@@ -998,7 +998,12 @@ function _bstLootRow(b = {}, id, i) {
       title="Chance de tomber — clic pour changer" aria-label="Chance de tomber : ${_bstChanceLbl(chance)}">${_bstChanceLbl(chance)}</button>
     <input type="hidden" data-f="chance" value="${_esc(chance)}">
     <input type="hidden" data-f="itemId" value="${_esc(b.itemId || '')}">
-    <button class="bst-arme-ic dngr" data-bst-action="removeRow" data-id="${id}" data-type="butins" title="Retirer" aria-label="Retirer">×</button>
+    <span class="bst-lactions">
+      <button type="button" class="bst-arme-ic" data-bst-action="pickerEdit" data-id="${id}" data-idx="${i}"
+        title="Modifier l’objet" aria-label="Modifier ${_esc(nom)}">✎</button>
+      <button type="button" class="bst-arme-ic dngr" data-bst-action="removeRow" data-id="${id}" data-type="butins"
+        title="Retirer" aria-label="Retirer ${_esc(nom)}">×</button>
+    </span>
   </div>`;
 }
 
@@ -1040,34 +1045,45 @@ const _bstRarColor = getRareteColor;
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // PICKER OBJET BOUTIQUE â€” utilise le composant partagÃ© shared/shop-picker.js
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-async function _bstButinPickerOpen(creatureId) {
+async function _bstButinPickerOpen(creatureId, editIndex = null) {
   if (!creatureId) return;
   const c = STORE.creatures.find(x => x.id === creatureId);
   if (!c) return;
+  const editing = Number.isInteger(editIndex) && editIndex >= 0;
+  if (editing && !c.butins?.[editIndex]) return;
   await openShopPicker({
-    title: 'Ajouter un butin',
+    title: editing ? 'Modifier le butin' : 'Ajouter un butin',
     modalMode: 'push',
-    hint: 'Tu peux enchainer les ajouts sans fermer cette fenetre.',
+    hint: editing
+      ? 'Choisis l’objet qui remplacera celui de cette ligne.'
+      : 'Tu peux enchainer les ajouts sans fermer cette fenetre.',
     ownedBadgeTitle: 'Deja dans le butin',
-    alreadyPicked: () => new Set((c.butins || []).map(b => b.itemId).filter(Boolean)),
+    alreadyPicked: () => new Set((c.butins || [])
+      .filter((_, index) => !editing || index !== editIndex)
+      .map(b => b.itemId)
+      .filter(Boolean)),
     onPick: (item) => {
       const butins = Array.isArray(c.butins) ? [...c.butins] : [];
-      if (butins.find(b => b.itemId === item.id)) {
+      if (butins.some((b, index) => b.itemId === item.id && (!editing || index !== editIndex))) {
         showNotif('Deja dans le butin de cette creature', 'warning');
         return false; // empÃªche l'ajout
       }
-      butins.push({
+      const previous = editing ? butins[editIndex] : null;
+      const next = {
         itemId:   item.id,
         nom:      item.nom   || '',
         image:    item.image || '',
-        quantite: '1',
-        chance:   '100%',
-      });
+        quantite: previous?.quantite || '1',
+        chance:   previous?.chance   || '100%',
+      };
+      if (editing) butins[editIndex] = next;
+      else butins.push(next);
       c.butins = butins;
       _bstQueueSave(creatureId, { butins });
       _bstRefreshButinSelects(creatureId);
       const countEl = document.querySelector(`[data-bst-count="${creatureId}-butins"]`);
       if (countEl) countEl.textContent = butins.length;
+      if (editing) popModal();
     },
   });
 }
@@ -2812,6 +2828,7 @@ Object.assign(bstHandlers, {
 
   // Picker de butin (dÃ©lÃ©gation au composant partagÃ© shop-picker.js â€” pas de handlers locaux)
   pickerOpen:     (el) => _bstButinPickerOpen(el.dataset.id),
+  pickerEdit:     (el) => _bstButinPickerOpen(el.dataset.id, parseInt(el.dataset.idx)),
 
   // Image
   openImage:      (el) => openBeastImageModal(el.dataset.id),

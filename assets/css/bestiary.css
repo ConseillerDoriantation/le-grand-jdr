@@ -1244,12 +1244,12 @@ textarea.bst-deduct-input {
 }
 
 /* ── Butin (v2) — tableau aligné, chance en pastille, tirage d'essai ──────── */
-.bst-lhead { display: grid; grid-template-columns: minmax(0,1fr) 54px 42px 58px 21px; gap: 5px; padding: 0 8px 4px 19px; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); font-weight: 700; }
+.bst-lhead { display: grid; grid-template-columns: minmax(0,1fr) 54px 42px 58px 47px; gap: 5px; padding: 0 8px 4px 19px; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); font-weight: 700; }
 .bst-lhead span:nth-child(2), .bst-lhead span:nth-child(3) { text-align: center; }
 .bst-lhead span:first-child { grid-column: 1/3; }
 .bst-loot { display: flex; flex-direction: column; gap: 3px; }
 .bst-loot-items { display: flex; flex-direction: column; gap: 3px; }
-.bst-lrow.bst-p-row, .bst-lrow { display: grid; grid-template-columns: 9px minmax(0,1fr) 54px 42px 58px 21px; align-items: center; gap: 5px; padding: 5px 4px 5px 8px; border-radius: var(--r-xs); background: var(--surface-sunken); border: 1px solid var(--border); min-height: 0; }
+.bst-lrow.bst-p-row, .bst-lrow { display: grid; grid-template-columns: 9px minmax(0,1fr) 54px 42px 58px 47px; align-items: center; gap: 5px; padding: 5px 4px 5px 8px; border-radius: var(--r-xs); background: var(--surface-sunken); border: 1px solid var(--border); min-height: 0; }
 .bst-lrow.is-orphan { border-color: color-mix(in srgb, var(--crimson) 40%, var(--border)); background: color-mix(in srgb, var(--crimson) 6%, var(--surface-sunken)); }
 .bst-lrow.or { grid-template-columns: 9px minmax(0,1fr) 100px 58px 21px; background: color-mix(in srgb, var(--amber) 6%, var(--surface-sunken)); border-color: color-mix(in srgb, var(--amber) 20%, var(--border)); }
 .bst-lrow.or .bst-lrar { display: none; }
@@ -1263,6 +1263,7 @@ textarea.bst-deduct-input {
 .bst-lch { height: 23px; border-radius: var(--r-full); border: 1px solid var(--border-md); background: none; cursor: pointer; font: inherit; font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .bst-lch:hover { border-color: var(--border-strong); color: var(--text); }
 .bst-lch.on { border-color: color-mix(in srgb, var(--emerald) 40%, transparent); background: color-mix(in srgb, var(--emerald) 12%, transparent); color: var(--emerald); }
+.bst-lactions { display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
 .bst-drawbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-top: 9px; }
 .bst-draw { height: 28px; padding: 0 12px; border-radius: var(--r-full); border: 1px solid var(--border-md); background: var(--surface-2); cursor: pointer; font: inherit; font-size: 11.5px; color: var(--text-soft); white-space: nowrap; }
 .bst-draw:hover { border-color: var(--gold); color: var(--gold-2); }
