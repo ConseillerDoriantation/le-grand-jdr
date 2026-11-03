@@ -3577,14 +3577,17 @@ async function _bastionDeleteAnnonce(id) {
   const post = _wallPostById(id);
   const canDelete = post && (STATE.isAdmin || (!post.legacy && post.uid === STATE.user?.uid));
   if (!canDelete) { showNotif('Tu ne peux supprimer que tes publications.', 'error'); return; }
-  // Ancienne vente ouverte (v1, objet en dépôt) : l'objet revient d'abord au
-  // vendeur, sinon il disparaîtrait avec l'annonce. En v2 il n'a jamais bougé.
+  // Vente ouverte qui tient un dépôt (objet d'une vente v1, or bloqué d'une
+  // offre d'enchère) : il est d'abord rendu, sinon il disparaîtrait avec
+  // l'annonce. Une vente v2 sans offre n'a rien en dépôt.
   const openSale = isEscrowListing(post) && post.status === 'active';
   const confirmed = await confirmModal(openSale
-    ? `Retirer la vente et supprimer la publication ?<br>L’objet revient dans l’inventaire de ${_esc(post.charName || 'son vendeur')}.`
+    ? `Retirer la vente et supprimer la publication ?<br>${post.listing?.bid
+      ? `L’offre de ${_esc(post.listing.bid.name || '?')} lui est remboursée.`
+      : `L’objet revient dans l’inventaire de ${_esc(post.charName || 'son vendeur')}.`}`
     : 'Supprimer définitivement cette publication et toutes ses réponses ?', { title: 'Supprimer la publication', confirmLabel: 'Supprimer', danger: true }).catch(() => false);
   if (!confirmed) return;
-  if (openSale && !await withdrawMarketListing(id, { confirm: false })) return;
+  if (openSale && !await withdrawMarketListing(id, { confirm: false, deleting: true })) return;
   if (post.legacy) {
     const items = _legacyAnnonces.filter(item => item.id !== id).map(({ legacy, legacyIndex, ...item }) => {
       // Ne pas transformer les identifiants d'affichage générés par la refonte
