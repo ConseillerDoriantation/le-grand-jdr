@@ -285,15 +285,25 @@ function _mountBastionWallNotifications() {
       unseen.forEach(event => delivered.add(event.id));
       const pending = unseen.slice(-10);
       pending.forEach(event => {
-        const label = event.kind === 'mention' ? 'vous mentionne'
-          : event.kind === 'sale' ? 'a acheté votre offre au Marché'
-            : 'a répondu sur le mur';
+        const label = {
+          mention: 'vous mentionne',
+          sale: 'a acheté votre offre au Marché',
+          bid: 'a enchéri sur votre vente',
+          outbid: 'a surenchéri sur votre offre',
+          won: 'vous adjuge son enchère',
+          'auction-failed': '· enchère annulée',
+          'auction-unsold': '· enchère terminée',
+        }[event.kind] || 'a répondu sur le mur';
         const message = `${event.actorName || 'Un personnage'} ${label}${event.text ? ` : ${event.text}` : ''}`;
         recordNotification(message, 'info', { id: `wall:${event.id}`, at: event.ts, page: 'bastion', sub: `post:${event.postId}` });
       });
       if (pending.length) showNotif(
         pending.length === 1 && pending[0].kind === 'sale'
           ? `🪙 Vente conclue : ${pending[0].actorName || 'Un personnage'} a acheté ${pending[0].text || 'votre offre'}.`
+          : pending.length === 1 && pending[0].kind === 'outbid'
+            ? `⚖ ${pending[0].actorName || 'Quelqu’un'} a surenchéri : ${pending[0].text || 'votre offre est battue'}.`
+            : pending.length === 1 && pending[0].kind === 'won'
+              ? `⚖ Enchère remportée : ${pending[0].text || ''}`
           : pending.length === 1 ? 'Nouveau message pour vous sur le mur du Bastion.' : `${pending.length} nouveaux messages pour vous sur le mur du Bastion.`,
         'info',
         { history: false, duration: 5000 },
