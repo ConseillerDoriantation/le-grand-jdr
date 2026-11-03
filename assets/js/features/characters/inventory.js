@@ -30,7 +30,8 @@ import { getArmorTypeMeta, getWeaponDamageStatKeys } from '../../shared/equipmen
 import { isFeatureEnabled } from '../../shared/features.js';
 import { recipeBookButton } from '../recipes.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
-import { calcUpgradeRefund, getUpgradeTotalCost, hasUpgrades, getUpgradeSettings } from '../../shared/upgrade-settings.js';
+import { hasUpgrades, getUpgradeSettings, loadUpgradeSettings } from '../../shared/upgrade-settings.js';
+import { upgradeResaleBonus, upgradeTariffValue } from '../../shared/upgrade-value.js';
 import { characterBuildsForStorage, getActiveBuild, patchBuildLocally } from '../../shared/character-builds.js';
 import { mergeCharacterTransferTargets } from '../../shared/character-transfer-targets.js';
 import {
@@ -326,6 +327,8 @@ const _ivSigned = n => `${n > 0 ? '+' : ''}${n}`;
 const _ivGold = n => `${Number(n || 0).toLocaleString('fr-FR')} or`;
 const _ivB64 = indices => btoa(JSON.stringify(indices));
 const _ivCatalog = item => getInventoryCatalogItem(item?.itemId);
+// Revente d'un exemplaire : prix de reprise + part de ses améliorations au tarif actuel.
+const _ivResale = item => getInventoryItemResaleValue(item, _ivCatalog(item)) + upgradeResaleBonus(item, getUpgradeSettings());
 const _ivReadable = item => !!getInventoryReadableDocument(item, _ivCatalog(item));
 
 // ── Nature de l'objet ─────────────────────────
@@ -550,7 +553,8 @@ function _ivItemSheetHtml(c, m, sel, canEdit) {
   const worn = [...new Set(group.indices.flatMap(index => m.eqMap.get(index) || []))];
   const per = group.qte > 1 ? ' / u.' : '';
   const price = getInventoryItemValue(item, cat);
-  const resale = getInventoryItemResaleValue(item, cat);
+  const resaleBase = getInventoryItemResaleValue(item, cat);
+  const resale = _ivResale(item); // + reprise de ses améliorations
   const image = getInventoryItemImage(item, cat);
   const readable = !!getInventoryReadableDocument(item, cat);
   const quest = _invIsQuestItem(item);
@@ -592,7 +596,7 @@ function _ivItemSheetHtml(c, m, sel, canEdit) {
       ? _ivBtn(zone === 'belt' ? 'Ranger dans le sac' : 'Mettre à portée de main', '_invToggleBelt', `${ids} data-belt="${zone !== 'belt'}"`) : '',
   ].join('');
   const more = [
-    !quest && resale ? _ivBtn(`Vendre <small>${_ivGold(resale)}</small>`, 'openSellInvModal', `${named} data-prix="${resale}"`, 'is-ghost') : '',
+    !quest && resale ? _ivBtn(`Vendre <small>${_ivGold(resale)}</small>`, 'openSellInvModal', `${named} data-prix="${resaleBase}"`, 'is-ghost') : '',
     _ivBtn('Donner', 'openSendInvModal', named, 'is-ghost'),
     item.source === 'custom' ? _ivBtn('Modifier', 'openCreateItemModal', `data-id="${_esc(c.id)}" data-index="${group.indices[0]}"`, 'is-ghost') : '',
     !quest ? _ivBtn('Jeter', 'openDeleteInvModal', named, 'is-ghost is-danger') : '',
@@ -667,7 +671,7 @@ function _ivSummarySheetHtml(c, m) {
       ${_ivFact('Objets', total(() => 1))}
       ${_ivFact('Emplacements', `${worn.length} / ${m.slots.length}`)}
       ${_ivFact('Valeur', _ivGold(total(item => getInventoryItemValue(item, _ivCatalog(item)))))}
-      ${_ivFact('Revente', _ivGold(total(item => getInventoryItemResaleValue(item, _ivCatalog(item)))))}
+      ${_ivFact('Revente', _ivGold(total(_ivResale)))}
     </div>
     ${_ivTagsHtml('Bonus de l’équipement', [...sums.values()].filter(b => b.v).map(b => _ivChipHtml({ t: `${b.k} ${_ivSigned(b.v)}`, cls: b.cls })).join(''))}
     ${fresh.length ? `<section class="iv-part"><h4>Nouveautés · 14 jours</h4><div class="iv-fresh">${fresh.map(({ key, group }) =>
@@ -716,6 +720,18 @@ function _ivWatchWidth() {
   _ivResizeObs.observe(root);
 }
 
+// Tarifs d'amélioration (world/upgrade_settings) : lus seulement si l'inventaire
+// porte un objet amélioré, pour que la revente affichée inclue la reprise ; la
+// fiche est rafraîchie si les tarifs chargés ne sont pas ceux du rendu.
+function _ivEnsureUpgradeSettings(c) {
+  if (!Array.isArray(c.inventaire) || !c.inventaire.some(hasUpgrades)) return;
+  const shown = getUpgradeSettings();
+  loadUpgradeSettings().then(settings => {
+    if (settings === shown || !document.querySelector('.iv')) return;
+    if ((charSession.getCurrentChar?.() || STATE.activeChar)?.id === c.id) _invSelect(_invSelected, { open: false });
+  });
+}
+
 export function renderCharInventaire(c, canEdit) {
   if (_invSelCharId !== c.id) { _invSelCharId = c.id; _invSelected = ''; _invSheetOpen = false; }
   _invLastCanEdit = !!canEdit;
@@ -726,6 +742,7 @@ export function renderCharInventaire(c, canEdit) {
   const width = document.getElementById('char-tab-content')?.clientWidth || 0;
   setTimeout(_ivBindInventoryKeys, 0);
   queueMicrotask(_ivWatchWidth);
+  _ivEnsureUpgradeSettings(c);
   return `<div class="iv${width && width < _IV_NARROW ? ' is-narrow' : ''}${_invSheetOpen ? ' is-sheet-open' : ''}">
     <div class="iv-bar">
       <label class="iv-search"><span aria-hidden="true">🔍</span><input type="search" value="${_esc(_charInvSearch)}" placeholder="Chercher un objet…  ( / )" data-input="_charInvSearch" autocomplete="off" aria-label="Rechercher dans l’inventaire"></label>
@@ -866,7 +883,14 @@ export async function saveInvPersonalLine(charId, indicesB64, sourceEl = null) {
 // ══════════════════════════════════════════════
 // VENTE
 // ══════════════════════════════════════════════
-export function openSellInvModal(charId, indicesB64, prixVente, nom) {
+// Ordre de vente d'un groupe : exemplaires rangés d'abord, équipés ensuite.
+function _sellOrder(c, indices) {
+  const equippedMap = getEquippedInventoryIndexMap(c);
+  const worn = idx => !!(equippedMap.get(idx) || []).length;
+  return [...indices.filter(idx => !worn(idx)), ...indices.filter(worn)];
+}
+
+export async function openSellInvModal(charId, indicesB64, prixVente, nom) {
   const indices = _decodeIndices(indicesB64);
   const maxQte  = indices.length;
   if (maxQte === 0) return;
@@ -876,24 +900,22 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
   const equippedSlots = [...new Set(indices.flatMap(idx => equippedMap.get(idx) || []))];
   const hasEquipped = equippedSlots.length > 0;
 
-  // Reprise sur améliorations : par item, on peut rembourser un % du coût investi.
-  const settings = getUpgradeSettings();
-  const refundRatio = parseFloat(settings?.refundUpgradeRatio) || 0;
-  const upgradedItems = c
-    ? indices.map(idx => c.inventaire?.[idx]).filter(it => it && hasUpgrades(it))
-    : [];
+  // Reprise des améliorations : X % de leur tarif actuel, par exemplaire, dans
+  // l'ordre où sellInvItemBulk les vend.
+  const items = c ? _sellOrder(c, indices).map(idx => c.inventaire?.[idx]) : [];
+  const upgradedItems = items.filter(it => it && hasUpgrades(it));
   const upgradedCount = upgradedItems.length;
-  const refundPerItem = upgradedItems.map(it => calcUpgradeRefund(it, settings));
-  const totalRefundAll = refundPerItem.reduce((s, n) => s + n, 0);
-  const lostInvestmentAll = upgradedItems.reduce((s, it) => s + getUpgradeTotalCost(it), 0) - totalRefundAll;
-  // Pour le calcul live (qty variable), on rembourse les `qty` premiers items améliorés.
-  const refundsCum = refundPerItem.reduce((acc, v) => { acc.push((acc[acc.length-1]||0) + v); return acc; }, []);
-  const refundForQty = (q) => refundsCum[Math.min(q, upgradedCount) - 1] || 0;
-  // Expose le tableau cumulatif au handler inline pour live-update.
+  const settings = upgradedCount ? await loadUpgradeSettings() : getUpgradeSettings();
+  const refundRatio = Math.min(1, parseFloat(settings?.refundUpgradeRatio) || 0);
+  const tariffAll = upgradedItems.reduce((s, it) => s + upgradeTariffValue(it, settings), 0);
+  // Cumul par quantité vendue, exposé au handler de saisie pour le total live.
+  const refundsCum = items.reduce((acc, it) => { acc.push((acc[acc.length-1]||0) + upgradeResaleBonus(it, settings)); return acc; }, []);
+  const refundForQty = (q) => refundsCum[Math.min(q, refundsCum.length) - 1] || 0;
+  const totalRefundAll = refundForQty(maxQte);
   _sellRefundsCum = refundsCum;
 
-  const refundHintHtml = upgradedCount && refundRatio > 0
-    ? ` <span id="sell-refund-hint" class="invm-hint">(dont +${refundForQty(1)} reprise)</span>`
+  const refundHintHtml = totalRefundAll > 0
+    ? ` <span id="sell-refund-hint" class="invm-hint">${refundForQty(1) > 0 ? `(dont +${refundForQty(1)} reprise)` : ''}</span>`
     : '';
 
   openModal(`💰 Vendre`, `
@@ -919,10 +941,10 @@ export function openSellInvModal(charId, indicesB64, prixVente, nom) {
       <div class="invm-info">
         <span class="invm-info-ico">✨</span>
         <div>
-          <b>Item${upgradedCount>1?'s':''} amélioré${upgradedCount>1?'s':''}</b>
+          <b>Objet${upgradedCount>1?'s':''} amélioré${upgradedCount>1?'s':''}</b>
           <span>${refundRatio > 0
-            ? `Reprise ${Math.round(refundRatio * 100)}% des PO investies — jusqu'à <b style="color:var(--gold)">+${totalRefundAll} or</b>.`
-            : `Les améliorations seront perdues sans remboursement (${lostInvestmentAll} PO investies).`}</span>
+            ? `Améliorations reprises à ${Math.round(refundRatio * 100)} % de leur tarif (${tariffAll} PO) : ${maxQte > 1 ? 'jusqu’à ' : ''}<b style="color:var(--gold)">+${totalRefundAll} or</b>.`
+            : `Les améliorations (${tariffAll} PO au tarif actuel) sont perdues à la revente.`}</span>
         </div>
       </div>` : ''}
 
@@ -981,10 +1003,7 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
 
     const allIndices = _decodeIndices(indicesB64);
     const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), allIndices.length);
-    const equippedMap = getEquippedInventoryIndexMap(c);
-    const unequippedIndices = allIndices.filter(idx => !(equippedMap.get(idx) || []).length);
-    const equippedIndices = allIndices.filter(idx => (equippedMap.get(idx) || []).length);
-    const indicesToSell = [...unequippedIndices, ...equippedIndices].slice(0, qty);
+    const indicesToSell = _sellOrder(c, allIndices).slice(0, qty);
 
     const inv      = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
     const item     = inv[indicesToSell[0]];
@@ -992,9 +1011,9 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
     const itemNom  = item.nom || 'objet';
     const totalPrix = prixVente * qty;
 
-    // Reprise des améliorations : somme des refunds des items vendus.
-    const settings = getUpgradeSettings();
-    const refundTotal = indicesToSell.reduce((s, idx) => s + calcUpgradeRefund(inv[idx], settings), 0);
+    // Reprise des améliorations : X % du tarif actuel de celles des exemplaires vendus.
+    const settings = indicesToSell.some(idx => hasUpgrades(inv[idx])) ? await loadUpgradeSettings() : getUpgradeSettings();
+    const refundTotal = indicesToSell.reduce((s, idx) => s + upgradeResaleBonus(inv[idx], settings), 0);
 
     const sorted = [...indicesToSell].sort((a,b)=>b-a);
     sorted.forEach(idx => inv.splice(idx, 1));

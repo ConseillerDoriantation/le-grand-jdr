@@ -14,6 +14,7 @@ import { showNotif } from './notifications.js';
 import { _esc } from './html.js';
 import { getRarities, loadRarities } from './rarity.js';
 import { DEFAULT_RARITY_CAPS, rarityCapFromTable } from './rarity-caps.js';
+import { upgradeResaleBonus } from './upgrade-value.js';
 
 let _settings = null;
 
@@ -53,8 +54,8 @@ export const DEFAULT_UPGRADE_SETTINGS = {
   // plafond rareté ici). Une 1★ ne peut donc jamais égaler une 5★ — on ne fait
   // que remplir le budget de sa rareté, défini par le MJ. 0/rareté non définie = commun (1).
   rarityCaps: DEFAULT_RARITY_CAPS, // table pure dans rarity-caps.js (testable)
-  // Drapeau optionnel : rembourser X% du coût total des upgrades à la revente
-  // ex : 0.2 = 20% remboursés. 0 = perte totale.
+  // Revente d'un objet amélioré : + X % du tarif ACTUEL des améliorations qu'il
+  // porte (cf. upgrade-value.js). ex : 0.2 = 20 %. 0 = améliorations perdues.
   refundUpgradeRatio: 0,
 }
 
@@ -120,8 +121,8 @@ export function getUpgradeSettings() {
 
 // ── Revente : helpers d'audit du coût investi en améliorations ───────────
 /**
- * Somme des coûts (PO) loggés dans `item.upgrades.history`.
- * Sert de base au remboursement à la revente.
+ * Somme des coûts (PO) loggés dans `item.upgrades.history` (audit : PO
+ * réellement payées). La revente, elle, part du tarif actuel.
  */
 export function getUpgradeTotalCost(item = {}) {
   const hist = item?.upgrades?.history;
@@ -130,14 +131,11 @@ export function getUpgradeTotalCost(item = {}) {
 }
 
 /**
- * Montant remboursé à la revente d'un item amélioré
- * en fonction du `refundUpgradeRatio` (0 par défaut → aucune reprise).
+ * Montant repris à la revente d'un item amélioré : `refundUpgradeRatio` × tarif
+ * actuel de ses améliorations (0 par défaut → aucune reprise).
  */
 export function calcUpgradeRefund(item = {}, settings = null) {
-  const s = settings || getUpgradeSettings();
-  const ratio = parseFloat(s?.refundUpgradeRatio) || 0;
-  if (ratio <= 0) return 0;
-  return Math.round(getUpgradeTotalCost(item) * ratio);
+  return upgradeResaleBonus(item, settings || getUpgradeSettings());
 }
 
 /**
@@ -295,13 +293,13 @@ function _renderUpgradeSettingsModal() {
       <div class="sh-admin-section">
         <div class="sh-admin-section-title">💰 Revente</div>
         <div class="sh-admin-row-line">
-          <span class="sh-admin-row-lbl">Remboursement à la revente d'un objet amélioré</span>
+          <span class="sh-admin-row-lbl">Reprise des améliorations à la revente</span>
           <input type="number" class="sh-admin-row-input small" value="${Math.round(s.refundUpgradeRatio * 100)}" min="0" max="100" step="5"
             data-input="_upgRatio">
           <span class="sh-admin-row-unit">%</span>
         </div>
         <p class="sh-admin-section-hint" style="margin-top:6px">
-          0 % = perte totale des améliorations à la revente. L'objet de base est restitué en stock.
+          Un objet amélioré se revend à son prix de revente + ce % du tarif actuel de ses améliorations (grilles ci-dessus) : changer un tarif ou ce % s'applique aux ventes suivantes. 0 % = améliorations perdues. L'objet de base est restitué en stock.
         </p>
       </div>
 
