@@ -112,8 +112,12 @@
 .db-g.in .db-g-k em{color:var(--emerald);background:color-mix(in srgb,var(--emerald) 14%,transparent)}
 .db-g h3{margin:0;font:600 1rem/1.2 var(--font-display);letter-spacing:.02em;overflow-wrap:anywhere}
 .db-g p{margin:0;font-size:.76rem;color:var(--text-muted);display:flex;align-items:center;gap:6px}
-.db-g-f{display:flex;align-items:center;gap:10px;margin-top:auto;padding-top:4px}
-.db-g-f small{font-size:.72rem;color:var(--text-muted);flex:1}
+.db-g-f{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:auto;padding-top:4px}
+.db-g-f small{font-size:.72rem;color:var(--text-muted);flex:1;white-space:nowrap}
+/* Carte étroite : le bouton passe sous les membres au lieu de déborder. */
+.db-g-f .db-btn{margin-left:auto;max-width:100%}
+.db-btn:disabled{opacity:.6;cursor:default}
+.db-btn:disabled:hover{border-color:var(--border-md);color:var(--text-soft)}
 .db-pick{display:flex;flex-direction:column;gap:6px;padding:10px;border-radius:var(--r-md);background:var(--surface-sunken);border:1px solid var(--border)}
 .db-pick>small{font-size:.7rem;color:var(--text-muted);font-weight:600}
 .db-pick>div{display:flex;gap:6px;flex-wrap:wrap}

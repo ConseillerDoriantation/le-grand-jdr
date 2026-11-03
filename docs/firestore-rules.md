@@ -356,7 +356,7 @@ function canUseCharacterResourceViaToken(adventureId, charId, tokenId) {
            )
          );
 }
-// ── Marché du Bastion ───────────────────────────────────────────────────
+// ── Vente d'objets sur le mur du Bastion ─────────────────────────────────
 // Une vente = une annonce `offre` de bastionAnnonces portant `listing` : les
 // objets EN DÉPÔT (déjà retirés de l'inventaire du vendeur), le prix et, une
 // fois vendue, l'acheteur. Le statut EST l'état de la vente : active = en vente,
@@ -644,8 +644,7 @@ match /adventures/{adventureId} {
         marketCreateAllowed(request.resource.data)
       )
     );
-    // Marché : prix (auteur) et achat (tout membre) passent ici. Requête des
-    // ventes ouvertes = deux égalités (type + status), sans index composite.
+    // Vente d'objet : prix (auteur) et achat (tout membre) passent ici.
     allow update: if inAdventure(adventureId) && (
       (id == 'main' && isAdvAdmin(adventureId)) ||
       isAdvAdmin(adventureId) ||
@@ -754,7 +753,7 @@ match /adventures/{adventureId} {
       isCharacterUidSelfRepair(resource.data, request.resource.data) ||
       isCharacterUidSameEmailRelink(adventureId, resource.data, request.resource.data) ||
       // Don entre membres : le destinataire recoit l'objet et sa trace dans
-      // l'historique au sein du meme batch atomique. Le Marché du Bastion s'en
+      // l'historique au sein du meme batch atomique. La vente d'objets du Bastion s'en
       // sert aussi : l'acheteur crédite le vendeur (`compte`) dans sa transaction.
       request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['inventaire', 'inventoryHistory', 'compte']) ||

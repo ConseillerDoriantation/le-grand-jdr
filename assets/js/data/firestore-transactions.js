@@ -7,7 +7,7 @@
 // ne le peut pas.
 // ══════════════════════════════════════════════
 
-import { db, doc, collection, query, where, limit, onSnapshot, runTransaction } from '../config/firebase.js';
+import { db, doc, collection, runTransaction } from '../config/firebase.js';
 import { getCurrentAdventureId } from './firestore.js';
 
 function _path(col) {
@@ -41,38 +41,4 @@ export async function runDocsTransaction(reads = [], plan) {
     });
     return result;
   });
-}
-
-// Listener borné sur les documents qui vérifient PLUSIEURS égalités. Sans tri
-// ni inégalité, Firestore fusionne les index mono-champ : aucun index composite
-// à créer. `onUnavailable` est appelé une seule fois si la requête est refusée.
-export function subscribeWhereEquals(col, equals = {}, { max = 100 } = {}, onData, { onUnavailable } = {}) {
-  const adventureId = getCurrentAdventureId();
-  const filters = Object.entries(equals || {});
-  if (!adventureId || !filters.length) {
-    onUnavailable?.();
-    return () => {};
-  }
-  const safeMax = Math.max(1, Math.min(200, Math.trunc(Number(max) || 100)));
-  let active = true;
-  const unsubscribe = onSnapshot(
-    query(
-      collection(db, `adventures/${adventureId}/${col}`),
-      ...filters.map(([field, value]) => where(field, '==', value)),
-      limit(safeMax),
-    ),
-    snap => {
-      if (active) onData(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    },
-    err => {
-      if (!active) return;
-      active = false;
-      console.debug(`[firestore] requête multi-égalités indisponible : ${col}`, err?.code || err);
-      onUnavailable?.(err);
-    },
-  );
-  return () => {
-    active = false;
-    unsubscribe();
-  };
 }

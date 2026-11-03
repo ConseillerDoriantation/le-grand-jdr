@@ -8,13 +8,11 @@ import {
   marketLedgerPayload,
   marketListingState,
   marketListingView,
-  mergeMarketPosts,
   normalizeMarketPrice,
   planMarketListing,
   planMarketPrice,
   planMarketPurchase,
   planMarketWithdraw,
-  sortMarketViews,
 } from '../assets/js/shared/bastion-market.js';
 import { calcOr } from '../assets/js/shared/char-stats.js';
 import { itemCompareRows, itemFamily, itemKind, isQuestItem } from '../assets/js/shared/item-facts.js';
@@ -158,22 +156,6 @@ test('changement de prix : seulement sur une vente ouverte, seul `price` change'
   assert.deepEqual({ ...plan.postPatch.listing, price: 250 }, post.listing);
   assert.throws(() => planMarketPrice({ post: listingPost({ status: 'resolved' }), price: 300 }), { code: 'sold' });
   assert.throws(() => planMarketPrice({ post, price: 'abc' }), { code: 'price' });
-});
-
-test('deux flux du même post : la version la plus récente gagne ; tris du Marché', () => {
-  const older = { id: 'a', status: 'active', ts: 1, updatedAt: 1 };
-  const newer = { id: 'a', status: 'resolved', ts: 1, updatedAt: 5 };
-  assert.equal(mergeMarketPosts([newer], [older])[0].status, 'resolved');
-  assert.equal(mergeMarketPosts([older], [newer])[0].status, 'resolved');
-  const views = [
-    { id: 'x', price: 50, rarity: 2, ts: 3 },
-    { id: 'y', price: 10, rarity: 4, ts: 1 },
-    { id: 'z', price: 90, rarity: 1, ts: 2 },
-  ];
-  assert.deepEqual(sortMarketViews(views).map(v => v.id), ['x', 'z', 'y']);
-  assert.deepEqual(sortMarketViews(views, 'price-asc').map(v => v.id), ['y', 'x', 'z']);
-  assert.deepEqual(sortMarketViews(views, 'price-desc').map(v => v.id), ['z', 'x', 'y']);
-  assert.deepEqual(sortMarketViews(views, 'rarity').map(v => v.id), ['y', 'x', 'z']);
 });
 
 test('faits d’objet partagés : famille, nature et écarts « Si tu l’équipes »', () => {
