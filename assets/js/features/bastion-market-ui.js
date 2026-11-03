@@ -12,7 +12,7 @@
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { _ensureFeatureCss } from '../core/navigation.js';
-import { addToCol, getCachedCollection } from '../data/firestore.js';
+import { addToCol, getCachedCollection, loadCollectionWhere } from '../data/firestore.js';
 import { newDocId, runDocsTransaction, subscribeWhereEquals } from '../data/firestore-transactions.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModalDirect, confirmModal, promptModal, updateModalContent } from '../shared/modal.js';
@@ -29,6 +29,8 @@ import { charSession } from '../shared/char-session.js';
 import { touchBastionWallActivity } from '../shared/bastion-signal.js';
 import { normalizeBastionWallPost } from '../shared/bastion-wall.js';
 import { weaponHandsLabel } from '../shared/weapon-family.js';
+import { getUpgradeSettings, hasUpgrades, loadUpgradeSettings } from '../shared/upgrade-settings.js';
+import { upgradeResaleBonus, upgradeTariffValue } from '../shared/upgrade-value.js';
 import {
   ITEM_FAMILIES, isArmorItem, isQuestItem, isWeaponItem, itemBonuses, itemChips, itemCompareRows,
   itemCompareSlot, itemDamageText, itemFamily, itemKind, itemRarity, itemSigned,
@@ -64,6 +66,7 @@ const MK = {
   ui: { family: 'all', query: '', sort: 'recent', sel: '', sheetOpen: false, history: false },
   busy: false,
   sell: null,      // état de la modale de mise en vente
+  ownPosts: new Map(), // charId → ses annonces (modale ouverte hors Bastion)
 };
 
 export function initBastionMarket(ctx = {}) {
@@ -75,6 +78,8 @@ export function resetBastionMarket() {
   MK.stopFeed?.();
   MK.offers = [];
   MK.ui = { family: 'all', query: '', sort: 'recent', sel: '', sheetOpen: false, history: false };
+  MK.ownPosts = new Map();
+  _upgradeLoad = null;
 }
 
 // Le mur ne garde que ses 80 posts récents : ce flux borné aux ventes OUVERTES
@@ -117,12 +122,45 @@ const _char = id => (STATE.characters || []).find(c => c.id === id) || null;
 const _catalog = item => (item?.itemId ? (getCachedCollection('shop') || []).find(entry => entry.id === item.itemId) : null) || null;
 const _lot = view => `${view.name}${view.qty > 1 ? ` ×${view.qty}` : ''}`;
 
+// Vente v2 ouverte : l'objet montré est l'exemplaire ACTUEL du vendeur (celui
+// que l'achat prendra : rangé d'abord), améliorations comprises — pas la copie
+// faite à la mise en vente. Vente close ou v1 : la copie de l'annonce.
+function _liveItem(view) {
+  if (view.escrow || view.state !== 'open') return view.item;
+  const seller = _char(view.sellerCharId);
+  const inventory = Array.isArray(seller?.inventaire) ? seller.inventaire : [];
+  const key = marketItemKey(view.item);
+  const worn = new Set(resolveEquippedInventoryIndices(seller || {}).values());
+  const matching = inventory.map((item, index) => ({ item, index }))
+    .filter(({ item }) => item && typeof item === 'object' && marketItemKey(item) === key);
+  return (matching.find(m => !worn.has(m.index)) || matching[0])?.item || view.item;
+}
+function _view(post) {
+  const view = marketListingView(post);
+  const item = _liveItem(view);
+  return item === view.item ? view : { ...view, item, rarity: itemRarity(item) };
+}
+
+// Revente d'un exemplaire : même calcul que l'Inventaire (prix de reprise +
+// part de ses améliorations au tarif actuel) ; valeur de ses améliorations.
+const _resale = item => getInventoryItemResaleValue(item, _catalog(item)) + upgradeResaleBonus(item, getUpgradeSettings());
+const _upgradesValue = item => upgradeTariffValue(item, getUpgradeSettings());
+// Tarifs d'amélioration (world/upgrade_settings) lus une fois, seulement si un
+// objet affiché est amélioré ; `onLoaded` redessine si les tarifs ont changé.
+let _upgradeLoad = null;
+function _ensureUpgradeSettings(items, onLoaded = _rerender) {
+  if (!items.some(item => hasUpgrades(item))) return;
+  const shown = getUpgradeSettings();
+  _upgradeLoad ||= loadUpgradeSettings().catch(() => shown);
+  _upgradeLoad.then(settings => { if (settings !== shown) onLoaded(); });
+}
+
 function _posts() {
   return mergeMarketPosts(MK.offers, (MK.ctx.posts() || []).filter(isMarketListing)).filter(isMarketListing);
 }
 const _post = id => _posts().find(post => post.id === id) || null;
 function _views() {
-  return _posts().map(marketListingView);
+  return _posts().map(_view);
 }
 const _isMine = view => !!view && view.sellerUid === _uid();
 const _canManage = view => _isMine(view) || !!STATE.isAdmin;
@@ -201,7 +239,8 @@ function _stateLine(view) {
   if (view.auction && view.state === 'withdrawn') return view.unsold ? 'Enchère sans offre' : view.failed ? 'Enchère annulée : objet indisponible' : 'Enchère annulée';
   if (view.state === 'sold') return `✓ Vendu à ${_esc(view.buyerName || '?')}${view.soldAt ? ` · ${_ago(view.soldAt)}` : ''}`;
   if (view.state === 'withdrawn') return 'Retirée de la vente';
-  return `Vendu par ${_esc(view.sellerName)}${view.ts ? ` · ${_ago(view.ts)}` : ''}`;
+  const who = _isMine(view) ? (view.auction ? 'Ton enchère' : 'Ta vente') : `Vendu par ${_esc(view.sellerName)}`;
+  return `${who}${view.ts ? ` · ${_ago(view.ts)}` : ''}`;
 }
 
 // L'objet est-il encore achetable (présent et rangé chez le vendeur) ? Lu sur la
@@ -241,8 +280,9 @@ function _bidButtons(view, cls = '') {
   const missing = min - calcOr(buyer) - (self ? view.bid.amount : 0);
   const bid = missing > 0
     ? `<button type="button" class="bs-w-btn ${cls}" disabled title="Il manque ${_esc(_gold(missing))} à ${_esc(buyer.nom || 'ce personnage')}">Enchérir</button>`
-    : `<button type="button" class="bs-w-btn bs-mk-bid ${cls}" data-action="_mkBid" data-id="${_esc(view.id)}" data-min="${min}" title="Enchérir avec ${_esc(buyer.nom || 'ce personnage')}">${self ? 'Surenchérir' : 'Enchérir'} · ${_esc(_gold(min))}</button>`;
-  return bid + (view.buyNow > _shown(view) ? _buyButton(view, cls) : '');
+    : `<button type="button" class="bs-w-btn bs-mk-bid ${cls}" data-action="_mkBid" data-id="${_esc(view.id)}" data-min="${min}" title="${self ? 'Relever ta propre offre' : `Enchérir avec ${_esc(buyer.nom || 'ce personnage')}`}">${self ? 'Relever' : 'Enchérir'} · ${_esc(_gold(min))}</button>`;
+  const lead = self ? '<span class="bs-mk-lead">✓ Tu mènes</span>' : '';
+  return lead + bid + (view.buyNow > _shown(view) ? _buyButton(view, cls) : '');
 }
 
 // Actions du vendeur : une enchère avec offres ne se retire plus (MJ seulement).
@@ -257,9 +297,10 @@ function _sellerButtons(view, cls = '') {
 // FIL DU MUR — l'objet joint à l'annonce
 // ══════════════════════════════════════════════
 export function marketWallBlockHtml(post) {
-  const view = marketListingView(post);
+  const view = _view(post);
   const item = view.item;
-  const chips = itemChips(item).slice(0, 3).map(_chipHtml).join('');
+  _ensureUpgradeSettings([item]);
+  const chips = itemChips(item).map(_chipHtml).join('');
   let actions = '';
   if (view.state === 'open') {
     actions = _isMine(view) ? _sellerButtons(view, 'bs-w-sm') : view.auction ? _bidButtons(view, 'bs-w-sm') : _buyButton(view, 'bs-w-sm');
@@ -283,7 +324,7 @@ export function marketWallBlockHtml(post) {
 
 // Ligne courte de la colonne « Offres & demandes ».
 export function marketSideLabel(post) {
-  const view = marketListingView(post);
+  const view = _view(post);
   return view.auction ? `${_lot(view)} · enchère ${_gold(_shown(view))}` : `${_lot(view)} · ${_gold(view.price)}`;
 }
 
@@ -302,15 +343,18 @@ function _matches(view) {
 
 function _rowHtml(view) {
   const sel = MK.ui.sel === view.id;
-  const chips = itemChips(view.item).slice(0, 2).map(_chipHtml).join('');
+  const chips = itemChips(view.item).map(_chipHtml).join('');
+  const avail = view.state === 'open' && _isMine(view) ? _avail(view) : { ok: true };
+  const warn = avail.ok ? '' : ` · <em class="bs-mk-row-warn">⚠ ${avail.reason === 'worn' ? 'porté' : 'plus dans l’inventaire'}</em>`;
   const who = view.state !== 'open' ? _stateLine(view)
     : view.auction ? `${_esc(_isMine(view) ? 'Ton enchère' : view.sellerName)} · ⏳ <span data-mk-ends="${view.endsAt}">${_countdown(view.endsAt)}</span>${view.bidCount ? ` · ${view.bidCount} offre${view.bidCount > 1 ? 's' : ''}` : ''}`
       : `${_esc(_isMine(view) ? 'Ta vente' : view.sellerName)}${view.ts ? ` · ${_ago(view.ts)}` : ''}`;
+  const line = `${_esc(itemKind(view.item))} · ${who}${warn}`;
   return `<button type="button" class="bs-mk-row${sel ? ' is-sel' : ''}${view.state !== 'open' ? ' is-closed' : ''}"${_rareAttrs(view.rarity)} data-action="_mkSelect" data-id="${_esc(view.id)}" aria-pressed="${sel}">
     <span class="bs-mk-gem"></span>
-    <span class="bs-mk-txt"><span class="bs-mk-name"><b>${_esc(view.name)}</b>${view.qty > 1 ? `<em>×${view.qty}</em>` : ''}</span><span class="bs-mk-line">${_esc(itemKind(view.item))} · ${who}</span></span>
+    <span class="bs-mk-txt"><span class="bs-mk-name"><b>${_esc(view.name)}</b>${view.qty > 1 ? `<em>×${view.qty}</em>` : ''}</span><span class="bs-mk-line">${line}</span></span>
     ${chips ? `<span class="bs-mk-chips">${chips}</span>` : ''}
-    <span class="bs-mk-price">${view.auction ? '<small>⚖</small>' : ''}${_esc(_gold(_shown(view)))}</span>
+    <span class="bs-mk-price">${view.auction ? '<i class="bs-mk-auc-ic" title="Enchère">⚖</i>' : ''}${_esc(_gold(_shown(view)))}</span>
   </button>`;
 }
 
@@ -398,7 +442,8 @@ function _sheetHtml(view) {
   const effect = String(getItemEffectText(item) || '').trim();
   const description = String(item.description || '').trim();
   const value = getInventoryItemValue(item, cat);
-  const resale = getInventoryItemResaleValue(item, cat);
+  const resale = _resale(item);
+  const upgrades = _upgradesValue(item);
   const buyer = view.state === 'open' && !_isMine(view) ? _buyer() : null;
   const per = view.qty > 1 ? ' / u.' : '';
   const facts = [
@@ -409,6 +454,7 @@ function _sheetHtml(view) {
     _fact('CA', armor ? itemSigned(bonuses[0].v) : ''),
     _fact('Set', item.set),
     _fact('Valeur', value ? _gold(value) + per : ''),
+    _fact('Améliorations', upgrades ? _gold(upgrades) + per : ''),
     _fact('Revente', resale ? _gold(resale) + per : ''),
   ].join('');
   const bonusHtml = bonuses.filter(b => b.v && !(armor && b.k === 'CA'))
@@ -452,6 +498,7 @@ function _summarySheetHtml(all) {
     </div>
     <section class="bs-mk-part"><h4>Comment ça marche</h4>
       <p>L’objet mis en vente reste dans l’inventaire du vendeur jusqu’à l’achat. À l’achat, l’or et l’objet changent de main en une seule opération, et le vendeur est prévenu. Un objet porté doit être rangé pour être acheté.</p>
+      <p>Enchère : chaque offre bloque l’or de son auteur (rendu s’il est surenchéri) ; à la fin, l’objet part au meilleur enchérisseur.</p>
     </section>
     ${buyer ? `<footer class="bs-mk-acts"><div class="bs-mk-acts-main"><button type="button" class="bs-w-btn bs-w-go" data-action="_mkOpenSell">＋ Mettre un objet en vente</button></div></footer>` : ''}
   </aside>`;
@@ -459,6 +506,7 @@ function _summarySheetHtml(all) {
 
 export function renderMarketTab() {
   const all = _views();
+  _ensureUpgradeSettings(all.map(view => view.item));
   const sel = all.find(view => view.id === MK.ui.sel) || null;
   if (!sel) MK.ui.sel = '';
   const open = all.filter(view => view.state === 'open');
@@ -773,9 +821,20 @@ async function _editPrice(id) {
 // Exemplaires de chaque lot déjà proposés dans les ventes ouvertes (v2) du perso.
 function _reserved(charId) {
   const out = new Map();
-  _views().filter(v => v.state === 'open' && !v.escrow && v.sellerCharId === charId)
+  const loaded = (MK.ownPosts.get(charId) || []).map(normalizeBastionWallPost).filter(isMarketListing);
+  mergeMarketPosts(loaded, _posts()).map(marketListingView)
+    .filter(v => v.state === 'open' && !v.escrow && v.sellerCharId === charId)
     .forEach(v => { const key = marketItemKey(v.item); out.set(key, (out.get(key) || 0) + v.qty); });
   return out;
+}
+
+// Hors du Bastion (fiche Inventaire), ses ventes ouvertes ne sont pas en
+// mémoire : on les lit une fois pour ne pas proposer deux fois un exemplaire.
+async function _loadOwnPosts(charId) {
+  if (!charId || STATE.currentPage === 'bastion' || MK.ownPosts.has(charId)) return;
+  const docs = await loadCollectionWhere(COL, 'charId', '==', charId).catch(() => []);
+  MK.ownPosts.set(charId, docs || []);
+  if (MK.sell?.charId === charId && _sellOpen()) _paintSell();
 }
 
 function _sellGroups(char) {
@@ -807,8 +866,10 @@ function _sellHtml() {
   if (group) s.qty = Math.max(1, Math.min(group.count, s.qty));
   const cat = group ? _catalog(group.item) : null;
   const value = group ? getInventoryItemValue(group.item, cat) : 0;
-  const resale = group ? getInventoryItemResaleValue(group.item, cat) : 0;
-  const refs = [value ? `valeur ${_gold(value)}` : '', resale ? `revente boutique ${_gold(resale)}` : ''].filter(Boolean).join(' · ');
+  const resale = group ? _resale(group.item) : 0;
+  const upgrades = group ? _upgradesValue(group.item) : 0;
+  if (group) _ensureUpgradeSettings([group.item], () => { if (MK.sell && _sellOpen()) _paintSell(); });
+  const refs = [value ? `valeur ${_gold(value)}` : '', upgrades ? `améliorations ${_gold(upgrades)}` : '', resale ? `revente boutique ${_gold(resale)}` : ''].filter(Boolean).join(' · ');
   const wornTaken = group ? Math.max(0, s.qty - (group.count - group.worn)) : 0;
   const canSubmit = !!group && !!normalizeMarketPrice(s.price);
   const auction = s.mode === 'auction';
@@ -822,7 +883,9 @@ function _sellHtml() {
           <span class="bs-mk-gem"></span>
           <span class="bs-mk-txt"><span class="bs-mk-name"><b>${_esc(g.item.nom || 'Sans nom')}</b></span><span class="bs-mk-line">${_esc(itemKind(g.item))}${g.worn ? ' · porté' : ''}</span></span>
           <span class="bs-mk-pick-q">×${g.count}</span>
-        </button>`).join('') || `<p class="bs-mk-empty">Rien à vendre dans l’inventaire de ${_esc(char?.nom || 'ce personnage')} (les objets de quête ne se vendent pas).</p>`}
+        </button>`).join('') || `<p class="bs-mk-empty">${_reserved(char?.id).size
+          ? `Tout ce que ${_esc(char?.nom || 'ce personnage')} peut vendre est déjà en vente.`
+          : `Rien à vendre dans l’inventaire de ${_esc(char?.nom || 'ce personnage')} (les objets de quête ne se vendent pas).`}</p>`}
       </div>
     </div>
     ${group ? `<div class="bs-mk-sell-row">
@@ -830,7 +893,7 @@ function _sellHtml() {
         <span class="bs-mk-qty"><span class="bs-v-step"><button type="button" data-action="_mkSellQty" data-delta="-1" aria-label="Moins"${s.qty <= 1 ? ' disabled' : ''}>−</button><span>${s.qty}</span><button type="button" data-action="_mkSellQty" data-delta="1" aria-label="Plus"${s.qty >= group.count ? ' disabled' : ''}>+</button></span><small>sur ${group.count}</small></span>
       </div>
       <label class="bs-mk-field"><span>${auction ? 'Prix de départ' : 'Prix du lot'}</span>
-        <span class="bs-mk-price-in"><input id="bs-mk-sell-price" type="number" min="1" max="${MARKET_PRICE_MAX}" step="1" inputmode="numeric" value="${_esc(s.price)}" placeholder="${value || resale || ''}" data-input="_mkSellPrice" data-modal-initial-focus><b>or</b></span>
+        <span class="bs-mk-price-in"><input id="bs-mk-sell-price" type="number" min="1" max="${MARKET_PRICE_MAX}" step="1" inputmode="numeric" value="${_esc(s.price)}" placeholder="${(value + upgrades) || resale || ''}" data-input="_mkSellPrice" data-modal-initial-focus><b>or</b></span>
         ${refs ? `<small>${_esc(refs)}${s.qty > 1 ? ' (par unité)' : ''}</small>` : ''}
       </label>
     </div>
@@ -852,6 +915,8 @@ function _sellHtml() {
 
 const _SELL_TITLE = '🪙 Mettre en vente au Bastion';
 const _SELL_OPTS = { subtitle: 'L’annonce paraît sur le mur et au Marché', accent: '#22c38e' };
+// Modale de mise en vente encore affichée (repeinte après un chargement async).
+const _sellOpen = () => !!document.querySelector('#modal-overlay.show #modal-body .bs-mk-sell');
 function _paintSell({ open = false } = {}) {
   if (open) openModal(_SELL_TITLE, _sellHtml(), _SELL_OPTS);
   else updateModalContent(_SELL_TITLE, _sellHtml(), _SELL_OPTS);
@@ -879,6 +944,7 @@ export async function openMarketSellModal({ charId = '', indices = [], fromCompo
     fromComposer,
   };
   _paintSell({ open: true });
+  void _loadOwnPosts(char.id);
 }
 
 function _refreshSellSubmit() {
@@ -965,7 +1031,7 @@ registerActions({
   _mkWithdraw:    (btn) => withdrawMarketListing(btn.dataset.id || ''),
   _mkPrice:       (btn) => _editPrice(btn.dataset.id || ''),
   _mkOpenSell:    (btn) => openMarketSellModal({ fromComposer: btn?.dataset?.from === 'composer' }),
-  _mkSellChar:    (el) => { if (MK.sell) { MK.sell = { ...MK.sell, charId: el.value, key: '', qty: 1 }; _paintSell(); } },
+  _mkSellChar:    (el) => { if (MK.sell) { MK.sell = { ...MK.sell, charId: el.value, key: '', qty: 1 }; _paintSell(); void _loadOwnPosts(el.value); } },
   _mkSellItem:    (btn) => { if (MK.sell) { MK.sell.key = btn.dataset.key || ''; MK.sell.qty = 1; _paintSell(); } },
   _mkSellQty:     (btn) => { if (MK.sell) { MK.sell.qty = Math.max(1, MK.sell.qty + (Number(btn.dataset.delta) || 0)); _paintSell(); } },
   _mkSellPrice:   (el) => { if (MK.sell) { MK.sell.price = el.value; _refreshSellSubmit(); } },
