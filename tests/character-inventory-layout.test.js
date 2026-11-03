@@ -122,7 +122,7 @@ test('CSS v11 présent, scopé .cs-v3, responsive et contraste thème clair', ()
   assert.match(css, /#char-sheet-area \.main-col:has\(\.iv\) \{ overflow: clip; \}/);
   assert.match(css, /\.cs-v3 \.iv:not\(\.is-narrow\) \.iv-sheet \{ position: sticky;/);
   assert.match(css, /\.cs-v3 \.iv\.is-narrow\.is-sheet-open \.iv-sheet \{ display: flex; position: fixed;/);
-  assert.match(css, /@media \(max-width: 640px\) \{\n  \.cs-v3 \.iv\.is-narrow\.is-sheet-open \.iv-sheet \{ top: auto;/);
+  assert.match(css, /@media \(max-width: 640px\) \{\r?\n  \.cs-v3 \.iv\.is-narrow\.is-sheet-open \.iv-sheet \{ top: auto;/);
   assert.match(css, /\[data-theme="light"\] \.cs-v3 \.iv-row\[data-r\] \.iv-name b/);
   // Les classes inv5 ne doivent plus exister dans le CSS.
   assert.ok(!css.includes('.inv5-shell'), 'CSS inv5-shell retiré');
