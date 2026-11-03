@@ -30,26 +30,12 @@ import { loadUpgradeSettings, getUpgradeSettings, rarityCapFor } from '../shared
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { characterBuildsForStorage, patchBuildLocally } from '../shared/character-builds.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
+// Catégories de fragments : partagées avec la revente (valeur des améliorations).
+import { FRAGMENT_CATEGORIES, getItemFragmentCategory } from '../shared/upgrade-value.js';
 
-// ══════════════════════════════════════════════
-// CATÉGORIES DE FRAGMENTS
-// Un fragment ne peut être posé que sur un item de la même catégorie.
-// (Toutes les armes partagent la catégorie 'arme', peu importe le format.)
-// ══════════════════════════════════════════════
-export const FRAGMENT_CATEGORIES = [
-  { id: 'arme',          label: 'Arme',          icon: '⚔️' },
-  { id: 'Tête',          label: 'Tête',          icon: '🪖' },
-  { id: 'Torse',         label: 'Torse',         icon: '🛡️' },
-  { id: 'Pieds',         label: 'Pieds',         icon: '🥾' },
-  { id: 'Amulette',      label: 'Amulette',      icon: '📿' },
-  { id: 'Anneau',        label: 'Anneau',        icon: '💍' },
-  { id: 'Objet magique', label: 'Objet magique', icon: '🔮' },
-];
+export { FRAGMENT_CATEGORIES, getItemFragmentCategory };
 
 const FRAGMENT_CAT_BY_ID = Object.fromEntries(FRAGMENT_CATEGORIES.map(c => [c.id, c]));
-
-// Détecte la catégorie de fragment d'un item d'inventaire.
-// Renvoie null si l'item n'est pas améliorable (ex : potion, item libre).
 
 const STORE = {
   activeCharId: null,
@@ -59,17 +45,6 @@ const STORE = {
   itemSearch: '',
   itemCategory: 'all',
 };
-
-export function getItemFragmentCategory(item = {}) {
-  if (!item) return null;
-  const tpl = (item.template || '').toLowerCase();
-  if (tpl === 'arme' || /arme|bouclier|baguette|main libre/i.test(item.format || '')) {
-    return 'arme';
-  }
-  if (item.slotArmure && FRAGMENT_CAT_BY_ID[item.slotArmure]) return item.slotArmure;
-  if (item.slotBijou && FRAGMENT_CAT_BY_ID[item.slotBijou]) return item.slotBijou;
-  return null;
-}
 
 // Retourne le nombre de slots de traits autorisés pour un item.
 // La clé du plafond est directement la catégorie de fragment (artisan unifié).

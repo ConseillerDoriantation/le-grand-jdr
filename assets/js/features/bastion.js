@@ -53,6 +53,9 @@ import { shouldRestoreLegacyBastionCatalog } from '../shared/bastion-catalog.js'
 import { bastionEqualShare, bastionRoomProjects, roomFundingPlan, roomInvestmentAvailable, roomInvestmentContributors as investmentContributors } from '../shared/bastion-investments.js';
 import { touchBastionWallActivity, refreshBastionWallDot } from '../shared/bastion-signal.js';
 import { normalizeEmoteCatalog } from '../shared/emote-admin.js';
+import {
+  initBastionMarket, isMarketListing, marketSideLabel, marketWallBlockHtml, withdrawMarketListing,
+} from './bastion-market-ui.js';
 
 
 const STORE = {
@@ -3153,20 +3156,26 @@ function _wallComposer() {
   _wallEnsureCharacter();
   const identity = _wallIdentity();
   if (!identity) {
-    return `<div class="bs-w-card bs-w-compose"><div class="bs-wall-no-character"><strong>Choisis ton identité</strong><p>Il faut un personnage de cette aventure pour écrire, réagir ou répondre sur le mur.</p><button class="btn btn-outline" data-navigate="characters">Voir mes personnages</button></div></div>`;
+    return `<div class="bs-w-card bs-w-compose" id="bs-wall-composer"><div class="bs-wall-no-character"><strong>Choisis ton identité</strong><p>Il faut un personnage de cette aventure pour écrire, réagir ou répondre sur le mur.</p><button class="btn btn-outline" data-navigate="characters">Voir mes personnages</button></div></div>`;
   }
   const PH = {
     message: 'Une nouvelle à partager avec le Bastion ?',
     quete:   'Décris la quête : objectif, lieu, récompense…',
-    offre:   'Que proposes-tu ? Objet, service, prix…',
+    offre:   'Que proposes-tu ? Un service, ou joins un objet de ton inventaire ci-dessous…',
     demande: 'De quoi as-tu besoin ?',
   };
+  const PUBLISH = { message: 'Publier', quete: 'Publier la quête', offre: 'Publier l’offre', demande: 'Publier la demande' };
   const typeBtns = Object.entries(BASTION_WALL_TYPES).map(([id, type]) =>
-    `<button type="button" class="bs-w-tpick${_wallUi.type === id ? ' on' : ''}" style="--tc:${type.color}" data-action="_bastionSetAnnonceType" data-type="${id}" aria-pressed="${_wallUi.type === id}"><i></i>${_esc(type.label)}</button>`
+    `<button type="button" class="bs-w-tpick${_wallUi.type === id ? ' on' : ''}" style="--tc:${type.color}" data-action="_bastionSetAnnonceType" data-type="${id}" aria-pressed="${_wallUi.type === id}" title="${_esc(type.description)}"><i aria-hidden="true"></i>${_esc(type.label)}</button>`
   ).join('');
   const canPost = _wallUi.draftText.trim() || _wallUi.images.length;
+  // Offre : l'objet vendu se joint ici → achat automatique depuis le mur.
+  const sellHint = _wallUi.type === 'offre' && _eligibleChars().length ? `<div class="bs-w-sell-hint">
+      <span><b>🪙 Tu vends un objet de ton inventaire ?</b> Joins-le : l’achat devient automatique (l’or et l’objet changent de main d’un clic).</span>
+      <button type="button" class="bs-w-btn bs-w-sm" data-action="_mkOpenSell" data-from="composer">Joindre un objet</button>
+    </div>` : '';
 
-  return `<div class="bs-w-card bs-w-compose">
+  return `<div class="bs-w-card bs-w-compose" id="bs-wall-composer">
     <div class="bs-w-compose-row">
       ${_wallAvatar(identity, 36)}
       <div id="bs-annonce-text" class="bs-w-editor" contenteditable="true" role="textbox" aria-multiline="true" data-input="_bastionWallDraft" data-placeholder="${_esc(PH[_wallUi.type] || PH.message)}">${applyEmotes(_esc(_wallUi.draftText), _wallEmotes)}</div>
@@ -3174,13 +3183,14 @@ function _wallComposer() {
     <div id="bs-wall-mention-slot">${_wallMentionSuggestions()}</div>
     <div id="bs-wall-media-preview">${_wallComposerMedia()}</div>
     ${_wallPicker()}
+    ${sellHint}
     <div class="bs-w-compose-ft">
-      ${typeBtns}
+      <div class="bs-w-tpicks" role="group" aria-label="Catégorie de la publication">${typeBtns}</div>
       <div class="bs-w-compose-tools">
         <button type="button" class="bs-w-tool" data-action="_bastionWallTogglePicker" aria-expanded="${_wallUi.pickerOpen}" title="Émojis & émotes">☺</button>
         <button type="button" class="bs-w-tool" data-action="_bastionWallAddImage" ${_wallUi.images.length >= 3 ? 'disabled' : ''} title="Ajouter une image">▧${_wallUi.images.length ? ` ${_wallUi.images.length}/3` : ''}</button>
       </div>
-      <button type="button" class="bs-w-btn bs-w-go" data-action="_bastionPostAnnonce" ${canPost ? '' : 'disabled'}>Publier</button>
+      <button type="button" class="bs-w-btn bs-w-go" id="bs-wall-publish" data-action="_bastionPostAnnonce" ${canPost ? '' : 'disabled'}>${PUBLISH[_wallUi.type] || PUBLISH.message}</button>
     </div>
   </div>`;
 }
@@ -3207,7 +3217,9 @@ function _wallPostMenu(post) {
     <button type="button" class="is-danger" data-action="_bastionDeleteAnnonce" data-id="${_esc(post.id)}">🗑 Supprimer cette ancienne publication</button>
   </div>` : '';
   const mine = post.uid === STATE.user?.uid;
-  const statusActions = post.type === 'message' ? '' : Object.entries(BASTION_WALL_STATUSES)
+  // Une vente ne se « clôt » pas à la main : rouvrir une vente retirée
+  // dupliquerait l'objet déjà rendu au vendeur.
+  const statusActions = post.type === 'message' || isMarketListing(post) ? '' : Object.entries(BASTION_WALL_STATUSES)
     .filter(([id]) => id !== post.status)
     .map(([id, status]) => `<button type="button" data-action="_bastionWallSetStatus" data-id="${_esc(post.id)}" data-status="${id}">${status.icon} ${status.label}</button>`).join('');
   return `<div class="bs-wall-post-menu" role="menu">
@@ -3221,7 +3233,9 @@ function _wallPostMenu(post) {
 function _wallPostEdit(post) {
   if (_wallUi.editPostId !== post.id) return '';
   const options = Object.entries(BASTION_WALL_TYPES).map(([id, type]) => `<option value="${id}" ${_wallUi.editPostType === id ? 'selected' : ''}>${type.icon} ${type.label}</option>`).join('');
-  return `<div class="bs-wall-post-edit"><textarea rows="4" maxlength="4000" data-input="_bastionWallEditPostDraft">${_esc(_wallUi.editPostText)}</textarea><div><select data-change="_bastionWallEditPostType">${options}</select><span></span><button type="button" data-action="_bastionWallCancelPostEdit">Annuler</button><button type="button" class="btn btn-gold" data-action="_bastionWallSavePost" data-id="${_esc(post.id)}">Enregistrer</button></div></div>`;
+  // Une vente reste une Offre : seul son texte se modifie (le prix, via « Modifier le prix »).
+  const typeField = isMarketListing(post) ? '' : `<select data-change="_bastionWallEditPostType">${options}</select>`;
+  return `<div class="bs-wall-post-edit"><textarea rows="4" maxlength="4000" data-input="_bastionWallEditPostDraft">${_esc(_wallUi.editPostText)}</textarea><div>${typeField}<span></span><button type="button" data-action="_bastionWallCancelPostEdit">Annuler</button><button type="button" class="btn btn-gold" data-action="_bastionWallSavePost" data-id="${_esc(post.id)}">Enregistrer</button></div></div>`;
 }
 
 function _wallCard(post) {
@@ -3239,9 +3253,12 @@ function _wallCard(post) {
   const countedReactions = Object.entries(counts).map(([reaction, count]) => !post.legacy && identity
     ? `<button type="button" class="bs-w-rx${mine === reaction ? ' mine' : ''}" data-action="_bastionWallReact" data-id="${_esc(post.id)}" data-reaction="${_esc(reaction)}" title="Réagir avec ${_esc(reaction)}">${_wallReactionVisual(reaction)} <span>${count}</span></button>`
     : `<span class="bs-w-rx">${_wallReactionVisual(reaction)} ${count}</span>`).join('');
-  const canResolve = post.type !== 'message' && !post.legacy && (post.uid === STATE.user?.uid || STATE.isAdmin);
+  // Vente d'objet : son statut suit l'achat ou le retrait, jamais « Clore ».
+  const listing = isMarketListing(post);
+  const canResolve = post.type !== 'message' && !post.legacy && !listing && (post.uid === STATE.user?.uid || STATE.isAdmin);
+  const statusLabel = listing ? (post.status === 'resolved' ? '✓ Vendu' : '↩ Retirée') : `${status.icon} ${status.label}`;
   const tags = `${post.pinned ? '<span class="bs-w-chip">📌 Épinglé</span>' : ''}`
-    + `${post.status !== 'active' ? `<span class="bs-w-chip">${status.icon} ${status.label}</span>` : ''}`
+    + `${post.status !== 'active' ? `<span class="bs-w-chip">${statusLabel}</span>` : ''}`
     + `<span class="bs-w-chip t" style="--tc:${type.color}"><i></i>${type.label}</span>`
     + `${canDelete ? `<button type="button" class="bs-w-menu-btn" data-action="_bastionWallToggleMenu" data-id="${_esc(post.id)}" aria-label="Gérer cette publication" aria-expanded="${_wallUi.menuPostId === post.id}">•••</button>${_wallPostMenu(post)}` : ''}`;
 
@@ -3251,7 +3268,8 @@ function _wallCard(post) {
       <div class="bs-w-who"><b>${_esc(author.charName)}</b><small>${_wallCharSub(post.charId, _annonceTimeAgo(post.ts))}${post.editedAt ? ' · Modifié' : ''}${post.legacy ? ' · archive' : ''}</small></div>
       <div class="bs-w-tags">${tags}</div>
     </div>
-    ${_wallPostEdit(post) || `${post.text ? `<div class="bs-w-post-tx">${_wallText(post.text)}</div>` : ''}${media}`}
+    ${_wallPostEdit(post) || `${post.text ? `<div class="bs-w-post-tx">${_wallText(post.text)}</div>` : ''}${listing ? '' : media}`}
+    ${listing ? marketWallBlockHtml(post) : ''}
     ${comments.length ? `<div class="bs-w-cmts">${comments.slice(replyOpen ? 0 : -1).map(comment => _wallCommentHtml(comment, post)).join('')}${comments.length > 1 && !replyOpen ? `<button class="bs-w-morecmt" data-action="_bastionWallToggleReply" data-id="${_esc(post.id)}">Voir les ${comments.length} réponses</button>` : ''}</div>` : ''}
     ${replyOpen && identity && !post.legacy ? `<div class="bs-w-reply">${_wallAvatar(identity, 28)}<textarea rows="1" maxlength="1200" data-input="_bastionWallReplyDraft" data-id="${_esc(post.id)}" placeholder="Répondre à ${_esc(author.charName)}…">${_esc(_wallUi.replyDrafts.get(post.id) || '')}</textarea><button type="button" class="bs-w-btn" data-action="_bastionWallReply" data-id="${_esc(post.id)}">Envoyer</button></div>` : ''}
     ${_wallReactionPicker(post.id)}
@@ -3301,7 +3319,7 @@ function _renderAnnonces() {
 function _wallSideItem(p) {
   const type = BASTION_WALL_TYPES[p.type] || BASTION_WALL_TYPES.message;
   const author = p.charName || p.author || 'Personnage';
-  const preview = (p.text || '').replace(/\s+/g, ' ').trim().slice(0, 70);
+  const preview = isMarketListing(p) ? marketSideLabel(p) : (p.text || '').replace(/\s+/g, ' ').trim().slice(0, 70);
   return `<button type="button" class="bs-side-item" data-action="_bastionWallJump" data-id="${_esc(p.id)}" style="--c:${type.color}">
     <span class="bs-side-ic">${type.icon}</span>
     <span class="bs-side-txt"><b>${_esc(author)}</b><small>${_esc(preview || type.label)}</small></span>
@@ -3378,14 +3396,17 @@ function _bastionWallJump(id) {
   });
 }
 
+// Le composeur est redessiné depuis l'état : pastille cochée, invite, libellé de
+// « Publier » et (Offre) encart « Joindre un objet » suivent la catégorie. L'ancien
+// code visait des `.bs-annonce-type` disparus à la refonte du mur : le choix était
+// enregistré sans aucun retour visuel.
 function _bastionSetAnnonceType(btn) {
   _wallUi.type = BASTION_WALL_TYPES[btn.dataset.type] ? btn.dataset.type : 'message';
   _wallPersistDraft();
-  document.querySelectorAll('.bs-annonce-type').forEach(el => {
-    const active = el === btn;
-    el.classList.toggle('active', active);
-    el.setAttribute('aria-pressed', String(active));
-  });
+  const card = document.getElementById('bs-wall-composer');
+  if (!card) { _renderPage(); return; }
+  card.outerHTML = _wallComposer();
+  document.querySelector(`#bs-wall-composer [data-action="_bastionSetAnnonceType"][data-type="${_wallUi.type}"]`)?.focus();
 }
 
 function _bastionWallDraft(el) {
@@ -3402,7 +3423,7 @@ function _bastionWallDraft(el) {
   });
   walk(el);
   _wallUi.draftText = text.trim().slice(0, 4000);
-  document.querySelector('.bs-wall-publish')?.toggleAttribute('disabled', !_wallUi.draftText.trim() && !_wallUi.images.length);
+  document.getElementById('bs-wall-publish')?.toggleAttribute('disabled', !_wallUi.draftText.trim() && !_wallUi.images.length);
   const slot = document.getElementById('bs-wall-mention-slot');
   if (slot) slot.innerHTML = _wallMentionSuggestions();
   _wallPersistDraft();
@@ -3460,7 +3481,7 @@ function _bastionWallTogglePicker() {
 function _bastionWallRefreshMedia() {
   const slot = document.getElementById('bs-wall-media-preview');
   if (slot) slot.innerHTML = _wallComposerMedia();
-  document.querySelector('.bs-wall-publish')?.toggleAttribute('disabled', !_wallUi.draftText.trim() && !_wallUi.images.length);
+  document.getElementById('bs-wall-publish')?.toggleAttribute('disabled', !_wallUi.draftText.trim() && !_wallUi.images.length);
 }
 
 function _bastionWallAddImage() {
@@ -3550,8 +3571,14 @@ async function _bastionDeleteAnnonce(id) {
   const post = _wallPostById(id);
   const canDelete = post && (STATE.isAdmin || (!post.legacy && post.uid === STATE.user?.uid));
   if (!canDelete) { showNotif('Tu ne peux supprimer que tes publications.', 'error'); return; }
-  const confirmed = await confirmModal('Supprimer définitivement cette publication et toutes ses réponses ?', { title: 'Supprimer la publication', confirmLabel: 'Supprimer', danger: true }).catch(() => false);
+  // Vente ouverte : l'objet en dépôt revient d'abord au vendeur, sinon il
+  // disparaîtrait avec l'annonce.
+  const openSale = isMarketListing(post) && post.status === 'active';
+  const confirmed = await confirmModal(openSale
+    ? `Retirer la vente et supprimer la publication ?<br>L’objet revient dans l’inventaire de ${_esc(post.charName || 'son vendeur')}.`
+    : 'Supprimer définitivement cette publication et toutes ses réponses ?', { title: 'Supprimer la publication', confirmLabel: 'Supprimer', danger: true }).catch(() => false);
   if (!confirmed) return;
+  if (openSale && !await withdrawMarketListing(id, { confirm: false })) return;
   if (post.legacy) {
     const items = _legacyAnnonces.filter(item => item.id !== id).map(({ legacy, legacyIndex, ...item }) => {
       // Ne pas transformer les identifiants d'affichage générés par la refonte
@@ -3613,10 +3640,11 @@ function _bastionWallEditPost(id) {
 async function _bastionWallSavePost(id) {
   const post = _wallPostById(id);
   const text = _wallUi.editPostText.trim().slice(0, 4000);
-  if (!post || (!text && !post.imageCount && !post.images?.length)) return;
+  const listing = isMarketListing(post);
+  if (!post || (!text && !post.imageCount && !post.images?.length && !listing)) return;
   const oldMentionUids = new Set(bastionWallMentionedCharacters(post.text, STATE.characters || []).map(character => character.uid));
   const newMentions = bastionWallMentionedCharacters(text, STATE.characters || []).filter(character => !oldMentionUids.has(character.uid));
-  const nextType = BASTION_WALL_TYPES[_wallUi.editPostType] ? _wallUi.editPostType : 'message';
+  const nextType = listing ? 'offre' : (BASTION_WALL_TYPES[_wallUi.editPostType] ? _wallUi.editPostType : 'message');
   await updateInCol('bastionAnnonces', id, {
     text,
     type: nextType,
@@ -3638,6 +3666,7 @@ async function _bastionWallSavePost(id) {
 async function _bastionWallSetStatus(id, status) {
   const post = _wallPostById(id);
   if (!post || !BASTION_WALL_STATUSES[status] || (post.uid !== STATE.user?.uid && !STATE.isAdmin)) return;
+  if (isMarketListing(post)) { showNotif('Une vente se clôt par l’achat ou en la retirant (l’objet revient au vendeur).', 'info'); return; }
   await updateInCol('bastionAnnonces', id, { status, updatedAt: Date.now() });
   _wallUi.menuPostId = '';
   if (STATE.currentPage === 'bastion') _renderPage();
@@ -3863,6 +3892,26 @@ async function renderBastionPage() {
     .then(() => { if (STATE.currentPage === 'bastion') _renderPage(); })
     .catch(e => console.error('[bastion] chargement shop/npcs', e));
 }
+
+// Vente d'objets sur le mur (features/bastion-market-ui.js) : il lit le fil et le
+// personnage « Je joue » d'ici, et y reflète ses écritures sans attendre le snapshot.
+initBastionMarket({
+  posts: () => _wallAllPosts(),
+  scopeChar: () => _bastionScopeChar(),
+  rerender: () => _renderPage(),
+  patchPost: (id, patch) => {
+    _annonces = sortBastionWallPosts(_annonces.map(post => (post.id === id ? { ...post, ...patch } : post)));
+  },
+  onPosted: post => {
+    _annonces = sortBastionWallPosts([post, ..._annonces.filter(item => item.id !== post.id)]);
+  },
+  draftText: () => _wallUi.draftText,
+  clearDraft: () => {
+    _wallUi.draftText = '';
+    _wallUi.pickerOpen = false;
+    _wallPersistDraft();   // supprime le brouillon s'il ne reste aucune image
+  },
+});
 
 registerActions({
   _bastionRefreshDepositItems: () => _bastionRefreshDepositItems(),

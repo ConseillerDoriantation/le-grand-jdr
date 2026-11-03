@@ -15,7 +15,7 @@ import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser
 import { loadStats, peekStats, applyStatsLegacyRollup, resetStats, deleteCharStats, deleteCharDateStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
 import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, mergeVttRollDetails, normalizeSkillStats, topStatTies, vttLogTimeMs } from '../shared/stats-analysis.js';
 import { MVP_AXIS_GUIDE, MVP_SCORING_GUIDE, scoreMvpView } from '../shared/stats-mvp.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
 import { confirmModal, openModal, promptModal, closeModalDirect } from '../shared/modal.js';
 import { watch, watchDoc } from '../shared/realtime.js';
@@ -3010,6 +3010,12 @@ const PAGES = {
           || (order[a.slot] ?? 9) - (order[b.slot] ?? 9));
       return _sessionsMemo;
     };
+    // Utilisée par la séance, les séances suivantes et les cartes de groupe : la
+    // retirer fait planter chaque paint dès qu'un groupe existe (tableau de bord
+    // figé sur son premier rendu, mur du Bastion compris).
+    const charForParticipant = participant => allChars.find(char => char.id === participant?.charId)
+      || allChars.find(char => char.uid === participant?.uid)
+      || { nom: participant?.nom || 'Personnage', uid: participant?.uid || '' };
     const avatar = (entity, className = '', live = false) => {
       const sizes = { sm: 24, lg: 46, xl: 56 };
       const sizeClass = className.split(/\s+/).find(value => sizes[value]);
@@ -3121,7 +3127,10 @@ const PAGES = {
         const reactions = Object.values(bastionWallReactionCounts(post)).reduce((sum, value) => sum + value, 0);
         const replies = Number(post.commentCount) || (post.comments || []).length;
         const isUnread = post.ts > seenAt && post.uid !== STATE.user?.uid;
-        return `<button type="button" class="db-w${isUnread ? ' unread' : ''}" data-navigate="bastion" data-nav-sub="post:${_esc(post.id)}">${avatar(char)}<span class="db-w-b"><span class="db-w-h"><b>${_esc(post.charName || post.author || char.nom || 'Personnage')}</b><span class="db-ty" style="--t:${_esc(type.color)}">${_esc(type.label)}</span>${post.pinned ? '<span class="db-pin">Épinglé</span>' : ''}<span>· ${timeAgo(post.ts)}</span></span><p>${_esc(post.text || 'Nouvelle publication')}</p><span class="db-w-s">${reactions} réaction${reactions > 1 ? 's' : ''} · ${replies} réponse${replies > 1 ? 's' : ''}</span></span></button>`;
+        // Vente du Marché : l'objet et son prix, même sans message.
+        const sale = post.type === 'offre' && Array.isArray(post.listing?.items) && post.listing.items.length
+          ? `🪙 ${post.listing.name || 'Objet'} · ${Number(post.listing.price || 0).toLocaleString('fr-FR')} or` : '';
+        return `<button type="button" class="db-w${isUnread ? ' unread' : ''}" data-navigate="bastion" data-nav-sub="post:${_esc(post.id)}">${avatar(char)}<span class="db-w-b"><span class="db-w-h"><b>${_esc(post.charName || post.author || char.nom || 'Personnage')}</b><span class="db-ty" style="--t:${_esc(type.color)}">${_esc(type.label)}</span>${post.pinned ? '<span class="db-pin">Épinglé</span>' : ''}<span>· ${timeAgo(post.ts)}</span></span><p>${sale ? `<b>${_esc(sale)}</b>${post.text ? ' — ' : ''}` : ''}${_esc(post.text || (sale ? '' : 'Nouvelle publication'))}</p><span class="db-w-s">${reactions} réaction${reactions > 1 ? 's' : ''} · ${replies} réponse${replies > 1 ? 's' : ''}</span></span></button>`;
       };
       return `<section class="db-sec db-wall"><div class="db-sh"><h2>Mur du Bastion</h2>${unread ? `<span class="new">${unread} nouveau${unread > 1 ? 'x' : ''}</span>` : ''}<span class="sp"></span><button type="button" class="db-link" data-navigate="bastion">Ouvrir ${icon('arrow-right')}</button></div><div class="db-card">${shown.length ? shown.map(card).join('') : '<div class="db-empty"><b>Le mur est prêt</b>Publiez la première nouvelle du Bastion.</div>'}<div class="db-wf"><button type="button" class="db-btn" data-navigate="bastion">${icon('edit')} Publier</button>${unread ? '<button type="button" class="db-btn ghost" data-action="_dashMarkWallRead">Tout marquer lu</button>' : ''}</div></div></section>`;
     };

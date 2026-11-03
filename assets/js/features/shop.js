@@ -18,7 +18,8 @@ import { getShopItemEditableText, shopItemToInvEntry } from '../shared/inventory
 import { sanitizeRichTextHtml } from '../shared/rich-text.js';
 import { bindQuillEditors, getQuillHtml, markQuillSaved, quillEditorHtml } from '../shared/rich-text-quill.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry, inventoryHistoryEntries } from '../shared/inventory-history.js';
-import { openUpgradeSettingsAdmin } from '../shared/upgrade-settings.js';
+import { openUpgradeSettingsAdmin, loadUpgradeSettings, getUpgradeSettings, hasUpgrades } from '../shared/upgrade-settings.js';
+import { upgradeResaleBonus } from '../shared/upgrade-value.js';
 import { openCraftSettingsAdmin } from '../shared/craft-settings.js';
 import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
 import { mountArtisanPage, unmountArtisanPage } from './artisan.js';
@@ -411,6 +412,8 @@ function _renderManageMenu() {
 
 export async function renderShop() {
   await Promise.all([loadShopData(), loadShopCharacters()]);
+  // Tarifs d'amélioration : seulement si un objet amélioré peut être repris.
+  if ((STATE.characters || []).some(c => Array.isArray(c.inventaire) && c.inventaire.some(hasUpgrades))) await loadUpgradeSettings();
   const routeSection = getRouteSub('shop').split('/')[0];
   if (routeSection === 'atelier') _shopSection = _prepareAtelier() ? 'atelier' : 'shop';
   else if (routeSection === 'artisan' && STATE.isAdmin) _shopSection = 'artisan';
@@ -1325,6 +1328,12 @@ function _getActiveShopChar() {
   return active || null;
 }
 
+// Revente d'un objet d'inventaire : prix de reprise + part de ses améliorations
+// au tarif actuel (Gérer → Améliorations).
+function _resaleCredit(invItem) {
+  return (parseFloat(invItem?.prixVente) || 0) + upgradeResaleBonus(invItem, getUpgradeSettings());
+}
+
 function _tradeEntries(char = _getActiveShopChar()) {
   if (!char) return [];
   const seen = new Set();
@@ -1338,7 +1347,7 @@ function _tradeEntries(char = _getActiveShopChar()) {
       slot,
       invIndex,
       item,
-      credit: parseFloat(item.prixVente) || 0,
+      credit: _resaleCredit(item),
     };
   }).filter(Boolean);
 }
@@ -1831,7 +1840,7 @@ async function _sellCurrentEquipForShop(slot, draft = null) {
 
   const invItem = c.inventaire?.[invIndex] || {};
   const itemNom = invItem.nom || eq?.nom || 'cet objet';
-  const prixVente = parseFloat(invItem.prixVente) || 0;
+  const prixVente = _resaleCredit(invItem);
   if (draft) {
     if (draft.tradeIndices.has(invIndex)) return { ok: true, duplicate: true };
     draft.tradeIndices.add(invIndex);
@@ -1883,7 +1892,7 @@ function _renderDetailPanelHtml() {
   const sourceIndex = Number(equipped?.sourceInvIndex);
   const sourceItem = Number.isInteger(sourceIndex) ? ctx.char?.inventaire?.[sourceIndex] : null;
   const canTrade = !!sourceItem;
-  const tradeCredit = parseFloat(sourceItem?.prixVente) || 0;
+  const tradeCredit = _resaleCredit(sourceItem);
   const facts = [
     ..._itemFacts(item),
     { lbl: 'Stock', val: st.dispo == null ? 'Illimité' : st.epuise ? 'Épuisé' : String(st.dispo) },
@@ -2399,7 +2408,7 @@ export async function sellInvItemFromShop(charId, invIndex, opts = {}) {
     const item = inv[invIndex];
     if (!item) return;
 
-    const prixVente = parseFloat(item.prixVente) || 0;
+    const prixVente = _resaleCredit(item);
     const itemNom   = item.nom || 'cet objet';
 
     if (!opts.skipConfirm && !await confirmModal(`Vendre "${_esc(itemNom)}" pour ${prixVente} or ?`, { title: 'Confirmation de vente' })) return;
@@ -4812,7 +4821,7 @@ function _atelierMoney() {
     const old = c?.equipement?.[slot.id];
     const invIndex = Number(old?.sourceInvIndex);
     const invItem = Number.isInteger(invIndex) && invIndex >= 0 ? c?.inventaire?.[invIndex] : null;
-    if (old && invItem) replaced.push({ slot: slot.id, item: invItem, credit: parseFloat(invItem.prixVente) || 0 });
+    if (old && invItem) replaced.push({ slot: slot.id, item: invItem, credit: _resaleCredit(invItem) });
   });
   const gross = toBuy.reduce((sum, entry) => sum + (parseFloat(entry.item.prix) || 0), 0);
   const resaleCredit = replaced.reduce((sum, entry) => sum + entry.credit, 0);

@@ -21,11 +21,8 @@ import {
 } from '../shared/char-stats.js';
 import { getCharacterRules } from '../shared/character-rules.js';
 import { getDeckUsage } from '../shared/spell-deck.js';
-import { isFeatureEnabled } from '../shared/features.js';
 import { recordRecentNavigation } from '../shared/recent-navigation.js';
-import {
-  recipeBookButton, openCharacterRecipeBook,
-} from './recipes.js';
+import { openCharacterRecipeBook } from './recipes.js';
 
 import { canControlCharacter, getCharacterById, getVisibleCharacters } from '../shared/character-state.js';
 // ── Sous-modules ─────────────────────────────────────────────────────────────
@@ -76,21 +73,15 @@ import {
   openSendGoldModal, sendGold,
   addInvItem, saveInvItemFromShop,
   editInvItem, saveInvItem,
-  renderInvPersonalLine, saveInvPersonalLine,
-  filterInvRows, openInventoryItemDetail, inventoryHistoryButton, openInventoryHistoryModal,
-  ensureInventoryCatalog, isInventoryCatalogReady, getInventoryCatalogItem, renderCharInventaire,
+  saveInvPersonalLine,
+  openInventoryHistoryModal,
+  ensureInventoryCatalog, isInventoryCatalogReady, renderCharInventaire,
 } from './characters/inventory.js';
 import { openCreateItemModal } from './characters/item-forge.js';
+import { RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import {
-  getInventoryItemValue,
-  getInventoryItemResaleValue,
-  getInventoryItemImage,
-  getInventoryReadableDocument,
-} from '../shared/inventory-utils.js';
-import { RARETE_NAMES, _rareteColor, _rareteLabel } from '../shared/rarity.js';
-import {
-  getArmorTorsoSlotId, getEquipmentSlot, getEquipmentSlots, getPrimaryWeaponSlotId,
-  getSecondaryWeaponSlotId, resolveEquipmentSlotForItem, equipmentSlotAcceptsItem,
+  getArmorTorsoSlotId, getEquipmentSlots, getPrimaryWeaponSlotId,
+  getSecondaryWeaponSlotId, equipmentSlotAcceptsItem,
 } from '../shared/equipment-slots.js';
 import { weaponHands } from '../shared/weapon-family.js';
 
@@ -143,14 +134,11 @@ import Sortable from '../vendor/sortable.esm.js';
 import { makeSortable } from '../shared/sortable-helper.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { openModal, closeModalDirect } from '../shared/modal.js';
-import { lsJson } from '../shared/local-storage.js';
 
 // Caches partagés Phase 2 — chargés à la demande au 1er affichage Combat
 let _combatTabCache = { styles: null, dmgTypes: null };
 let _combatTabUi = { charId: '', open: null };
 let _currentTopTab   = 'combat';
-let _csV3InvFilter = { cat: 'all', search: '' };
-let _csV3InvDensity = lsJson.get('cs-inventory-density') === 'list' ? 'list' : 'cards';
 let _inventoryCatalogRefreshQueued = false;
 
 // Palette d'auras — constante partagée par renderCharSheet et setCharAura
@@ -1864,454 +1852,6 @@ function renderCharCombatV3(c, canEdit) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════════
-// V3 — INVENTAIRE (header avec summary + filter chips, puis renderer existant)
-// ══════════════════════════════════════════════════════════════════════════════
-// ══════════════════════════════════════════════════════════════════════════════
-// V3 — INVENTAIRE (.inv-card grid + summary + filter chips + search)
-// ══════════════════════════════════════════════════════════════════════════════
-// Regroupements spécifiques par type (le MJ saisit le type libre des objets).
-// Clé = type normalisé (minuscules, sans accents) → catégorie cible.
-const _INV_MATERIAUX = { id: 'materiaux', lbl: 'Matériaux', icon: '🧱' };
-const _INV_TYPE_MAP = {
-  'skin':       { id: 'armure', lbl: 'Armures', icon: '🛡️' }, // routé vers la catégorie Armures
-  'instrument': { id: 'objet',  lbl: 'Objet',   icon: '🎒' },
-};
-
-// Catégorie complète d'un objet ({ id, lbl, icon }) pour le filtre d'inventaire.
-// • Équipement → 3 catégories fixes qui absorbent tous leurs sous-types :
-//   toute arme → Armes, toute armure → Armures, bagues/amulettes → Bijoux.
-// • Mat.* (Mat.Arme, Mat.Armure, Mat.Bijoux…) → Matériaux.
-// • Règles ponctuelles (_INV_TYPE_MAP) : skin → Armures, Instrument → Objet…
-// • Tout le reste → une catégorie par `type` d'objet (libellé = le type réel).
-// • Sans type → Divers.
-function _invCat(it) {
-  const tpl = (it.template || '').toLowerCase();
-  const hay = _norm([it.type, it.categorie, it.nom, it.sousType, it.sousCategorie].filter(Boolean).join(' '));
-  const has = (...k) => k.some(x => hay.includes(x));
-  if (tpl === 'arme'   || tpl.includes('arme')   || it.degats || it.toucher) return { id: 'arme',   lbl: 'Armes',   icon: '⚔️' };
-  if (tpl === 'armure' || tpl.includes('armure') || it.typeArmure || it.slotArmure) return { id: 'armure', lbl: 'Armures', icon: '🛡️' };
-  if (tpl === 'bijou'  || it.slotBijou || has('anneau','amulette','bijou','talisman','pendentif','bague')) return { id: 'bijou', lbl: 'Bijoux', icon: '💍' };
-  const type = (it.type || '').trim();
-  if (!type) return { id: 'autre', lbl: 'Divers', icon: '📦' };
-  const nt = _norm(type);
-  if (nt.startsWith('mat.') || nt.startsWith('mat ') || nt === 'materiau' || nt === 'materiaux') return _INV_MATERIAUX;
-  if (_INV_TYPE_MAP[nt]) return _INV_TYPE_MAP[nt];
-  return { id: 'type:' + nt, lbl: type, icon: _invTypeIcon(type) };
-}
-
-// Renvoie l'id de catégorie (pour le filtrage).
-function _detectInvCategory(it) { return _invCat(it).id; }
-
-// Icône d'agrément d'un filtre de type (cosmétique ; le libellé reste le type réel).
-function _invTypeIcon(type) {
-  const t = _norm(type || '');
-  if (/plante|fleur|champignon|graine|botaniqu/.test(t)) return '🌿';
-  if (/potion|consommable|elixir|antidote|nourriture|herbe|ingredient|ressource|materiau/.test(t)) return '🧪';
-  if (/parchemin|grimoire|rouleau|scroll|livre/.test(t)) return '📜';
-  if (/precieux|gemme|joyau|pierre|tresor|lingot|diamant|rubis|saphir|emeraude|perle|cristal|pepite|relique|valeur/.test(t)) return '💎';
-  if (/cle|clef|outil|kit|piege/.test(t)) return '🔧';
-  return '📦';
-}
-
-// Puces de filtre dynamiques : « Tout » + uniquement les catégories réellement
-// présentes dans l'inventaire (Armes/Armures/Bijoux, puis les autres par libellé,
-// puis « Divers »).
-function _invFilters(inv) {
-  const present = new Map();
-  (inv || []).forEach(it => {
-    const cat = _invCat(it);
-    if (!present.has(cat.id)) present.set(cat.id, cat);
-  });
-  const FIX = ['arme', 'armure', 'bijou'];
-  const fixed = FIX.map(id => present.get(id)).filter(Boolean);
-  const dyn = [...present.values()]
-    .filter(c => !FIX.includes(c.id) && c.id !== 'autre')
-    .sort((a, b) => a.lbl.localeCompare(b.lbl, 'fr', { sensitivity: 'base' }));
-  const autre = present.get('autre');
-  return [{ id: 'all', lbl: 'Tout', icon: '' }, ...fixed, ...dyn, ...(autre ? [autre] : [])];
-}
-
-function _invLooksMechanicalEffect(text = '') {
-  const raw = String(text || '').trim();
-  if (!raw || raw.length > 90) return false;
-  const n = _norm(raw);
-  if (/[+\-]?\d/.test(raw)) return true;
-  return /\b(pv|pm|ca|degat|degats|soin|vitesse|portee|toucher|critique|avantage|desavantage|relance|dd|etat|reaction|action bonus|resistance|immunite|mana)\b/.test(n);
-}
-
-function _inventoryBuildUsageMap(c = {}) {
-  const inv = Array.isArray(c?.inventaire) ? c.inventaire : [];
-  const { builds, activeBuildId } = normalizeCharacterBuilds(c);
-  const usageMap = new Map();
-  const sameItem = (entry, eq) => {
-    if (!entry || !eq) return false;
-    if (eq.itemId && entry.itemId) return entry.itemId === eq.itemId;
-    return String(entry.nom || '') === String(eq.nom || '');
-  };
-  const readIdx = value => {
-    const n = Number.isInteger(value) ? value : parseInt(value, 10);
-    return Number.isInteger(n) && n >= 0 ? n : -1;
-  };
-
-  builds.forEach((build, buildIndex) => {
-    const claimed = new Set();
-    Object.entries(build?.equipement || {}).forEach(([slot, eq]) => {
-      if (!eq?.nom) return;
-      let idx = readIdx(eq.sourceInvIndex);
-      if (!(idx >= 0 && !claimed.has(idx) && sameItem(inv[idx], eq))) {
-        idx = inv.findIndex((entry, i) => !claimed.has(i) && sameItem(entry, eq));
-      }
-      if (idx < 0) return;
-      claimed.add(idx);
-      const list = usageMap.get(idx) || [];
-      list.push({
-        buildId: build.id || `build-${buildIndex}`,
-        buildName: build.name || build.nom || `Build ${buildIndex + 1}`,
-        slot,
-        active: (build.id || '') === activeBuildId,
-      });
-      usageMap.set(idx, list);
-    });
-  });
-
-  return usageMap;
-}
-
-function _inventoryBuildUsagesForIndices(usageMap, indices = []) {
-  const seen = new Set();
-  const out = [];
-  indices.forEach(rawIdx => {
-    const idx = Number.isInteger(rawIdx) ? rawIdx : parseInt(rawIdx, 10);
-    (usageMap.get(idx) || []).forEach(usage => {
-      const key = `${usage.buildId}|${usage.slot}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push(usage);
-    });
-  });
-  return out.sort((a, b) => Number(b.active) - Number(a.active)
-    || String(a.buildName).localeCompare(String(b.buildName), 'fr', { sensitivity: 'base' })
-    || String(a.slot).localeCompare(String(b.slot), 'fr', { sensitivity: 'base' }));
-}
-
-function _inventorySlotLabel(slot = '') {
-  const definition = getEquipmentSlots().find(entry => entry.id === slot);
-  return definition?.label || slot || 'Emplacement';
-}
-
-function _renderInventoryBuildBadges(usages = []) {
-  const inactive = usages.filter(u => !u.active);
-  if (!inactive.length) return '';
-  const otherByBuild = new Map();
-  inactive.forEach(u => {
-    if (!otherByBuild.has(u.buildId)) otherByBuild.set(u.buildId, { name: u.buildName, slots: [] });
-    otherByBuild.get(u.buildId).slots.push(_inventorySlotLabel(u.slot));
-  });
-
-  const detail = inactive
-    .map(u => `${u.buildName} — ${_inventorySlotLabel(u.slot)}`)
-    .join('\n');
-  const title = _esc(detail);
-  const badges = [];
-
-  const others = [...otherByBuild.values()];
-  if (others.length === 1) {
-    badges.push(`<span class="inv-equipped-badge inv-build-badge is-other" title="${title}">Autre build · ${_esc(others[0].name)}</span>`);
-  } else if (others.length > 1) {
-    badges.push(`<span class="inv-equipped-badge inv-build-badge is-other" title="${title}">${others.length} autres builds</span>`);
-  }
-
-  return `<span class="inv-build-badges">${badges.join('')}</span>`;
-}
-
-function _renderCurrentBuildEquipment(usages = []) {
-  const active = usages.filter(usage => usage.active);
-  if (!active.length) return '';
-  const slots = [...new Set(active.map(usage => _inventorySlotLabel(usage.slot)))];
-  const buildName = active[0].buildName || 'Principal';
-  const detail = `Build actuel : ${buildName}\n${slots.join(', ')}`;
-  return `<div class="inv-equipped-current" title="${_esc(detail)}">
-    <span class="inv-equipped-current-check" aria-hidden="true">✓</span>
-    <span class="inv-equipped-current-copy">
-      <small>Équipé · build actuel</small>
-      <strong>${_esc(slots.join(' · '))}</strong>
-    </span>
-  </div>`;
-}
-
-function renderCharInventaireV3(c, canEdit) {
-  const inv = c.inventaire || [];
-  const totalItems = inv.reduce((sum, item) =>
-    sum + (parseInt(item.quantite || item.qte || 1) || 1), 0);
-  let equipped = 0;
-  let currentEquippedMap = new Map();
-  try {
-    currentEquippedMap = getEquippedInventoryIndexMap?.(c) || new Map();
-    equipped = currentEquippedMap.size;
-  } catch {}
-  const totals = inv.reduce((sum, it) => {
-    const catalogItem = getInventoryCatalogItem(it.itemId);
-    const q = parseInt(it.quantite || it.qte || 1) || 1;
-    sum.value += getInventoryItemValue(it, catalogItem) * q;
-    sum.resale += getInventoryItemResaleValue(it, catalogItem) * q;
-    return sum;
-  }, { value: 0, resale: 0 });
-
-  // État du filtre / search module-local
-  const filter = _csV3InvFilter;
-  const q = _norm(filter.search || '');   // minuscules + sans accents
-  // Puces dynamiques d'après les objets présents ; un filtre devenu absent
-  // (ex. ancienne catégorie supprimée) retombe sur « Tout ».
-  const filters = _invFilters(inv);
-  const activeCat = filters.some(f => f.id === filter.cat) ? filter.cat : 'all';
-  const buildUsageMap = _inventoryBuildUsageMap(c);
-
-  // Stack : regroupe les items identiques qui portent aussi les mêmes traits.
-  // Garde la liste d'indices originaux pour les actions (vente/envoi/suppression bulk).
-  const stackMap = new Map();
-  inv.forEach((it, idx) => {
-    const catalogItem = getInventoryCatalogItem(it.itemId);
-    const baseKey = it.itemId || `${it.nom||''}|${it.template||it.type||''}|${parseInt(it.rarete||it.rare||0)}|${getInventoryItemValue(it, catalogItem)}`;
-    const traitsKey = (_getTraits?.(it) || []).join('\u001f');
-    const key = `${baseKey}|traits:${traitsKey}`;
-    if (!stackMap.has(key)) {
-      stackMap.set(key, { it: { ...it }, indices: [idx], qte: parseInt(it.quantite || it.qte || 1) || 1 });
-    } else {
-      const cur = stackMap.get(key);
-      cur.indices.push(idx);
-      cur.qte += parseInt(it.quantite || it.qte || 1) || 1;
-    }
-  });
-
-  // Filtrage sur les stacks
-  const filteredInv = [...stackMap.values()].filter(({ it }) => {
-    if (activeCat !== 'all' && _detectInvCategory(it) !== activeCat) return false;
-    if (!q) return true;
-    const traits = (_getTraits?.(it) || []).join(' ');
-    const hay = _norm(`${it.nom||''} ${it.type||''} ${it.template||''} ${it.description||''} ${getItemEffectText(it)||''} ${traits}`);
-    return hay.includes(q);
-  });
-
-  const categoryCount = catId => inv.reduce((count, item) => {
-    if (catId !== 'all' && _detectInvCategory(item) !== catId) return count;
-    return count + (parseInt(item.quantite || item.qte || 1) || 1);
-  }, 0);
-
-  const summaryHtml = `<div class="inv-overview">
-    <span class="inv-overview-tile count"><small>Total</small><b>${totalItems}</b><em>objet${totalItems > 1 ? 's' : ''}</em></span>
-    <span class="inv-overview-tile equipped"><small>Porté</small><b>${equipped}</b><em>équipé${equipped > 1 ? 's' : ''}</em></span>
-    <span class="inv-overview-tile value"><small>Valeur</small><b>${totals.value} or</b></span>
-    <span class="inv-overview-tile resale"><small>Revente</small><b>${totals.resale} or</b></span>
-  </div>`;
-
-  const filterBarHtml = `<div class="inv-toolbar">
-    <div class="inv-search">
-      <svg class="inv-search-ico" aria-hidden="true"><use href="./assets/img/icons.svg#icon-search"/></svg>
-      <input placeholder="Rechercher un objet…" value="${_esc(filter.search)}"
-        aria-label="Rechercher dans l’inventaire" data-input="_csV3InvSetSearch">
-      ${filter.search ? `<button class="inv-search-clear" data-action="csV3InvClearSearch" title="Effacer la recherche" aria-label="Effacer la recherche">×</button>` : ''}
-    </div>
-    <div class="inv-toolbar-actions">
-    ${isFeatureEnabled('recettes') ? recipeBookButton(c) : ''}
-    ${inventoryHistoryButton(c)}
-    <div class="inv-densityseg" role="group" aria-label="Mode d’affichage">
-      <button class="${_csV3InvDensity === 'cards' ? 'on' : ''}" data-action="csV3InvSetDensity"
-        data-density="cards" aria-pressed="${_csV3InvDensity === 'cards'}" title="Vue cartes">▦</button>
-      <button class="${_csV3InvDensity === 'list' ? 'on' : ''}" data-action="csV3InvSetDensity"
-        data-density="list" aria-pressed="${_csV3InvDensity === 'list'}" title="Vue liste">☰</button>
-    </div>
-    ${canEdit ? `<div class="inv-add-group">
-      <button class="btn btn-outline btn-sm inv-add-btn" data-action="openCreateItemModal" data-id="${c.id}" title="Créer un objet selon les règles de l’aventure">🛠️ <span>Créer</span></button>
-      <button class="btn btn-gold btn-sm inv-add-btn" data-action="addInvItem" data-id="${c.id}" title="Ajouter un objet">＋ <span>Objet</span></button>
-    </div>` : ''}
-    </div>
-  </div>
-  <div class="inv-category-bar" role="tablist" aria-label="Catégories de l’inventaire">
-    ${filters.map(f => `<button class="inv-category ${activeCat===f.id?'on':''}" role="tab"
-      aria-selected="${activeCat===f.id}" data-action="csV3InvSetCat" data-cat="${_esc(f.id)}">
-      ${f.icon ? `<span aria-hidden="true">${f.icon}</span>` : ''}${_esc(f.lbl)}
-      <b>${categoryCount(f.id)}</b>
-    </button>`).join('')}
-  </div>`;
-
-  if (filteredInv.length === 0) {
-    return `<div class="cs-section cs-section--compact cs-inventory-v3">${filterBarHtml}${summaryHtml}<div class="q-empty">${inv.length===0?"Inventaire vide.":"Aucun objet ne correspond aux filtres."}</div></div>`;
-  }
-
-  const cardsHtml = filteredInv.map(({ it, indices, qte }) => {
-    const idx = indices[0];               // index principal pour Modifier
-    const allIdx = indices;               // tous les indices pour bulk actions
-    const cat = _invCat(it);
-    const rareRaw = parseInt(it.rarete || it.rare || 0) || 0;
-    const rareIdx = Math.max(0, rareRaw);
-    const rareName = RARETE_NAMES[rareIdx] || '';
-    const col = rareName ? _rareteColor(rareName) : '#7a8fa8';
-    const allIdxB64 = btoa(JSON.stringify(allIdx));
-
-    // Prix d'achat (référence) et prix de vente (au joueur quand il revend)
-    const catalogItem = getInventoryCatalogItem(it.itemId);
-    const prixAchat = getInventoryItemValue(it, catalogItem);
-    const prixVente = getInventoryItemResaleValue(it, catalogItem);
-    const image = getInventoryItemImage(it, catalogItem);
-    const readableDocument = getInventoryReadableDocument(it, catalogItem);
-
-    // Effet principal : une seule information forte, le reste devient secondaire.
-    const caTotal = (parseInt(it.ca) || 0) + (parseInt(it.caBonus) || 0);
-    const rawEffectTxt = String(getItemEffectText(it) || '').trim();
-    const descriptionTxt = String(it.description || '').trim();
-    const effectCandidateTxt = rawEffectTxt && _norm(rawEffectTxt) !== _norm(descriptionTxt)
-      ? rawEffectTxt
-      : '';
-    const effetTxt = _invLooksMechanicalEffect(effectCandidateTxt) ? effectCandidateTxt : '';
-    const displayDescription = descriptionTxt || (!effetTxt ? effectCandidateTxt : '');
-    const heroEffectTxt = effetTxt.length > 56 ? `${effetTxt.slice(0, 53).trim()}…` : effetTxt;
-    const hero = it.degats
-      ? { k: 'Dégâts', v: it.degats, c: 'dmg', icon: '⚔' }
-      : caTotal
-        ? { k: 'Armure', v: `CA ${caTotal > 0 ? '+' : ''}${caTotal}`, c: 'ca', icon: '◈' }
-        : effetTxt
-          ? { k: 'Effet', v: heroEffectTxt, c: 'effect', icon: '✦' }
-          : null;
-
-    // Propriétés secondaires
-    const props = [];
-    const rawType = String(it.sousType || it.type || '').trim();
-    if (rawType) {
-      const rawTypeNorm = _norm(rawType);
-      const catNorm = _norm(cat.lbl || '');
-      if (!catNorm.includes(rawTypeNorm) && !rawTypeNorm.includes(catNorm)) {
-        props.push({ k: 'Type', v: rawType });
-      }
-    }
-    if (it.toucher) props.push({ k: 'Toucher', v: it.toucher });
-    if (it.portee) props.push({ k: 'Portée', v: it.portee });
-    if (it.typeArmure) props.push({ k: 'Type', v: it.typeArmure });
-    if (it.slotArmure)  props.push({ k: 'Slot', v: it.slotArmure });
-    else if (it.slotBijou) props.push({ k: 'Slot', v: it.slotBijou });
-    if (it.format) props.push({ k: 'Type d’arme', v: it.format });
-    if (it.mains) props.push({ k: 'Maniement', v: it.mains });
-    if (effetTxt && hero?.k !== 'Effet') props.push({ k: 'Effet', v: effetTxt, c: 'effect' });
-    const traits = _getTraits?.(it) || [];
-
-    const buildUsages = _inventoryBuildUsagesForIndices(buildUsageMap, allIdx);
-    const isEquipped = buildUsages.length > 0;
-    const hasActiveBuildUsage = buildUsages.some(u => u.active);
-    const buildBadgesHtml = _renderInventoryBuildBadges(buildUsages);
-    const currentBuildEquipmentHtml = _renderCurrentBuildEquipment(buildUsages);
-    const equipSlotId = resolveEquipmentSlotForItem(it);
-    const equipSlot = equipSlotId ? getEquipmentSlot(equipSlotId) : null;
-    const equipIndex = allIdx.find(index => !(currentEquippedMap.get(index) || []).length) ?? idx;
-    const equippedInTarget = !!equipSlotId && allIdx.some(index =>
-      (currentEquippedMap.get(index) || []).includes(equipSlotId));
-    const replacedName = equipSlotId && !equippedInTarget ? c.equipement?.[equipSlotId]?.nom : '';
-    const equipTitle = equippedInTarget
-      ? `Déjà équipé dans ${equipSlot?.label || equipSlotId}`
-      : `Équiper dans ${equipSlot?.label || equipSlotId}${replacedName ? ` · remplace ${replacedName}` : ''}`;
-
-    return `<div class="inv-card ${isEquipped ? `is-equipped ${hasActiveBuildUsage ? 'is-equipped-active' : 'is-equipped-other'}` : ''}" style="--rare-c:${col}">
-      <div class="inv-card-head">
-        <button class="inv-card-visual" data-action="openInventoryItemDetail" data-id="${c.id}"
-          data-indices="${allIdxB64}" title="Inspecter ${_esc(it.nom || 'l’objet')}">
-          ${image ? `<img src="${_esc(image)}" alt="">` : `<span aria-hidden="true">${cat.icon || '◇'}</span>`}
-        </button>
-        <div class="inv-card-identity">
-          <div class="inv-card-name">${_esc(it.nom || 'Sans nom')}</div>
-          <div class="inv-card-subline">
-            <span class="inv-card-cat">${cat.icon ? `<span aria-hidden="true">${cat.icon}</span>` : ''}${_esc(cat.lbl)}</span>
-            ${rareName
-              ? `<span class="inv-card-rare" style="color:${col}">${_rareteLabel(rareIdx)}</span>`
-              : ''}
-            ${readableDocument && canEdit ? `<button class="inv-card-read" data-action="openInventoryReadableContent"
-              data-id="${_esc(c.id)}" data-indices="${allIdxB64}" title="Lire ${_esc(readableDocument.title)}">📖 Lire</button>` : ''}
-            ${buildBadgesHtml}
-          </div>
-          ${currentBuildEquipmentHtml}
-        </div>
-        <div class="inv-card-head-actions">
-          ${qte > 1
-            ? `<span class="inv-qte" title="${qte} items empilés">×${qte}</span>`
-            : `<span class="inv-qte">×1</span>`}
-        </div>
-      </div>
-      ${hero ? `<div class="inv-card-hero ${hero.c}">
-        <span class="inv-card-hero-icon" aria-hidden="true">${hero.icon}</span>
-        <span><small>${hero.k}</small><strong>${_esc(hero.v)}</strong></span>
-      </div>` : ''}
-      ${props.length?`<div class="inv-card-props">
-        ${props.map(p => `<span class="kv">
-          <span class="k">${_esc(p.k)}</span>
-          <span class="v ${p.c||''}">${_esc(p.v)}</span>
-        </span>`).join('')}
-      </div>`:''}
-      ${traits.length ? `<div class="inv-card-traits">
-        <span class="inv-card-traits-label">Traits</span>
-        <div class="inv-card-traits-list">
-          ${traits.map(trait => `<span class="trait">${_esc(trait)}</span>`).join('')}
-        </div>
-      </div>` : ''}
-      ${(() => {
-        const badges = _itemBonusBadges(it);
-        return badges.length ? `<div class="inv-card-badges">${badges.map(b=>`<span class="badge-chip ${b.cls}">${b.lbl}</span>`).join('')}</div>` : '';
-      })()}
-      ${displayDescription?`<div class="inv-card-desc">${_esc(displayDescription)}</div>`:''}
-      ${renderInvPersonalLine(c, allIdx, allIdxB64, 'card', canEdit)}
-      <div class="inv-card-footer">
-        <button class="inv-detail-btn" data-action="openInventoryItemDetail" data-id="${c.id}" data-indices="${allIdxB64}">Inspecter</button>
-        <div class="inv-card-values">
-          ${prixAchat ? `<span title="Valeur unitaire"><small>Valeur</small>${prixAchat}</span>` : ''}
-          ${prixVente ? `<span class="resale" title="Revente unitaire"><small>Revente</small>${prixVente}</span>` : ''}
-        </div>
-        ${canEdit?`<div class="inv-card-actions">
-          ${equipSlot ? `<button class="inv-act eq${equippedInTarget ? ' is-on' : ''}" data-action="equipInventoryItem"
-            data-index="${equipIndex}" data-slot="${_esc(equipSlotId)}" data-render-tab="inv"
-            title="${_esc(equipTitle)}" aria-label="${_esc(equipTitle)}" ${equippedInTarget ? 'disabled' : ''}>
-            <span aria-hidden="true">${equippedInTarget ? '✓' : '⚔'}</span><span class="inv-equip-label">${equippedInTarget ? 'Équipé' : 'Équiper'}</span>
-          </button>` : ''}
-          <button class="inv-act sell" data-action="openSellInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-prix="${prixVente}" data-name="${_esc(it.nom||'')}" title="Vendre ${prixVente} or/u" aria-label="Vendre"><svg aria-hidden="true"><use href="./assets/img/icons.svg#icon-coin"/></svg></button>
-          <button class="inv-act send" data-action="openSendInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Envoyer" aria-label="Envoyer">↗</button>
-          <button class="inv-act del" data-action="openDeleteInvModal" data-id="${c.id}" data-indices="${allIdxB64}" data-name="${_esc(it.nom||'')}" title="Supprimer" aria-label="Supprimer">×</button>
-        </div>`:''}
-      </div>
-    </div>`;
-  }).join('');
-
-  return `<div class="cs-section cs-section--compact cs-inventory-v3">
-    ${filterBarHtml}
-    ${summaryHtml}
-    <div class="inv-grid ${_csV3InvDensity === 'list' ? 'is-list' : 'is-cards'}">${cardsHtml}</div>
-  </div>`;
-}
-
-function _csV3InvSetCat(cat) {
-  _csV3InvFilter = { ..._csV3InvFilter, cat };
-  if (charSession.getCurrentChar() && charSession.getCurrentCharTab() === 'inv') _renderTabV3('inv', charSession.getCurrentChar(), charSession.getCanEditChar());
-}
-function _csV3InvSetSearch(search) {
-  _csV3InvFilter = { ..._csV3InvFilter, search };
-  if (!charSession.getCurrentChar()) return;
-  const caret = document.querySelector('.inv-search input')?.selectionStart;
-  if (charSession.getCurrentCharTab() === 'inv') _renderTabV3('inv', charSession.getCurrentChar(), charSession.getCanEditChar());
-  requestAnimationFrame(() => {
-    const inp = document.querySelector('.inv-search input');
-    if (inp) { inp.focus(); try { inp.setSelectionRange(caret, caret); } catch {} }
-  });
-}
-
-function _csV3InvClearSearch() {
-  _csV3InvSetSearch('');
-}
-
-function _csV3InvSetDensity(density) {
-  const next = density === 'list' ? 'list' : 'cards';
-  if (next === _csV3InvDensity) return;
-  _csV3InvDensity = next;
-  lsJson.set('cs-inventory-density', next);
-  if (charSession.getCurrentChar() && charSession.getCurrentCharTab() === 'inv') {
-    _renderTabV3('inv', charSession.getCurrentChar(), charSession.getCanEditChar());
-  }
-}
-
 // ── Allocation ±1 point de niveau sur une stat depuis le stats banner ───────
 async function allocateStat(charId, key, delta = 1) {
   const c = getCharacterById(charId);
@@ -2630,7 +2170,6 @@ registerActions({
   _csV3LedgerSetSearch:    (el)     => _csV3LedgerSetSearch(el.dataset.id, el.value),
   _csQuoteToggleEmpty:     (el)     => el.classList.toggle('is-empty', !el.value),
   _csV3SaveVisibility:     (el)     => _csV3SaveVisibility(el.dataset.id, el.dataset.key, el.checked),
-  _csV3InvSetSearch:       (el)     => _csV3InvSetSearch(el.value),
   saveCombatMasteryNote:   (el)     => _saveCombatMasteryNote(el),
   saveCombatMasteryName:   (el)     => _saveCombatMasteryName(el),
   // Sélection
@@ -2744,13 +2283,9 @@ registerActions({
   // Inventaire
   openCharacterRecipeBook:    (btn)   => openCharacterRecipeBook(btn.dataset.id),
   openInventoryHistoryModal:(btn)   => openInventoryHistoryModal(btn.dataset.id),
-  openInventoryItemDetail:  (btn)   => openInventoryItemDetail(btn.dataset.id, btn.dataset.indices),
   addInvItem:               ()      => addInvItem(),
   openCreateItemModal:      (btn)   => openCreateItemModal(btn?.dataset?.id,
     btn?.dataset?.index != null ? { index: Number(btn.dataset.index) } : {}),
-  csV3InvSetCat:            (btn)   => _csV3InvSetCat(btn.dataset.cat),
-  csV3InvClearSearch:       ()      => _csV3InvClearSearch(),
-  csV3InvSetDensity:        (btn)   => _csV3InvSetDensity(btn.dataset.density),
   openSellInvModal:         (btn)   => openSellInvModal(btn.dataset.id, btn.dataset.indices, Number(btn.dataset.prix), btn.dataset.name),
   openSendInvModal:         (btn)   => openSendInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
   openDeleteInvModal:       (btn)   => openDeleteInvModal(btn.dataset.id, btn.dataset.indices, btn.dataset.name),
@@ -2762,7 +2297,6 @@ registerActions({
   saveInvItemFromShop:      ()      => saveInvItemFromShop(),
   saveInvItem:              (btn)   => saveInvItem(Number(btn.dataset.idx)),
   editInvItem:              (btn)   => editInvItem(Number(btn.dataset.idx)),
-  filterInvClear:           (btn)   => { filterInvRows(''); const w = btn.closest('.inv-search-wrap'); if (w) w.querySelector('input').value = ''; },
 
   // Sorts
   addSort:                  ()      => addSort(),
