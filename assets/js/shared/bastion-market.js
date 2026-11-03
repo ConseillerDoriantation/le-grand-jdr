@@ -76,27 +76,6 @@ export function marketListingView(post = {}) {
   };
 }
 
-// Un même post peut arriver par deux flux (mur récent + ventes ouvertes) :
-// la version la plus récemment modifiée l'emporte.
-export function mergeMarketPosts(...lists) {
-  const byId = new Map();
-  lists.flat().forEach(post => {
-    if (!post?.id) return;
-    const known = byId.get(post.id);
-    const at = p => Math.max(Number(p?.updatedAt) || 0, Number(p?.ts) || 0);
-    if (!known || at(post) >= at(known)) byId.set(post.id, post);
-  });
-  return [...byId.values()];
-}
-
-export function sortMarketViews(views = [], sort = 'recent') {
-  const list = [...views];
-  if (sort === 'price-asc') return list.sort((a, b) => a.price - b.price || b.ts - a.ts);
-  if (sort === 'price-desc') return list.sort((a, b) => b.price - a.price || b.ts - a.ts);
-  if (sort === 'rarity') return list.sort((a, b) => b.rarity - a.rarity || b.ts - a.ts);
-  return list.sort((a, b) => b.ts - a.ts);
-}
-
 // Livre de compte après une ligne de marché. Très anciennes fiches à champ `or`
 // seul : sans le report du solde initial, la première ligne ferait disparaître
 // leur argent (calcOr bascule alors sur le livre de compte).
