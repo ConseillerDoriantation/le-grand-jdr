@@ -8,10 +8,7 @@ import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _norm } from '../../shared/html.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { RARETE_NAMES, _rareteColor } from '../../shared/rarity.js';
-import {
-  ITEM_STAT_META, statShort, getItemStatBonus, calcOr, getItemEffectText,
-  computeEquipDerivedBonus, computeEquipAllSkillBonuses,
-} from '../../shared/char-stats.js';
+import { statShort, calcOr, getItemEffectText } from '../../shared/char-stats.js';
 import { useGold, useGoldMulti } from '../../shared/economy.js';
 import {
   shopItemToInvEntry,
@@ -26,7 +23,6 @@ import {
   inventoryHistoryTypeMeta,
   makeInventoryHistoryEntry,
 } from '../../shared/inventory-history.js';
-import { getArmorTypeMeta, getWeaponDamageStatKeys } from '../../shared/equipment-utils.js';
 import { isFeatureEnabled } from '../../shared/features.js';
 import { recipeBookButton } from '../recipes.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
@@ -45,9 +41,12 @@ import {
   getEquipmentSlots,
   getPrimaryWeaponSlotId,
   getSecondaryWeaponSlotId,
-  resolveEquipmentSlotForItem,
 } from '../../shared/equipment-slots.js';
 import { weaponHands, weaponHandsLabel } from '../../shared/weapon-family.js';
+import {
+  ITEM_FAMILIES, isArmorItem, isQuestItem, isWeaponItem, itemBonuses, itemChips, itemCompareRows,
+  itemCompareSlot, itemDamageText, itemFamily, itemGroupKey, itemKind, itemRarity, itemSigned,
+} from '../../shared/item-facts.js';
 
 import { canControlCharacter, getCharacterById } from '../../shared/character-state.js';
 let _charInvSearch = '';
@@ -232,10 +231,6 @@ export function openInventoryHistoryModal(charId) {
   });
 }
 
-function _itemDegatsStatsShorts(item) {
-  return getWeaponDamageStatKeys(item).map(statShort).filter(Boolean);
-}
-
 // ══════════════════════════════════════════════
 // INVENTAIRE PRINCIPAL — v11 « une liste + une fiche »
 // ══════════════════════════════════════════════
@@ -244,9 +239,9 @@ function _itemDegatsStatsShorts(item) {
 // Sorts. Une ligne = nom / ce que c'est / nombres. La sélection reste locale
 // (aucune lecture Firestore) ; les actions sont celles de l'inventaire.
 
-function _invItemKey(item = {}) {
-  return `${item.itemId || ''}||${item.nom || ''}||${item.template || item.type || ''}`;
-}
+// Faits d'objet (nature, famille, bonus, comparaison) : shared/item-facts.js,
+// partagé avec le Marché du Bastion. Les alias gardent les noms de l'onglet.
+const _invItemKey = itemGroupKey;
 
 function _groupInventoryEntries(inv, indices) {
   const groups = new Map();
@@ -266,10 +261,7 @@ function _groupInventoryEntries(inv, indices) {
   return [...groups.values()];
 }
 
-function _invIsQuestItem(item = {}) {
-  const hay = _norm(`${item.type || ''} ${item.categorie || ''} ${item.template || ''} ${item.tags || ''}`);
-  return item.isQuest === true || item.quest === true || /\bquete\b|objet de quete|mission/.test(hay);
-}
+const _invIsQuestItem = isQuestItem;
 
 function _invIsBeltItem(item = {}) {
   if (item.belt === false) return false;
@@ -310,7 +302,7 @@ function _invRecentAt(group, recentMap) {
   return recentMap.get(`id:${group.item.itemId}`) || recentMap.get(`name:${_norm(group.item.nom)}`) || 0;
 }
 
-const _IV_RAR = item => Math.max(0, parseInt(item?.rarete ?? item?.rare ?? 0) || 0);
+const _IV_RAR = itemRarity;
 // Barème réel 1-indexé (Commun = 1). « Notable » = au-dessus du commun → marque
 // + couleur ; 0/1 = aucune marque (volontaire, pour ne pas charger la liste).
 const _IV_NOTABLE = rare => rare >= 2 && !!RARETE_NAMES[rare];
@@ -323,7 +315,7 @@ function _ivOrder(recentMap) {
 }
 
 const _ivQty = item => parseInt(item?.quantite || item?.qte || 1) || 1;
-const _ivSigned = n => `${n > 0 ? '+' : ''}${n}`;
+const _ivSigned = itemSigned;
 const _ivGold = n => `${Number(n || 0).toLocaleString('fr-FR')} or`;
 const _ivB64 = indices => btoa(JSON.stringify(indices));
 const _ivCatalog = item => getInventoryCatalogItem(item?.itemId);
@@ -331,76 +323,17 @@ const _ivCatalog = item => getInventoryCatalogItem(item?.itemId);
 const _ivResale = item => getInventoryItemResaleValue(item, _ivCatalog(item)) + upgradeResaleBonus(item, getUpgradeSettings());
 const _ivReadable = item => !!getInventoryReadableDocument(item, _ivCatalog(item));
 
-// ── Nature de l'objet ─────────────────────────
-const _ivTpl = item => String(item?.template || '').toLowerCase();
-const _ivIsWeapon = item => _ivTpl(item) === 'arme' || !!(item.degats || item.toucher || item.toucherStat);
-const _ivIsArmor = item => _ivTpl(item) === 'armure' || !!(item.slotArmure || item.typeArmure) || (item.ca != null && item.ca !== '');
-const _ivIsJewel = item => _ivTpl(item) === 'bijou' || !!item.slotBijou;
-const _ivLooksJewel = item => /\b(bijou|bijoux|anneau|bague|amulette|collier|pendentif|talisman)\b/.test(_norm(`${item.nom || ''} ${item.type || ''}`));
-
-// Familles du sac : 5 rubriques FIXES (le type libre reste lu sur la ligne).
-// Signaux d'équipement d'abord, puis matériaux, puis noms de bijoux : une
-// armure de cuir reste une armure, « Mat. bijou » est un matériau.
-const _IV_FAMILIES = [
-  { id: 'equip', label: 'Équipement' },
-  { id: 'conso', label: 'Consommables' },
-  { id: 'mat',   label: 'Matériaux' },
-  { id: 'quest', label: 'Quête & clés' },
-  { id: 'misc',  label: 'Divers' },
-];
-function _ivFamily(item) {
-  const hay = _norm(`${item.type || ''} ${item.categorie || ''} ${item.sousType || ''} ${item.template || ''}`);
-  if (_invIsQuestItem(item) || _ivReadable(item) || /\b(cle|clef|cles|clefs|document|lettre|missive)\b/.test(hay)) return 'quest';
-  if (_ivIsWeapon(item) || _ivIsArmor(item) || _ivIsJewel(item)) return 'equip';
-  if (/\bmat\b|materiau|composant|ressource|ingredient|reactif|plante|herbe|minerai|lingot|cuir|bois|tissu|metal/.test(hay)) return 'mat';
-  if (_ivLooksJewel(item)) return 'equip';
-  if (/potion|consommable|elixir|antidote|parchemin|scroll|munition|fleche|carreau|nourriture|ration|repas|boisson|poison/.test(hay)) return 'conso';
-  return 'misc';
-}
-
-// « Ce que c'est » : une ligne courte et constante selon la nature de l'objet.
-function _ivKind(item) {
-  if (_ivIsWeapon(item)) {
-    return [item.format || item.sousType || 'Arme', weaponHands(item) === 2 ? weaponHandsLabel(item) : '',
-      item.portee && !/contact/i.test(item.portee) ? `portée ${item.portee}` : ''].filter(Boolean).join(' · ');
-  }
-  if (_ivIsArmor(item)) {
-    const type = item.typeArmure ? (getArmorTypeMeta(item.typeArmure)?.label || item.typeArmure) : '';
-    return [type ? `Armure ${String(type).toLowerCase()}` : 'Armure', item.slotArmure].filter(Boolean).join(' · ');
-  }
-  if (_ivIsJewel(item) || _ivLooksJewel(item)) return item.slotBijou || item.type || 'Bijou';
-  return item.type || item.categorie || 'Objet';
-}
-
-// « Ce que ça fait » : uniquement des nombres. Mêmes calculs que la fiche
-// (paliers d'amélioration compris) ; zéros inclus, ordre fixe pour comparer.
-const _IV_DERIVED = [
-  ['pvMaxBonus', 'PV', 'derived-pv'],
-  ['pmMaxBonus', 'PM', 'derived-pm'],
-  ['vitesseBonus', 'Vit.', 'derived-speed'],
-  ['initiativeBonus', 'Init.', 'derived-init'],
-];
-function _ivBonuses(item = {}) {
-  const derived = computeEquipDerivedBonus({ item });
-  return [
-    { k: 'CA', v: (parseInt(item.ca) || 0) + derived.caBonus, cls: 'derived-tone derived-ca' },
-    ...ITEM_STAT_META.map(s => ({ k: s.short.toUpperCase(), v: getItemStatBonus(item, s.full), cls: `stat-tone stat-${s.full}` })),
-    ..._IV_DERIVED.map(([key, k, tone]) => ({ k, v: derived[key], cls: `derived-tone ${tone}` })),
-    ...Object.entries(computeEquipAllSkillBonuses({ item })).map(([k, v]) => ({ k, v, cls: '' })),
-  ];
-}
-function _ivDamage(item) {
-  const stats = _itemDegatsStatsShorts(item);
-  return stats.length ? `${item.degats} + ${stats.join(' + ')}` : String(item.degats);
-}
-const _ivChips = item => [
-  ...(item.degats ? [{ t: _ivDamage(item), cls: 'is-dmg' }] : []),
-  ..._ivBonuses(item).filter(b => b.v).map(b => ({ t: `${b.k} ${_ivSigned(b.v)}`, cls: b.cls })),
-];
+// ── Nature de l'objet · familles du sac (5 FIXES) · « ce que c'est » · bonus
+// chiffrés (paliers compris) : règles dans shared/item-facts.js.
+const _ivIsWeapon = isWeaponItem;
+const _ivIsArmor = isArmorItem;
+const _IV_FAMILIES = ITEM_FAMILIES;
+const _ivFamily = item => itemFamily(item, { readable: _ivReadable(item) });
+const _ivKind = itemKind;
+const _ivBonuses = itemBonuses;
+const _ivDamage = itemDamageText;
+const _ivChips = itemChips;
 const _ivChipHtml = chip => `<i class="iv-chip ${chip.cls}">${_esc(chip.t)}</i>`;
-// Main secondaire « prise » par une arme à 2 mains : jamais une cible d'équipement.
-const _ivSlotTaken = (c, slot) => !!c.equipement?.[slot.id]
-  || (slot.id === getSecondaryWeaponSlotId() && weaponHands(c.equipement?.[getPrimaryWeaponSlotId()]) === 2);
 
 // ── Modèle de l'onglet (la liste et la fiche lisent la même chose) ──
 function _ivModel(c) {
@@ -522,17 +455,7 @@ const _IV_SHEET_X = '<button type="button" class="iv-sheet-x" data-action="_invC
 // « Si tu l'équipes » : seuls les nombres qui changent (▲ gain, ▼ perte).
 function _ivCompareHtml(item, occupant, slotLabel) {
   if (!occupant) return '';
-  const before = new Map(_ivBonuses(occupant).map(b => [b.k, b.v]));
-  const rows = [];
-  _ivBonuses(item).forEach(b => {
-    const was = before.get(b.k) || 0;
-    before.delete(b.k);
-    if (was !== b.v) rows.push([b.k, was, b.v]);
-  });
-  before.forEach((was, k) => { if (was) rows.push([k, was, 0]); });
-  const dmgBefore = occupant.degats ? _ivDamage(occupant) : '—';
-  const dmgAfter = item.degats ? _ivDamage(item) : '—';
-  if (dmgBefore !== dmgAfter) rows.unshift(['Dégâts', dmgBefore, dmgAfter]);
+  const rows = itemCompareRows(item, occupant);
   const fmt = v => typeof v === 'number' ? _ivSigned(v) : v;
   return `<section class="iv-part iv-cmp"><h4>Si tu l'équipes</h4>
     <p>Remplace <b>${_esc(occupant.nom || 'objet')}</b> <small>(${_esc(slotLabel)})</small></p>
@@ -565,9 +488,7 @@ function _ivItemSheetHtml(c, m, sel, canEdit) {
   const description = String(item.description || '').trim();
   const note = getInvPersonalLineForIndices(c.inventaire || [], group.indices);
   // Emplacement visé : le premier libre parmi les compatibles, sinon le préféré.
-  const compatible = worn.length ? [] : getEquipmentSlots().filter(slot => equipmentSlotAcceptsItem(slot, item));
-  const preferred = resolveEquipmentSlotForItem(item);
-  const target = compatible.find(slot => !_ivSlotTaken(c, slot)) || compatible.find(slot => slot.id === preferred) || compatible[0] || null;
+  const target = worn.length ? null : itemCompareSlot(c, item);
   const facts = [
     _ivFact('Dégâts', item.degats ? _ivDamage(item) : ''),
     _ivFact('Toucher', item.toucher || (item.toucherStat ? statShort(item.toucherStat) : '')),
@@ -598,6 +519,7 @@ function _ivItemSheetHtml(c, m, sel, canEdit) {
   const more = [
     !quest && resale ? _ivBtn(`Vendre <small>${_ivGold(resale)}</small>`, 'openSellInvModal', `${named} data-prix="${resaleBase}"`, 'is-ghost') : '',
     _ivBtn('Donner', 'openSendInvModal', named, 'is-ghost'),
+    !quest && isFeatureEnabled('bastion') ? _ivBtn('Mettre en vente', '_invMarketSell', ids, 'is-ghost') : '',
     item.source === 'custom' ? _ivBtn('Modifier', 'openCreateItemModal', `data-id="${_esc(c.id)}" data-index="${group.indices[0]}"`, 'is-ghost') : '',
     !quest ? _ivBtn('Jeter', 'openDeleteInvModal', named, 'is-ghost is-danger') : '',
   ].join('');
@@ -1816,4 +1738,8 @@ registerActions({
   _lootQte:            (btn) => { const i = document.getElementById('loot-qte'); if (i) i.value = Math.max(1, parseInt(i.value || 1) + Number(btn.dataset.delta)); },
   _invToggleBelt:      (btn) => _invToggleBelt(btn.dataset.id, btn.dataset.indices, btn.dataset.belt === 'true'),
   _invConsumeOne:      (btn) => _invConsumeOne(btn.dataset.id, btn.dataset.indices),
+  // Marché du Bastion : module chargé au clic (inutile tant qu'on ne vend rien).
+  _invMarketSell:      (btn) => import('../bastion-market-ui.js')
+    .then(m => m.openMarketSellModal({ charId: btn.dataset.id, indices: _decodeIndices(btn.dataset.indices) }))
+    .catch(e => { console.error('[inventaire] Marché indisponible', e); showNotif('Le Marché du Bastion n’a pas pu s’ouvrir.', 'error'); }),
 });

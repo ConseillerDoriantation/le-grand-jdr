@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 
 const root = new URL('../', import.meta.url);
 const feature = readFileSync(new URL('assets/js/features/characters/inventory.js', root), 'utf8');
+// Familles, nature et bonus d'un objet : règles partagées avec le Marché du Bastion.
+const facts = readFileSync(new URL('assets/js/shared/item-facts.js', root), 'utf8');
 const sheet = readFileSync(new URL('assets/js/features/characters.js', root), 'utf8');
 const css = readFileSync(new URL('assets/css/characters.css', root), 'utf8');
 
@@ -15,11 +17,12 @@ test('l onglet inventaire utilise la vue v11 une liste + une fiche (Équipé · 
   assert.ok(worn >= 0 && belt > worn && bag > belt, 'les trois sections dans l’ordre');
   assert.match(feature, /const slots = getEquipmentSlots\(\)/);
   // Sac en 5 familles FIXES, dans cet ordre (le type libre reste lu sur la ligne).
-  const fams = ['Équipement', 'Consommables', 'Matériaux', 'Quête & clés', 'Divers'].map(l => feature.indexOf(`label: '${l}'`));
+  const fams = ['Équipement', 'Consommables', 'Matériaux', 'Quête & clés', 'Divers'].map(l => facts.indexOf(`label: '${l}'`));
   assert.ok(fams.every((at, i) => at >= 0 && (i === 0 || at > fams[i - 1])), 'familles du sac dans l’ordre');
+  assert.match(feature, /const _IV_FAMILIES = ITEM_FAMILIES/);
   assert.match(feature, /_ivFamily\(group\.item\) === fam\.id/);
   // « Mat. bijou » est un matériau : signaux d'équipement, puis matériaux, puis noms de bijoux.
-  assert.match(feature, /return 'equip';[\s\S]*?return 'mat';[\s\S]*?_ivLooksJewel\(item\)\) return 'equip'/);
+  assert.match(facts, /return 'equip';[\s\S]*?return 'mat';[\s\S]*?_looksJewel\(item\)\) return 'equip'/);
   // Liste + fiche côte à côte.
   assert.match(feature, /<div class="iv-list">\$\{_ivListHtml\(c, m, canEdit\)\}<\/div>\s*\$\{_ivSheetHtml\(c, m, sel, canEdit\)\}/);
 });
