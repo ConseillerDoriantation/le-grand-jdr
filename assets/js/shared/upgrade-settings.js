@@ -18,6 +18,24 @@ import { DEFAULT_REFORGE, mergeReforge } from './reforge.js';
 import { upgradeResaleBonus } from './upgrade-value.js';
 
 let _settings = null;
+let _roomCatalog = [];  // catalogue de salles de l'aventure (pour les sélecteurs reforge)
+
+// Salles par défaut si l'aventure n'a pas (encore) de catalogue chargé.
+const _ROOM_FALLBACK = [
+  { slug: 'forge',              nom: '🔨 Forge' },
+  { slug: 'atelier_confection', nom: '🧵 Atelier de confection' },
+  { slug: 'atelier_orfevre',    nom: '💎 Atelier d\'orfèvre' },
+];
+// <option> des salles disponibles ; garde la valeur courante même si hors catalogue.
+function _roomOptions(selected) {
+  const list = _roomCatalog.length ? _roomCatalog : _ROOM_FALLBACK;
+  const slugs = new Set(list.map(r => r.slug));
+  const all = selected && !slugs.has(selected) ? [...list, { slug: selected, nom: selected }] : list;
+  return all.map(r => {
+    const label = `${r.emoji ? r.emoji + ' ' : ''}${r.nom || r.slug}`;
+    return `<option value="${_esc(r.slug)}" ${r.slug === selected ? 'selected' : ''}>${_esc(label)}</option>`;
+  }).join('');
+}
 
 // Valeurs par défaut — utilisées si le doc Firestore n'existe pas
 // ou en fallback champ par champ pour les MJ qui ont une config partielle.
@@ -162,6 +180,9 @@ export function hasUpgrades(item = {}) {
 
 export async function openUpgradeSettingsAdmin() {
   await Promise.all([loadUpgradeSettings(), loadRarities().catch(() => null)]);
+  // Catalogue de salles pour les sélecteurs reforge (bastion/main = session-live).
+  try { const b = await getDocData('bastion', 'main'); _roomCatalog = Array.isArray(b?.roomCatalog) ? b.roomCatalog : []; }
+  catch { _roomCatalog = []; }
   _renderUpgradeSettingsModal();
 }
 
@@ -197,6 +218,30 @@ function _renderUpgradeSettingsModal() {
       <input type="number" class="sh-admin-row-input small" value="${s.rarityCaps?.stats?.[r.value] ?? 0}" min="0" step="1"
         data-input="_upgField" data-field="rarityCaps.stats.${r.value}">
       <span class="sh-admin-row-unit">stats</span>
+    </div>`;
+
+  // Reforge : discipline → salle du Bastion (sélecteur).
+  const discRow = (disc, label) => {
+    const sel = s.reforge?.disciplineRoom?.[disc] || '';
+    return `
+    <div class="sh-admin-row-line">
+      <span class="sh-admin-row-lbl">${label}</span>
+      <select class="sh-admin-row-input" data-change="_upgStr" data-field="reforge.disciplineRoom.${disc}">
+        <option value="" ${sel ? '' : 'selected'}>— aucune salle —</option>
+        ${_roomOptions(sel)}
+      </select>
+    </div>`;
+  };
+  // Reforge : par rareté cible → niveau de salle requis + coût en or.
+  const reforgeRarityRow = (r) => `
+    <div class="sh-admin-row-line">
+      <span class="sh-admin-row-lbl">${'★'.repeat(r.value)} ${_esc(r.name)}</span>
+      <input type="number" class="sh-admin-row-input small" value="${s.reforge?.roomLevelForRarity?.[r.value] ?? 1}" min="1" step="1"
+        data-input="_upgField" data-field="reforge.roomLevelForRarity.${r.value}">
+      <span class="sh-admin-row-unit">niv.</span>
+      <input type="number" class="sh-admin-row-input small" value="${s.reforge?.goldForRarity?.[r.value] ?? 0}" min="0" step="10"
+        data-input="_upgField" data-field="reforge.goldForRarity.${r.value}">
+      <span class="sh-admin-row-unit">PO</span>
     </div>`;
 
   openModal('', `
@@ -294,6 +339,24 @@ function _renderUpgradeSettingsModal() {
           : '<p class="sh-admin-section-hint">Aucune rareté définie — configure-les d’abord dans l’admin des raretés.</p>'}
       </div>
 
+      <!-- ── Reforge (monter la rareté, gatée Bastion — Option A) ── -->
+      <div class="sh-admin-section">
+        <div class="sh-admin-section-title">⭐ Reforge <small style="font-weight:400;color:var(--text-dim);font-family:inherit">— monter la rareté</small></div>
+        <p class="sh-admin-section-hint">Seule la reforge (monter la rareté d'un cran, définitif) dépend d'une salle du Bastion. Améliorer stats/traits reste libre. Matériaux requis = la recette de craft de la catégorie (palier = rareté visée, max 3). Réglé par aventure.</p>
+        <label class="sh-admin-row-checkbox" style="padding:6px 0">
+          <input type="checkbox" ${s.reforge?.enabled ? 'checked' : ''} data-change="_upgCheck" data-field="reforge.enabled">
+          <span>Activer la reforge</span>
+        </label>
+        <p class="sh-admin-section-hint" style="margin:8px 0 4px">Discipline de craft → salle du Bastion :</p>
+        ${discRow('forge', '⚒️ Forge')}
+        ${discRow('confection', '🧵 Confection')}
+        ${discRow('orfevre', '💎 Orfèvre')}
+        <p class="sh-admin-section-hint" style="margin:12px 0 4px">Par rareté cible : niveau de salle requis + coût en or :</p>
+        ${rarities.filter(r => r.value >= 2).length
+          ? rarities.filter(r => r.value >= 2).map(reforgeRarityRow).join('')
+          : '<p class="sh-admin-section-hint">Aucune rareté ≥ 2★ définie.</p>'}
+      </div>
+
       <!-- ── Revente ───────────────────────────────────────── -->
       <div class="sh-admin-section">
         <div class="sh-admin-section-title">💰 Revente</div>
@@ -358,6 +421,7 @@ registerActions({
   _upgReset: () => _upgResetDefaults(),
   _upgSave: () => _upgSaveAndClose(),
   _upgField: (el) => _upgSetField(el.dataset.field, +el.value),
+  _upgStr: (el) => _upgSetField(el.dataset.field, el.value),
   _upgCheck: (el) => _upgSetField(el.dataset.field, el.checked),
   _upgRatio: (el) => _upgSetField('refundUpgradeRatio', (+el.value) / 100),
 });

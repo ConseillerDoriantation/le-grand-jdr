@@ -98,3 +98,21 @@ test('upgrade-settings stocke la config reforge (par aventure)', () => {
   assert.match(upg, /reforge: DEFAULT_REFORGE/);
   assert.match(upg, /reforge: mergeReforge\(stored\.reforge\)/);
 });
+
+test('admin 2b : section reforge éditable (activation, salles, niveaux, or)', () => {
+  // Toggle d'activation (champ littéral).
+  assert.match(upg, /data-field="reforge\.enabled"/);
+  // Mapping discipline→salle : helper templaté + appelé pour les 3 disciplines.
+  assert.match(upg, /data-field="reforge\.disciplineRoom\.\$\{disc\}"/);
+  assert.match(upg, /discRow\('forge'/);
+  assert.match(upg, /discRow\('confection'/);
+  assert.match(upg, /discRow\('orfevre'/);
+  // Niveau requis + or par rareté cible (helper templaté).
+  assert.match(upg, /data-field="reforge\.roomLevelForRarity\.\$\{r\.value\}"/);
+  assert.match(upg, /data-field="reforge\.goldForRarity\.\$\{r\.value\}"/);
+  // Les sélecteurs de salle écrivent une chaîne, pas un nombre.
+  assert.match(upg, /_upgStr: \(el\) => _upgSetField\(el\.dataset\.field, el\.value\)/);
+  assert.match(upg, /data-change="_upgStr"/);
+  // Catalogue de salles chargé pour peupler les sélecteurs.
+  assert.match(upg, /getDocData\('bastion', 'main'\)/);
+});
