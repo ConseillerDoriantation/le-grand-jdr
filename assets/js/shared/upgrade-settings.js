@@ -14,6 +14,7 @@ import { showNotif } from './notifications.js';
 import { _esc } from './html.js';
 import { getRarities, loadRarities } from './rarity.js';
 import { DEFAULT_RARITY_CAPS, rarityCapFromTable } from './rarity-caps.js';
+import { DEFAULT_REFORGE, mergeReforge } from './reforge.js';
 import { upgradeResaleBonus } from './upgrade-value.js';
 
 let _settings = null;
@@ -54,6 +55,9 @@ export const DEFAULT_UPGRADE_SETTINGS = {
   // plafond rareté ici). Une 1★ ne peut donc jamais égaler une 5★ — on ne fait
   // que remplir le budget de sa rareté, défini par le MJ. 0/rareté non définie = commun (1).
   rarityCaps: DEFAULT_RARITY_CAPS, // table pure dans rarity-caps.js (testable)
+  // Reforge (monter la rareté) — gatée Bastion. Logique pure dans reforge.js.
+  // Améliorer stats/traits reste libre ; seule la reforge dépend d'une salle.
+  reforge: DEFAULT_REFORGE,
   // Revente d'un objet amélioré : + X % du tarif ACTUEL des améliorations qu'il
   // porte (cf. upgrade-value.js). ex : 0.2 = 20 %. 0 = améliorations perdues.
   refundUpgradeRatio: 0,
@@ -81,6 +85,7 @@ function _mergeDefaults(stored = {}) {
       traits: { ...d.rarityCaps.traits, ...(stored.rarityCaps?.traits || {}) },
       stats:  { ...d.rarityCaps.stats,  ...(stored.rarityCaps?.stats  || {}) },
     },
+    reforge: mergeReforge(stored.reforge),
     refundUpgradeRatio: stored.refundUpgradeRatio ?? d.refundUpgradeRatio,
   };
 }
