@@ -32,6 +32,12 @@ import { characterBuildsForStorage, patchBuildLocally } from '../shared/characte
 import { characterAvatarHtml } from '../shared/portraits.js';
 // Catégories de fragments : partagées avec la revente (valeur des améliorations).
 import { FRAGMENT_CATEGORIES, getItemFragmentCategory } from '../shared/upgrade-value.js';
+// Reforge (monter la rareté) — gatée Bastion, Option A. Réutilise le mapping craft.
+import { craftCategoryForItem, craftDiscipline } from '../shared/craft-engine.js';
+import { craftRecipeMaterials, loadCraftSettings, getCraftSettings } from '../shared/craft-settings.js';
+import { evaluateReforge, scaleMaterials } from '../shared/reforge.js';
+import { getRarities, loadRarities, RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
+import { getDocData } from '../data/firestore.js';
 
 export { FRAGMENT_CATEGORIES, getItemFragmentCategory };
 
@@ -44,7 +50,19 @@ const STORE = {
   inlineRootId: null,
   itemSearch: '',
   itemCategory: 'all',
+  bastion: null,           // doc bastion/main (niveaux de salles) pour la reforge
 };
+
+// Charge les réglages nécessaires à l'Artisan (améliorations + craft + raretés +
+// niveaux de salles du Bastion). bastion/main est session-live → 0 lecture en plus.
+async function _artisanLoadSettings() {
+  await Promise.all([
+    loadUpgradeSettings(),
+    loadCraftSettings().catch(() => null),
+    loadRarities().catch(() => null),
+    getDocData('bastion', 'main').then(d => { STORE.bastion = d || null; }).catch(() => { STORE.bastion = null; }),
+  ]);
+}
 
 // Retourne le nombre de slots de traits autorisés pour un item.
 // La clé du plafond est directement la catégorie de fragment (artisan unifié).
@@ -123,7 +141,7 @@ function _getActiveArtisanChar() {
 export async function openArtisanModal() {
   // Accès réservé au MJ le temps de la refonte du système de craft/artisanat.
   if (!STATE.isAdmin) { showNotif('L\'Artisan est en cours de refonte — indisponible pour le moment.', 'info'); return; }
-  await loadUpgradeSettings();
+  await _artisanLoadSettings();
   STORE.inlineRootId = null;
   STORE.activeCharId = null; // reset à chaque ouverture
   STORE.activeItemIndex = null;
@@ -141,7 +159,7 @@ export async function mountArtisanPage(rootId = 'sh-artisan-page', { reset = fal
     STORE.inlineRootId = null;
     return;
   }
-  await loadUpgradeSettings();
+  await _artisanLoadSettings();
   STORE.inlineRootId = rootId;
   if (reset) {
     STORE.activeCharId = null;
@@ -462,6 +480,7 @@ function _renderWorkbench(c) {
 
     ${_renderTraitsSection(item, i, c, cat)}
     ${_renderStatsSection(item, i, c, cat)}
+    ${_renderReforgeSection(item, i, c)}
     ${_renderRecycleSection(item, i, cat)}
   </div>`;
 }
@@ -739,6 +758,145 @@ async function _persistChar(c) {
 }
 
 // ══════════════════════════════════════════════
+// ÉTABLI — SECTION REFORGE (monter la rareté, gatée Bastion — Option A)
+// ══════════════════════════════════════════════
+
+const _ROOM_LABEL_DEFAULT = {
+  forge: '🔨 Forge',
+  atelier_confection: '🧵 Atelier de confection',
+  atelier_orfevre: '💎 Atelier d\'orfèvre',
+};
+// Libellé lisible d'une salle : catalogue de l'aventure si dispo, sinon défaut.
+function _roomLabel(slug) {
+  const cat = STORE.bastion?.roomCatalog;
+  const found = Array.isArray(cat) ? cat.find(r => r?.slug === slug) : null;
+  if (found) return `${found.emoji || ''} ${found.nom || slug}`.trim();
+  return _ROOM_LABEL_DEFAULT[slug] || slug;
+}
+
+// Retire N unités de chaque matériau (1 entrée d'inventaire = 1 unité).
+function _consumeMaterials(inv, requirements) {
+  let out = [...inv];
+  for (const req of (requirements || [])) {
+    let need = parseInt(req.quantite) || 0;
+    if (need <= 0) continue;
+    out = out.filter(it => {
+      if (need > 0 && it && it.itemId === req.itemId) { need--; return false; }
+      return true;
+    });
+  }
+  return out;
+}
+
+// Résout tout le contexte de reforge d'un objet (catégorie, discipline, salle,
+// matériaux, évaluation pure). Réutilise le mapping craft (par aventure).
+function _reforgeContext(item, c) {
+  const upg = getUpgradeSettings();
+  const craftCfg = getCraftSettings();
+  const category = craftCategoryForItem(item);
+  const discipline = category ? craftDiscipline(category, craftCfg) : null;
+  const rarities = getRarities();
+  const maxRarete = rarities.length ? Math.max(...rarities.map(r => r.value)) : 5;
+  const cur = Math.max(1, parseInt(item.rarete) || 1);
+  const tier = Math.min(cur + 1, 3);  // recettes de craft : paliers 1..3
+  const cfg = upg.reforge;
+  // Reforge = fraction de la recette de craft (materialPercent, dial indépendant).
+  const materialReq = category
+    ? scaleMaterials(craftRecipeMaterials(category, tier, craftCfg), cfg?.materialPercent)
+    : [];
+  const roomSlug = discipline ? (cfg?.disciplineRoom?.[discipline] || null) : null;
+  const roomLevel = roomSlug ? (STORE.bastion?.salles?.[roomSlug]?.niveau || 0) : 0;
+  const ev = evaluateReforge({
+    rarete: cur, maxRarete, discipline, roomLevel,
+    materialReq, inventory: c.inventaire || [], gold: calcOr(c), cfg,
+  });
+  return { ev, category, discipline, roomSlug, roomLevel, materialReq, cur };
+}
+
+function _renderReforgeSection(item, invIndex, c) {
+  const { ev, discipline, roomSlug, roomLevel, materialReq } = _reforgeContext(item, c);
+  if (!discipline) return '';  // objet non reforgeable (pas de discipline de craft)
+  if (!ev.target) {
+    return `<div class="art-wb-sec"><div class="art-wb-sec-hd">⭐ Reforge</div><div class="art-muted" style="font-size:.72rem">Rareté maximale atteinte.</div></div>`;
+  }
+  const free = STORE.mjFreeMode;
+  const targetName = RARETE_NAMES[ev.target] || `Rareté ${ev.target}`;
+  const targetColor = _rareteColor(RARETE_NAMES[ev.target]) || 'var(--text)';
+
+  const line = (ok, html) => `<div style="display:flex;gap:7px;align-items:baseline;font-size:.74rem;color:${ok ? 'var(--text-soft)' : 'var(--text-dim)'}"><span style="color:${ok ? 'var(--emerald)' : 'var(--text-dim)'}">${ok ? '✓' : '○'}</span><span>${html}</span></div>`;
+
+  const roomLine = line(free || ev.roomOk,
+    `Salle <b>${_esc(_roomLabel(roomSlug))}</b> niv. ${ev.requiredLevel} <span class="art-muted">(construite : niv. ${roomLevel})</span>`);
+  const matLines = materialReq.length
+    ? materialReq.map(req => {
+        const owned = (c.inventaire || []).filter(it => it && it.itemId === req.itemId).length;
+        const name = (c.inventaire || []).find(it => it && it.itemId === req.itemId)?.nom || 'Matériau requis';
+        return line(free || owned >= req.quantite, `${_esc(name)} <span class="art-muted">${owned}/${req.quantite}</span>`);
+      }).join('')
+    : line(false, '<span class="art-muted">Aucune recette de matériaux pour cette catégorie (console MJ → Craft).</span>');
+  const goldLine = line(free || ev.goldOk, `${ev.goldCost} PO`);
+
+  const allow = free || ev.ok;
+  const btn = `<button class="art-act art-act--gold" data-action="_artisanReforge" data-i="${invIndex}" ${allow ? '' : 'disabled'}>Reforger → <b style="color:${targetColor}">${_esc(targetName)}</b>${free ? ' <span class="art-act-cost">Gratuit (MJ)</span>' : ''}</button>`;
+
+  return `<div class="art-wb-sec">
+    <div class="art-wb-sec-hd">⭐ Reforge <span class="art-wb-sec-sub">monter la rareté (définitif)</span></div>
+    <div style="display:flex;flex-direction:column;gap:3px;margin:2px 0 8px">${roomLine}${matLines}${goldLine}</div>
+    <div class="art-act-row">${btn}</div>
+  </div>`;
+}
+
+async function _artisanReforge(invIndex) {
+  const c = _getActiveArtisanChar();
+  if (!c) return;
+  const item = (c.inventaire || [])[invIndex];
+  if (!item) return;
+
+  const { ev, materialReq, cur } = _reforgeContext(item, c);
+  const free = STORE.mjFreeMode;
+  if (!ev.target) { showNotif('Rareté maximale atteinte.', 'error'); return; }
+  if (!free && !ev.ok) {
+    const msg = {
+      no_room_mapping: 'Aucune salle du Bastion liée à cette discipline.',
+      room:            `Salle requise non construite au niveau ${ev.requiredLevel}.`,
+      no_recipe:       'Aucune recette de matériaux définie pour cette catégorie.',
+      materials:       'Matériaux insuffisants.',
+      gold:            `Or insuffisant (${ev.goldCost} PO requis).`,
+    }[ev.reason] || 'Reforge impossible.';
+    showNotif(msg, 'error'); return;
+  }
+
+  const fromName = RARETE_NAMES[cur] || `rareté ${cur}`;
+  const toName   = RARETE_NAMES[ev.target] || `rareté ${ev.target}`;
+  const matTxt = (!free && materialReq.length)
+    ? '<br>Consomme : ' + materialReq.map(r => {
+        const name = (c.inventaire || []).find(it => it && it.itemId === r.itemId)?.nom || 'matériau';
+        return `${r.quantite}× ${_esc(name)}`;
+      }).join(', ')
+    : '';
+  if (!await confirmModal(
+    `Reforger « ${_esc(item.nom || 'objet')} » : <b>${_esc(fromName)}</b> → <b>${_esc(toName)}</b> ?<br>` +
+    `<span style="color:var(--gold)">${free ? 'Gratuit (MJ)' : `${ev.goldCost} PO`}</span>${matTxt}<br>` +
+    `<small style="color:var(--text-dim)">Action définitive.</small>`,
+    { title: '⭐ Reforger', confirmLabel: 'Reforger', danger: false, icon: '⭐' }
+  )) return;
+
+  const inv = [...c.inventaire];
+  const newItem = { ...item, rarete: ev.target };
+  _logUpgradeHistory(newItem, { op: 'reforge', from: fromName, to: toName, cost: ev.goldCost });
+  inv[invIndex] = newItem;
+  const consumed = free ? inv : _consumeMaterials(inv, materialReq);
+  c.inventaire = consumed;
+  const newIdx = consumed.indexOf(newItem);
+  if (newIdx >= 0) STORE.activeItemIndex = newIdx;
+
+  if (!free) _logExpense(c, `Artisan : reforge ${item.nom || ''} → ${toName}`, ev.goldCost);
+
+  await _persistChar(c);
+  showNotif(`« ${item.nom || 'Objet'} » reforgé en ${toName}.`, 'success');
+}
+
+// ══════════════════════════════════════════════
 // ÉTABLI — SECTION TRAITS (inline)
 // ══════════════════════════════════════════════
 
@@ -820,25 +978,38 @@ async function _artisanDestroyStart(invIndex) {
   const s = getUpgradeSettings();
   const allTraits = _getTraits(item);
   if (!allTraits.length) return;
+  // Objet « signature » (non recyclable, flag posé par le MJ) → aucun fragment.
+  const locked = !!item.noRecycle;
+  const transferable = locked ? [] : allTraits;
   const cost = s.trait.deconstructCost || 0;
   const costTxt = STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`;
+  const sigWarn = locked
+    ? `<br><span style="color:#ff8ca7">⭐ Objet signature : ses traits ne sont pas récupérables.</span>`
+    : '';
 
-  if (s.trait.extractAllTraits || allTraits.length === 1) {
-    // Cas simple → une seule confirmation.
-    const list = allTraits.map(t => `« ${_esc(t)} »`).join(', ');
-    if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Tu récupères ${allTraits.length} fragment${allTraits.length > 1 ? 's' : ''} (${list}). L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
+  // Aucun trait transférable (objet signature) → on détruit sans fragment.
+  if (!transferable.length) {
+    if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Aucun fragment récupérable.${sigWarn}<br>L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
       { title: '♻️ Recycler en fragments', confirmLabel: 'Recycler', danger: true, icon: '♻️' })) return;
-    return _artisanDoDestroy(invIndex, allTraits);
+    return _artisanDoDestroy(invIndex, []);
   }
 
-  // Plusieurs traits → le choix EST la confirmation (pas de 2ᵉ modale).
+  if (s.trait.extractAllTraits || transferable.length === 1) {
+    // Cas simple → une seule confirmation.
+    const list = transferable.map(t => `« ${_esc(t)} »`).join(', ');
+    if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Tu récupères ${transferable.length} fragment${transferable.length > 1 ? 's' : ''} (${list}).${sigWarn} L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
+      { title: '♻️ Recycler en fragments', confirmLabel: 'Recycler', danger: true, icon: '♻️' })) return;
+    return _artisanDoDestroy(invIndex, transferable);
+  }
+
+  // Plusieurs traits transférables → le choix EST la confirmation (pas de 2ᵉ modale).
   pushModal(`♻️ Recycler « ${item.nom || 'objet'} »`, `
     <div class="art-muted" style="font-size:.8rem;margin-bottom:.6rem;line-height:1.5">
-      Quel trait veux-tu <strong>récupérer en fragment</strong> ? Les autres seront <strong style="color:#ff8ca7">perdus</strong>, et l'objet détruit.<br>
+      Quel trait veux-tu <strong>récupérer en fragment</strong> ? Les autres seront <strong style="color:#ff8ca7">perdus</strong>, et l'objet détruit.${sigWarn}<br>
       <span style="color:var(--gold)">${costTxt}</span> · action <strong>immédiate</strong>.
     </div>
     <div class="art-ow-list">
-      ${allTraits.map(t => `
+      ${transferable.map(t => `
         <button class="art-ow-opt" data-action="_artisanDestroyConfirm" data-i="${invIndex}" data-trait="${_esc(t)}">
           <span class="art-ow-opt-name">${_esc(t)}</span>
           <span class="art-ow-opt-cta">♻️ Récupérer</span>
@@ -868,6 +1039,8 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   const s    = getUpgradeSettings();
   const cost = s.trait.deconstructCost || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
+  // Sécurité : un objet signature ne rend jamais de fragment (même en appel direct).
+  if (item.noRecycle) traitsToExtract = [];
 
   // 1) Supprimer l'item de l'inventaire
   const inv = [...(c.inventaire || [])];
@@ -895,7 +1068,9 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   if (cost > 0) _logExpense(c, `Artisan : destruction de ${item.nom}`, cost);
 
   await _persistChar(c);
-  showNotif(`${traitsToExtract.length} fragment(s) ajouté(s) au sac.`, 'success');
+  showNotif(traitsToExtract.length
+    ? `${traitsToExtract.length} fragment(s) ajouté(s) au sac.`
+    : 'Objet recyclé (aucun fragment récupérable).', 'success');
 }
 
 // ── Ajouter un trait (slot libre) ──
@@ -1388,6 +1563,7 @@ registerActions({
   _artisanRingUpgradeEffect: (btn) => _artisanRingUpgradeEffect(Number(btn.dataset.i)),
   _artisanAmuletAddStat: (btn) => _artisanAmuletAddStat(Number(btn.dataset.i), btn.dataset.stat),
   _artisanWeaponAddPoint: (btn) => _artisanWeaponAddPoint(Number(btn.dataset.i), btn.dataset.stat),
+  _artisanReforge: (btn) => _artisanReforge(Number(btn.dataset.i)),
   _artisanCloseModal: () => closeModalDirect(),
   _artisanBack: () => closeModalDirect(),
 });

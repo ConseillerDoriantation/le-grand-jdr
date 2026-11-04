@@ -1,9 +1,9 @@
 import { STATE } from '../core/state.js';
-import { loadCollection, saveDoc, replaceDoc, deleteFromCol } from '../data/firestore.js';
+import { loadCollection, saveDoc, replaceDoc, deleteFromCol, batchReplaceInCol, batchSaveInCol } from '../data/firestore.js';
 import { confirmDelete, trySave, tryUpsert } from '../shared/crud.js';
 import { registerActions } from '../core/actions.js';
 import { openModal, closeModal } from '../shared/modal.js';
-import { showNotif } from '../shared/notifications.js';
+import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { _esc, _nl2br, _trunc, eyeIcon } from '../shared/html.js';
 import { emptyStateHtml } from '../shared/list-renderer.js';
 import { uploadJpeg } from '../shared/image-upload.js';
@@ -18,6 +18,8 @@ const STORE = {
 };
 let _sortable = null;
 let _cardImageCropper = null;
+let _bulkMode = false;
+const _bulkSelected = new Set();
 
 function normalizeBackImages(rawBackImages, templateUrl = '', backImagesById = null, backImageOrder = []) {
   if (backImagesById && typeof backImagesById === 'object') {
@@ -105,6 +107,19 @@ async function _persistCard(id, full) {
   }
 }
 
+async function _persistCardBatch(cards) {
+  const entries = cards.filter(card => card?.id);
+  if (!entries.length) return;
+  const secret = entries.map(({ id, ...data }) => ({ col: 'collection_secret', id, data }));
+  const publicCards = entries.map(card => ({ col: 'collection', id: card.id, data: _publicProjection(card) }));
+  for (let index = 0; index < secret.length; index += 450) {
+    await batchSaveInCol(secret.slice(index, index + 450));
+  }
+  for (let index = 0; index < publicCards.length; index += 450) {
+    await batchReplaceInCol(publicCards.slice(index, index + 450));
+  }
+}
+
 // MJ : source = collection_secret (complète). Migration douce idempotente — toute
 // carte présente côté public mais absente du secret y est recopiée, puis le doc
 // public est réduit à sa projection.
@@ -123,14 +138,75 @@ async function _loadAdminCardsWithMigration() {
   return secret;
 }
 
+function _bulkCards() {
+  return STORE.cards.filter(card => _bulkSelected.has(card.id));
+}
+
+function _bulkBarHtml() {
+  if (!STATE.isAdmin || !_bulkMode) return '';
+  const selected = _bulkCards();
+  const count = selected.length;
+  const allUnlocked = count > 0 && selected.every(card => !!card.unlocked);
+  const allMasked = count > 0 && selected.every(card => !!card.descMasquee);
+  return `<div class="coll-bulkbar" role="region" aria-label="Actions groupées de la collection">
+    <strong>${count} sélectionnée${count !== 1 ? 's' : ''}</strong>
+    <button type="button" class="coll-bulklink" data-action="selectAllCollectionCards"${STORE.cards.length ? '' : ' disabled'}>Tout sélectionner (${STORE.cards.length})</button>
+    ${count ? '<button type="button" class="coll-bulklink" data-action="clearCollectionSelection">Effacer</button>' : ''}
+    <span></span>
+    <button type="button" class="btn btn-outline btn-sm" data-action="bulkCollectionUnlock"${count ? '' : ' disabled'}>${allUnlocked ? '🔒 Verrouiller' : '◇ Débloquer'}</button>
+    <button type="button" class="btn btn-outline btn-sm" data-action="bulkCollectionChallenge"${count ? '' : ' disabled'}>${allMasked ? '◉ Afficher les défis' : '◉ Masquer les défis'}</button>
+  </div>`;
+}
+
+function _toggleBulkCard(id) {
+  if (!_bulkMode || !id) return;
+  if (_bulkSelected.has(id)) _bulkSelected.delete(id);
+  else _bulkSelected.add(id);
+  renderCollectionPage();
+}
+
+async function _applyCollectionBulk(field, value, successMessage) {
+  const selected = _bulkCards();
+  if (!STATE.isAdmin || !selected.length) return;
+  const before = selected.map(card => ({ ...card }));
+  const after = selected.map(card => ({ ...card, [field]: value }));
+  try {
+    await _persistCardBatch(after);
+    const byId = new Map(after.map(card => [card.id, card]));
+    STORE.cards = STORE.cards.map(card => byId.get(card.id) || card);
+    _bulkSelected.clear();
+    showNotif(successMessage(selected.length), 'success', {
+      duration: 8000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          await _persistCardBatch(before);
+          const previousById = new Map(before.map(card => [card.id, card]));
+          STORE.cards = STORE.cards.map(card => previousById.get(card.id) || card);
+          if (document.querySelector('.coll-page')) await renderCollectionPage();
+          showNotif('Action groupée annulée.', 'success');
+        },
+      },
+    });
+    await renderCollectionPage();
+  } catch (error) {
+    notifySaveError(error);
+  }
+}
+
 // ── Rendu principal ──────────────────────────────────────────────────────────
 export async function renderCollectionPage() {
+  _sortable?.destroy?.();
+  _sortable = null;
   await loadSettings();
   const cards = STATE.isAdmin
     ? await _loadAdminCardsWithMigration()
     : await loadCollection('collection').catch(() => []);
 
   STORE.cards = [...cards].sort((a, b) => (a.ordre ?? 999) - (b.ordre ?? 999));
+  const knownIds = new Set(STORE.cards.map(card => card.id));
+  [..._bulkSelected].forEach(id => { if (!knownIds.has(id)) _bulkSelected.delete(id); });
+  if (!STATE.isAdmin) { _bulkMode = false; _bulkSelected.clear(); }
 
   const content = document.getElementById('main-content');
   const total = STORE.cards.length;
@@ -138,7 +214,7 @@ export async function renderCollectionPage() {
 
   let html = `<section class="coll-page${STATE.isAdmin ? ' coll-page--admin' : ''}">${_collectionHeaderHtml(unlocked, total)}`;
 
-  if (STATE.isAdmin) html += _collectionAdminPanelHtml(unlocked, total);
+  if (STATE.isAdmin) html += _collectionAdminPanelHtml(unlocked, total) + _bulkBarHtml();
 
   if (STORE.cards.length === 0) {
     html += emptyStateHtml('🃏', 'La collection est vide.');
@@ -153,7 +229,7 @@ export async function renderCollectionPage() {
 
   // Drag & drop (MJ) → réordonne et persiste l'ordre partagé.
   const grid = content.querySelector('.coll-admin-grid');
-  if (grid && STATE.isAdmin) {
+  if (grid && STATE.isAdmin && !_bulkMode) {
     _sortable = makeSortable(grid, {
       prefix: 'coll',
       draggable: '.coll-admin-card',
@@ -202,6 +278,7 @@ function _collectionAdminPanelHtml(unlocked, total) {
         ${missingArt ? `<span class="is-warn"><strong>${missingArt}</strong> sans image</span>` : ''}
       </div>
       <div class="coll-admin-actions" aria-label="Actions de gestion">
+        <button class="btn btn-outline btn-sm${_bulkMode ? ' is-active' : ''}" data-action="toggleCollectionBulk" aria-pressed="${_bulkMode}">${_bulkMode ? '✓ Terminer' : '☑ Sélectionner'}</button>
         <button class="btn btn-gold btn-sm" data-action="openCollectionModal">+ Ajouter</button>
         <button class="btn btn-outline btn-sm" data-action="openTemplateModal">Dos de carte</button>
       </div>
@@ -224,8 +301,8 @@ function _adminCardHtml(c, index) {
   const unlockAction = c.unlocked ? 'Verrouiller' : 'Débloquer';
 
   return `
-    <article class="coll-admin-card ${c.unlocked ? 'is-unlocked' : 'is-locked'}${c.imageUrl ? '' : ' is-missing-art'}" data-id="${c.id}" data-collection-id="${c.id}">
-      <span class="coll-admin-drag" title="Réordonner" aria-hidden="true">↕</span>
+    <article class="coll-admin-card ${c.unlocked ? 'is-unlocked' : 'is-locked'}${c.imageUrl ? '' : ' is-missing-art'}${_bulkMode ? ' is-bulk' : ''}${_bulkSelected.has(c.id) ? ' is-selected' : ''}" data-id="${c.id}" data-collection-id="${c.id}">
+      ${_bulkMode ? `<button type="button" class="coll-admin-select${_bulkSelected.has(c.id) ? ' is-on' : ''}" data-action="toggleCollectionSelection" data-id="${c.id}" data-stop-propagation aria-pressed="${_bulkSelected.has(c.id)}" aria-label="${_bulkSelected.has(c.id) ? 'Retirer' : 'Ajouter'} ${_esc(title)} de la sélection">${_bulkSelected.has(c.id) ? '✓' : ''}</button>` : '<span class="coll-admin-drag" title="Réordonner" aria-hidden="true">↕</span>'}
       <button class="${artClass}" type="button" data-action="presentCard" data-id="${c.id}" data-stop-propagation aria-label="Présenter ${_esc(title)} en grand">
         ${art}
       </button>
@@ -636,10 +713,25 @@ function editCard(id) {
 }
 
 async function deleteCard(id) {
+  const current = STORE.cards.find(card => card.id === id);
+  const snapshot = current
+    ? (typeof structuredClone === 'function' ? structuredClone(current) : JSON.parse(JSON.stringify(current)))
+    : null;
   if (!await confirmDelete('collection', id, 'Supprimer cette carte ?')) return;
   try { await deleteFromCol('collection_secret', id); } catch (e) { console.warn('[collection] suppr. secret', e); }
   closeModal();
-  showNotif('Carte supprimée.', 'success');
+  showNotif('Carte supprimée.', 'success', snapshot ? {
+    duration: 7000,
+    action: {
+      label: '↶ Annuler',
+      onClick: async () => {
+        const { id: _ignored, ...full } = snapshot;
+        if (!await _persistCard(id, full)) throw new Error('Restauration de la carte impossible');
+        await renderCollectionPage();
+        showNotif('Suppression annulée.', 'success');
+      },
+    },
+  } : {});
   await renderCollectionPage();
 }
 
@@ -664,6 +756,39 @@ function removeBackImage(index) {
 }
 
 registerActions({
+  toggleCollectionBulk: () => {
+    _bulkMode = !_bulkMode;
+    if (!_bulkMode) _bulkSelected.clear();
+    renderCollectionPage();
+  },
+  toggleCollectionSelection: (btn, event) => {
+    event?.stopPropagation();
+    _toggleBulkCard(btn.dataset.id);
+  },
+  selectAllCollectionCards: () => {
+    STORE.cards.forEach(card => _bulkSelected.add(card.id));
+    renderCollectionPage();
+  },
+  clearCollectionSelection: () => {
+    _bulkSelected.clear();
+    renderCollectionPage();
+  },
+  bulkCollectionUnlock: () => {
+    const selected = _bulkCards();
+    const unlocked = !selected.every(card => !!card.unlocked);
+    _applyCollectionBulk('unlocked', unlocked, count => {
+      const plural = count !== 1;
+      return `${count} carte${plural ? 's' : ''} ${unlocked ? `débloquée${plural ? 's' : ''}` : `verrouillée${plural ? 's' : ''}`}.`;
+    });
+  },
+  bulkCollectionChallenge: () => {
+    const selected = _bulkCards();
+    const masked = !selected.every(card => !!card.descMasquee);
+    _applyCollectionBulk('descMasquee', masked, count => {
+      const plural = count !== 1;
+      return `${count} défi${plural ? 's' : ''} ${masked ? `masqué${plural ? 's' : ''}` : `rendu${plural ? 's' : ''} visible${plural ? 's' : ''}`}.`;
+    });
+  },
   openCollectionModal: () => openCollectionModal(),
   openTemplateModal:   () => openTemplateModal(),
   saveTemplate:        () => saveTemplate(),

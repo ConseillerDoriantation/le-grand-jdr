@@ -33,3 +33,9 @@ export function recordRecentNavigation(entry) {
     localStorage.setItem(_storageKey(), JSON.stringify(next));
   } catch {}
 }
+
+export function clearRecentNavigation() {
+  try {
+    localStorage.removeItem(_storageKey());
+  } catch {}
+}

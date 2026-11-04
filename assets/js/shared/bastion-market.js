@@ -102,7 +102,6 @@ export function marketListingView(post = {}) {
     text: String(post.text || ''),
   };
 }
-
 // Un même post peut arriver par deux flux (mur récent + ventes ouvertes) :
 // la version la plus récemment modifiée l'emporte.
 export function mergeMarketPosts(...lists) {
@@ -449,4 +448,3 @@ export function planMarketClose({ post, seller, winner, expectedBid = null, now 
     },
   };
 }
-

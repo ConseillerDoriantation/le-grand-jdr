@@ -122,7 +122,7 @@ test('CSS v11 présent, scopé .cs-v3, responsive et contraste thème clair', ()
   assert.match(css, /#char-sheet-area \.main-col:has\(\.iv\) \{ overflow: clip; \}/);
   assert.match(css, /\.cs-v3 \.iv:not\(\.is-narrow\) \.iv-sheet \{ position: sticky;/);
   assert.match(css, /\.cs-v3 \.iv\.is-narrow\.is-sheet-open \.iv-sheet \{ display: flex; position: fixed;/);
-  assert.match(css, /@media \(max-width: 640px\) \{\n  \.cs-v3 \.iv\.is-narrow\.is-sheet-open \.iv-sheet \{ top: auto;/);
+  assert.match(css, /@media \(max-width: 640px\) \{\r?\n  \.cs-v3 \.iv\.is-narrow\.is-sheet-open \.iv-sheet \{ top: auto;/);
   assert.match(css, /\[data-theme="light"\] \.cs-v3 \.iv-row\[data-r\] \.iv-name b/);
   // Les classes inv5 ne doivent plus exister dans le CSS.
   assert.ok(!css.includes('.inv5-shell'), 'CSS inv5-shell retiré');
@@ -145,4 +145,22 @@ test('la recherche met à jour la liste de façon ciblée et débouncée (sans r
     'la recherche ne doit plus déclencher un re-render total de l’onglet');
   // Débounce présent.
   assert.match(feature, /function _ivDebouncedListUpdate\(\)[\s\S]*?setTimeout\([\s\S]*?120\)/);
+});
+
+test('vendre un objet conserve la position de défilement réelle de la feuille', () => {
+  const sellStart = feature.indexOf('export async function sellInvItemBulk');
+  const sellEnd = feature.indexOf('\nexport async function sellInvItem', sellStart);
+  const sell = feature.slice(sellStart, sellEnd);
+  assert.match(sell, /const inventoryView = _captureInventoryViewState\(\)/);
+  assert.match(sell, /_rerenderInventoryView\(\{ viewState: inventoryView \}\)/);
+  assert.doesNotMatch(sell, /_renderInventoryChar\(c,/);
+
+  const captureStart = feature.indexOf('function _captureInventoryViewState');
+  const rerenderEnd = feature.indexOf('\nasync function _invToggleBelt', captureStart);
+  const view = feature.slice(captureStart, rerenderEnd);
+  assert.match(view, /document\.getElementById\('char-sheet-area'\)/);
+  assert.match(view, /document\.getElementById\('char-tab-content'\)/);
+  assert.match(view, /requestAnimationFrame\(\(\) => requestAnimationFrame/);
+  assert.match(view, /sheet\?\.scrollTo\(\{ top: viewState\.sheetTop/);
+  assert.match(view, /window\.scrollTo\(\{ top: viewState\.windowY/);
 });

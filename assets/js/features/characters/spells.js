@@ -1703,38 +1703,74 @@ async function _addSortCat(couleur) {
 
 async function _renameSortCat(idx, value) {
   const c = STATE.activeChar; if (!c) return;
-  const cats = [...(c.sort_cats || [])];
+  const previous = [...(c.sort_cats || [])];
+  const cats = [...previous];
   if (!cats[idx]) return;
   const nom = (value || '').trim();
   if (!nom || nom === cats[idx].nom) return;
   cats[idx] = { ...cats[idx], nom };
   c.sort_cats = cats;
-  if (await trySave(spellHostCollection(c), c.id, { sort_cats: cats })) _renderSpellsTab(c);
+  if (!await trySave(spellHostCollection(c), c.id, { sort_cats: cats })) c.sort_cats = previous;
+  _renderSpellsTab(c);
 }
 
 async function _recolorSortCat(idx, couleur) {
   const c = STATE.activeChar; if (!c) return;
-  const cats = [...(c.sort_cats || [])];
+  const previous = [...(c.sort_cats || [])];
+  const cats = [...previous];
   if (!cats[idx] || cats[idx].couleur === couleur) return;
   cats[idx] = { ...cats[idx], couleur };
   c.sort_cats = cats;
-  if (await trySave(spellHostCollection(c), c.id, { sort_cats: cats })) _renderSpellsTab(c);
+  if (!await trySave(spellHostCollection(c), c.id, { sort_cats: cats })) c.sort_cats = previous;
+  _renderSpellsTab(c);
 }
 
 async function _delSortCat(idx) {
   const c = STATE.activeChar; if (!c) return;
-  const cats  = [...(c.sort_cats || [])];
+  const previousCats = [...(c.sort_cats || [])];
+  const previousSorts = [...(c.deck_sorts || [])];
+  const cats  = [...previousCats];
   const cat   = cats[idx]; if (!cat) return;
   if (!await confirmModal(`Supprimer la catégorie <b>${_esc(cat.nom)}</b> ?<br><span style="color:var(--text-dim);font-size:.85em">Ses sorts sont conservés (ils repassent « Sans catégorie »).</span>`, {
     title: 'Supprimer la catégorie', confirmLabel: 'Supprimer', icon: '🗑️',
   })) return;
   // Les sorts de la catégorie sont CONSERVÉS : on remet juste leur catId à ''.
-  const sorts = (c.deck_sorts || []).map(s => s.catId === cat.id ? { ...s, catId: '' } : s);
+  const affectedIds = new Set(previousSorts.filter(s => s.catId === cat.id).map(s => s.id).filter(Boolean));
+  const affectedFallbacks = new Set(previousSorts.flatMap((s, index) => s.catId === cat.id && !s.id ? [index] : []));
+  const sorts = previousSorts.map(s => s.catId === cat.id ? { ...s, catId: '' } : s);
   cats.splice(idx, 1);
   c.sort_cats  = cats;
   c.deck_sorts = sorts;
   if (await trySave(spellHostCollection(c), c.id, { sort_cats: cats, deck_sorts: sorts })) {
-    showNotif('Catégorie supprimée (sorts conservés).', 'success');
+    showNotif('Catégorie supprimée (sorts conservés).', 'success', {
+      duration: 8000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          const currentCats = [...(c.sort_cats || [])];
+          const currentSorts = [...(c.deck_sorts || [])];
+          const restoredCats = [...currentCats];
+          restoredCats.splice(Math.min(idx, restoredCats.length), 0, cat);
+          const restoredSorts = currentSorts.map((spell, index) => {
+            const wasAffected = spell.id ? affectedIds.has(spell.id) : affectedFallbacks.has(index);
+            return wasAffected && !spell.catId ? { ...spell, catId: cat.id } : spell;
+          });
+          c.sort_cats = restoredCats;
+          c.deck_sorts = restoredSorts;
+          if (!await trySave(spellHostCollection(c), c.id, { sort_cats: restoredCats, deck_sorts: restoredSorts })) {
+            c.sort_cats = currentCats;
+            c.deck_sorts = currentSorts;
+            throw new Error('Restauration de la catégorie impossible');
+          }
+          _renderSpellsTab(c);
+          showNotif('Suppression annulée.', 'success');
+        },
+      },
+    });
+    _renderSpellsTab(c);
+  } else {
+    c.sort_cats = previousCats;
+    c.deck_sorts = previousSorts;
     _renderSpellsTab(c);
   }
 }

@@ -62,6 +62,8 @@ function _blankDraft() {
     caBonus: '', pvMaxBonus: '', pmMaxBonus: '', vitesseBonus: '', initiativeBonus: '',
     // objet
     type: '', quantite: 1,
+    // signature MJ : objet non recyclable en fragments (balance craft)
+    noRecycle: false,
   };
 }
 
@@ -87,6 +89,7 @@ function _draftFromItem(item = {}) {
   d.slotBijou   = item.slotBijou || '';
   d.type        = item.type || '';
   d.quantite    = 1;
+  d.noRecycle   = !!item.noRecycle;
   ITEM_STATS.forEach(st => { if (item[st.store] != null) d[st.store] = item[st.store]; });
   DERIVED_BONUSES.forEach(([k]) => { if (item[k] != null) d[k] = item[k]; });
   return d;
@@ -151,7 +154,11 @@ function _catBody() {
     _row2(
       _fRow('Nom', _fText('nom', 'Nom de l’objet')),
       _fRow('Rareté', buildRaretePicker('forge', d.rarete)),
-    ));
+    ) +
+    (STATE.isAdmin
+      ? _fRow('⭐ Non recyclable (signature)',
+          `<input type="checkbox" data-forge-field="noRecycle" ${d.noRecycle ? 'checked' : ''}>`)
+      : ''));
 
   if (cat === 'arme') {
     const formatOpts = `<option value="">—</option>` +
@@ -235,7 +242,7 @@ function _renderForge() {
 function _syncDraftFromDom() {
   if (!_forge) return;
   document.querySelectorAll('[data-forge-field]').forEach(el => {
-    _forge.draft[el.dataset.forgeField] = el.value;
+    _forge.draft[el.dataset.forgeField] = el.type === 'checkbox' ? el.checked : el.value;
   });
   // Le sélecteur d'étoiles (rarity.js) écrit dans un input caché #forge-rarete.
   const rar = document.getElementById('forge-rarete');
@@ -264,6 +271,7 @@ function _buildItem() {
     description: String(d.description || '').trim(),
     source: 'custom',
     createdBy: STATE.user?.uid || '',
+    ...(d.noRecycle ? { noRecycle: true } : {}),
   };
 
   if (cat === 'arme') {

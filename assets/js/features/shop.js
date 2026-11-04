@@ -2,7 +2,7 @@ import { STATE } from '../core/state.js';
 import { loadCollection, loadChars, addToCol, updateInCol, deleteFromCol, batchUpdateInCol, getDocDataSilent, saveDoc } from '../data/firestore.js';
 import { deleteField } from '../config/firebase.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
-import { openModal, updateModalContent, closeModalDirect, confirmModal, promptModal, setModalCloseGuard, clearModalCloseGuard } from '../shared/modal.js';
+import { openModal, pushModal, popModal, updateModalContent, closeModalDirect, confirmModal, promptModal, setModalCloseGuard, clearModalCloseGuard } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { timeAgo } from '../shared/relative-time.js';
 import { RARETE_NAMES, _rareteColor, buildRaretePicker, pickRarete, loadRarities, getRarities, openRaritiesAdmin } from '../shared/rarity.js';
@@ -45,6 +45,7 @@ import { compareManualOrder, manualOrderValue, mergeVisibleManualOrder, nextManu
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
 import { compressDataUrl } from '../shared/image-upload.js';
+import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { shopAffinityScore, shopCartTotals, shopItemBuyState, shopUpgradeGain } from '../shared/shop-cart.js';
 import { atelierApplyBuild, atelierCompactSlots, atelierGainScore, atelierNetCost } from '../shared/shop-atelier.js';
 import { damageProfileToRelations, parseShopItemQuickEntry, relationsToDamageProfile } from '../shared/shop-item-editor.js';
@@ -129,6 +130,7 @@ const TEMPLATES = {
     label: '🧪 Classique',
     fields: [
       { id:'type',        label:'Type',          type:'text',     placeholder:'Consommable, Matériau, Accessoire...' },
+      { id:'rarete',      label:'Rareté',        type:'rarete' },
       { id:'effet',       label:'Description',   type:'textarea', placeholder:'(Action) Rend 10 PV...' },
       { id:'prix',        label:'Prix 🪙',       type:'number',   placeholder:'0' },
       { id:'dispo',       label:'Dispo',         type:'dispo' },
@@ -223,6 +225,8 @@ let _activeCat = null;
 let _page = 1;
 let _pendingTargetShopItemId = null;
 let _pendingTargetShopMode = '';
+let _bulkMode = false;
+const _bulkSelected = new Set();
 const PAGE_SIZE = 24; // divisible par 2, 3, 4 et 6 colonnes
 
 // Filtres actifs (multi-sélection)
@@ -299,6 +303,9 @@ async function loadShopData() {
   ]);
   _cats = cats.map(category => category.template === 'libre' ? { ...category, template: 'classique' } : category);
   _items = items.map(_normalizeLegacyShopItem);
+  const knownItemIds = new Set(_items.map(item => item.id));
+  [..._bulkSelected].forEach(id => { if (!knownItemIds.has(id)) _bulkSelected.delete(id); });
+  if (!STATE.isAdmin) { _bulkMode = false; _bulkSelected.clear(); }
   _weaponFormats = weaponFormats;
   _cats.sort((a,b) => (a.ordre||0)-(b.ordre||0));
   _items.sort(compareManualOrder);
@@ -520,10 +527,8 @@ export async function renderShop() {
 
           <div class="sh-topbar-tools">
             <div class="sh-topbar-character">${charStripHtml}</div>
-            ${_shopSection === 'shop' ? `
-              <button type="button" class="shc-btn" data-sh-action="openShopHistory" title="Historique des objets achetés et vendus" aria-label="Historique">${_shopIcon('receipt')}<span class="shc-btn-lbl">Historique</span></button>
-              ${_renderManageMenu()}
-            ` : ''}
+            <button type="button" class="shc-btn" data-sh-action="openShopHistory" title="Historique des objets achetés et vendus" aria-label="Historique">${_shopIcon('receipt')}<span class="shc-btn-lbl">Historique</span></button>
+            ${_renderManageMenu()}
           </div>
         </div>
   `;
@@ -721,7 +726,8 @@ function _renderCatalogHead(st, foldedGroups = st.groups) {
       <div class="shc-view" role="group" aria-label="Affichage des articles">
         ${viewBtn('grille', 'Grille', _SVG_GRID)}${viewBtn('liste', 'Liste', _SVG_LIST)}
       </div>
-      ${edit ? `<button type="button" class="shc-btn is-primary" data-sh-action="openItemModal" title="Créer un article${isRealCat ? ' dans cette catégorie' : ''}">＋ Article</button>` : ''}
+      ${edit ? `<button type="button" class="shc-btn shc-bulk-mode${_bulkMode ? ' is-on' : ''}" data-sh-action="bulkMode" aria-pressed="${_bulkMode}">${_bulkMode ? '✓ Terminer' : '☑ Sélectionner'}</button>
+      <button type="button" class="shc-btn is-primary" data-sh-action="openItemModal" title="Créer un article${isRealCat ? ' dans cette catégorie' : ''}">＋ Article</button>` : ''}
     </div>
   </div>`;
 }
@@ -785,27 +791,126 @@ function _renderActiveFilters(groups) {
     + '<button type="button" class="shc-link" data-sh-action="resetFilters">Tout effacer</button>';
 }
 
+function _bulkSelectedItems() {
+  return _items.filter(item => _bulkSelected.has(item.id));
+}
+
+function _renderBulkBar(st) {
+  const selected = _bulkSelectedItems();
+  const count = selected.length;
+  const pageIds = st.slice.map(item => item.id);
+  const filteredIds = st.items.map(item => item.id);
+  const allHidden = count > 0 && selected.every(item => !!item.masque);
+  const categoryOptions = [
+    '<option value="">Déplacer vers…</option>',
+    ..._cats.map(cat => `<option value="${_esc(cat.id)}">${_esc(cat.emoji || _catEmoji(cat.nom))} ${_esc(cat.nom)}</option>`),
+    '<option value="__uncategorized__">📦 Non classé</option>',
+  ].join('');
+  return `<div class="shc-bulk-bar" role="region" aria-label="Actions groupées">
+    <strong>${count} sélectionné${count !== 1 ? 's' : ''}</strong>
+    <div class="shc-bulk-pick" role="group" aria-label="Étendre la sélection">
+      <button type="button" class="shc-link" data-sh-action="bulkSelect" data-scope="page"${pageIds.length ? '' : ' disabled'}>Page (${pageIds.length})</button>
+      <button type="button" class="shc-link" data-sh-action="bulkSelect" data-scope="filtered"${filteredIds.length ? '' : ' disabled'}>Tous les résultats (${filteredIds.length})</button>
+      ${count ? '<button type="button" class="shc-link" data-sh-action="bulkClear">Effacer</button>' : ''}
+    </div>
+    <span class="shc-bulk-spacer"></span>
+    <select class="input-field shc-bulk-category" data-sh-action="bulkMove" data-sh-on="change" aria-label="Déplacer les articles sélectionnés"${count ? '' : ' disabled'}>${categoryOptions}</select>
+    <button type="button" class="shc-btn" data-sh-action="bulkVisibility"${count ? '' : ' disabled'}>${allHidden ? '◉ Rendre visibles' : '◉ Masquer'}</button>
+  </div>`;
+}
+
+function _syncBulkModeButton() {
+  const button = document.querySelector('[data-sh-action="bulkMode"]');
+  if (!button) return;
+  button.classList.toggle('is-on', _bulkMode);
+  button.setAttribute('aria-pressed', String(_bulkMode));
+  button.textContent = _bulkMode ? '✓ Terminer' : '☑ Sélectionner';
+}
+
+function _toggleBulkItem(itemId) {
+  if (!_bulkMode || !itemId) return;
+  if (_bulkSelected.has(itemId)) _bulkSelected.delete(itemId);
+  else _bulkSelected.add(itemId);
+  _updateResults();
+}
+
+async function _applyBulkShopPatch(dataForItem, successMessage) {
+  const selected = _bulkSelectedItems();
+  if (!STATE.isAdmin || !selected.length) return;
+  const changes = selected.map(item => {
+    const data = dataForItem(item);
+    const before = Object.fromEntries(Object.keys(data).map(key => [
+      key,
+      Object.prototype.hasOwnProperty.call(item, key) ? item[key] : (key === 'masque' ? false : ''),
+    ]));
+    const localBefore = Object.fromEntries(Object.keys(data).map(key => [key, {
+      exists: Object.prototype.hasOwnProperty.call(item, key),
+      value: item[key],
+    }]));
+    return { id: item.id, data, before, localBefore };
+  });
+  const updates = changes.map(({ id, data }) => ({ col: 'shop', id, data }));
+  try {
+    for (let index = 0; index < updates.length; index += 450) {
+      await batchUpdateInCol(updates.slice(index, index + 450));
+    }
+    changes.forEach(({ id, data }) => {
+      const item = _items.find(entry => entry.id === id);
+      if (item) Object.assign(item, data);
+    });
+    _bulkSelected.clear();
+    _rebuildShopSearchIndex();
+    showNotif(successMessage(selected.length), 'success', {
+      duration: 8000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          const reverse = changes.map(({ id, before }) => ({ col: 'shop', id, data: before }));
+          for (let index = 0; index < reverse.length; index += 450) {
+            await batchUpdateInCol(reverse.slice(index, index + 450));
+          }
+          changes.forEach(({ id, localBefore }) => {
+            const item = _items.find(entry => entry.id === id);
+            if (!item) return;
+            Object.entries(localBefore).forEach(([key, previous]) => {
+              if (previous.exists) item[key] = previous.value;
+              else delete item[key];
+            });
+          });
+          _rebuildShopSearchIndex();
+          if (document.getElementById('sh-items-results')) _updateResults();
+          showNotif('Action groupée annulée.', 'success');
+        },
+      },
+    });
+    _updateResults();
+  } catch (error) {
+    notifySaveError(error);
+  }
+}
+
 function _renderResultsHtml(st) {
+  const bulkBar = STATE.isAdmin && _bulkMode ? _renderBulkBar(st) : '';
   if (!st.slice.length) {
     if (st.hasFilters) {
-      return `<div class="shc-empty">
+      return `${bulkBar}<div class="shc-empty">
         <p>Aucun article ne correspond à ces critères.</p>
         <button type="button" class="shc-btn" data-sh-action="resetFilters">Réinitialiser la recherche et les filtres</button>
       </div>`;
     }
     const emptyShop = _view === 'home';
-    return `<div class="shc-empty">
+    return `${bulkBar}<div class="shc-empty">
       <p>${emptyShop ? 'La boutique est vide.' : 'Aucun article dans cette catégorie.'}</p>
       ${STATE.isAdmin ? `<button type="button" class="shc-btn is-primary" data-sh-action="${emptyShop && !_cats.length ? 'openCatModal' : 'openItemModal'}">${emptyShop && !_cats.length ? '📁 Créer une catégorie' : '＋ Ajouter un article'}</button>` : ''}
     </div>`;
   }
   const ctx = _cardCtx();
-  if (_view === 'home' && !st.hasFilters) return _renderHomeShelves(ctx);
-  const opts = { showCat: _view === 'home', sortable: STATE.isAdmin && _view === 'items' };
+  if (_view === 'home' && !st.hasFilters && !_bulkMode) return _renderHomeShelves(ctx);
+  const opts = { showCat: _view === 'home', sortable: STATE.isAdmin && _view === 'items' && !_bulkMode };
   const body = _shopView === 'liste'
     ? _renderItemList(st.slice, ctx, opts)
     : `<div class="shc-grid${opts.sortable ? ' sh-sortable' : ''}" id="sh-items-grid">${st.slice.map(it => _renderCard(it, ctx, opts)).join('')}</div>`;
-  return body + _renderPagination(st.p, st.pages);
+  return bulkBar + body + _renderPagination(st.p, st.pages);
 }
 
 function _renderShelf(id, title, icon, color, items, subtitle, more = true, pick = false, category = null) {
@@ -1597,12 +1702,13 @@ function _renderCard(item, ctx, { showCat = false, sortable = false } = {}) {
   ].join('');
 
   return `
-    <article class="shc-card${st.epuise ? ' is-out' : ''}${edit && item.masque ? ' is-masked' : ''}${cartQty ? ' is-in-cart' : ''}${_detailItemId === item.id ? ' is-current' : ''}${sortable ? ' sh-sortable-item' : ''}"
+    <article class="shc-card${st.epuise ? ' is-out' : ''}${edit && item.masque ? ' is-masked' : ''}${cartQty ? ' is-in-cart' : ''}${_detailItemId === item.id ? ' is-current' : ''}${_bulkMode ? ' is-bulk' : ''}${_bulkSelected.has(item.id) ? ' is-selected' : ''}${sortable ? ' sh-sortable-item' : ''}"
       style="${_itemColorVars(rar, cat)}"
       data-item-id="${item.id}" data-sh-action="openDetail" data-id="${item.id}"
       data-sh-key-card="item" tabindex="0" role="button" aria-label="Ouvrir ${_esc(nom)}">
       <div class="shc-card-vis${item.image ? ' has-img' : ''}"${_itemVisStyle(item)}>
         ${item.image ? '' : `<span class="shc-card-glyph" aria-hidden="true">${_esc(_itemGlyph(item, tplKey, cat))}</span>`}
+        ${edit && _bulkMode ? `<button type="button" class="shc-card-select${_bulkSelected.has(item.id) ? ' is-on' : ''}" data-sh-action="bulkToggle" data-id="${item.id}" aria-pressed="${_bulkSelected.has(item.id)}" aria-label="${_bulkSelected.has(item.id) ? 'Retirer' : 'Ajouter'} ${_esc(nom)} de la sélection">${_bulkSelected.has(item.id) ? '✓' : ''}</button>` : ''}
         <button type="button" class="shc-card-fav${fav ? ' is-on' : ''}" data-sh-action="toggleFav" data-id="${item.id}"
           aria-pressed="${fav}" title="${fav ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favori">${fav ? '★' : '☆'}</button>
         ${!STATE.isAdmin && _itemNewUntilMs(item) > Date.now() ? '<span class="shc-new-badge">NOUVEAU</span>' : ''}
@@ -1671,12 +1777,13 @@ function _renderItemRow(item, ctx, { showCat = false, sortable = false } = {}) {
     : `<span class="shc-row-stock${st.dispo === 0 ? ' is-out' : st.dispo < 3 ? ' is-low' : ''}">${st.dispo === 0 ? 'Épuisé' : st.dispo}</span>`;
 
   return `
-    <div class="shc-row${st.epuise ? ' is-out' : ''}${edit && item.masque ? ' is-masked' : ''}${cartQty ? ' is-in-cart' : ''}${_detailItemId === item.id ? ' is-current' : ''}${sortable ? ' sh-sortable-item' : ''}"
+    <div class="shc-row${st.epuise ? ' is-out' : ''}${edit && item.masque ? ' is-masked' : ''}${cartQty ? ' is-in-cart' : ''}${_detailItemId === item.id ? ' is-current' : ''}${_bulkMode ? ' is-bulk' : ''}${_bulkSelected.has(item.id) ? ' is-selected' : ''}${sortable ? ' sh-sortable-item' : ''}"
       style="${_itemColorVars(rar, cat)}"
       data-item-id="${item.id}" data-sh-action="openDetail" data-id="${item.id}"
       data-sh-key-card="item" tabindex="0" role="button" aria-label="Ouvrir ${_esc(nom)}">
       <span class="shc-row-thumb${item.image ? ' has-img' : ''}"${_itemVisStyle(item)}>
         ${item.image ? '' : `<span aria-hidden="true">${_esc(_itemGlyph(item, tplKey, cat))}</span>`}
+        ${edit && _bulkMode ? `<button type="button" class="shc-card-select${_bulkSelected.has(item.id) ? ' is-on' : ''}" data-sh-action="bulkToggle" data-id="${item.id}" aria-pressed="${_bulkSelected.has(item.id)}" aria-label="${_bulkSelected.has(item.id) ? 'Retirer' : 'Ajouter'} ${_esc(nom)} de la sélection">${_bulkSelected.has(item.id) ? '✓' : ''}</button>` : ''}
         <button type="button" class="shc-card-fav${fav ? ' is-on' : ''}" data-sh-action="toggleFav" data-id="${item.id}"
           aria-pressed="${fav}" title="${fav ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favori">${fav ? '★' : '☆'}</button>
       </span>
@@ -3363,6 +3470,7 @@ const _SI_SECTION_DEF = {
 };
 
 let _siEditorState = null;
+let _siImageCropper = null;
 
 function _siClone(value) {
   try { return structuredClone(value); } catch { return JSON.parse(JSON.stringify(value || {})); }
@@ -3461,10 +3569,12 @@ function _siMetaHtml(item, tplKey) {
   const newUntilMs = _itemNewUntilMs(item);
   const newActive = item ? (newUntilMs > Date.now() || item.isNew === true) : true;
   const flag = (id, title, hint, checked) => `<label class="si-flag${checked ? ' is-on' : ''}"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><i></i><span><b>${title}</b><small>${hint}</small></span></label>`;
+  const equippable = ['arme', 'armure', 'bijou'].includes(tplKey);
   return `<div class="si-meta-grid">
     ${flag('si-masque', 'Masqué aux joueurs', 'Visible uniquement du MJ et récupérable en butin.', !!item?.masque)}
     ${flag('si-new', 'Nouveauté', 'Présent dans le filtre Nouveautés pendant deux semaines.', newActive)}
     ${flag('si-has-recipe', 'Recette d’artisanat', 'Permet la fabrication via l’Artisan.', recipeChk)}
+    ${equippable ? flag('si-norecycle', '⭐ Non recyclable (signature)', 'Ses traits ne donnent aucun fragment au recyclage — reste exclusif à cet objet.', !!item?.noRecycle) : ''}
   </div>`;
 }
 
@@ -3711,6 +3821,7 @@ function _siReadDraftFromDom() {
   draft.masque = !!document.getElementById('si-masque')?.checked; draft.isNew = !!document.getElementById('si-new')?.checked;
   draft.hasRecipe = !!document.getElementById('si-has-recipe')?.checked;
   draft.consommable = !!document.getElementById('si-consommable')?.checked;
+  { const nr = document.getElementById('si-norecycle'); if (nr) draft.noRecycle = !!nr.checked; }
   draft.actions = _shopCollectActions(); draft.damageProfile = _shopCollectDamageProfile() || draft.damageProfile || {};
   draft.traits = [...document.querySelectorAll('#si-traits-list input')].map(el => el.value.trim()).filter(Boolean);
   if (document.getElementById('si-skill-chips')) {
@@ -4325,34 +4436,75 @@ function refreshTemplateFields(tplKey) {
 }
 
 // ── Upload image ──────────────────────────────────────────────────────────────
-function previewUpload(fileInputId,previewId,hiddenId) {
-  const file=document.getElementById(fileInputId)?.files?.[0]; if(!file) return;
-  const reader=new FileReader();
-  reader.onload=e=>{
-    const img=new Image();
-    img.onload=()=>{
-      const MAX=400; let w=img.width,h=img.height;
-      if(w>MAX||h>MAX){ if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;} }
-      const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
-      canvas.getContext('2d').drawImage(img,0,0,w,h);
-      const b64=canvas.toDataURL('image/jpeg',0.72);
-      const hidden=document.getElementById(hiddenId); if(hidden) hidden.value=b64;
-      const preview=document.getElementById(previewId);
-      if (preview) {
-        // Si le conteneur est la vignette ronde du nouveau modal, remplit-la full.
-        if (preview.classList.contains('si-img-thumb')) {
-          preview.innerHTML = `<img src="${b64}" alt="">`;
-        } else {
-          preview.innerHTML = `<img src="${b64}" alt="" style="max-height:80px;border-radius:8px;margin-top:0.4rem;display:block">`;
-        }
-      }
-      const kb=Math.round(b64.length*3/4/1024);
-      if(kb>700) showNotif(`⚠️ Image encore lourde (${kb}KB).`,'error');
-      else showNotif(`✅ Image prête (${kb}KB)`,'success');
-      _siRefreshLive();
-    };
-    img.src=e.target.result;
-  };
+function _siDestroyImageCropper() {
+  _siImageCropper?.destroy?.();
+  _siImageCropper = null;
+}
+
+function _siApplyCroppedImage(b64, previewId, hiddenId) {
+  const hidden = document.getElementById(hiddenId);
+  if (hidden) hidden.value = b64;
+  const preview = document.getElementById(previewId);
+  if (preview) preview.innerHTML = `<img src="${b64}" alt="Aperçu de l’article">`;
+  if (_siEditorState?.draft) _siEditorState.draft.image = b64;
+  _siRefreshLive();
+}
+
+async function _siSaveCroppedImage(previewId, hiddenId) {
+  const raw = _siImageCropper?.getBase64?.();
+  if (!raw) {
+    showNotif('Le cadreur d’image n’est pas encore prêt.', 'warning');
+    return;
+  }
+  const saveBtn = document.getElementById('si-image-crop-save');
+  if (saveBtn) saveBtn.disabled = true;
+  const b64 = await compressDataUrl(raw, {
+    max: 640, quality: 0.78, maxBytes: 120_000, minSide: 320,
+  }) || raw;
+  popModal();
+  _siApplyCroppedImage(b64, previewId, hiddenId);
+  const kb = Math.round(b64.length * 3 / 4 / 1024);
+  showNotif(`Image cadrée (${kb} Ko).`, 'success');
+}
+
+function _siOpenImageCropper(dataUrl, previewId, hiddenId) {
+  _siReadDraftFromDom();
+  _siDestroyImageCropper();
+  pushModal('Cadrer l’image', `
+    ${panZoomCropHTML({ idPrefix: 'si-image-crop', viewW: 320, viewH: 240 })}
+    <div style="display:flex;gap:.6rem;justify-content:flex-end;width:320px;max-width:100%;margin:.8rem auto 0">
+      <button type="button" class="btn btn-outline" id="si-image-crop-cancel">Annuler</button>
+      <button type="button" class="btn btn-gold" id="si-image-crop-save">Utiliser cette image</button>
+    </div>
+  `, null, {
+    subtitle: 'Zoome et déplace l’image dans le cadre 4:3',
+    accent: '#4f8cff',
+    onDismiss: _siDestroyImageCropper,
+  });
+  requestAnimationFrame(() => {
+    _siImageCropper = attachPanZoomCrop({
+      idPrefix: 'si-image-crop', dataUrl,
+      viewW: 320, viewH: 240, outputW: 640, outputH: 480,
+      constrainCover: true,
+    });
+    document.getElementById('si-image-crop-cancel')?.addEventListener('click', popModal, { once: true });
+    document.getElementById('si-image-crop-save')?.addEventListener('click', () => _siSaveCroppedImage(previewId, hiddenId), { once: true });
+  });
+}
+
+function previewUpload(fileInputId, previewId, hiddenId) {
+  const input = document.getElementById(fileInputId);
+  const file = input?.files?.[0];
+  if (!file) return;
+  input.value = '';
+  if (!file.type?.startsWith('image/')) {
+    showNotif('Sélectionne un fichier image.', 'warning');
+    return;
+  }
+  const reader = new FileReader();
+  reader.addEventListener('load', () => {
+    if (typeof reader.result === 'string') _siOpenImageCropper(reader.result, previewId, hiddenId);
+  }, { once: true });
   reader.readAsDataURL(file);
 }
 
@@ -4380,6 +4532,10 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
       categorieId:catId,
       template:tplKey,
       image:document.getElementById('si-img-b64')?.value||'',
+      // La rareté appartient à tous les articles, pas seulement aux templates
+      // d'équipement. Elle est lue depuis l'identité commune afin que les
+      // consommables, composants, livres et objets libres la conservent aussi.
+      rarete:parseInt(document.getElementById('si-rarete')?.value,10)||0,
       // Une modification conserve sa place. Un nouvel article, ou un article
       // déplacé vers une autre catégorie, est ajouté proprement à la fin.
       ordre: sameCategory && existingOrder !== null
@@ -4481,6 +4637,8 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
     data.consommable = !!document.getElementById('si-consommable')?.checked;
     // Masqué aux joueurs (MJ) — confort d'affichage, cf. _visibleItems.
     data.masque = !!document.getElementById('si-masque')?.checked;
+    // Signature MJ (équipables) : objet non recyclable en fragments à l'Artisan.
+    if (document.getElementById('si-norecycle')) data.noRecycle = !!document.getElementById('si-norecycle').checked;
 
     // Nouveauté : toggle → fenêtre de 2 semaines (newUntil). On ne ré-arme la
     // fenêtre que si elle n'est pas déjà active (éditer un item en cours de
@@ -5082,8 +5240,18 @@ async function _atelierSaveBuild() {
 async function _atelierDeleteBuild(buildId = _atelier.buildId) {
   const c = _getActiveShopChar();
   if (!c || buildId === 'equip') return;
+  const clone = value => (typeof structuredClone === 'function'
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value)));
   const wasActive = buildId === _atelier.buildId;
-  const exists = (c.shopBuilds || []).some(build => build.id === buildId);
+  const savedIndex = (c.shopBuilds || []).findIndex(build => build.id === buildId);
+  const localIndex = _atelier.localBuilds.findIndex(build => build.id === buildId);
+  const savedSnapshot = savedIndex >= 0 ? clone(c.shopBuilds[savedIndex]) : null;
+  const localSnapshot = localIndex >= 0 ? clone(_atelier.localBuilds[localIndex]) : null;
+  if (!savedSnapshot && !localSnapshot) return;
+  const workingSnapshot = _atelier.working.has(buildId) ? clone(_atelier.working.get(buildId)) : null;
+  const deletedName = workingSnapshot?.name || savedSnapshot?.name || localSnapshot?.name || 'Sans nom';
+  const exists = savedIndex >= 0;
   if (exists) {
     const ok = await confirmModal('Supprimer définitivement ce build ?', { title: 'Supprimer le build', confirmLabel: 'Supprimer', danger: true });
     if (!ok) return;
@@ -5096,6 +5264,29 @@ async function _atelierDeleteBuild(buildId = _atelier.buildId) {
   _atelier.contextBuild = null;
   if (wasActive) _atelierUseBuild('equip');
   _renderAtelier();
+  showNotif(`Build « ${deletedName} » supprimé.`, 'success', {
+    duration: 8000,
+    action: {
+      label: '↶ Annuler',
+      onClick: async () => {
+        if (savedSnapshot) {
+          const restored = [...(c.shopBuilds || [])];
+          if (!restored.some(build => build.id === buildId)) {
+            restored.splice(Math.min(savedIndex, restored.length), 0, clone(savedSnapshot));
+            if (!await trySave('characters', c.id, { shopBuilds: restored })) return;
+            c.shopBuilds = restored;
+          }
+        } else if (localSnapshot && !_atelier.localBuilds.some(build => build.id === buildId)) {
+          _atelier.localBuilds.splice(Math.min(localIndex, _atelier.localBuilds.length), 0, clone(localSnapshot));
+        }
+        if (workingSnapshot) _atelier.working.set(buildId, clone(workingSnapshot));
+        else _atelier.working.delete(buildId);
+        _atelierUseBuild(buildId);
+        _renderAtelier();
+        showNotif('Suppression du build annulée.', 'success');
+      },
+    },
+  });
 }
 
 function _atelierDuplicateBuild(buildId) {
@@ -5321,6 +5512,42 @@ Object.assign(shHandlers, {
     });
     _updateResults();
   },
+  bulkMode:       () => {
+    _bulkMode = !_bulkMode;
+    if (!_bulkMode) _bulkSelected.clear();
+    _syncBulkModeButton();
+    _updateResults();
+  },
+  bulkToggle:     (el, event) => {
+    event?.stopPropagation?.();
+    _toggleBulkItem(el.dataset.id || '');
+  },
+  bulkSelect:     (el) => {
+    const st = _catalogState();
+    const items = el.dataset.scope === 'filtered' ? st.items : st.slice;
+    items.forEach(item => _bulkSelected.add(item.id));
+    _updateResults();
+  },
+  bulkClear:      () => { _bulkSelected.clear(); _updateResults(); },
+  bulkMove:       (el) => {
+    const categoryId = el.value;
+    if (!categoryId) return;
+    const targetName = categoryId === '__uncategorized__'
+      ? 'Non classé'
+      : (_cats.find(cat => cat.id === categoryId)?.nom || 'la catégorie');
+    _applyBulkShopPatch(
+      () => ({ categorieId: categoryId === '__uncategorized__' ? '' : categoryId }),
+      count => `${count} article${count > 1 ? 's' : ''} déplacé${count > 1 ? 's' : ''} vers « ${targetName} ».`,
+    );
+  },
+  bulkVisibility: () => {
+    const selected = _bulkSelectedItems();
+    const masque = !selected.every(item => !!item.masque);
+    _applyBulkShopPatch(
+      () => ({ masque }),
+      count => `${count} article${count > 1 ? 's' : ''} ${masque ? 'masqué' : 'rendu visible'}${count > 1 ? 's' : ''}.`,
+    );
+  },
   toggleFilters:  (el) => {
     _filtersOpen = !_filtersOpen;
     _lsSet('shop_filters_open', _filtersOpen ? '1' : '0');
@@ -5403,7 +5630,7 @@ Object.assign(shHandlers, {
   // Items
   buyItem:        (el, ev) => { ev?.stopPropagation?.(); _cartAdd(el.dataset.id); },
   confirmBuy:     (el) => confirmBuyItem(el.dataset.id),
-  openDetail:     (el) => openShopItemDetail(el.dataset.id),
+  openDetail:     (el) => _bulkMode ? _toggleBulkItem(el.dataset.id) : openShopItemDetail(el.dataset.id),
   closeDetail:    () => _closeShopItemDetail(),
   cartInc:        (el, ev) => { ev?.stopPropagation?.(); _cartAdd(el.dataset.id); },
   cartDec:        (el, ev) => { ev?.stopPropagation?.(); _cartRemove(el.dataset.id); },

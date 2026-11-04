@@ -21,6 +21,7 @@ import { STATE } from '../core/state.js';
 import { lsJson } from './local-storage.js';
 import { getDocDataSilent, subscribeRecentCollection } from '../data/firestore.js';
 import { subscribeRecentWhere } from '../data/firestore-queries.js';
+import { captureViewContext, restoreViewContext } from './view-context.js';
 
 let _initialized = false;
 let _onlineTimer = null;
@@ -98,6 +99,144 @@ function _mountNetworkStatus() {
   window.addEventListener('offline', () => render(false));
   window.addEventListener('online', () => render(true));
   if (!navigator.onLine) render(false, false);
+}
+
+function _mountSyncStatus() {
+  const status = document.createElement('div');
+  status.id = 'global-sync-status';
+  status.className = 'global-sync-status';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  status.setAttribute('aria-atomic', 'true');
+  document.body.appendChild(status);
+
+  const pending = new Map();
+  let showTimer = null;
+  let hideTimer = null;
+
+  const hideLater = (delay = 1700) => {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => status.classList.remove('is-visible'), delay);
+  };
+  const renderPending = () => {
+    clearTimeout(hideTimer);
+    const count = pending.size;
+    if (!count) return;
+    const offline = !navigator.onLine;
+    status.className = `global-sync-status ${offline ? 'is-waiting' : 'is-saving'} is-visible`;
+    status.innerHTML = `<span class="global-sync-dot" aria-hidden="true"></span><strong>${offline ? 'En attente de connexion' : 'Enregistrement…'}</strong>${count > 1 ? `<span>${count} modifications</span>` : ''}`;
+  };
+  const schedulePending = () => {
+    clearTimeout(showTimer);
+    showTimer = setTimeout(renderPending, 180);
+  };
+  const renderSettled = (state) => {
+    clearTimeout(showTimer);
+    clearTimeout(hideTimer);
+    if (pending.size) {
+      renderPending();
+      return;
+    }
+    if (state === 'failed') {
+      status.className = 'global-sync-status is-error is-visible';
+      status.innerHTML = '<span class="global-sync-dot" aria-hidden="true"></span><strong>Échec de synchronisation</strong><span>L’action n’a pas été enregistrée.</span>';
+      hideLater(7000);
+      return;
+    }
+    status.className = 'global-sync-status is-saved is-visible';
+    status.innerHTML = '<span class="global-sync-dot" aria-hidden="true"></span><strong>Synchronisé</strong>';
+    hideLater();
+  };
+
+  document.addEventListener('app:data-write-state', (event) => {
+    const { id, state } = event.detail || {};
+    if (!id || !state) return;
+    if (state === 'started') {
+      pending.set(id, event.detail);
+      schedulePending();
+      return;
+    }
+    pending.delete(id);
+    renderSettled(state);
+  });
+  window.addEventListener('offline', () => { if (pending.size) renderPending(); });
+  window.addEventListener('online', () => { if (pending.size) renderPending(); });
+  window.addEventListener('beforeunload', (event) => {
+    if (!pending.size) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+  document.addEventListener('app:session-releasing', () => {
+    pending.clear();
+    clearTimeout(showTimer);
+    clearTimeout(hideTimer);
+    status.classList.remove('is-visible');
+  });
+}
+
+function _mountUpdateStatus() {
+  const banner = document.createElement('aside');
+  banner.id = 'global-update-status';
+  banner.className = 'global-update-status';
+  banner.setAttribute('role', 'status');
+  banner.setAttribute('aria-live', 'polite');
+  banner.innerHTML = `
+    <span class="global-update-icon" aria-hidden="true">↻</span>
+    <div><strong>Nouvelle version disponible</strong><span>Rechargez quand vous êtes prêt.</span></div>
+    <button type="button" data-update-reload>Recharger</button>
+    <button type="button" class="global-update-dismiss" data-update-dismiss aria-label="Plus tard">×</button>`;
+  document.body.appendChild(banner);
+
+  let available = false;
+  document.addEventListener('app:update-available', () => {
+    if (available) return;
+    available = true;
+    banner.classList.add('is-visible');
+  });
+  banner.querySelector('[data-update-reload]')?.addEventListener('click', () => window.location.reload());
+  banner.querySelector('[data-update-dismiss]')?.addEventListener('click', () => banner.classList.remove('is-visible'));
+}
+
+// Plusieurs pages historiques reconstruisent encore une zone avec innerHTML à
+// chaque frappe. La donnée reste bonne mais le champ remplacé perd le focus et
+// le curseur repart au début. On restaure uniquement le contexte d'une saisie
+// utilisateur effectivement retirée du DOM, sans intervenir sur un rerender
+// normal ni sur les valeurs contrôlées par la feature.
+function _initRerenderContinuity() {
+  let sequence = 0;
+  document.addEventListener('input', (event) => {
+    const field = event.target;
+    if (!event.isTrusted || !field?.matches?.('input:not([type="file"]), textarea, [contenteditable="true"]')) return;
+    const modal = field.closest('#modal-body');
+    const scope = modal || field.closest('#main-content');
+    if (!scope) return;
+    const page = STATE.currentPage;
+    const context = captureViewContext(scope, {
+      includeWindow: !modal,
+      includeFocus: true,
+    });
+    const run = ++sequence;
+
+    const restoreIfReplaced = () => {
+      if (run !== sequence || field.isConnected || STATE.currentPage !== page) return;
+      const currentScope = modal
+        ? document.getElementById('modal-body')
+        : document.getElementById('main-content');
+      if (!currentScope || (modal && !document.getElementById('modal-overlay')?.classList.contains('show'))) return;
+      const active = document.activeElement;
+      if (active && active !== document.body && active !== document.documentElement && active !== currentScope) return;
+      sequence++;
+      restoreViewContext(currentScope, context, {
+        includeWindow: !modal,
+        includeFocus: true,
+      });
+    };
+
+    queueMicrotask(restoreIfReplaced);
+    requestAnimationFrame(restoreIfReplaced);
+    setTimeout(restoreIfReplaced, 80);
+    setTimeout(restoreIfReplaced, 240);
+  }, true);
 }
 
 function _mountBackToTop() {
@@ -621,6 +760,7 @@ function _openKeyboardHelp() {
         <div><span>Rechercher dans la page</span><kbd>/</kbd></div>
         <div><span>Créer sur la page courante</span><kbd>N</kbd></div>
         <div><span>Page précédente</span><kbd>Alt</kbd><kbd>←</kbd></div>
+        <div><span>Page suivante</span><kbd>Alt</kbd><kbd>→</kbd></div>
         <div><span>Parcourir les onglets</span><kbd>←</kbd><kbd>→</kbd></div>
         <div><span>Premier / dernier onglet</span><kbd>Début</kbd><kbd>Fin</kbd></div>
       </section>
@@ -856,9 +996,11 @@ function _initContextualShortcuts() {
       return;
     }
     const back = (event.altKey && event.key === 'ArrowLeft') || (event.metaKey && event.key === '[');
-    if (!editing && !modalOpen && back) {
+    const forward = (event.altKey && event.key === 'ArrowRight') || (event.metaKey && event.key === ']');
+    if (!editing && !modalOpen && (back || forward)) {
       event.preventDefault();
-      history.back();
+      if (back) history.back();
+      else history.forward();
     }
   });
   document.addEventListener('app:modal-opened', () => requestAnimationFrame(() => _hintContextualShortcuts()));
@@ -1000,6 +1142,8 @@ export function initGlobalQol() {
   if (_initialized) return;
   _initialized = true;
   _mountNetworkStatus();
+  _mountSyncStatus();
+  _mountUpdateStatus();
   _initDocumentTitles();
   _mountPageAnnouncer();
   _mountBackToTop();
@@ -1016,5 +1160,6 @@ export function initGlobalQol() {
   _initFormValidationQol();
   _initCapsLockHint();
   _initTextareaQol();
+  _initRerenderContinuity();
   initPagePreferences();
 }

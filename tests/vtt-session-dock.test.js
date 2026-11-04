@@ -132,7 +132,7 @@ test('le sélecteur d’émetteur des émotes affiche les portraits avec repli s
 });
 
 test('la recherche d’émotes conserve son input et son curseur pendant la saisie', () => {
-  assert.match(emotes, /function _refreshEmoteSearchResults\(\)[\s\S]*?tabs\.innerHTML[\s\S]*?grid\.innerHTML/);
+  assert.match(emotes, /function _refreshEmoteSearchResults\([^)]*\)[\s\S]*?tabs\.innerHTML[\s\S]*?grid\.innerHTML/);
   assert.match(emotes, /q\.oninput = e => \{ _emoteQuery = e\.target\.value; _refreshEmoteSearchResults\(\); \}/);
   assert.doesNotMatch(emotes, /q\.oninput = e => \{[^}]*_renderEmotePicker\(\)/);
 });
@@ -145,4 +145,13 @@ test('les émotes ne révèlent aucune identité de compte et montrent clairemen
   assert.match(emotes, /aria-pressed="\$\{isFav\}"/);
   assert.match(css, /\.vtt-emote-star\.on \{[^}]*background:var\(--amber/);
   assert.match(css, /\.vtt-emote-tile\.is-favorite/);
+});
+
+test('ajouter une émote aux favoris conserve le défilement du sélecteur', () => {
+  assert.match(emotes, /function _refreshEmoteSearchResults\(\{ preserveScroll = false \} = \{\}\)/);
+  assert.match(emotes, /const scrollTop = preserveScroll \? body\?\.scrollTop \|\| 0 : 0/);
+  assert.match(emotes, /if \(preserveScroll && body\) body\.scrollTop = scrollTop/);
+  const toggleFav = emotes.slice(emotes.indexOf('export function _vttToggleFav'), emotes.indexOf('// ── Ouverture / fermeture'));
+  assert.match(toggleFav, /_refreshEmoteSearchResults\(\{ preserveScroll: true \}\)/);
+  assert.doesNotMatch(toggleFav, /_renderEmotePicker\(\)/);
 });

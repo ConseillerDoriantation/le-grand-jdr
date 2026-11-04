@@ -66,6 +66,8 @@ let _bstReordering = false;
 let _pendingTargetBeastId = null;
 let _pendingRouteBeastId = null;
 let _bstTrackerLoaded = false;   // carnet lu au moins une fois (cf. _saveTracker)
+let _bstBulkMode = false;
+const _bstBulkSelected = new Set();
 
 function _bstRouteId() {
   return String(getRouteSub('bestiaire') || '').split('/')[0] || '';
@@ -108,6 +110,7 @@ function _isAdminView() {
 // difficile à comprendre (et de déplacer involontairement les fiches masquées).
 function _canReorderBestiary() {
   return _isAdminView()
+    && !_bstBulkMode
     && STORE.bestiaireId === 'main'
     && STORE.currentCol === 'bestiary'
     && !STORE.searchVal
@@ -976,7 +979,7 @@ function _bstLootOrRow(c) {
   </div>`;
 }
 
-// Ligne d'objet : pastille de rareté · nom · rareté · Qté · Chance (pastille) · retirer.
+// Ligne d'objet : pastille de rareté · nom · rareté · Qté · Chance (pastille) · actions.
 // `.bst-p-row` conservé → _bstSaveArr (scrape) et removeRow fonctionnent inchangés ;
 // la chance vit dans un input caché synchronisé avec la pastille.
 function _bstLootRow(b = {}, id, i) {
@@ -998,7 +1001,12 @@ function _bstLootRow(b = {}, id, i) {
       title="Chance de tomber — clic pour changer" aria-label="Chance de tomber : ${_bstChanceLbl(chance)}">${_bstChanceLbl(chance)}</button>
     <input type="hidden" data-f="chance" value="${_esc(chance)}">
     <input type="hidden" data-f="itemId" value="${_esc(b.itemId || '')}">
-    <button class="bst-arme-ic dngr" data-bst-action="removeRow" data-id="${id}" data-type="butins" title="Retirer" aria-label="Retirer">×</button>
+    <span class="bst-lactions">
+      <button type="button" class="bst-arme-ic" data-bst-action="pickerEdit" data-id="${id}" data-idx="${i}"
+        title="Modifier l’objet" aria-label="Modifier ${_esc(nom)}">✎</button>
+      <button type="button" class="bst-arme-ic dngr" data-bst-action="removeRow" data-id="${id}" data-type="butins"
+        title="Retirer" aria-label="Retirer ${_esc(nom)}">×</button>
+    </span>
   </div>`;
 }
 
@@ -1040,34 +1048,45 @@ const _bstRarColor = getRareteColor;
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // PICKER OBJET BOUTIQUE â€” utilise le composant partagÃ© shared/shop-picker.js
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-async function _bstButinPickerOpen(creatureId) {
+async function _bstButinPickerOpen(creatureId, editIndex = null) {
   if (!creatureId) return;
   const c = STORE.creatures.find(x => x.id === creatureId);
   if (!c) return;
+  const editing = Number.isInteger(editIndex) && editIndex >= 0;
+  if (editing && !c.butins?.[editIndex]) return;
   await openShopPicker({
-    title: 'Ajouter un butin',
+    title: editing ? 'Modifier le butin' : 'Ajouter un butin',
     modalMode: 'push',
-    hint: 'Tu peux enchainer les ajouts sans fermer cette fenetre.',
+    hint: editing
+      ? 'Choisis l’objet qui remplacera celui de cette ligne.'
+      : 'Tu peux enchainer les ajouts sans fermer cette fenetre.',
     ownedBadgeTitle: 'Deja dans le butin',
-    alreadyPicked: () => new Set((c.butins || []).map(b => b.itemId).filter(Boolean)),
+    alreadyPicked: () => new Set((c.butins || [])
+      .filter((_, index) => !editing || index !== editIndex)
+      .map(b => b.itemId)
+      .filter(Boolean)),
     onPick: (item) => {
       const butins = Array.isArray(c.butins) ? [...c.butins] : [];
-      if (butins.find(b => b.itemId === item.id)) {
+      if (butins.some((b, index) => b.itemId === item.id && (!editing || index !== editIndex))) {
         showNotif('Deja dans le butin de cette creature', 'warning');
         return false; // empÃªche l'ajout
       }
-      butins.push({
+      const previous = editing ? butins[editIndex] : null;
+      const next = {
         itemId:   item.id,
         nom:      item.nom   || '',
         image:    item.image || '',
-        quantite: '1',
-        chance:   '100%',
-      });
+        quantite: previous?.quantite || '1',
+        chance:   previous?.chance   || '100%',
+      };
+      if (editing) butins[editIndex] = next;
+      else butins.push(next);
       c.butins = butins;
       _bstQueueSave(creatureId, { butins });
       _bstRefreshButinSelects(creatureId);
       const countEl = document.querySelector(`[data-bst-count="${creatureId}-butins"]`);
       if (countEl) countEl.textContent = butins.length;
+      if (editing) popModal();
     },
   });
 }
@@ -1250,6 +1269,9 @@ function _bstApplyData(all) {
   const arr = all || [];
   STORE.creatures = (STATE.isAdmin ? [...arr] : arr.filter(c => !c.hidden))
     .sort(_bstCompareCreatures);
+  const knownIds = new Set(STORE.creatures.map(creature => creature.id));
+  [..._bstBulkSelected].forEach(id => { if (!knownIds.has(id)) _bstBulkSelected.delete(id); });
+  if (!_isAdminView()) { _bstBulkMode = false; _bstBulkSelected.clear(); }
   if (_pendingTargetBeastId && STORE.creatures.some(c => c.id === _pendingTargetBeastId)) {
     STORE.activeId = _pendingTargetBeastId;
     STORE.searchVal = '';
@@ -1588,6 +1610,7 @@ function _bstInstallInput() {
     if (e.key === 'Escape') {
       if (inField) { e.target.blur(); return; }
       if (document.getElementById('bst-ctx')?.classList.contains('on')) { _bstCloseCtx(); return; }
+      if (_bstBulkMode) { _bstBulkMode = false; _bstBulkSelected.clear(); _render(); return; }
       if (STORE.activeId) _bstClose();
       return;
     }
@@ -1602,19 +1625,103 @@ function _bstInstallInput() {
       e.preventDefault();
       _bstFocusIdx = Math.max(0, Math.min(cards.length - 1, _bstFocusIdx + step));
       const t = cards[_bstFocusIdx];
-      STORE.activeId = t.dataset.id;
-      _bstSyncRoute({ replace: true });
-      _syncActivePanel();
+      if (!_bstBulkMode) {
+        STORE.activeId = t.dataset.id;
+        _bstSyncRoute({ replace: true });
+        _syncActivePanel();
+      }
       document.querySelectorAll('.bst-bc')[_bstFocusIdx]?.focus({ preventScroll: false });
       return;
     }
-    if (e.key === 'Enter' && _bstFocusIdx >= 0 && !inField) {
+    if ((e.key === 'Enter' || (_bstBulkMode && e.key === ' ')) && _bstFocusIdx >= 0 && !inField) {
       e.preventDefault();
-      STORE.activeId = cards[_bstFocusIdx].dataset.id;
-      _bstSyncRoute();
-      _syncActivePanel();
+      const id = cards[_bstFocusIdx].dataset.id;
+      if (_bstBulkMode) _bstToggleBulkItem(id);
+      else {
+        STORE.activeId = id;
+        _bstSyncRoute();
+        _syncActivePanel();
+      }
     }
   });
+}
+
+function _bstBulkItems() {
+  return STORE.creatures.filter(creature => _bstBulkSelected.has(creature.id));
+}
+
+function _bstBulkBarHtml(filtered) {
+  if (!_isAdminView() || !_bstBulkMode) return '';
+  const selected = _bstBulkItems();
+  const count = selected.length;
+  const allHidden = count > 0 && selected.every(creature => !!creature.hidden);
+  return `<div class="bst-bulkbar" role="region" aria-label="Actions groupées du bestiaire">
+    <strong>${count} sélectionnée${count !== 1 ? 's' : ''}</strong>
+    <button type="button" class="bst-bulklink" data-bst-action="bulkSelectFiltered"${filtered.length ? '' : ' disabled'}>Tout ce filtre (${filtered.length})</button>
+    ${count ? '<button type="button" class="bst-bulklink" data-bst-action="bulkClear">Effacer</button>' : ''}
+    <span></span>
+    <select data-bst-action="bulkRank" data-bst-on="change" aria-label="Changer le rang des créatures sélectionnées"${count ? '' : ' disabled'}>
+      <option value="">Changer le rang…</option>
+      ${BESTIARY_RANKS.map(rank => `<option value="${_esc(rank.id)}">${_esc(rank.label)}</option>`).join('')}
+    </select>
+    <button type="button" class="bst-pill" data-bst-action="bulkVisibility"${count ? '' : ' disabled'}>${allHidden ? '◉ Rendre visibles' : '◉ Cacher aux joueurs'}</button>
+  </div>`;
+}
+
+function _bstToggleBulkItem(id) {
+  if (!_bstBulkMode || !id) return;
+  if (_bstBulkSelected.has(id)) _bstBulkSelected.delete(id);
+  else _bstBulkSelected.add(id);
+  _render();
+}
+
+function _bstDropPendingField(id, field) {
+  const pending = _bstPending[id];
+  if (!pending || !(field in pending)) return;
+  delete pending[field];
+  if (!Object.keys(pending).length) delete _bstPending[id];
+}
+
+async function _bstApplyBulk(field, value, successMessage) {
+  const selected = _bstBulkItems();
+  if (!_isAdminView() || !selected.length) return;
+  const col = STORE.currentCol || 'bestiary';
+  const previous = selected.map(creature => ({
+    id: creature.id,
+    value: field === 'hidden' ? !!creature.hidden : (creature[field] || _defaultRankId()),
+  }));
+  selected.forEach(creature => _bstDropPendingField(creature.id, field));
+  const updates = selected.map(creature => ({ col, id: creature.id, data: { [field]: value } }));
+  try {
+    for (let index = 0; index < updates.length; index += 450) {
+      await batchUpdateInCol(updates.slice(index, index + 450));
+    }
+    selected.forEach(creature => { creature[field] = value; });
+    _bstBulkSelected.clear();
+    showNotif(successMessage(selected.length), 'success', {
+      duration: 8000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          const reverse = previous.map(entry => ({ col, id: entry.id, data: { [field]: entry.value } }));
+          for (let index = 0; index < reverse.length; index += 450) {
+            await batchUpdateInCol(reverse.slice(index, index + 450));
+          }
+          if ((STORE.currentCol || 'bestiary') === col) {
+            previous.forEach(entry => {
+              const creature = STORE.creatures.find(candidate => candidate.id === entry.id);
+              if (creature) creature[field] = entry.value;
+            });
+            if (document.getElementById('bst-root')) _render();
+          }
+          showNotif('Action groupée annulée.', 'success');
+        },
+      },
+    });
+    _render();
+  } catch (error) {
+    notifySaveError(error);
+  }
 }
 
 function _render() {
@@ -1657,6 +1764,7 @@ function _render() {
   const headActs = admin ? `
     <button class="bst-pill" data-action="openBestiaryRanksAdmin">Rangs</button>
     <button class="bst-pill" data-bst-action="exportBeasts">Exporter</button>
+    <button class="bst-pill${_bstBulkMode ? ' is-on' : ''}" data-bst-action="bulkMode" aria-pressed="${_bstBulkMode}">${_bstBulkMode ? '✓ Terminer' : '☑ Sélectionner'}</button>
     <button class="bst-pill go" data-bst-action="createDraft">+ Créature</button>` : '';
 
   const rangSeg = `<div class="bst-fseg">
@@ -1714,6 +1822,7 @@ function _render() {
     </div>
     <div class="bst-wrap">
       ${_isViewingPlayer() ? `<div class="bst-view-banner"><span>Vue joueur</span><b>${_esc(STORE.playersList.find(p => p.uid === STORE.viewAsUid)?.pseudo || 'joueur')}</b><button data-bst-action="viewAs" data-uid="">Revenir à mon carnet</button></div>` : ''}
+      ${_bstBulkBarHtml(filtered)}
       <div class="bst-gridnote">${_bstGridnoteHtml(admin, canReorder, hasFilters)}</div>
       <div class="bst-main ${STORE.activeId ? '' : 'solo'}" id="bst-main">
         <section>
@@ -1823,12 +1932,13 @@ function _renderCard(c, sortable = _canReorderBestiary()) {
   const pct = admin ? 0 : _bstCarnetPct(c).pct;
   const sub = [c.type, c.environnement].filter(Boolean).join(' · ') || 'Sans classification';
   const isActive = c.id === STORE.activeId;
-  return `<button class="bst-bc${isActive ? ' on' : ''}${c.hidden && admin ? ' hid' : ''}${sortable ? ' bst-sortable-item' : ''}"
+  return `<article class="bst-bc${isActive ? ' on' : ''}${c.hidden && admin ? ' hid' : ''}${_bstBulkMode ? ' is-bulk' : ''}${_bstBulkSelected.has(c.id) ? ' is-selected' : ''}${sortable ? ' bst-sortable-item' : ''}"
     style="--rc:${rs.color}" data-beast-id="${_esc(c.id)}" data-bst-action="open" data-id="${_esc(c.id)}"
-    data-nav-page="bestiaire" data-nav-sub="${_esc(c.id)}">
+    ${_bstBulkMode ? '' : `data-nav-page="bestiaire" data-nav-sub="${_esc(c.id)}"`} role="button" tabindex="0" aria-label="${_bstBulkMode ? 'Sélectionner' : 'Ouvrir'} ${_esc(c.nom || 'cette créature')}">
     <span class="bst-bc-r"></span>
     <span class="bst-bc-m">
       ${c.imageUrl ? `<img src="${_esc(c.imageUrl)}" alt="" loading="lazy">` : `<span class="bst-bc-e">${_esc(c.emoji || '❓')}</span>`}
+      ${admin && _bstBulkMode ? `<button type="button" class="bst-bc-select${_bstBulkSelected.has(c.id) ? ' on' : ''}" data-bst-action="bulkToggle" data-id="${_esc(c.id)}" aria-pressed="${_bstBulkSelected.has(c.id)}" aria-label="${_bstBulkSelected.has(c.id) ? 'Retirer' : 'Ajouter'} ${_esc(c.nom || 'cette créature')} de la sélection">${_bstBulkSelected.has(c.id) ? '✓' : ''}</button>` : ''}
       <span class="bst-bc-flags">
         ${hard.length ? `<span class="bst-bc-flag warn" title="${_esc(hard.map(a => a.label).join(' · '))}">!</span>` : ''}
         ${c.hidden && admin ? `<span class="bst-bc-flag eye" title="Cachée aux joueurs">◒</span>` : ''}
@@ -1840,7 +1950,7 @@ function _renderCard(c, sortable = _canReorderBestiary()) {
       <span class="bst-bc-n"><i></i><span class="bst-bc-name">${_bstHighlight(c.nom || '?')}</span>${sortable ? `<span class="bst-bc-drag" title="Glisser pour déplacer" aria-hidden="true">⠿</span>` : ''}</span>
       <span class="bst-bc-t">${_esc(sub)}</span>
     </span>
-  </button>`;
+  </article>`;
 }
 function _bstPanelShell(c, rs, SEC, bodyHtml, isMJ) {
   return `<div class="bst-pn" style="--rc:${rs.color}">
@@ -2255,6 +2365,8 @@ function _bstRefreshResults() {
   const canReorder = _canReorderBestiary();
   grid.classList.toggle('bst-sortable', canReorder);
   grid.innerHTML = _bstGridHtml(filtered, canReorder, admin);
+  const bulkBar = root.querySelector('.bst-bulkbar');
+  if (bulkBar) bulkBar.outerHTML = _bstBulkBarHtml(filtered);
   _mountBestiarySortable();
   root.querySelector('.bst-srch .clr, .bst-srch kbd')?.replaceWith(
     document.createRange().createContextualFragment(_bstSearchAffordanceHtml()));
@@ -2272,6 +2384,7 @@ function _bstSetPrep(prep) { STORE.filterPrep = prep || ''; _render(); }
 function _bstSetRole(role) {
   STORE.role = role === 'player' ? 'player' : 'mj';
   if (STORE.role === 'mj') STORE.viewAsUid = null;
+  if (STORE.role === 'player') { _bstBulkMode = false; _bstBulkSelected.clear(); }
   STORE.filterPrep = '';
   STORE.activeId = null;
   _render();
@@ -2306,6 +2419,8 @@ async function _bstDuplicateBeast(id) {
 
 // Switch de bestiaire (admin uniquement)
 async function _bstSwitchBestiaire(id) {
+  _bstBulkMode = false;
+  _bstBulkSelected.clear();
   STORE.bestiaireId = id;
   STORE.activeId    = null;
   STORE.searchVal   = '';
@@ -2754,7 +2869,7 @@ function _bstBuildExportHtml(list) {
 
 Object.assign(bstHandlers, {
   // Galerie / navigation
-  open:           (el) => _bstOpen(el.dataset.id),
+  open:           (el) => _bstBulkMode ? _bstToggleBulkItem(el.dataset.id) : _bstOpen(el.dataset.id),
   exportBeasts:   ()   => _bstExportDocument(),
   close:          ()   => _bstClose(),
   createDraft:    ()   => _bstCreateDraft(),
@@ -2765,6 +2880,32 @@ Object.assign(bstHandlers, {
   setRang:        (el) => _bstSetRang(el.dataset.rang),
   setType:        (el) => _bstSetType(el.dataset.type ?? el.value),
   setPrep:        (el) => _bstSetPrep(el.dataset.prep),
+  bulkMode:       () => {
+    _bstBulkMode = !_bstBulkMode;
+    if (!_bstBulkMode) _bstBulkSelected.clear();
+    STORE.activeId = null;
+    _render();
+  },
+  bulkToggle:     (el, event) => { event?.stopPropagation?.(); _bstToggleBulkItem(el.dataset.id); },
+  bulkSelectFiltered: () => {
+    STORE.creatures.filter(creature => _beastMatchesFilters(creature)).forEach(creature => _bstBulkSelected.add(creature.id));
+    _render();
+  },
+  bulkClear:      () => { _bstBulkSelected.clear(); _render(); },
+  bulkRank:       (el) => {
+    const rank = el.value;
+    if (!rank || !RANG_STYLE[rank]) return;
+    const label = _rankStyle(rank).label;
+    _bstApplyBulk('rang', rank, count => `${count} créature${count > 1 ? 's' : ''} passée${count > 1 ? 's' : ''} au rang « ${label} ».`);
+  },
+  bulkVisibility: () => {
+    const selected = _bstBulkItems();
+    const hidden = !selected.every(creature => !!creature.hidden);
+    _bstApplyBulk('hidden', hidden, count => {
+      const plural = count > 1 ? 's' : '';
+      return `${count} créature${plural} ${hidden ? `cachée${plural}` : `rendue${plural} visible${plural}`}.`;
+    });
+  },
   resetFilters:   ()   => _bstResetFilters(),
   search:         (el) => _bstSearchInput(el.value),
   clearSearch:    ()   => { STORE.searchVal = ''; _render(); document.getElementById('bst-search')?.focus(); },
@@ -2812,6 +2953,7 @@ Object.assign(bstHandlers, {
 
   // Picker de butin (dÃ©lÃ©gation au composant partagÃ© shop-picker.js â€” pas de handlers locaux)
   pickerOpen:     (el) => _bstButinPickerOpen(el.dataset.id),
+  pickerEdit:     (el) => _bstButinPickerOpen(el.dataset.id, parseInt(el.dataset.idx)),
 
   // Image
   openImage:      (el) => openBeastImageModal(el.dataset.id),

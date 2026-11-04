@@ -10,7 +10,7 @@ import { _esc, _norm, _searchIncludes, _trunc, loadingHtml } from '../shared/htm
 import { charSession } from '../shared/char-session.js';
 import { navigate } from '../core/navigation.js';
 import { isFeatureEnabled } from '../shared/features.js';
-import { getRecentNavigation, recordRecentNavigation } from '../shared/recent-navigation.js';
+import { clearRecentNavigation, getRecentNavigation, recordRecentNavigation } from '../shared/recent-navigation.js';
 import { characterAvatarHtml } from '../shared/portraits.js';
 import { showNotif } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
@@ -64,6 +64,14 @@ const QUICK_COMMANDS = [
   {
     id: 'copy-view-link', label: 'Copier le lien de cette vue', icon: '🔗', page: '',
     aliases: 'partager url adresse lien page onglet', directAction: 'copy-view-link',
+  },
+  {
+    id: 'copy-diagnostic', label: 'Copier le diagnostic technique', icon: '🩺', page: '',
+    aliases: 'bug erreur console support version connexion diagnostic technique', directAction: 'copy-diagnostic',
+  },
+  {
+    id: 'display-preferences', label: 'Régler le confort d’affichage', icon: '◐', page: '',
+    aliases: 'affichage texte grand taille lisibilité animation mouvement accessibilité', directAction: 'display-preferences',
   },
   {
     id: 'new-character', label: 'Créer un personnage', icon: '➕', page: 'characters',
@@ -124,14 +132,20 @@ async function _loadEntries({ deep = true } = {}) {
   const get = (col, force = false) => (deep || force || needed.has(col))
     ? loadCollection(col).catch(() => [])
     : Promise.resolve(getCachedCollection(col) || []);
-  const [npcs, chars, quests, shop, achievements, collection, story, recipes] =
+  // Les catalogues secrets contiennent souvent de grandes images. La palette ne
+  // les amorce jamais : le MJ peut les retrouver s'ils sont déjà en cache après
+  // une visite des pages concernées, sans lecture Firestore supplémentaire.
+  const cachedOnly = col => Promise.resolve(getCachedCollection(col) || []);
+  const [npcs, chars, quests, shop, achievements, achievementSecrets, collection, collectionSecrets, story, recipes] =
     await Promise.all([
       get('npcs'),
       loadChars().then(chars => getControlledCharacters(chars)).catch(() => []),
       get('quests'),
       get('shop'),
       get('achievements'),
+      STATE.isAdmin ? cachedOnly('achievements_secret') : Promise.resolve([]),
       get('collection'),
+      STATE.isAdmin ? cachedOnly('collection_secret') : Promise.resolve([]),
       get('story'),
       get('recipes'),
     ]);
@@ -139,7 +153,17 @@ async function _loadEntries({ deep = true } = {}) {
   const shopCats = shop.length ? await get('shopCategories', true) : [];
 
   // Cohérence avec le reste de l'app : on cache les hauts-faits secrets aux non-MJ.
-  const achFiltered = STATE.isAdmin ? achievements : achievements.filter(a => !a.secret);
+  const mergeById = (publicItems, secretItems) => {
+    const merged = new Map((publicItems || []).map(item => [item.id, item]));
+    (secretItems || []).forEach(item => merged.set(item.id, item));
+    return [...merged.values()];
+  };
+  const achFiltered = STATE.isAdmin
+    ? mergeById(achievements, achievementSecrets)
+    : achievements.filter(a => !a.secret);
+  const collectionFiltered = STATE.isAdmin
+    ? mergeById(collection, collectionSecrets)
+    : collection;
 
   // Cohérence avec la boutique : articles des catégories masquées cachés aux non-MJ.
   const hiddenCatIds = STATE.isAdmin
@@ -253,7 +277,7 @@ async function _loadEntries({ deep = true } = {}) {
   }
 
   // Collection
-  for (const c of collection) {
+  for (const c of collectionFiltered) {
     const title = _firstStr(c, ['nom', 'titre', 'name']);
     if (!title) continue;
     entries.push({
@@ -427,6 +451,21 @@ async function _executeEntry(entry) {
           }
           return;
         }
+        if (command?.directAction === 'copy-diagnostic') {
+          try {
+            const { copyDiagnosticReport } = await import('../shared/diagnostics.js');
+            await copyDiagnosticReport();
+            showNotif('Diagnostic technique copié.', 'success');
+          } catch {
+            showNotif('Impossible de copier le diagnostic.', 'error');
+          }
+          return;
+        }
+        if (command?.directAction === 'display-preferences') {
+          const { openDisplayPreferences } = await import('../shared/display-preferences.js');
+          openDisplayPreferences();
+          return;
+        }
         if (command?.directAction === 'create-adventure') {
           const { openCreateAdventureModal } = await import('../core/init.js');
           await openCreateAdventureModal();
@@ -513,7 +552,10 @@ async function _executeEntry(entry) {
       case 'achievement':
         await go('achievements');
         await _nextTick();
-        _highlight(`[data-ach-id="${entry.id}"]`);
+        {
+          const { openAchievementLightbox } = await import('./achievements.js');
+          await openAchievementLightbox(entry.id);
+        }
         return;
 
       case 'collection':
@@ -563,7 +605,7 @@ function _renderList() {
     const groupKey = e.groupKey || e.type;
     const groupLabel = e.groupLabel || e.typeLabel;
     if (groupKey !== lastGroup) {
-      html += `<div class="cmd-palette-group">${_esc(groupLabel)}</div>`;
+      html += `<div class="cmd-palette-group"><span>${_esc(groupLabel)}</span>${groupKey === 'recent' ? '<button type="button" data-cmd-clear-recent aria-label="Effacer les éléments récemment ouverts">Effacer</button>' : ''}</div>`;
       lastGroup = groupKey;
     }
     const active = i === _activeIndex ? ' is-active' : '';
@@ -654,6 +696,14 @@ function _mountModal() {
 
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-cmd-close]')) { closePalette(); return; }
+    if (e.target.closest('[data-cmd-clear-recent]')) {
+      clearRecentNavigation();
+      _results = _filterAndSort(_entries, _query);
+      _activeIndex = 0;
+      _renderList();
+      showNotif('Historique de navigation effacé.', 'success', { history: false });
+      return;
+    }
     const row = e.target.closest('[data-cmd-idx]');
     if (row) {
       _activeIndex = parseInt(row.dataset.cmdIdx, 10);

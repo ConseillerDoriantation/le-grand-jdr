@@ -2617,6 +2617,114 @@ body.is-modal-open { overflow:hidden; }
 .is-offline .global-network-dot { background: #ffae4a; box-shadow: 0 0 0 4px rgba(255, 174, 74, .12); }
 .is-online .global-network-dot { background: #34d399; box-shadow: 0 0 0 4px rgba(52, 211, 153, .12); }
 
+/* État des écritures applicatives. Alimenté par la couche Firestore, donc sans
+   listener ni lecture supplémentaire. Reste discret hors sauvegarde/erreur. */
+.global-sync-status {
+  position: fixed;
+  z-index: 11800;
+  left: calc(var(--sidebar-width, 264px) + 14px);
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  max-width: min(420px, calc(100vw - var(--sidebar-width, 264px) - 32px));
+  padding: 7px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-full, 999px);
+  background: rgba(10, 17, 29, .94);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+  color: var(--text-muted);
+  font-size: .7rem;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity .16s ease, transform .16s ease;
+}
+
+.global-sync-status.is-visible { opacity: 1; transform: translateY(0); }
+.global-sync-status strong { color: var(--text); font-size: .72rem; white-space: nowrap; }
+.global-sync-status > span:last-child:not(.global-sync-dot) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.global-sync-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #8db8ff; }
+.global-sync-status.is-saving .global-sync-dot {
+  border: 1.5px solid rgba(141, 184, 255, .35);
+  border-top-color: #8db8ff;
+  background: transparent;
+  animation: action-pending-spin .7s linear infinite;
+}
+.global-sync-status.is-saved .global-sync-dot { background: #34d399; box-shadow: 0 0 0 3px rgba(52, 211, 153, .12); }
+.global-sync-status.is-waiting .global-sync-dot { background: #ffae4a; box-shadow: 0 0 0 3px rgba(255, 174, 74, .12); }
+.global-sync-status.is-error { border-color: rgba(255, 91, 118, .48); }
+.global-sync-status.is-error .global-sync-dot { background: #ff5b76; box-shadow: 0 0 0 3px rgba(255, 91, 118, .12); }
+
+/* Une nouvelle version ne force jamais le rechargement : l'utilisateur garde
+   la main, notamment lorsqu'un formulaire ou un éditeur est encore ouvert. */
+.global-update-status {
+  position: fixed;
+  z-index: 12100;
+  top: 12px;
+  right: 14px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  width: min(440px, calc(100vw - 28px));
+  padding: 10px 10px 10px 12px;
+  border: 1px solid rgba(105, 168, 255, .42);
+  border-radius: 12px;
+  background: rgba(10, 17, 29, .97);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .4);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-12px);
+  transition: opacity .2s ease, transform .2s ease;
+}
+
+.global-update-status.is-visible { opacity: 1; pointer-events: auto; transform: translateY(0); }
+.global-update-icon { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 50%; background: rgba(105, 168, 255, .14); color: #8db8ff; font-size: 1rem; }
+.global-update-status > div { display: grid; min-width: 0; gap: 1px; }
+.global-update-status strong { color: var(--text); font-size: .76rem; }
+.global-update-status > div span { color: var(--text-muted); font-size: .68rem; }
+.global-update-status button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(105, 168, 255, .45);
+  border-radius: 8px;
+  background: rgba(105, 168, 255, .16);
+  color: #cfe1ff;
+  font: 600 .7rem var(--font-body);
+  cursor: pointer;
+}
+.global-update-status button:hover { background: rgba(105, 168, 255, .25); }
+.global-update-status .global-update-dismiss { width: 28px; padding: 0; border-color: transparent; background: transparent; color: var(--text-muted); font-size: 1rem; }
+
+html[data-ui-text="large"] { font-size: 17px; }
+html[data-ui-motion="reduced"] *,
+html[data-ui-motion="reduced"] *::before,
+html[data-ui-motion="reduced"] *::after {
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
+  scroll-behavior: auto !important;
+}
+
+.global-display-prefs { display: grid; gap: 18px; }
+.global-display-prefs section { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(240px, 1.2fr); align-items: center; gap: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); }
+.global-display-prefs section > div:first-child { display: grid; gap: 3px; }
+.global-display-prefs strong { color: var(--text); font-size: .84rem; }
+.global-display-prefs section > div:first-child span,
+.global-display-prefs > p { color: var(--text-muted); font-size: .72rem; line-height: 1.45; }
+.global-display-prefs > p { margin: -4px 2px 0; }
+.global-display-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.global-display-options label { min-width: 0; cursor: pointer; }
+.global-display-options input { position: absolute; opacity: 0; pointer-events: none; }
+.global-display-options label > span { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-2); color: var(--text-muted); font-size: .76rem; font-weight: 600; }
+.global-display-options label > span b { color: var(--text-soft); font: 600 .78rem var(--font-display); }
+.global-display-options label > span.is-large b { font-size: .96rem; }
+.global-display-options input:checked + span { border-color: rgba(105, 168, 255, .65); background: rgba(105, 168, 255, .14); color: #cfe1ff; box-shadow: inset 0 0 0 1px rgba(105, 168, 255, .16); }
+.global-display-options input:focus-visible + span { outline: 2px solid var(--accent, #69a8ff); outline-offset: 2px; }
+.global-display-footer { justify-content: flex-end; }
+
 .global-back-top {
   position: fixed;
   z-index: 850;
@@ -2644,7 +2752,19 @@ body.is-modal-open { overflow:hidden; }
 
 @media (max-width: 700px) {
   .global-network-status span:last-child { display: none; }
+  .global-sync-status {
+    left: 10px;
+    bottom: calc(var(--bottom-nav-h, 62px) + 14px);
+    max-width: calc(100vw - 78px);
+  }
+  .global-update-status {
+    top: auto;
+    right: 10px;
+    bottom: calc(var(--bottom-nav-h, 62px) + 58px);
+    width: calc(100vw - 20px);
+  }
   .global-back-top { right: 68px; bottom: calc(var(--bottom-nav-h, 62px) + 14px); }
+  .global-display-prefs section { grid-template-columns: 1fr; gap: 10px; }
 }
 
 .main-content.is-page-transitioning::after {
