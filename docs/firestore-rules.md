@@ -387,22 +387,36 @@ function marketCreateAllowed(data) {
     ))
   );
 }
-// Auteur : texte libre ; dans `listing`, seul le prix change, et seulement tant
-// que la vente est ouverte (jamais pour une enchère). Le statut ne va que de
-// « en vente » à « retirée » (l'offre d'une enchère est alors remboursée dans la
-// même transaction) : rouvrir une vente close dupliquerait l'objet déjà vendu
-// (ou rendu en v1). Une annonce ordinaire ne peut pas devenir une vente après coup.
+// Enchère : le départ ne change plus après une offre ; l'achat immédiat,
+// facultatif, dépasse le départ et la meilleure offre.
+function marketAuctionPricesAllowed(before, after) {
+  return (after.get('price', 0) == before.get('price', 0) || before.get('bid', null) == null) &&
+         (!('buyNow' in after) || (
+           after.buyNow is int &&
+           after.buyNow > after.get('price', 0) &&
+           after.buyNow <= 1000000 &&
+           (before.get('bid', null) == null || after.buyNow > before.bid.get('amount', 0))
+         ));
+}
+// Auteur : texte libre ; dans `listing`, seuls le prix (et, pour une enchère,
+// l'achat immédiat) changent, et seulement tant que la vente est ouverte. Le
+// statut ne va que de « en vente » à « retirée » (l'offre d'une enchère est
+// alors remboursée dans la même transaction) : rouvrir une vente close
+// dupliquerait l'objet déjà vendu (ou rendu en v1). Une annonce ordinaire ne
+// peut pas devenir une vente après coup.
 function marketAuthorUpdateAllowed(before, after) {
   return (!isMarketListing(before) && after.get('listing', null) == before.get('listing', null)) || (
     isMarketListing(before) &&
     isMarketListing(after) &&
-    after.listing.diff(before.listing).affectedKeys().hasOnly(['price']) &&
+    after.listing.diff(before.listing).affectedKeys().hasOnly(['price', 'buyNow']) &&
     marketPriceValid(after.listing) &&
-    (after.listing.get('price', 0) == before.listing.get('price', 0) || before.get('status', 'active') == 'active') &&
+    (after.listing.diff(before.listing).affectedKeys().size() == 0 || (
+      before.get('status', 'active') == 'active' && (
+        (before.listing.get('mode', 'fixed') == 'auction' && marketAuctionPricesAllowed(before.listing, after.listing)) ||
+        (before.listing.get('mode', 'fixed') != 'auction' && !after.listing.diff(before.listing).affectedKeys().hasAny(['buyNow']))
+      ))) &&
     (after.get('status', 'active') == before.get('status', 'active') ||
-      (before.get('status', 'active') == 'active' && after.get('status', '') == 'cancelled')) &&
-    (before.listing.get('mode', 'fixed') != 'auction' ||
-      after.listing.get('price', 0) == before.listing.get('price', 0))
+      (before.get('status', 'active') == 'active' && after.get('status', '') == 'cancelled'))
   );
 }
 // Acheteur (tout membre sauf l'auteur) : une vente ouverte passe « vendue » ;

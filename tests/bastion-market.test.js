@@ -308,5 +308,26 @@ test('achat immédiat tant qu’aucune offre ne l’atteint ; retrait = offre re
   assert.equal(back.postPatch.status, 'cancelled');
   assert.equal(calcOr({ compte: back.refund.patch.compte }), 450);
   assert.equal(planMarketWithdraw({ post: auctionPost() }).postPatch.status, 'cancelled', 'sans offre, rien à rembourser');
-  assert.throws(() => planMarketPrice({ post: auctionPost(), price: 120 }), { code: 'auction' });
+});
+
+test('modifier une enchère : départ tant qu’aucune offre, achat immédiat au-dessus de la meilleure offre', () => {
+  const changed = (plan, post) => Object.keys({ ...plan.postPatch.listing, ...post.listing })
+    .filter(k => JSON.stringify(plan.postPatch.listing[k]) !== JSON.stringify(post.listing[k])).sort();
+  const free = auctionPost();
+  const both = planMarketPrice({ post: free, price: 120, buyNow: '500' });
+  assert.deepEqual([both.postPatch.listing.price, both.postPatch.listing.buyNow], [120, 500]);
+  assert.deepEqual(changed(both, free), ['buyNow', 'price'], 'seuls price/buyNow changent (règles Firestore)');
+  assert.equal(planMarketPrice({ post: free, price: 120 }).postPatch.listing.buyNow, 400, 'buyNow non fourni = inchangé');
+  const removed = planMarketPrice({ post: free, price: 100, buyNow: '' });
+  assert.equal('buyNow' in removed.postPatch.listing, false, 'vide = achat immédiat retiré');
+  assert.equal(removed.buyNow, 0);
+  assert.throws(() => planMarketPrice({ post: free, price: 100, buyNow: 100 }), /dépasser le prix de départ \(100 or\)/);
+  assert.throws(() => planMarketPrice({ post: free, price: 100, buyNow: 2_000_000 }), { code: 'price' });
+  const bid = withBid(150);
+  assert.throws(() => planMarketPrice({ post: bid, price: 90 }), { code: 'bids' });
+  assert.throws(() => planMarketPrice({ post: bid, price: 100, buyNow: 150 }), /dépasser la meilleure offre \(150 or\)/);
+  const raised = planMarketPrice({ post: bid, price: 100, buyNow: 151 });
+  assert.equal(raised.postPatch.listing.buyNow, 151);
+  assert.deepEqual(changed(raised, bid), ['buyNow']);
+  assert.throws(() => planMarketPrice({ post: auctionPost({ status: 'resolved' }), price: 100 }), { code: 'sold' });
 });
