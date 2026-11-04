@@ -68,6 +68,14 @@ let _lootSelect = () => {};
 let _lootSaveRecent = null;
 let _lootRenderGrid = null;
 
+const _cloneInvState = value => {
+  if (value == null) return value;
+  return typeof structuredClone === 'function'
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value));
+};
+const _sameInvState = (left, right) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+
 function _inventoryCatalogSnapshot() {
   const live = getCachedCollection('shop');
   if (Array.isArray(live)) _shopItemsCache = live;
@@ -922,6 +930,7 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
   try {
     const c = getCharacterById(charId);
     if (!c) return;
+    const inventoryView = _captureInventoryViewState();
 
     const allIndices = _decodeIndices(indicesB64);
     const qty = Math.min(Math.max(1, parseInt(document.getElementById('sell-qty')?.value)||1), allIndices.length);
@@ -981,8 +990,7 @@ export async function sellInvItemBulk(charId, indicesB64, prixVente) {
       : '';
     const refundMsg = refundTotal > 0 ? ` (+${refundTotal} or de reprise)` : '';
     showNotif(`💰 ×${qty} "${itemNom}" vendu${qty>1?'s':''} pour ${totalPrix} or${refundMsg} !${unequipMsg}`, 'success');
-    charSession.refresh?.(c);
-    _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
+    _rerenderInventoryView({ viewState: inventoryView });
   } catch (e) { notifySaveError(e); }
 }
 
@@ -1018,8 +1026,8 @@ export function openDeleteInvModal(charId, indicesB64, nom) {
       <div class="invm-warn invm-warn-danger">
         <span class="invm-warn-ico">⚠️</span>
         <div>
-          <b>Suppression définitive</b>
-          <span>L'objet sera retiré de l'inventaire. Action irréversible.</span>
+          <b>Retirer de l’inventaire</b>
+          <span>L’objet pourra être restauré pendant quelques secondes tant que l’inventaire n’est pas remodifié.</span>
         </div>
       </div>
 
@@ -1044,6 +1052,14 @@ export function openDeleteInvModal(charId, indicesB64, nom) {
 export async function deleteInvItemBulk(charId, indicesB64) {
   const c = getCharacterById(charId);
   if (!c) return;
+  const previousState = {
+    inventaire: _cloneInvState(c.inventaire || []),
+    equipement: _cloneInvState(c.equipement || {}),
+    statsBonus: _cloneInvState(c.statsBonus || {}),
+    builds: _cloneInvState(c.builds),
+    activeBuildId: c.activeBuildId,
+    inventoryHistory: _cloneInvState(c.inventoryHistory || []),
+  };
   const allIndices = _decodeIndices(indicesB64);
   const qty = Math.min(Math.max(1, parseInt(document.getElementById('del-qty')?.value)||1), allIndices.length);
   const inv = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
@@ -1071,11 +1087,70 @@ export async function deleteInvItemBulk(charId, indicesB64) {
       c.statsBonus = equipSync.statsBonus;
     }
     _patchInventoryHistoryLocal(c, historyPatch.inventoryHistory);
+    const postState = {
+      inventaire: _cloneInvState(c.inventaire || []),
+      equipement: _cloneInvState(c.equipement || {}),
+      statsBonus: _cloneInvState(c.statsBonus || {}),
+      builds: _cloneInvState(c.builds),
+      activeBuildId: c.activeBuildId,
+      inventoryHistory: _cloneInvState(c.inventoryHistory || []),
+    };
     closeModal();
     const deleteMsg = equipSync.removedSlots.length
       ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
       : '';
-    showNotif(`Objet(s) supprimé(s).${deleteMsg}`, 'success');
+    showNotif(`Objet(s) supprimé(s).${deleteMsg}`, 'success', {
+      duration: 8000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          const current = getCharacterById(charId) || c;
+          const unchanged = ['inventaire', 'equipement', 'statsBonus', 'activeBuildId', 'inventoryHistory']
+            .every(field => _sameInvState(current[field], postState[field]));
+          if (!unchanged) {
+            showNotif('L’inventaire a changé depuis : annulation automatique impossible.', 'warning');
+            return;
+          }
+          const beforeUndo = {
+            inventaire: _cloneInvState(current.inventaire || []),
+            equipement: _cloneInvState(current.equipement || {}),
+            statsBonus: _cloneInvState(current.statsBonus || {}),
+            builds: _cloneInvState(current.builds),
+            activeBuildId: current.activeBuildId,
+            inventoryHistory: _cloneInvState(current.inventoryHistory || []),
+          };
+          const restorePayload = {
+            inventaire: previousState.inventaire,
+            inventoryHistory: previousState.inventoryHistory,
+          };
+          current.inventaire = previousState.inventaire;
+          current.inventoryHistory = previousState.inventoryHistory;
+          if (equipSync.changed) {
+            current.equipement = previousState.equipement;
+            current.statsBonus = previousState.statsBonus;
+            patchBuildLocally(current, {
+              equipement: previousState.equipement,
+              statsBonus: previousState.statsBonus,
+            });
+            Object.assign(restorePayload, {
+              equipement: previousState.equipement,
+              statsBonus: previousState.statsBonus,
+              builds: characterBuildsForStorage(current),
+              activeBuildId: current.activeBuildId,
+            });
+          }
+          if (!await trySave('characters', charId, restorePayload)) {
+            Object.assign(current, beforeUndo);
+            throw new Error('Restauration de l’inventaire impossible');
+          }
+          _patchInventoryHistoryLocal(current, previousState.inventoryHistory);
+          _renderInventoryChar(current, charSession.getCurrentCharTab() || 'inventaire');
+          showNotif('Suppression annulée.', 'success');
+        },
+      },
+    });
+  } else {
+    Object.assign(c, previousState);
   }
   _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
 }
@@ -1646,15 +1721,42 @@ function _ivDebouncedListUpdate() {
   _ivSearchTimer = setTimeout(() => { _ivSearchTimer = null; _ivUpdateList(); }, 120);
 }
 
-function _rerenderInventoryView({ focusSearch = false } = {}) {
+function _captureInventoryViewState() {
+  const sheet = document.getElementById('char-sheet-area');
+  const tab = document.getElementById('char-tab-content');
+  return {
+    windowX: window.scrollX || 0,
+    windowY: document.scrollingElement?.scrollTop || window.scrollY || 0,
+    sheetTop: sheet?.scrollTop || 0,
+    sheetLeft: sheet?.scrollLeft || 0,
+    tabTop: tab?.scrollTop || 0,
+    tabLeft: tab?.scrollLeft || 0,
+  };
+}
+
+function _restoreInventoryViewState(viewState) {
+  if (!viewState) return;
+  // renderCharSheet restaure lui-même son contexte sur deux frames. On passe
+  // après lui afin que le vrai scroller desktop (#char-sheet-area) ait le
+  // dernier mot et ne reparte jamais en haut après une mutation d’inventaire.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const sheet = document.getElementById('char-sheet-area');
+    const tab = document.getElementById('char-tab-content');
+    sheet?.scrollTo({ top: viewState.sheetTop, left: viewState.sheetLeft, behavior: 'auto' });
+    tab?.scrollTo({ top: viewState.tabTop, left: viewState.tabLeft, behavior: 'auto' });
+    window.scrollTo({ top: viewState.windowY, left: viewState.windowX, behavior: 'instant' });
+  }));
+}
+
+function _rerenderInventoryView({ focusSearch = false, viewState = null } = {}) {
   const c = charSession.getCurrentChar?.() || STATE.activeChar;
   if (!c) return;
-  const scrollTop = document.scrollingElement?.scrollTop || window.scrollY || 0;
+  const savedView = viewState || _captureInventoryViewState();
   const search = document.querySelector('.iv-search input[type="search"]');
   const caret = search?.selectionStart ?? String(_charInvSearch || '').length;
   _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
+  _restoreInventoryViewState(savedView);
   requestAnimationFrame(() => {
-    window.scrollTo(0, scrollTop);
     if (!focusSearch) return;
     const input = document.querySelector('.iv-search input[type="search"]');
     if (!input) return;

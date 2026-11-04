@@ -26,6 +26,8 @@ import { showNotif }              from './shared/notifications.js';
 import { openAdventureSwitcher }  from './core/layout.js';
 import { initTheme, toggleTheme } from './shared/theme.js';
 import { initGlobalQol } from './shared/global-qol.js';
+import { initDiagnostics } from './shared/diagnostics.js';
+import { initDisplayPreferences } from './shared/display-preferences.js';
 
 // ── Modules chargés au boot (nécessaires immédiatement) ──────────────────────
 // character-photo : enregistre à l'import un handler de clic délégué pour les
@@ -80,6 +82,20 @@ registerActions({
   _openQuickView: (btn) => openQuickView(btn.dataset.id, btn.dataset.list?.split(',').filter(Boolean)),
   cloudinaryConfig: () => openCloudinaryConfigModal(),
 });
+
+// ── Préférences d'affichage locales ──────────────────────────────────────────
+try {
+  initDisplayPreferences();
+} catch (err) {
+  console.error('[app] initDisplayPreferences:', err);
+}
+
+// ── Diagnostic local (aucune donnée métier) ─────────────────────────────────
+try {
+  initDiagnostics();
+} catch (err) {
+  console.error('[app] initDiagnostics:', err);
+}
 
 // ── Thème ────────────────────────────────────────────────────────────────────
 try {
@@ -138,9 +154,42 @@ try {
 // non sécurisé, navigateur sans SW…). Stratégie réseau-first → aucune régression
 // de fraîcheur en ligne (cf. sw.js à la racine).
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js').catch((err) =>
-      console.warn('[pwa] service worker non enregistré :', err?.message || err));
+  let updateAnnounced = false;
+  let hadController = Boolean(navigator.serviceWorker.controller);
+  const announceUpdate = () => {
+    if (updateAnnounced) return;
+    updateAnnounced = true;
+    document.dispatchEvent(new CustomEvent('app:update-available'));
+  };
+
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data?.type === 'APP_UPDATE_AVAILABLE') announceUpdate();
+  });
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // Le premier claim installe simplement la PWA ; les suivants correspondent
+    // à une nouvelle version du service worker.
+    if (hadController) announceUpdate();
+    hadController = true;
+  });
+
+  window.addEventListener('load', async () => {
+    try {
+      const registration = await navigator.serviceWorker.register('./sw.js');
+      let lastCheck = 0;
+      const checkForUpdate = () => {
+        if (document.hidden || !navigator.onLine || Date.now() - lastCheck < 5 * 60_000) return;
+        lastCheck = Date.now();
+        // update() couvre sw.js ; la lecture légère d'index.html permet au SW de
+        // comparer le déploiement courant même si seul le code applicatif change.
+        registration.update().catch(() => {});
+        fetch('./index.html', { cache: 'no-store' }).catch(() => {});
+      };
+      checkForUpdate();
+      document.addEventListener('visibilitychange', checkForUpdate);
+      setInterval(checkForUpdate, 15 * 60_000);
+    } catch (err) {
+      console.warn('[pwa] service worker non enregistré :', err?.message || err);
+    }
   });
 }
 

@@ -229,14 +229,47 @@ export async function toggleSort(idx, btn = null) {
 // ══════════════════════════════════════════════
 export async function toggleQuete(idx) {
   const c=STATE.activeChar; if(!c) return;
-  c.quetes[idx].valide=!c.quetes[idx].valide;
-  if (await trySave('characters',c.id,{quetes:c.quetes})) _renderFormsChar(c, 'quetes');
+  const index = Number(idx);
+  const previous = [...(c.quetes || [])];
+  if (!previous[index]) return;
+  const quetes = previous.map((quete, i) => i === index ? { ...quete, valide: !quete.valide } : quete);
+  c.quetes = quetes;
+  if (!await trySave('characters',c.id,{quetes})) c.quetes = previous;
+  _renderFormsChar(c, 'quetes');
 }
 
 export async function deleteQuete(idx) {
   const c=STATE.activeChar; if(!c) return;
-  c.quetes.splice(idx,1);
-  if (await trySave('characters',c.id,{quetes:c.quetes})) _renderFormsChar(c, 'quetes');
+  const index = Number(idx);
+  const previous = [...(c.quetes || [])];
+  const removed = previous[index];
+  if (!removed) return;
+  const quetes = previous.filter((_, i) => i !== index);
+  c.quetes = quetes;
+  if (!await trySave('characters',c.id,{quetes})) {
+    c.quetes = previous;
+    _renderFormsChar(c, 'quetes');
+    return;
+  }
+  _renderFormsChar(c, 'quetes');
+  showNotif(`Quête supprimée — ${removed.nom || 'Sans nom'}`, 'info', {
+    duration: 8000,
+    action: {
+      label: '↶ Annuler',
+      onClick: async () => {
+        const current = [...(c.quetes || [])];
+        const restored = [...current];
+        restored.splice(Math.min(index, restored.length), 0, removed);
+        c.quetes = restored;
+        if (!await trySave('characters', c.id, { quetes: restored })) {
+          c.quetes = current;
+          throw new Error('Restauration de la quête impossible');
+        }
+        _renderFormsChar(c, 'quetes');
+        showNotif('Suppression annulée.', 'success');
+      },
+    },
+  });
 }
 
 export function addQuete() {
@@ -298,12 +331,15 @@ export async function saveQuete(idx = null) {
 // ══════════════════════════════════════════════
 // INVENTAIRE — suppression legacy
 // ══════════════════════════════════════════════
-// Restaure un tableau deck_sorts précédent (Undo des notifs suppression/duplication).
-async function _restoreDeckSorts(c, prev) {
-  c.deck_sorts = prev;
-  if (await trySave(spellHostCollection(c), c.id, { deck_sorts: prev })) {
+async function _commitDeckSorts(c, next, rollback) {
+  c.deck_sorts = next;
+  if (!await trySave(spellHostCollection(c), c.id, { deck_sorts: next })) {
+    c.deck_sorts = rollback;
     if (!runSpellRerenderIfHosted(c)) _renderFormsChar(c, 'sorts');
+    return false;
   }
+  if (!runSpellRerenderIfHosted(c)) _renderFormsChar(c, 'sorts');
+  return true;
 }
 
 export async function deleteSort(idx) {
@@ -313,12 +349,22 @@ export async function deleteSort(idx) {
     title: 'Confirmation', confirmLabel: 'Supprimer', icon: '🗑️',
   })) return;
   const prev = [...(c.deck_sorts||[])];
-  c.deck_sorts.splice(idx,1);
-  if (await trySave(spellHostCollection(c),c.id,{deck_sorts:c.deck_sorts})) {
-    if (!runSpellRerenderIfHosted(c)) _renderFormsChar(c, 'sorts');
+  const removed = prev[idx];
+  if (!removed) return;
+  const next = prev.filter((_, i) => i !== idx);
+  if (await _commitDeckSorts(c, next, prev)) {
     showNotif(`Sort supprimé — ${nom}`, 'info', {
-      duration: 6000,
-      action: { label: '↺ Annuler', onClick: () => _restoreDeckSorts(c, prev) },
+      duration: 8000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          const current = [...(c.deck_sorts || [])];
+          const restored = [...current];
+          restored.splice(Math.min(idx, restored.length), 0, removed);
+          if (!await _commitDeckSorts(c, restored, current)) throw new Error('Restauration du sort impossible');
+          showNotif('Suppression annulée.', 'success');
+        },
+      },
     });
   }
 }
@@ -339,13 +385,20 @@ export async function duplicateSort(idx) {
   clone.mjValidated = false;
   delete clone.mjReviewed;   // une copie est un sort neuf : aucune version relue par le MJ
   sorts.splice(idx + 1, 0, clone);
-  c.deck_sorts = sorts;
-  if (await trySave(spellHostCollection(c), c.id, {deck_sorts: sorts})) {
+  if (await _commitDeckSorts(c, sorts, prev)) {
     showNotif('Sort dupliqué — à valider par le MJ.', 'success', {
-      duration: 6000,
-      action: { label: '↺ Annuler', onClick: () => _restoreDeckSorts(c, prev) },
+      duration: 8000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          const current = [...(c.deck_sorts || [])];
+          const restored = current.filter(sort => sort.id !== clone.id);
+          if (restored.length === current.length) return;
+          if (!await _commitDeckSorts(c, restored, current)) throw new Error('Annulation de la duplication impossible');
+          showNotif('Duplication annulée.', 'success');
+        },
+      },
     });
-    if (!runSpellRerenderIfHosted(c)) _renderFormsChar(c, 'sorts');
   }
 }
 

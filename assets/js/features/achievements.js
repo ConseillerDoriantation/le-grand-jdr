@@ -124,6 +124,8 @@ let _achObservedGalleryWidth = 0;
 let _achRenderedContentEl = null;
 let _achLastRenderSignature = '';
 let _achLocalMutationDepth = 0;
+let _achBulkMode = false;
+const _achBulkSelected = new Set();
 
 let _achSelectCat = () => {};
 let _achToggleContrib = () => {};
@@ -757,6 +759,8 @@ async function deleteAchievement(id) {
   let mutationFailed=false;
   try {
     const col = (STORE.secretItems || []).some(a => a.id === id) ? 'achievements_secret' : 'achievements';
+    const snapshot = (col === 'achievements_secret' ? STORE.secretItems : STORE.publicItems)?.find(a => a.id === id);
+    const previousOrder = [...(STORE.order || [])];
     _achLocalMutationDepth += 1;
     mutationStarted=true;
     if (!await confirmDelete(col, id, 'Supprimer ce haut-fait définitivement ?')) return;
@@ -766,8 +770,23 @@ async function deleteAchievement(id) {
     const order = (await _loadOrder()).filter(oid => oid !== id);
     await _saveOrder(order);
     STORE.order = order;
-    showNotif('Haut-Fait supprimé.', 'success');
     await _achRenderContentPreserveViewport();
+    showNotif('Haut-Fait supprimé.', 'success', snapshot ? {
+      duration: 7000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          const { id: _ignored, ...data } = snapshot;
+          await saveDoc(col, id, data);
+          _storeUpsert(id, snapshot);
+          const restoredOrder = previousOrder.includes(id) ? previousOrder : [...previousOrder, id];
+          await _saveOrder(restoredOrder);
+          STORE.order = restoredOrder;
+          await _achRenderContentPreserveViewport({ force: true });
+          showNotif('Suppression annulée.', 'success');
+        },
+      },
+    } : {});
   } catch (e) { mutationFailed=mutationStarted; notifySaveError(e); }
   finally {
     if (mutationStarted && _achLocalMutationDepth>0) _achLocalMutationDepth -= 1;
@@ -851,6 +870,109 @@ function _achFilteredItemsForCurrentState({ ordered = false } = {}) {
   return filter === 'all' ? _sortAchievementsByDate(filtered) : filtered;
 }
 
+function _achBulkItems() {
+  return (STORE.items || []).filter(item => _achBulkSelected.has(item.id));
+}
+
+function _achSyncBulkToggle() {
+  const button = document.querySelector('[data-action="_achToggleBulkMode"]');
+  if (!button) return;
+  button.classList.toggle('is-active', _achBulkMode);
+  button.setAttribute('aria-pressed', String(_achBulkMode));
+  const label = button.querySelector('[data-ach-bulk-label]');
+  if (label) label.textContent = _achBulkMode ? 'Terminer' : 'Sélectionner';
+}
+
+function _achBulkBarHtml(filtered = []) {
+  if (!STATE.isAdmin || !_achBulkMode) return '';
+  const selected = _achBulkItems();
+  const count = selected.length;
+  const filteredIds = new Set(filtered.map(item => item.id));
+  const filteredSelected = filtered.length > 0 && filtered.every(item => _achBulkSelected.has(item.id));
+  const categoryOptions = ACH_CATS.map(category =>
+    `<option value="${_esc(category.id)}">${_esc(`${category.emoji || ''} ${category.label}`.trim())}</option>`
+  ).join('');
+  return `<section class="ach-bulkbar" aria-label="Classement groupé des hauts-faits">
+    <strong>${count} sélectionné${count !== 1 ? 's' : ''}</strong>
+    <button type="button" class="ach-bulklink" data-action="_achBulkSelectFiltered"${filtered.length ? '' : ' disabled'}>${filteredSelected ? 'Retirer les résultats' : `Sélectionner les résultats (${filteredIds.size})`}</button>
+    ${count ? '<button type="button" class="ach-bulklink" data-action="_achBulkClear">Effacer</button>' : ''}
+    <span></span>
+    <label class="ach-bulk-category">
+      <span>Classer dans</span>
+      <select data-change="_achBulkCategory"${count ? '' : ' disabled'}>
+        <option value="">Choisir une catégorie…</option>
+        ${categoryOptions}
+      </select>
+    </label>
+  </section>`;
+}
+
+function _achToggleBulkSelection(id) {
+  if (!_achBulkMode || !id) return;
+  if (_achBulkSelected.has(id)) _achBulkSelected.delete(id);
+  else _achBulkSelected.add(id);
+  _achRenderContentPreserveViewport({ force: true });
+}
+
+function _achPatchCategoriesLocally(items) {
+  const byId = new Map(items.map(item => [item.id, item.categorie]));
+  const patch = list => (list || []).map(item => byId.has(item.id)
+    ? { ...item, categorie: byId.get(item.id) }
+    : item);
+  STORE.publicItems = patch(STORE.publicItems);
+  STORE.secretItems = patch(STORE.secretItems);
+  STORE.items = _composeItems();
+}
+
+async function _achPersistCategories(items) {
+  const secretIds = new Set((STORE.secretItems || []).map(item => item.id));
+  const updates = items.map(item => ({
+    col: secretIds.has(item.id) ? 'achievements_secret' : 'achievements',
+    id: item.id,
+    data: { categorie: item.categorie || _achDefaultCategoryId() },
+  }));
+  for (let index = 0; index < updates.length; index += 450) {
+    await batchUpdateInCol(updates.slice(index, index + 450));
+  }
+}
+
+async function _achApplyBulkCategory(categoryId) {
+  if (!STATE.isAdmin || !_achBulkMode || !ACH_CATS.some(category => category.id === categoryId)) return;
+  const selected = _achBulkItems();
+  if (!selected.length) return;
+  const before = selected.map(item => ({ id: item.id, categorie: item.categorie || _achDefaultCategoryId() }));
+  const after = selected.map(item => ({ id: item.id, categorie: categoryId }));
+  const category = ACH_CATS.find(item => item.id === categoryId);
+  _achLocalMutationDepth += 1;
+  try {
+    await _achPersistCategories(after);
+    _achPatchCategoriesLocally(after);
+    _achBulkSelected.clear();
+    await _achRenderContentPreserveViewport({ force: true });
+    showNotif(`${selected.length} haut${selected.length > 1 ? 's' : ''}-fait${selected.length > 1 ? 's' : ''} classé${selected.length > 1 ? 's' : ''} dans ${category?.label || 'la catégorie'}.`, 'success', {
+      duration: 8000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          _achLocalMutationDepth += 1;
+          try {
+            await _achPersistCategories(before);
+            _achPatchCategoriesLocally(before);
+            await _achRenderContentPreserveViewport({ force: true });
+            showNotif('Classement groupé annulé.', 'success');
+          } finally {
+            _achLocalMutationDepth = Math.max(0, _achLocalMutationDepth - 1);
+          }
+        },
+      },
+    });
+  } catch (error) {
+    notifySaveError(error);
+  } finally {
+    _achLocalMutationDepth = Math.max(0, _achLocalMutationDepth - 1);
+  }
+}
+
 function _achCompactImageSignature(url = '') {
   const value=String(url || '');
   return `${value.length}:${value.slice(0,24)}:${value.slice(-24)}`;
@@ -868,6 +990,7 @@ function _achRenderSignature() {
   return JSON.stringify([
     STORE.filter, STORE.missionFilter, STORE.view, STORE.search,
     STORE.timelineDesc, STORE.charMatchMode, _achSelectedCharIds(), STORE.order,
+    _achBulkMode, [..._achBulkSelected].sort(),
     ACH_CATS.map(cat=>[cat.id,cat.label,cat.emoji,cat.color]), items, missions,
   ]);
 }
@@ -1045,7 +1168,7 @@ function _installAchievementKeyboard() {
     const card = event.target?.closest?.('[data-ach-open-card]');
     if (!card || event.target !== card || (event.key !== 'Enter' && event.key !== ' ')) return;
     event.preventDefault();
-    _achOpenLightbox(card.dataset.id);
+    card.click();
   });
 }
 
@@ -1148,7 +1271,7 @@ function _achCardHTML(item, isAdmin) {
       }).join('')}
     </div>` : '';
 
-  const adminHtml = isAdmin ? `
+  const adminHtml = isAdmin && !_achBulkMode ? `
     <div class="ach-admin-btns">
       <button class="btn btn-outline btn-sm" style="flex:1;font-size:.7rem"
         data-action="editAchievement" data-id="${item.id}" data-stop-propagation>✏️ Modifier</button>
@@ -1162,12 +1285,16 @@ function _achCardHTML(item, isAdmin) {
 
   const secretBadge = (isAdmin && item.secret)
     ? `<div class="ach-secret-badge" title="Caché aux joueurs">🔒 Secret</div>` : '';
+  const selection = isAdmin && _achBulkMode
+    ? `<span class="ach-bulk-check${_achBulkSelected.has(item.id) ? ' is-on' : ''}" aria-hidden="true">${_achBulkSelected.has(item.id) ? '✓' : ''}</span>`
+    : '';
 
   const dateDisplay = _formatDateFr(item.date);
   return `
     <div class="ach-cat-badge">${cat.emoji} ${cat.label}</div>
     ${dateDisplay ? `<div class="ach-date-badge">${_esc(dateDisplay)}</div>` : ''}
     ${secretBadge}
+    ${selection}
     ${imageHtml}
     <div class="ach-meta">
       <div class="ach-title">${_esc(item.titre || 'Haut-Fait')}</div>
@@ -1199,10 +1326,12 @@ async function _achRenderJustified(catId, items, container) {
         const icat    = _achCategoryFor(item);
         const noDesc  = !item.description ? ' no-desc' : '';
         const delay   = (rowIdx * 4 + colIdx) * 30;
-        return `<div class="ach-item${isAdmin ? ' ach-sortable-item' : ''}${noDesc}" data-ach-id="${item.id}"
-          role="button" tabindex="0" data-ach-open-card aria-label="Ouvrir le Haut-Fait ${_esc(item.titre || 'Haut-Fait')}"
-          style="width:${item.w}px;height:${row.h}px;--c:${icat.color};--c-glow:${icat.glow};--c-line:${icat.line};animation-delay:${delay}ms;${isAdmin ? 'cursor:grab' : ''}"
-          data-action="_achOpenLightbox" data-id="${item.id}">
+        const selected = _achBulkSelected.has(item.id);
+        return `<div class="ach-item${isAdmin && !_achBulkMode ? ' ach-sortable-item' : ''}${_achBulkMode ? ' is-bulk' : ''}${selected ? ' is-selected' : ''}${noDesc}" data-ach-id="${item.id}"
+          role="button" tabindex="0" data-ach-open-card aria-label="${_achBulkMode ? (selected ? 'Retirer' : 'Ajouter') : 'Ouvrir'} le Haut-Fait ${_esc(item.titre || 'Haut-Fait')}"
+          aria-pressed="${_achBulkMode ? String(selected) : 'false'}"
+          style="width:${item.w}px;height:${row.h}px;--c:${icat.color};--c-glow:${icat.glow};--c-line:${icat.line};animation-delay:${delay}ms;${isAdmin && !_achBulkMode ? 'cursor:grab' : ''}"
+          data-action="${_achBulkMode ? '_achToggleBulkSelection' : '_achOpenLightbox'}" data-id="${item.id}">
           ${_achCardHTML(item, isAdmin)}
         </div>`;
       }).join('')}
@@ -1835,6 +1964,8 @@ function _achRenderControlsExtras() {
 async function _achRenderContent({ force=false } = {}) {
   const contentEl = document.getElementById('ach-content');
   if (!contentEl) return;
+  const knownIds = new Set((STORE.items || []).map(item => item.id));
+  [..._achBulkSelected].forEach(id => { if (!knownIds.has(id)) _achBulkSelected.delete(id); });
   const signature=_achRenderSignature();
   if (!force && _achRenderedContentEl===contentEl && _achLastRenderSignature===signature) return;
   _achRenderedContentEl=contentEl;
@@ -1875,6 +2006,7 @@ async function _achRenderContent({ force=false } = {}) {
   const visibleForLightbox = isAdmin ? all : all.filter(a => !a.secret);
   STORE.lightboxItems = Object.fromEntries(visibleForLightbox.map(a => [a.id, a]));
   const missionContextHtml = _achMissionContextHtml(missionFilter, filtered.length);
+  const bulkBarHtml = _achBulkBarHtml(filtered);
 
   if (!filtered.length) {
     const catDef = ACH_CATS.find(c => c.id === filter);
@@ -1903,6 +2035,7 @@ async function _achRenderContent({ force=false } = {}) {
       : '';
     contentEl.innerHTML = `
       ${missionContextHtml}
+      ${bulkBarHtml}
       <div class="hall-empty">
         <div class="hall-empty-icon">${catDef?.emoji || '🏆'}</div>
         <div class="hall-empty-title">${title}</div>
@@ -1929,11 +2062,11 @@ async function _achRenderContent({ force=false } = {}) {
   const galleryEl = document.createElement('div');
   galleryEl.id        = 'ach-gallery';
   galleryEl.className = 'ach-justified';
-  contentEl.innerHTML = missionContextHtml;
+  contentEl.innerHTML = missionContextHtml + bulkBarHtml;
   contentEl.appendChild(galleryEl);
 
   await _achRenderJustified(filter, filtered, galleryEl);
-  const canManualSort = filter !== 'all' && missionFilter === 'all' && !selectedCharIds.length && !search;
+  const canManualSort = !_achBulkMode && filter !== 'all' && missionFilter === 'all' && !selectedCharIds.length && !search;
   setupAchievementsDnd(canManualSort ? filter : null);
   _achObserveGalleryResize(galleryEl);
   _achLastRenderSignature=_achRenderSignature();
@@ -1961,6 +2094,11 @@ function _achSetFilter(filter) {
 };
 function _achSetView(view, { syncRoute = true } = {}) {
   if (!['galerie', 'timeline', 'missions'].includes(view)) return;
+  if (view !== 'galerie' && _achBulkMode) {
+    _achBulkMode = false;
+    _achBulkSelected.clear();
+    _achSyncBulkToggle();
+  }
   STORE.view = view;
   _achSavePreferences();
   if (syncRoute) setRouteSub('achievements', view);
@@ -1971,6 +2109,37 @@ function _achSetView(view, { syncRoute = true } = {}) {
   });
   _achRenderContentPreserveViewport();
 };
+function _achToggleBulkMode() {
+  if (!STATE.isAdmin) return;
+  _achBulkMode = !_achBulkMode;
+  if (!_achBulkMode) _achBulkSelected.clear();
+  if (_achBulkMode && STORE.view !== 'galerie') {
+    STORE.view = 'galerie';
+    _achSavePreferences();
+    setRouteSub('achievements', 'galerie');
+    document.querySelectorAll('.view-tab').forEach((button) => {
+      const active = button.dataset.val === 'galerie';
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+    });
+  }
+  _achSyncBulkToggle();
+  _achRenderContentPreserveViewport({ force: true });
+}
+function _achBulkSelectFiltered() {
+  if (!_achBulkMode) return;
+  const filtered = _achFilteredItemsForCurrentState();
+  const allSelected = filtered.length > 0 && filtered.every(item => _achBulkSelected.has(item.id));
+  filtered.forEach(item => {
+    if (allSelected) _achBulkSelected.delete(item.id);
+    else _achBulkSelected.add(item.id);
+  });
+  _achRenderContentPreserveViewport({ force: true });
+}
+function _achBulkClear() {
+  _achBulkSelected.clear();
+  _achRenderContentPreserveViewport({ force: true });
+}
 function _achSetMissionFilter(missionId) {
   STORE.missionFilter = missionId || 'all';
   _achRenderContentPreserveViewport();
@@ -2398,6 +2567,8 @@ PAGES.achievements = async function() {
   _achDisconnectGalleryResize();
   _achRenderedContentEl=null;
   _achLastRenderSignature='';
+  _achBulkMode = false;
+  _achBulkSelected.clear();
   _achRestorePreferences();
   const routeView = getRouteSub('achievements');
   if (['galerie', 'timeline', 'missions'].includes(routeView)) STORE.view = routeView;
@@ -2441,6 +2612,7 @@ PAGES.achievements = async function() {
   PAGES._achievementsShellState = { ...getAchievementsShellState(), categories: ACH_CATS };
 
   await _origPage();    // génère le shell (hero + controls + #ach-content)
+  _achSyncBulkToggle();
   _installAchievementKeyboard();
   await _achRenderContent();
 
@@ -2483,6 +2655,11 @@ document.addEventListener('app:route-sub-changed', (event) => {
 });
 
 registerActions({
+  _achToggleBulkMode:    ()    => _achToggleBulkMode(),
+  _achToggleBulkSelection: (btn) => _achToggleBulkSelection(btn.dataset.id),
+  _achBulkSelectFiltered:()    => _achBulkSelectFiltered(),
+  _achBulkClear:         ()    => _achBulkClear(),
+  _achBulkCategory:      (el)  => _achApplyBulkCategory(el.value),
   _achSetSearch:         (el)  => _achSetSearch(el.value),
   _achFilterMissionOptions: (el) => _achFilterMissionOptions(el.value, el),
   _achSetFilter:         (btn) => _achSetFilter(btn.dataset.val),

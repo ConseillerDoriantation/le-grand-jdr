@@ -1975,6 +1975,12 @@ async function renameCharacterBuild(charId, buildId) {
 async function deleteCharacterBuild(charId, buildId) {
   const c = getCharacterById(charId);
   if (!c) return;
+  const cloneState = value => (typeof structuredClone === 'function'
+    ? structuredClone(value)
+    : JSON.parse(JSON.stringify(value)));
+  const normalized = normalizeCharacterBuilds(c);
+  const deleted = normalized.builds.find(build => build.id === buildId);
+  const before = cloneState(normalized);
   const active = deleteBuild(c, buildId);
   if (!active) {
     showNotif('Impossible de supprimer le dernier build.', 'error');
@@ -1983,9 +1989,35 @@ async function deleteCharacterBuild(charId, buildId) {
   try {
     await _persistCharacterBuildState(c);
     _closeIdentityPopover();
-    showNotif('Build supprimé.', 'success');
+    showNotif(`Build « ${deleted?.name || 'Sans nom'} » supprimé.`, 'success', {
+      duration: 8000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          const current = cloneState(normalizeCharacterBuilds(c));
+          try {
+            c.builds = cloneState(before.builds);
+            c.activeBuildId = before.activeBuildId;
+            applyActiveBuild(c);
+            await _persistCharacterBuildState(c);
+            renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
+            showNotif('Suppression du build annulée.', 'success');
+          } catch (error) {
+            c.builds = cloneState(current.builds);
+            c.activeBuildId = current.activeBuildId;
+            applyActiveBuild(c);
+            renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
+            throw error;
+          }
+        },
+      },
+    });
     renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
   } catch (e) {
+    c.builds = cloneState(before.builds);
+    c.activeBuildId = before.activeBuildId;
+    applyActiveBuild(c);
+    renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
     notifySaveError(e);
   }
 }

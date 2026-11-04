@@ -3436,6 +3436,10 @@ const PAGES = {
           </div>
           <span class="hall-command-spacer"></span>
           ${STATE.isAdmin ? `<div class="hall-command-tools">
+            <button class="hall-tool-btn" data-action="_achToggleBulkMode" title="Classer plusieurs hauts-faits" aria-label="Sélectionner plusieurs hauts-faits" aria-pressed="false">
+              <span aria-hidden="true">☑</span>
+              <span data-ach-bulk-label>Sélectionner</span>
+            </button>
             <button class="hall-tool-btn" data-action="openAchievementCategoriesAdmin" title="Gérer les catégories" aria-label="Gérer les catégories de hauts-faits">
               <svg aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>
               <span>Catégories</span>

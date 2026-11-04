@@ -169,6 +169,10 @@ test('les builds se créent, changent et se suppriment depuis la fiche sans moda
   assert.doesNotMatch(source, /openModal\('Builds du personnage'/);
   assert.match(css, /\.cs-v3 \.ids-build-option\.is-active/);
   assert.match(css, /\.cs-v3 \.ids-build-create/);
+  const deletion = source.slice(source.indexOf('async function deleteCharacterBuild'), source.indexOf('async function setCharAura'));
+  assert.match(deletion, /label: '↶ Annuler'/);
+  assert.match(deletion, /c\.builds = cloneState\(before\.builds\)/);
+  assert.match(deletion, /await _persistCharacterBuildState\(c\)/);
 });
 
 test('les modes lecture et mobile restent sûrs', () => {

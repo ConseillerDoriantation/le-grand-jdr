@@ -146,3 +146,21 @@ test('la recherche met à jour la liste de façon ciblée et débouncée (sans r
   // Débounce présent.
   assert.match(feature, /function _ivDebouncedListUpdate\(\)[\s\S]*?setTimeout\([\s\S]*?120\)/);
 });
+
+test('vendre un objet conserve la position de défilement réelle de la feuille', () => {
+  const sellStart = feature.indexOf('export async function sellInvItemBulk');
+  const sellEnd = feature.indexOf('\nexport async function sellInvItem', sellStart);
+  const sell = feature.slice(sellStart, sellEnd);
+  assert.match(sell, /const inventoryView = _captureInventoryViewState\(\)/);
+  assert.match(sell, /_rerenderInventoryView\(\{ viewState: inventoryView \}\)/);
+  assert.doesNotMatch(sell, /_renderInventoryChar\(c,/);
+
+  const captureStart = feature.indexOf('function _captureInventoryViewState');
+  const rerenderEnd = feature.indexOf('\nasync function _invToggleBelt', captureStart);
+  const view = feature.slice(captureStart, rerenderEnd);
+  assert.match(view, /document\.getElementById\('char-sheet-area'\)/);
+  assert.match(view, /document\.getElementById\('char-tab-content'\)/);
+  assert.match(view, /requestAnimationFrame\(\(\) => requestAnimationFrame/);
+  assert.match(view, /sheet\?\.scrollTo\(\{ top: viewState\.sheetTop/);
+  assert.match(view, /window\.scrollTo\(\{ top: viewState\.windowY/);
+});

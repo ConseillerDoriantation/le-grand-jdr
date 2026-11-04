@@ -418,10 +418,36 @@ export function scheduleNoteAutosave(id) {
 
 export async function deleteNote(idx) {
   const c = STATE.activeChar; if(!c) return;
+  const index = Number(idx);
+  const previous = [...(c.notesList || [])];
+  const removed = previous[index];
+  if (!removed) return;
   if (!await confirmModal('Supprimer cette note ?')) return;
-  c.notesList.splice(idx, 1);
+  c.notesList = previous.filter((_, i) => i !== index);
   if (_openNote >= c.notesList.length) _openNote = null;
-  if (await trySave('characters', c.id, {notesList: c.notesList})) showNotif('Note supprimée.','success');
+  if (!await trySave('characters', c.id, {notesList: c.notesList})) {
+    c.notesList = previous;
+    charSession.renderTab('notes', c, charSession.getCanEditChar());
+    return;
+  }
+  showNotif('Note supprimée.','success', {
+    duration: 8000,
+    action: {
+      label: '↶ Annuler',
+      onClick: async () => {
+        const current = [...(c.notesList || [])];
+        const restored = [...current];
+        restored.splice(Math.min(index, restored.length), 0, removed);
+        c.notesList = restored;
+        if (!await trySave('characters', c.id, { notesList: restored })) {
+          c.notesList = current;
+          throw new Error('Restauration de la note impossible');
+        }
+        charSession.renderTab('notes', c, charSession.getCanEditChar());
+        showNotif('Suppression annulée.', 'success');
+      },
+    },
+  });
   charSession.renderTab('notes', c, charSession.getCanEditChar());
 }
 
@@ -576,10 +602,41 @@ export function addCompteRow(type) {
 
 export async function deleteCompteRow(type, idx) {
   const c = STATE.activeChar; if(!c) return;
-  (c.compte||{})[type]?.splice(idx,1);
-  await trySave('characters', c.id, {compte: c.compte});
+  const index = Number(idx);
+  const previousCompte = c.compte || { recettes: [], depenses: [] };
+  const previousList = [...(previousCompte[type] || [])];
+  const removed = previousList[index];
+  if (!removed) return;
+  c.compte = { ...previousCompte, [type]: previousList.filter((_, i) => i !== index) };
+  if (!await trySave('characters', c.id, {compte: c.compte})) {
+    c.compte = previousCompte;
+    charSession.renderTab('compte', c, charSession.getCanEditChar());
+    refreshOrDisplay(c);
+    return;
+  }
   charSession.renderTab('compte', c, charSession.getCanEditChar());
   refreshOrDisplay(c);
+  showNotif('Ligne supprimée.', 'success', {
+    duration: 8000,
+    action: {
+      label: '↶ Annuler',
+      onClick: async () => {
+        const currentCompte = c.compte || { recettes: [], depenses: [] };
+        const currentList = [...(currentCompte[type] || [])];
+        const restoredList = [...currentList];
+        restoredList.splice(Math.min(index, restoredList.length), 0, removed);
+        const restoredCompte = { ...currentCompte, [type]: restoredList };
+        c.compte = restoredCompte;
+        if (!await trySave('characters', c.id, { compte: restoredCompte })) {
+          c.compte = currentCompte;
+          throw new Error('Restauration de la ligne impossible');
+        }
+        charSession.renderTab('compte', c, charSession.getCanEditChar());
+        refreshOrDisplay(c);
+        showNotif('Suppression annulée.', 'success');
+      },
+    },
+  });
 }
 
 export async function saveCompteField(type, idx, field, value) {
@@ -770,10 +827,35 @@ export async function saveMaitrise(idx) {
 
 export async function deleteMaitrise(idx) {
   const c = STATE.activeChar; if (!c) return;
-  const m = (c.maitrises || [])[idx];
+  const index = Number(idx);
+  const previous = [...(c.maitrises || [])];
+  const m = previous[index];
+  if (!m) return;
   if (!await confirmModal(`Supprimer la maîtrise "${m?.typeArme||'?'}" ?`)) return;
-  c.maitrises = (c.maitrises || []).filter((_, i) => i !== idx);
-  if (await trySave('characters', c.id, { maitrises: c.maitrises })) showNotif('Maîtrise supprimée.', 'success');
+  c.maitrises = previous.filter((_, i) => i !== index);
+  if (!await trySave('characters', c.id, { maitrises: c.maitrises })) {
+    c.maitrises = previous;
+    charSession.renderSheet(c, 'maitrises');
+    return;
+  }
+  showNotif('Maîtrise supprimée.', 'success', {
+    duration: 8000,
+    action: {
+      label: '↶ Annuler',
+      onClick: async () => {
+        const current = [...(c.maitrises || [])];
+        const restored = [...current];
+        restored.splice(Math.min(index, restored.length), 0, m);
+        c.maitrises = restored;
+        if (!await trySave('characters', c.id, { maitrises: restored })) {
+          c.maitrises = current;
+          throw new Error('Restauration de la maîtrise impossible');
+        }
+        charSession.renderSheet(c, 'maitrises');
+        showNotif('Suppression annulée.', 'success');
+      },
+    },
+  });
   charSession.renderSheet(c, 'maitrises');
 }
 

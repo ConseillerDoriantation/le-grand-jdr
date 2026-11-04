@@ -736,32 +736,34 @@ export async function importAdventure(advId, payload, { onProgress } = {}) {
   if (!payload || payload.type !== 'le-grand-jdr.campaign' || !payload.collections) {
     throw new Error('Fichier de backup invalide.');
   }
-  const allowed = new Set([...CAMPAIGN_EXPORT_COLLECTIONS, 'vttLog']);
-  const cols = Object.keys(payload.collections)
-    .filter(c => allowed.has(c) && !_RESTORE_SKIP.has(c));
+  return _trackWrite(`restauration ${advId}`, async () => {
+    const allowed = new Set([...CAMPAIGN_EXPORT_COLLECTIONS, 'vttLog']);
+    const cols = Object.keys(payload.collections)
+      .filter(c => allowed.has(c) && !_RESTORE_SKIP.has(c));
 
-  let written = 0, skipped = 0;
-  const failed = [];
-  for (const col of cols) {
-    const docs = Array.isArray(payload.collections[col]) ? payload.collections[col] : [];
-    try {
-      for (let i = 0; i < docs.length; i += 400) {   // marge sous la limite de 500 ops/batch
-        const batch = writeBatch(db);
-        let n = 0;
-        for (const d of docs.slice(i, i + 400)) {
-          if (!d || !d.id) { skipped++; continue; }
-          const { id, ...data } = d;
-          batch.set(doc(db, `adventures/${advId}/${col}/${id}`), _reviveTimestamps(data));
-          n++;
+    let written = 0, skipped = 0;
+    const failed = [];
+    for (const col of cols) {
+      const docs = Array.isArray(payload.collections[col]) ? payload.collections[col] : [];
+      try {
+        for (let i = 0; i < docs.length; i += 400) {   // marge sous la limite de 500 ops/batch
+          const batch = writeBatch(db);
+          let n = 0;
+          for (const d of docs.slice(i, i + 400)) {
+            if (!d || !d.id) { skipped++; continue; }
+            const { id, ...data } = d;
+            batch.set(doc(db, `adventures/${advId}/${col}/${id}`), _reviveTimestamps(data));
+            n++;
+          }
+          if (n) { await batch.commit(); written += n; }
         }
-        if (n) { await batch.commit(); written += n; }
+        onProgress?.(col, docs.length);
+      } catch (e) {
+        failed.push({ col, error: e?.code || e?.message || String(e) });
       }
-      onProgress?.(col, docs.length);
-    } catch (e) {
-      failed.push({ col, error: e?.code || e?.message || String(e) });
     }
-  }
-  return { written, skipped, collections: cols.length, failed };
+    return { written, skipped, collections: cols.length, failed };
+  });
 }
 
 export async function loadCollectionWhere(col, field, op, value) {
@@ -925,50 +927,92 @@ export const serverTimestampValue = () => serverTimestamp();
 // l'écriture localement via latency-compensation : les observers sont
 // notifiés instantanément. Pour le cache TTL (non-live), on patche
 // chirurgicalement pour éviter une invalidation totale.
+let _writeSequence = 0;
+
+function _emitWriteState(id, state, target, error = null) {
+  if (typeof document === 'undefined' || typeof CustomEvent === 'undefined') return;
+  document.dispatchEvent(new CustomEvent('app:data-write-state', {
+    detail: {
+      id,
+      state,
+      target,
+      at: Date.now(),
+      error: error ? {
+        code: String(error.code || ''),
+        message: String(error.message || error),
+      } : null,
+    },
+  }));
+}
+
+// Cycle transversal purement local : permet à l'UI d'indiquer les sauvegardes
+// en cours/échouées sans listener Firestore ni lecture supplémentaire.
+async function _trackWrite(target, task, { quiet = false } = {}) {
+  if (quiet) return task();
+  const id = `write-${Date.now().toString(36)}-${(++_writeSequence).toString(36)}`;
+  _emitWriteState(id, 'started', target);
+  try {
+    const result = await task();
+    _emitWriteState(id, 'succeeded', target);
+    return result;
+  } catch (error) {
+    _emitWriteState(id, 'failed', target, error);
+    throw error;
+  }
+}
+
 export async function saveDoc(col, id, data, { silent = false } = {}) {
   const path = _colPath(col);
-  try {
-    await setDoc(doc(db, path, id), data, { merge: true });
-    _cachePatchSave(path, id, data);
-  } catch (e) {
-    _handleFirestoreError(e, `saveDoc(${path}/${id})`, { silent });
-    throw e;
-  }
+  return _trackWrite(`${path}/${id}`, async () => {
+    try {
+      await setDoc(doc(db, path, id), data, { merge: true });
+      _cachePatchSave(path, id, data);
+    } catch (e) {
+      _handleFirestoreError(e, `saveDoc(${path}/${id})`, { silent });
+      throw e;
+    }
+  }, { quiet: silent });
 }
 
 export async function replaceDoc(col, id, data) {
   const path = _colPath(col);
-  try {
-    await setDoc(doc(db, path, id), data);
-    _cachePatchReplace(path, id, data);
-  } catch (e) {
-    _handleFirestoreError(e, `replaceDoc(${path}/${id})`);
-    throw e;
-  }
+  return _trackWrite(`${path}/${id}`, async () => {
+    try {
+      await setDoc(doc(db, path, id), data);
+      _cachePatchReplace(path, id, data);
+    } catch (e) {
+      _handleFirestoreError(e, `replaceDoc(${path}/${id})`);
+      throw e;
+    }
+  });
 }
 
 export async function addToCol(col, data, { silent = false } = {}) {
   const path = _colPath(col);
-  try {
-    const enriched = { ...data, createdAt: new Date().toISOString() };
-    const ref = await addDoc(collection(db, path), enriched);
-    _cachePatchAdd(path, { id: ref.id, ...enriched });
-    return ref.id;
-  } catch (e) {
-    _handleFirestoreError(e, `addToCol(${path})`, { silent });
-    throw e;
-  }
+  return _trackWrite(path, async () => {
+    try {
+      const enriched = { ...data, createdAt: new Date().toISOString() };
+      const ref = await addDoc(collection(db, path), enriched);
+      _cachePatchAdd(path, { id: ref.id, ...enriched });
+      return ref.id;
+    } catch (e) {
+      _handleFirestoreError(e, `addToCol(${path})`, { silent });
+      throw e;
+    }
+  }, { quiet: silent });
 }
 
 export async function updateInCol(col, id, data) {
   const path = _colPath(col);
-  try {
-    await updateDoc(doc(db, path, id), data);
-    _cachePatchUpdate(path, id, data);
-  } catch (e) {
-    _handleFirestoreError(e, `updateInCol(${path}/${id})`);
-    throw e;
-  }
+  return _trackWrite(`${path}/${id}`, async () => {
+    try {
+      await updateDoc(doc(db, path, id), data);
+      _cachePatchUpdate(path, id, data);
+    } catch (e) {
+      _handleFirestoreError(e, `updateInCol(${path}/${id})`);
+      throw e;
+    }
+  });
 }
 
 // Mutation atomique d'un document à partir de sa valeur courante. Utile pour
@@ -978,21 +1022,23 @@ export async function updateInCol(col, id, data) {
 export async function mutateInCol(col, id, mutator) {
   const path = _colPath(col);
   const ref = doc(db, path, id);
-  try {
-    const next = await runTransaction(db, async transaction => {
-      const snapshot = await transaction.get(ref);
-      const current = snapshot.exists() ? snapshot.data() : null;
-      const value = await mutator(current);
-      if (value == null) return null;
-      transaction.set(ref, value);
-      return value;
-    });
-    if (next != null) _cachePatchReplace(path, id, next);
-    return next;
-  } catch (e) {
-    _handleFirestoreError(e, `mutateInCol(${path}/${id})`);
-    throw e;
-  }
+  return _trackWrite(`${path}/${id}`, async () => {
+    try {
+      const next = await runTransaction(db, async transaction => {
+        const snapshot = await transaction.get(ref);
+        const current = snapshot.exists() ? snapshot.data() : null;
+        const value = await mutator(current);
+        if (value == null) return null;
+        transaction.set(ref, value);
+        return value;
+      });
+      if (next != null) _cachePatchReplace(path, id, next);
+      return next;
+    } catch (e) {
+      _handleFirestoreError(e, `mutateInCol(${path}/${id})`);
+      throw e;
+    }
+  });
 }
 
 // Verrou distribué léger pour les migrations client coûteuses. Sans ce garde,
@@ -1065,16 +1111,18 @@ export async function batchUpdateInCol(updates = []) {
     id,
     data,
   }));
-  try {
-    const batch = writeBatch(db);
-    resolved.forEach(({ path, id, data }) => batch.update(doc(db, path, id), data));
-    await batch.commit();
-    resolved.forEach(({ path, id, data }) => _cachePatchUpdate(path, id, data));
-  } catch (e) {
-    const targets = resolved.map(({ path, id }) => `${path}/${id}`).join(', ');
-    _handleFirestoreError(e, `batchUpdateInCol(${targets})`);
-    throw e;
-  }
+  return _trackWrite(`${resolved.length} documents`, async () => {
+    try {
+      const batch = writeBatch(db);
+      resolved.forEach(({ path, id, data }) => batch.update(doc(db, path, id), data));
+      await batch.commit();
+      resolved.forEach(({ path, id, data }) => _cachePatchUpdate(path, id, data));
+    } catch (e) {
+      const targets = resolved.map(({ path, id }) => `${path}/${id}`).join(', ');
+      _handleFirestoreError(e, `batchUpdateInCol(${targets})`);
+      throw e;
+    }
+  });
 }
 
 // Enregistre plusieurs documents avec merge dans un même commit. Contrairement
@@ -1087,27 +1135,54 @@ export async function batchSaveInCol(updates = []) {
     id,
     data,
   }));
-  try {
-    const batch = writeBatch(db);
-    resolved.forEach(({ path, id, data }) => batch.set(doc(db, path, id), data, { merge: true }));
-    await batch.commit();
-    resolved.forEach(({ path, id, data }) => _cachePatchSave(path, id, data));
-  } catch (e) {
-    const targets = resolved.map(({ path, id }) => `${path}/${id}`).join(', ');
-    _handleFirestoreError(e, `batchSaveInCol(${targets})`);
-    throw e;
-  }
+  return _trackWrite(`${resolved.length} documents`, async () => {
+    try {
+      const batch = writeBatch(db);
+      resolved.forEach(({ path, id, data }) => batch.set(doc(db, path, id), data, { merge: true }));
+      await batch.commit();
+      resolved.forEach(({ path, id, data }) => _cachePatchSave(path, id, data));
+    } catch (e) {
+      const targets = resolved.map(({ path, id }) => `${path}/${id}`).join(', ');
+      _handleFirestoreError(e, `batchSaveInCol(${targets})`);
+      throw e;
+    }
+  });
+}
+
+// Remplace plusieurs documents dans un même commit. Utile pour les projections
+// publiques qui doivent retirer les anciens champs secrets, donc sans merge.
+export async function batchReplaceInCol(updates = []) {
+  if (!Array.isArray(updates) || !updates.length) return;
+  const resolved = updates.map(({ col, id, data }) => ({
+    path: _colPath(col),
+    id,
+    data,
+  }));
+  return _trackWrite(`${resolved.length} documents`, async () => {
+    try {
+      const batch = writeBatch(db);
+      resolved.forEach(({ path, id, data }) => batch.set(doc(db, path, id), data));
+      await batch.commit();
+      resolved.forEach(({ path, id, data }) => _cachePatchReplace(path, id, data));
+    } catch (e) {
+      const targets = resolved.map(({ path, id }) => `${path}/${id}`).join(', ');
+      _handleFirestoreError(e, `batchReplaceInCol(${targets})`);
+      throw e;
+    }
+  });
 }
 
 export async function deleteFromCol(col, id) {
   const path = _colPath(col);
-  try {
-    await deleteDoc(doc(db, path, id));
-    _cachePatchDelete(path, id);
-  } catch (e) {
-    _handleFirestoreError(e, `deleteFromCol(${path}/${id})`);
-    throw e;
-  }
+  return _trackWrite(`${path}/${id}`, async () => {
+    try {
+      await deleteDoc(doc(db, path, id));
+      _cachePatchDelete(path, id);
+    } catch (e) {
+      _handleFirestoreError(e, `deleteFromCol(${path}/${id})`);
+      throw e;
+    }
+  });
 }
 
 // Mutations explicites dans une aventure qui n'est pas forcément la table
@@ -1116,13 +1191,15 @@ export async function deleteFromCol(col, id) {
 export async function updateInAdventureCol(adventureId, col, id, data) {
   if (!adventureId || !col || !id) throw new Error('Cible aventure invalide');
   const path = `adventures/${adventureId}/${col}`;
-  try {
-    await updateDoc(doc(db, path, id), data);
-    _cachePatchUpdate(path, id, data);
-  } catch (e) {
-    _handleFirestoreError(e, `updateInAdventureCol(${path}/${id})`);
-    throw e;
-  }
+  return _trackWrite(`${path}/${id}`, async () => {
+    try {
+      await updateDoc(doc(db, path, id), data);
+      _cachePatchUpdate(path, id, data);
+    } catch (e) {
+      _handleFirestoreError(e, `updateInAdventureCol(${path}/${id})`);
+      throw e;
+    }
+  });
 }
 
 export async function loadAdventureCollection(adventureId, col) {
@@ -1140,13 +1217,15 @@ export async function loadAdventureCollection(adventureId, col) {
 export async function deleteFromAdventureCol(adventureId, col, id) {
   if (!adventureId || !col || !id) throw new Error('Cible aventure invalide');
   const path = `adventures/${adventureId}/${col}`;
-  try {
-    await deleteDoc(doc(db, path, id));
-    _cachePatchDelete(path, id);
-  } catch (e) {
-    _handleFirestoreError(e, `deleteFromAdventureCol(${path}/${id})`);
-    throw e;
-  }
+  return _trackWrite(`${path}/${id}`, async () => {
+    try {
+      await deleteDoc(doc(db, path, id));
+      _cachePatchDelete(path, id);
+    } catch (e) {
+      _handleFirestoreError(e, `deleteFromAdventureCol(${path}/${id})`);
+      throw e;
+    }
+  });
 }
 
 // ── Spécifique personnages ─────────────────────

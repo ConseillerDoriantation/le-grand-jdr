@@ -8,7 +8,25 @@
 // Volontairement minimal : pas de précache (app sans build → liste de fichiers
 // fragile), on met en cache au fil des requêtes réussies.
 // ══════════════════════════════════════════════════════════════════════════════
-const CACHE = 'grimorium-v1';
+const CACHE = 'grimorium-v2';
+
+async function _notifyUpdateAvailable() {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  windows.forEach(client => client.postMessage({ type: 'APP_UPDATE_AVAILABLE' }));
+}
+
+async function _responseChanged(previous, next) {
+  if (!previous || !next?.ok) return false;
+  const previousTag = previous.headers.get('etag');
+  const nextTag = next.headers.get('etag');
+  if (previousTag && nextTag && previousTag === nextTag) return false;
+  try {
+    const [before, after] = await Promise.all([previous.clone().text(), next.clone().text()]);
+    return before !== after;
+  } catch {
+    return Boolean(previousTag && nextTag && previousTag !== nextTag);
+  }
+}
 
 self.addEventListener('install', () => self.skipWaiting());
 
@@ -31,10 +49,15 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith((async () => {
     try {
+      const cache = await caches.open(CACHE);
+      const detectsDeployment = url.pathname.endsWith('/index.html');
+      const previous = detectsDeployment ? await cache.match(req) : null;
       const res = await fetch(req);
       // Ne met en cache que les réponses propres (200, same-origin).
       if (res && res.ok && res.type === 'basic') {
-        const cache = await caches.open(CACHE);
+        if (detectsDeployment && await _responseChanged(previous, res)) {
+          await _notifyUpdateAvailable();
+        }
         // Assets versionnés (?v=…) : purge les anciennes variantes du même
         // fichier avant d'écrire la nouvelle — sinon chaque bump accumule
         // une copie de plus (CSS ~pleins Ko) qui ne sera jamais servie en ligne.
