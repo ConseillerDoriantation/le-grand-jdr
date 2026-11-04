@@ -36,6 +36,7 @@ import { FRAGMENT_CATEGORIES, getItemFragmentCategory } from '../shared/upgrade-
 import { craftCategoryForItem, craftDiscipline } from '../shared/craft-engine.js';
 import { craftRecipeMaterials, loadCraftSettings, getCraftSettings } from '../shared/craft-settings.js';
 import { evaluateReforge } from '../shared/reforge.js';
+import { partitionTraits } from '../shared/signature-traits.js';
 import { getRarities, loadRarities, RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import { getDocData } from '../data/firestore.js';
 
@@ -975,25 +976,37 @@ async function _artisanDestroyStart(invIndex) {
   const s = getUpgradeSettings();
   const allTraits = _getTraits(item);
   if (!allTraits.length) return;
+  // Les traits signature (exclusifs au MJ) ne sont JAMAIS récupérables en fragment.
+  const { transferable, signature } = partitionTraits(allTraits, s.signatureTraits);
   const cost = s.trait.deconstructCost || 0;
   const costTxt = STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`;
+  const sigWarn = signature.length
+    ? `<br><span style="color:#ff8ca7">⭐ ${signature.length} trait${signature.length > 1 ? 's' : ''} signature non récupérable${signature.length > 1 ? 's' : ''} (${signature.map(t => `« ${_esc(t)} »`).join(', ')}).</span>`
+    : '';
 
-  if (s.trait.extractAllTraits || allTraits.length === 1) {
-    // Cas simple → une seule confirmation.
-    const list = allTraits.map(t => `« ${_esc(t)} »`).join(', ');
-    if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Tu récupères ${allTraits.length} fragment${allTraits.length > 1 ? 's' : ''} (${list}). L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
+  // Aucun trait transférable (tous signature) → on détruit sans fragment.
+  if (!transferable.length) {
+    if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Aucun fragment récupérable.${sigWarn}<br>L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
       { title: '♻️ Recycler en fragments', confirmLabel: 'Recycler', danger: true, icon: '♻️' })) return;
-    return _artisanDoDestroy(invIndex, allTraits);
+    return _artisanDoDestroy(invIndex, []);
   }
 
-  // Plusieurs traits → le choix EST la confirmation (pas de 2ᵉ modale).
+  if (s.trait.extractAllTraits || transferable.length === 1) {
+    // Cas simple → une seule confirmation.
+    const list = transferable.map(t => `« ${_esc(t)} »`).join(', ');
+    if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Tu récupères ${transferable.length} fragment${transferable.length > 1 ? 's' : ''} (${list}).${sigWarn} L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
+      { title: '♻️ Recycler en fragments', confirmLabel: 'Recycler', danger: true, icon: '♻️' })) return;
+    return _artisanDoDestroy(invIndex, transferable);
+  }
+
+  // Plusieurs traits transférables → le choix EST la confirmation (pas de 2ᵉ modale).
   pushModal(`♻️ Recycler « ${item.nom || 'objet'} »`, `
     <div class="art-muted" style="font-size:.8rem;margin-bottom:.6rem;line-height:1.5">
-      Quel trait veux-tu <strong>récupérer en fragment</strong> ? Les autres seront <strong style="color:#ff8ca7">perdus</strong>, et l'objet détruit.<br>
+      Quel trait veux-tu <strong>récupérer en fragment</strong> ? Les autres seront <strong style="color:#ff8ca7">perdus</strong>, et l'objet détruit.${sigWarn}<br>
       <span style="color:var(--gold)">${costTxt}</span> · action <strong>immédiate</strong>.
     </div>
     <div class="art-ow-list">
-      ${allTraits.map(t => `
+      ${transferable.map(t => `
         <button class="art-ow-opt" data-action="_artisanDestroyConfirm" data-i="${invIndex}" data-trait="${_esc(t)}">
           <span class="art-ow-opt-name">${_esc(t)}</span>
           <span class="art-ow-opt-cta">♻️ Récupérer</span>
@@ -1023,6 +1036,8 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   const s    = getUpgradeSettings();
   const cost = s.trait.deconstructCost || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
+  // Sécurité : jamais de fragment pour un trait signature (même en appel direct).
+  traitsToExtract = partitionTraits(traitsToExtract, s.signatureTraits).transferable;
 
   // 1) Supprimer l'item de l'inventaire
   const inv = [...(c.inventaire || [])];
@@ -1050,7 +1065,9 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   if (cost > 0) _logExpense(c, `Artisan : destruction de ${item.nom}`, cost);
 
   await _persistChar(c);
-  showNotif(`${traitsToExtract.length} fragment(s) ajouté(s) au sac.`, 'success');
+  showNotif(traitsToExtract.length
+    ? `${traitsToExtract.length} fragment(s) ajouté(s) au sac.`
+    : 'Objet recyclé (aucun fragment récupérable).', 'success');
 }
 
 // ── Ajouter un trait (slot libre) ──
