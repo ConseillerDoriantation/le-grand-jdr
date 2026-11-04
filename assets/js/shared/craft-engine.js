@@ -12,6 +12,9 @@
 
 /** Configuration par défaut (surchargée par world/craft_config côté app). */
 export const DEFAULT_CRAFT_CONFIG = {
+  // Dernier palier directement fabricable. Les raretés supérieures passent par
+  // la reforge ; le moteur reste volontairement borné à trois recettes.
+  maxTier: 3,
   // Catégorie d'objet → discipline (éditable par le MJ).
   categorieDiscipline: {
     armeCaC: 'forge', armeDist: 'confection', armeMagique: 'orfevre',
@@ -232,6 +235,11 @@ export function buildCraftedItem(base = {}, { name, nature, rarete, trait, autho
   delete out.id;        // nouvel objet d'inventaire, pas un article de boutique
   delete out.dispo;     // champs méta boutique non pertinents en inventaire
   delete out.prix;
+  // Le socle boutique sert uniquement aux statistiques. Le trait choisi par le
+  // joueur provient déjà du pool recyclable et ne doit pas hériter des verrous
+  // éventuels de l'article représentatif.
+  delete out.noRecycle;
+  delete out.nonRecyclableTraits;
   return out;
 }
 
@@ -252,6 +260,8 @@ export function resolveCraftAttempt({
   inventory, requirements, d20, competenceBonus, tier, config,
   base, trait, name, nature, rarete, author,
 } = {}) {
+  const maxTier = Math.max(1, Math.min(3, parseInt(_CFG(config).maxTier, 10) || 3));
+  if ((parseInt(tier, 10) || 1) > maxTier) return { ok: false, reason: 'tier', maxTier };
   const missing = missingMaterials(inventory, requirements);
   if (missing.length) return { ok: false, reason: 'materials', missing };
   const roll = resolveCraftRoll(d20, competenceBonus, tier, config);

@@ -20,6 +20,7 @@ test('la sauvegarde lit la rareté depuis l’identité commune à tous les arti
 });
 
 test('la rareté reste propagée aux exemplaires déjà achetés', () => {
-  assert.match(source, /const SYNC_FIELDS = Object\.keys\(newData\)\.filter\(k => !SYNC_BLOCKLIST\.has\(k\)\)/);
-  assert.doesNotMatch(source, /SYNC_BLOCKLIST[\s\S]{0,300}['"]rarete['"]/);
+  assert.match(source, /syncInventoryEntryFromShop\(entry, catalogItem\)/);
+  assert.match(source, /entry\?\.itemId \|\| entry\?\.shopItemId/);
+  assert.doesNotMatch(source, /item\.source === 'boutique'/);
 });

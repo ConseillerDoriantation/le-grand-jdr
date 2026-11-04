@@ -1,9 +1,10 @@
 import { registerActions } from '../core/actions.js';
 import { STATE } from '../core/state.js';
-import { getDocData, saveDoc } from '../data/firestore.js';
+import { batchSaveInCol, getDocData, loadCollection, saveDoc } from '../data/firestore.js';
+import { openCatalogAdmin } from './catalog-admin.js';
+import { catalogReplacementFor } from './catalog-admin-utils.js';
 import { _esc } from './html.js';
-import { closeModalDirect, openModal } from './modal.js';
-import { notifySaveError, showNotif } from './notifications.js';
+import { notifySaveError } from './notifications.js';
 
 const RARITY_DOC_ID = 'rarities';
 const RARITY_VERSION = 1;
@@ -87,9 +88,17 @@ export function invalidateRaritiesCache() {
     _applyRarities(DEFAULT_RARITIES);
 }
 
-export async function saveRarities(rarities = []) {
+export async function saveRarities(rarities = [], { relatedUpdates = [] } = {}) {
     const clean = rarities.map(_normalizeRarity).filter(r => r.name).sort((a, b) => a.value - b.value);
-    await saveDoc('world', RARITY_DOC_ID, { version: RARITY_VERSION, rarities: clean });
+    const payload = { version: RARITY_VERSION, rarities: clean };
+    if (relatedUpdates.length) {
+        const operations = [...relatedUpdates, { col: 'world', id: RARITY_DOC_ID, data: payload }];
+        for (let index = 0; index < operations.length; index += 450) {
+            await batchSaveInCol(operations.slice(index, index + 450));
+        }
+    } else {
+        await saveDoc('world', RARITY_DOC_ID, payload);
+    }
     _applyRarities(clean);
     _raritiesLoaded = true;
 }
@@ -157,72 +166,128 @@ export function pickRarete(idPrefix, n) {
     });
 }
 
-function _rarityRowHtml(r = {}, idx = 0) {
-    return `
-    <div class="rar-admin-row" data-rar-row>
-        <input class="input-field" data-rar-value type="number" min="1" value="${parseInt(r.value) || idx + 1}" title="Niveau">
-        <input class="input-field" data-rar-name value="${_esc(r.name || '')}" placeholder="Nom de rareté">
-        <input class="input-field" data-rar-color type="color" value="${_esc(r.color || '#9ca3af')}" title="Couleur">
-        <button type="button" class="btn btn-outline btn-sm" data-action="rarityRemoveRow" title="Supprimer">✕</button>
-    </div>`;
+const RARITY_PALETTE = ['#9ca3af', '#4ade80', '#60a5fa', '#c084fc', '#f97316', '#facc15', '#22d3ee', '#fb7185'];
+let _rarityCatalogOriginal = [];
+let _rarityCatalogUsage = [];
+
+const _rarityCatalogId = value => `rarity_${Math.max(1, parseInt(value) || 1)}`;
+const _clone = value => JSON.parse(JSON.stringify(value));
+
+async function _loadRarityCatalog() {
+    await loadRarities();
+    _rarityCatalogOriginal = getRarities().map(rarity => ({
+        id: _rarityCatalogId(rarity.value),
+        value: rarity.value,
+        label: rarity.name,
+        color: rarity.color,
+        enabled: true,
+    }));
+    return _clone(_rarityCatalogOriginal);
+}
+
+async function _loadRarityUsage(items = _rarityCatalogOriginal) {
+    _rarityCatalogUsage = await loadCollection('shop');
+    const idByValue = new Map(items.map(item => [Number(item.value), item.id]));
+    const counts = Object.fromEntries(items.map(item => [item.id, 0]));
+    _rarityCatalogUsage.forEach(article => {
+        const id = idByValue.get(Number(article.rarete));
+        if (id) counts[id] = (counts[id] || 0) + 1;
+    });
+    return counts;
+}
+
+function _remapRarityValue(value, nextById, reassign = []) {
+    const original = _rarityCatalogOriginal.find(item => Number(item.value) === Number(value));
+    if (!original) return Number(value) || 0;
+    const targetId = nextById.has(original.id)
+        ? original.id
+        : catalogReplacementFor(original.id, reassign) || [...nextById.keys()][0];
+    return nextById.get(targetId) || 0;
+}
+
+function _remapEquipmentRarity(equipement = {}, nextById, reassign) {
+    let changed = false;
+    const next = Object.fromEntries(Object.entries(equipement || {}).map(([slot, item]) => {
+        if (!item || typeof item !== 'object') return [slot, item];
+        const rarete = _remapRarityValue(item.rarete, nextById, reassign);
+        if (rarete === (Number(item.rarete) || 0)) return [slot, item];
+        changed = true;
+        return [slot, { ...item, rarete }];
+    }));
+    return { changed, value: changed ? next : equipement };
+}
+
+async function _saveRarityCatalog(draft, { reassign = [] } = {}) {
+    const saved = draft.map((item, index) => ({ ...item, value: index + 1 }));
+    const nextById = new Map(saved.map(item => [item.id, item.value]));
+    const updates = [];
+
+    _rarityCatalogUsage.forEach(article => {
+        const rarete = _remapRarityValue(article.rarete, nextById, reassign);
+        if (rarete === (Number(article.rarete) || 0)) return;
+        article.rarete = rarete;
+        updates.push({ col: 'shop', id: article.id, data: { rarete } });
+    });
+
+    (STATE.characters || []).forEach(character => {
+        let invChanged = false;
+        const inventaire = (character.inventaire || []).map(item => {
+            if (!item || typeof item !== 'object') return item;
+            const rarete = _remapRarityValue(item.rarete, nextById, reassign);
+            if (rarete === (Number(item.rarete) || 0)) return item;
+            invChanged = true;
+            return { ...item, rarete };
+        });
+        const equip = _remapEquipmentRarity(character.equipement, nextById, reassign);
+        let buildsChanged = false;
+        const builds = (character.builds || []).map(build => {
+            const buildEquip = _remapEquipmentRarity(build?.equipement, nextById, reassign);
+            if (!buildEquip.changed) return build;
+            buildsChanged = true;
+            return { ...build, equipement: buildEquip.value };
+        });
+        if (!invChanged && !equip.changed && !buildsChanged) return;
+        const data = {};
+        if (invChanged) { data.inventaire = inventaire; character.inventaire = inventaire; }
+        if (equip.changed) { data.equipement = equip.value; character.equipement = equip.value; }
+        if (buildsChanged) { data.builds = builds; character.builds = builds; }
+        updates.push({ col: 'characters', id: character.id, data });
+    });
+
+    const rarities = saved.map(item => ({ value: item.value, name: item.label.trim(), color: item.color }));
+    await saveRarities(rarities, { relatedUpdates: updates });
+    _rarityCatalogOriginal = _clone(saved);
+    return saved;
 }
 
 export async function openRaritiesAdmin() {
     if (!STATE.isAdmin) return;
-    await loadRarities();
-    const rows = getRarities();
-    openModal('Raretés', `
-      <div class="rar-admin">
-        <p class="sh-admin-section-hint" style="margin-top:0">
-          Ces raretés appartiennent à l'aventure courante. Sans personnalisation, l'aventure utilise les valeurs standards.
-        </p>
-        <div class="rar-admin-list" id="rar-admin-list">
-          ${rows.map(_rarityRowHtml).join('') || '<div class="rar-admin-empty">Aucune rareté définie.</div>'}
-        </div>
-        <div class="sh-admin-footer" style="padding:12px 0 0">
-          <button type="button" class="btn btn-outline btn-sm" data-action="rarityAddRow">＋ Ajouter</button>
-          <div class="sh-admin-footer-spacer"></div>
-          <button type="button" class="btn btn-outline btn-sm" data-action="raritySeedDefaults">Valeurs Le Grand JDR</button>
-          <button type="button" class="btn btn-gold btn-sm" data-action="raritySave">Enregistrer</button>
-        </div>
-      </div>`, { subtitle: 'Noms, ordre et couleurs des raretés', accent: '#c084fc' });
-}
-
-function _rarityRowsFromDom() {
-    return [...document.querySelectorAll('[data-rar-row]')].map((row, idx) => ({
-        value: parseInt(row.querySelector('[data-rar-value]')?.value) || (idx + 1),
-        name: row.querySelector('[data-rar-name]')?.value?.trim() || '',
-        color: row.querySelector('[data-rar-color]')?.value || '#9ca3af',
-    })).filter(r => r.name);
-}
-
-function _rarityRenderRows(rows = []) {
-    const host = document.getElementById('rar-admin-list');
-    if (!host) return;
-    host.innerHTML = rows.length
-        ? rows.map(_rarityRowHtml).join('')
-        : '<div class="rar-admin-empty">Aucune rareté définie.</div>';
+    return openCatalogAdmin({
+        kind: 'rarity', icon: '★', accent: '#c084fc',
+        title: 'Raretés d’objets',
+        sub: 'Boutique, inventaires et objets de cette aventure.',
+        noun: ['rareté', 'raretés'], fem: true,
+        item: ['article', 'articles'], itemFem: false, all: 'Toutes',
+        emoji: false, plural: false, idPrefix: 'rarity_',
+        defaultNote: 'L’ordre définit le niveau : la première rareté vaut 1 étoile.',
+        palette: RARITY_PALETTE,
+        load: _loadRarityCatalog,
+        count: _loadRarityUsage,
+        save: _saveRarityCatalog,
+        reassignInSave: true,
+        rowStatus: (_item, index) => [`Niveau ${index + 1}`, 'default'],
+        sample: () => {
+            const article = _rarityCatalogUsage.find(item => Number(item.rarete) > 0) || _rarityCatalogUsage[0] || {};
+            return {
+                title: article.nom || 'Objet de la boutique',
+                subtitle: [article.type || article.template, article.sousType || article.format].filter(Boolean).join(' · ') || 'Article de l’aventure',
+                meta: article.prix != null ? `${article.prix} or` : 'Prix · Stock · Propriétés',
+            };
+        },
+        onError: notifySaveError,
+    });
 }
 
 registerActions({
   pickRarete: (btn) => pickRarete(btn.dataset.prefix, Number(btn.dataset.val)),
-  rarityAddRow: () => {
-    const rows = _rarityRowsFromDom();
-    const nextValue = rows.reduce((m, r) => Math.max(m, parseInt(r.value) || 0), 0) + 1;
-    _rarityRenderRows([...rows, { value: nextValue, name: '', color: '#9ca3af' }]);
-  },
-  rarityRemoveRow: (btn) => {
-    btn.closest('[data-rar-row]')?.remove();
-    if (!document.querySelector('[data-rar-row]')) _rarityRenderRows([]);
-  },
-  raritySeedDefaults: () => _rarityRenderRows(DEFAULT_RARITIES),
-  raritySave: async () => {
-    try {
-      await saveRarities(_rarityRowsFromDom());
-      closeModalDirect();
-      showNotif('Raretés enregistrées.', 'success');
-    } catch (e) {
-      notifySaveError(e);
-    }
-  },
 });

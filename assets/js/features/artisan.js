@@ -33,11 +33,13 @@ import { characterAvatarHtml } from '../shared/portraits.js';
 // Catégories de fragments : partagées avec la revente (valeur des améliorations).
 import { FRAGMENT_CATEGORIES, getItemFragmentCategory } from '../shared/upgrade-value.js';
 // Reforge (monter la rareté) — gatée Bastion, Option A. Réutilise le mapping craft.
-import { craftCategoryForItem, craftDiscipline } from '../shared/craft-engine.js';
+import { craftCategoryForItem, craftDiscipline, craftRecycleQty } from '../shared/craft-engine.js';
 import { craftRecipeMaterials, loadCraftSettings, getCraftSettings } from '../shared/craft-settings.js';
 import { evaluateReforge, scaleMaterials } from '../shared/reforge.js';
 import { getRarities, loadRarities, RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
-import { getDocData } from '../data/firestore.js';
+import { getDocData, loadCollection } from '../data/firestore.js';
+import { shopItemToInvEntry } from '../shared/inventory-utils.js';
+import { isTraitRecyclable, recyclableTraits, nonRecyclableTraitNames } from '../shared/trait-recycling.js';
 
 export { FRAGMENT_CATEGORIES, getItemFragmentCategory };
 
@@ -910,6 +912,7 @@ function _renderTraitsSection(item, invIndex, c, cat) {
   const s          = getUpgradeSettings();
   const fragments  = c.traitFragments?.[cat] || {};
   const fragNames  = Object.entries(fragments).filter(([, n]) => (parseInt(n) || 0) > 0).map(([name, n]) => ({ name, n }));
+  const replaceableTraits = allTraits.filter(trait => isTraitRecyclable(item, trait));
 
   if (slotCount <= 0) return '';
 
@@ -920,7 +923,10 @@ function _renderTraitsSection(item, invIndex, c, cat) {
   // Chips des traits actuels (base + ajoutés★) — lecture seule (le remplacement
   // a maintenant sa propre rangée d'actions, aussi visible que l'ajout).
   const traitRows = allTraits.length
-    ? allTraits.map((t, k) => `<span class="art-trait-chip${k >= baseTraits.length ? ' art-trait-chip--added' : ''}">${_esc(t)}${k >= baseTraits.length ? ' ★' : ''}</span>`).join('')
+    ? allTraits.map((t, k) => {
+        const locked = !isTraitRecyclable(item, t);
+        return `<span class="art-trait-chip${k >= baseTraits.length ? ' art-trait-chip--added' : ''}${locked ? ' art-trait-chip--locked' : ''}"${locked ? ' title="Trait non recyclable et non remplaçable"' : ''}>${locked ? '<span aria-hidden="true">🔒</span> ' : ''}${_esc(t)}${k >= baseTraits.length ? ' ★' : ''}</span>`;
+      }).join('')
     : '<span class="art-muted" style="font-size:.72rem">Aucun trait posé.</span>';
 
   // ── Ajouter (slot libre) ──
@@ -936,9 +942,9 @@ function _renderTraitsSection(item, invIndex, c, cat) {
 
   // ── Remplacer (même poids visuel que l'ajout) ──
   let owHtml = '';
-  if (allTraits.length && fragNames.length) {
+  if (replaceableTraits.length && fragNames.length) {
     owHtml = `<div class="art-sub"><span class="art-sub-lbl art-sub-lbl--replace">↻ Remplacer un trait</span>
-      <div class="art-act-row">${allTraits.map(t => `<button class="art-act art-act--replace" data-action="_artisanOverwriteStart" data-i="${invIndex}" data-trait="${_esc(t)}" title="Remplacer « ${_esc(t)} » par un fragment (${s.trait.overwriteTrait} PO)">
+      <div class="art-act-row">${replaceableTraits.map(t => `<button class="art-act art-act--replace" data-action="_artisanOverwriteStart" data-i="${invIndex}" data-trait="${_esc(t)}" title="Remplacer « ${_esc(t)} » par un fragment (${s.trait.overwriteTrait} PO)">
         <span class="art-act-lbl">${_esc(t)}</span><span class="art-act-cost">${s.trait.overwriteTrait} PO</span></button>`).join('')}</div>
     </div>`;
   }
@@ -955,14 +961,16 @@ function _renderTraitsSection(item, invIndex, c, cat) {
 function _renderRecycleSection(item, invIndex, cat) {
   const s = getUpgradeSettings();
   const allTraits = _getTraits(item);
-  if (!allTraits.length) return '';
-  const extractInfo = s.trait.extractAllTraits
+  if (!allTraits.length && !craftCategoryForItem(item)) return '';
+  const extractInfo = !allTraits.length
+    ? 'Aucun fragment, mais la part configurée de la recette est rendue.'
+    : s.trait.extractAllTraits
     ? `Tu récupères ${allTraits.length} fragment${allTraits.length > 1 ? 's' : ''}.`
     : (allTraits.length > 1 ? 'Tu choisiras le trait à récupérer (les autres sont perdus).' : 'Tu récupères son trait en fragment.');
   return `<div class="art-wb-sec art-wb-sec--danger">
-    <div class="art-wb-sec-hd">♻️ Recycler en fragments</div>
+    <div class="art-wb-sec-hd">♻️ Démonter</div>
     <div class="art-recycle">
-      <button class="art-act art-act--danger" data-action="_artisanDestroyStart" data-i="${invIndex}">♻️ Recycler <span class="art-act-cost">${s.trait.deconstructCost} PO</span></button>
+      <button class="art-act art-act--danger" data-action="_artisanDestroyStart" data-i="${invIndex}">♻️ Démonter <span class="art-act-cost">${s.trait.deconstructCost} PO</span></button>
       <span class="art-muted" style="font-size:.72rem">Détruit l'objet. ${extractInfo}</span>
     </div>
   </div>`;
@@ -977,17 +985,17 @@ async function _artisanDestroyStart(invIndex) {
 
   const s = getUpgradeSettings();
   const allTraits = _getTraits(item);
-  if (!allTraits.length) return;
-  // Objet « signature » (non recyclable, flag posé par le MJ) → aucun fragment.
-  const locked = !!item.noRecycle;
-  const transferable = locked ? [] : allTraits;
+  // Le verrou est porté par chaque trait : les autres traits du même objet
+  // restent récupérables normalement.
+  const transferable = recyclableTraits(item, allTraits);
+  const lockedTraits = nonRecyclableTraitNames(item);
   const cost = s.trait.deconstructCost || 0;
   const costTxt = STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`;
-  const sigWarn = locked
-    ? `<br><span style="color:#ff8ca7">⭐ Objet signature : ses traits ne sont pas récupérables.</span>`
+  const sigWarn = lockedTraits.length
+    ? `<br><span style="color:#ff8ca7">Traits non recyclables : ${lockedTraits.map(_esc).join(', ')}.</span>`
     : '';
 
-  // Aucun trait transférable (objet signature) → on détruit sans fragment.
+  // Aucun trait transférable → on démonte tout de même pour les matériaux.
   if (!transferable.length) {
     if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Aucun fragment récupérable.${sigWarn}<br>L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
       { title: '♻️ Recycler en fragments', confirmLabel: 'Recycler', danger: true, icon: '♻️' })) return;
@@ -1039,38 +1047,63 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   const s    = getUpgradeSettings();
   const cost = s.trait.deconstructCost || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
-  // Sécurité : un objet signature ne rend jamais de fragment (même en appel direct).
-  if (item.noRecycle) traitsToExtract = [];
+  // Sécurité : un appel direct ne peut jamais extraire un trait verrouillé.
+  traitsToExtract = recyclableTraits(item, traitsToExtract);
 
-  // 1) Supprimer l'item de l'inventaire
+  // 1) Matériaux rendus : même règle que le démontage depuis le VTT.
+  const craftCfg = getCraftSettings();
+  const craftCat = craftCategoryForItem(item);
+  const tier = Math.max(1, Math.min(3, parseInt(item.rarete, 10) || 1));
+  const returned = [];
+  const returnedLog = [];
+  if (craftCat) {
+    const shop = await loadCollection('shop').catch(() => []);
+    const catalog = new Map((shop || []).map(entry => [entry.id, entry]));
+    for (const requirement of craftRecipeMaterials(craftCat, tier, craftCfg)) {
+      const qty = craftRecycleQty(requirement.quantite, craftCfg);
+      const shopItem = catalog.get(requirement.itemId);
+      if (!shopItem || qty <= 0) continue;
+      for (let index = 0; index < qty; index++) returned.push(shopItemToInvEntry(shopItem, { source: 'recyclage' }));
+      returnedLog.push({ shopItem, qty });
+    }
+  }
+
+  // 2) Supprimer l'item de l'inventaire puis ajouter les matériaux récupérés.
   const inv = [...(c.inventaire || [])];
   inv.splice(invIndex, 1);
-  c.inventaire = inv;
+  c.inventaire = inv.concat(returned);
   STORE.activeItemIndex = null;   // l'objet recyclé n'existe plus → établi vide
 
-  // 2) Sync équipement (décale les sourceInvIndex)
+  // 3) Sync équipement (décale les sourceInvIndex)
   const sync = syncEquipmentAfterInventoryMutation(c, [invIndex]);
   c.equipement = sync.equipement;
   c.statsBonus = sync.statsBonus;
 
-  // 3) Ajouter les fragments
+  // 4) Ajouter les fragments
   let frags = c.traitFragments || {};
   traitsToExtract.forEach(t => { frags = _addFragment(frags, cat, t, +1); });
   c.traitFragments = frags;
-  c.inventoryHistory = inventoryHistoryPayload(c, makeInventoryHistoryEntry('delete', item, 1, {
+  const historyEntries = [makeInventoryHistoryEntry('delete', item, 1, {
     actorUid: STATE.user?.uid || '',
     actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
     source: 'Artisan',
     note: traitsToExtract.join(', '),
-  })).inventoryHistory;
+  })];
+  returnedLog.forEach(({ shopItem, qty }) => historyEntries.push(makeInventoryHistoryEntry('add', shopItemToInvEntry(shopItem), qty, {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
+    source: 'Artisan · démontage',
+  })));
+  c.inventoryHistory = inventoryHistoryPayload(c, historyEntries).inventoryHistory;
 
-  // 4) Débit or si applicable
+  // 5) Débit or si applicable
   if (cost > 0) _logExpense(c, `Artisan : destruction de ${item.nom}`, cost);
 
   await _persistChar(c);
+  const materialText = returnedLog.length ? ` · ${returnedLog.map(entry => `${entry.qty}× ${entry.shopItem.nom}`).join(', ')}` : '';
   showNotif(traitsToExtract.length
-    ? `${traitsToExtract.length} fragment(s) ajouté(s) au sac.`
-    : 'Objet recyclé (aucun fragment récupérable).', 'success');
+    ? `${traitsToExtract.length} fragment(s) ajouté(s) au sac${materialText}.`
+    : `Objet démonté${materialText || ' (aucun matériau ni fragment récupérable)'}.`, 'success');
 }
 
 // ── Ajouter un trait (slot libre) ──
@@ -1122,6 +1155,10 @@ function _artisanOverwriteStart(invIndex, oldTraitName) {
   if (!c) return;
   const item = (c.inventaire || [])[invIndex];
   if (!item) return;
+  if (!isTraitRecyclable(item, oldTraitName)) {
+    showNotif(`Le trait « ${oldTraitName} » est verrouillé et ne peut pas être remplacé.`, 'warning');
+    return;
+  }
 
   const cat = getItemFragmentCategory(item);
   const fragments = c.traitFragments?.[cat] || {};
@@ -1159,6 +1196,12 @@ async function _artisanOverwriteConfirm(invIndex, oldTraitName, newFragmentName)
   if (!c) return;
   const item = (c.inventaire || [])[invIndex];
   if (!item) return;
+  // Garde-fou métier : même un appel direct ou une ancienne modale ouverte ne
+  // peut écraser un trait marqué non recyclable.
+  if (!isTraitRecyclable(item, oldTraitName)) {
+    showNotif(`Le trait « ${oldTraitName} » est verrouillé et ne peut pas être remplacé.`, 'warning');
+    return;
+  }
 
   const cat = getItemFragmentCategory(item);
   if (!cat) return;

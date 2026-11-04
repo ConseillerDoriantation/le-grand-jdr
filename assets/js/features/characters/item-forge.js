@@ -24,6 +24,7 @@ import { loadArmorSetSettings, getArmorTypeOptions } from '../../shared/armor-se
 import { syncEquipmentAfterInventoryMutation } from '../../shared/equipment-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { ITEM_STATS } from '../shop-item-stats.js';
+import { cleanNonRecyclableTraits, nonRecyclableTraitNames } from '../../shared/trait-recycling.js';
 
 const FORGE_CATS = [
   { id: 'arme',   label: 'Arme',       icon: '⚔️' },
@@ -62,8 +63,8 @@ function _blankDraft() {
     caBonus: '', pvMaxBonus: '', pmMaxBonus: '', vitesseBonus: '', initiativeBonus: '',
     // objet
     type: '', quantite: 1,
-    // signature MJ : objet non recyclable en fragments (balance craft)
-    noRecycle: false,
+    // Noms exacts des traits qui ne donnent jamais de fragment.
+    nonRecyclableTraits: '',
   };
 }
 
@@ -89,7 +90,7 @@ function _draftFromItem(item = {}) {
   d.slotBijou   = item.slotBijou || '';
   d.type        = item.type || '';
   d.quantite    = 1;
-  d.noRecycle   = !!item.noRecycle;
+  d.nonRecyclableTraits = nonRecyclableTraitNames(item).join(', ');
   ITEM_STATS.forEach(st => { if (item[st.store] != null) d[st.store] = item[st.store]; });
   DERIVED_BONUSES.forEach(([k]) => { if (item[k] != null) d[k] = item[k]; });
   return d;
@@ -154,11 +155,7 @@ function _catBody() {
     _row2(
       _fRow('Nom', _fText('nom', 'Nom de l’objet')),
       _fRow('Rareté', buildRaretePicker('forge', d.rarete)),
-    ) +
-    (STATE.isAdmin
-      ? _fRow('⭐ Non recyclable (signature)',
-          `<input type="checkbox" data-forge-field="noRecycle" ${d.noRecycle ? 'checked' : ''}>`)
-      : ''));
+    ));
 
   if (cat === 'arme') {
     const formatOpts = `<option value="">—</option>` +
@@ -177,6 +174,7 @@ function _catBody() {
         _fRow('Stat de toucher', _statChips('_forgeToucherPick', k => d.toucherStat === k))) +
       _section('Détails',
         _fRow('Traits', _fText('traits', 'Séparés par des virgules')) +
+        (STATE.isAdmin ? _fRow('Traits non recyclables', _fText('nonRecyclableTraits', 'Noms exacts, séparés par des virgules')) : '') +
         _advanced('Bonus de stats', _statBonusGrid()) +
         _advanced('Bonus dérivés', _derivedBonusGrid()) +
         _fRow('Description', _fArea('description')));
@@ -271,11 +269,11 @@ function _buildItem() {
     description: String(d.description || '').trim(),
     source: 'custom',
     createdBy: STATE.user?.uid || '',
-    ...(d.noRecycle ? { noRecycle: true } : {}),
   };
 
   if (cat === 'arme') {
     const stats = (d.degatsStats || []).filter(Boolean);
+    const traits = _parseTraits(d.traits);
     return {
       ...base, template: 'arme',
       format: d.format || '',
@@ -288,7 +286,8 @@ function _buildItem() {
       toucherStat: d.toucherStat || '',
       statAttaque: d.toucherStat || stats[0] || '',
       portee: String(d.portee || '').trim(),
-      traits: _parseTraits(d.traits),
+      traits,
+      nonRecyclableTraits: cleanNonRecyclableTraits(traits, _parseTraits(d.nonRecyclableTraits)),
       ..._pickStatBonuses(d), ..._pickDerivedBonuses(d),
     };
   }

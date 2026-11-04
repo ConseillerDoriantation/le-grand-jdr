@@ -14,13 +14,16 @@ import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { WEAPON_HANDS_OPTIONS, hasWeaponDefaults, normalizeWeaponDefaults, resolveWeaponFamily, weaponHandsLabel } from '../shared/weapon-family.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
 import { DAMAGE_RELATIONS } from '../shared/damage-profile.js';
-import { getShopItemEditableText, shopItemToInvEntry } from '../shared/inventory-utils.js';
+import {
+  getShopItemEditableText, normalizeShopItemForTemplate, SHOP_TEMPLATE_MANAGED_FIELDS,
+  shopItemToInvEntry, syncInventoryEntryFromShop,
+} from '../shared/inventory-utils.js';
 import { sanitizeRichTextHtml } from '../shared/rich-text.js';
 import { bindQuillEditors, getQuillHtml, markQuillSaved, quillEditorHtml } from '../shared/rich-text-quill.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry, inventoryHistoryEntries } from '../shared/inventory-history.js';
-import { openUpgradeSettingsAdmin, loadUpgradeSettings, getUpgradeSettings, hasUpgrades } from '../shared/upgrade-settings.js';
+import { loadUpgradeSettings, getUpgradeSettings, hasUpgrades } from '../shared/upgrade-settings.js';
 import { upgradeResaleBonus } from '../shared/upgrade-value.js';
-import { openCraftSettingsAdmin } from '../shared/craft-settings.js';
+import { openArtisanSettings } from '../shared/artisan-settings.js';
 import { getArmorTypeOptions } from '../shared/armor-set-settings.js';
 import { mountArtisanPage, unmountArtisanPage } from './artisan.js';
 import {
@@ -44,11 +47,13 @@ import { makeSortable } from '../shared/sortable-helper.js';
 import { compareManualOrder, manualOrderValue, mergeVisibleManualOrder, nextManualOrder } from '../shared/manual-order.js';
 import { getVisibleCharacters } from '../shared/character-state.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
-import { compressDataUrl } from '../shared/image-upload.js';
+import { characterBuildsForStorage, patchBuildLocally } from '../shared/character-builds.js';
+import { compressDataUrl, readImageFileAsDataUrl } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { shopAffinityScore, shopCartTotals, shopItemBuyState, shopUpgradeGain } from '../shared/shop-cart.js';
 import { atelierApplyBuild, atelierCompactSlots, atelierGainScore, atelierNetCost } from '../shared/shop-atelier.js';
 import { damageProfileToRelations, parseShopItemQuickEntry, relationsToDamageProfile } from '../shared/shop-item-editor.js';
+import { cleanNonRecyclableTraits, nonRecyclableTraitNames } from '../shared/trait-recycling.js';
 import { getRouteSub, setRouteSub } from '../shared/route.js';
 import {
   equipmentSlotAcceptsItem, getEquipmentItemOptions, getEquipmentSlot,
@@ -144,9 +149,9 @@ function _normalizeShopTemplate(template) {
 }
 
 function _normalizeLegacyShopItem(item = {}) {
-  if (item.template !== 'libre') return item;
+  if (item.template !== 'libre') return normalizeShopItemForTemplate(item);
   const description = item.effet || item.description || '';
-  return { ...item, template: 'classique', effet: description, description };
+  return normalizeShopItemForTemplate({ ...item, template: 'classique', effet: description, description });
 }
 
 async function _persistLegacyShopTemplates(categories = [], items = []) {
@@ -212,6 +217,8 @@ let _shopReadableDraft = null;
 let _shopSousTypes = [];
 let _shopCharactersScope = '';
 let _shopCharactersLoad = null;
+let _shopInventorySyncScope = '';
+let _shopInventorySyncPromise = null;
 // Index local id → texte normalisé : recherches et filtres sans lecture Firestore.
 let _shopSearchText = new Map();
 function _setShopCharId(id = '') {
@@ -409,8 +416,7 @@ function _renderManageMenu() {
       <hr>
       ${opt('openWeaponFmts', '⚔️ Types d’arme', 'Gérer les types d’arme et leurs techniques')}
       ${opt('openRarities', '★ Raretés', 'Gérer les raretés')}
-      ${opt('openUpgradeStg', '⚙️ Améliorations', 'Tarifs et plafonds des améliorations')}
-      ${opt('openCraftStg', '🔨 Réglages du craft', 'Disciplines, compétences et paliers du craft')}
+      ${opt('openArtisanStg', '⚒️ Artisanat', 'Fabrication, amélioration, reforge et démontage')}
       <hr>
       ${opt('openExport', '⬆️ Export / Import', 'Exporter ou importer la boutique')}
     </div>
@@ -419,6 +425,9 @@ function _renderManageMenu() {
 
 export async function renderShop() {
   await Promise.all([loadShopData(), loadShopCharacters()]);
+  // Une seule passe par aventure/session. Elle ne fait aucune lecture et
+  // n'écrit que les personnages qui possèdent encore une copie obsolète.
+  if (STATE.isAdmin) await _syncAllLinkedInventoryCopies();
   // Tarifs d'amélioration : seulement si un objet amélioré peut être repris.
   if ((STATE.characters || []).some(c => Array.isArray(c.inventaire) && c.inventaire.some(hasUpgrades))) await loadUpgradeSettings();
   const routeSection = getRouteSub('shop').split('/')[0];
@@ -3471,6 +3480,10 @@ const _SI_SECTION_DEF = {
 
 let _siEditorState = null;
 let _siImageCropper = null;
+// Valeur indépendante du DOM : le cadreur vit dans une sous-couche de modale et
+// le formulaire est temporairement garé/restauré. La sauvegarde doit toujours
+// privilégier l'image effectivement validée par l'utilisateur.
+let _siPendingImage;
 
 function _siClone(value) {
   try { return structuredClone(value); } catch { return JSON.parse(JSON.stringify(value || {})); }
@@ -3569,12 +3582,10 @@ function _siMetaHtml(item, tplKey) {
   const newUntilMs = _itemNewUntilMs(item);
   const newActive = item ? (newUntilMs > Date.now() || item.isNew === true) : true;
   const flag = (id, title, hint, checked) => `<label class="si-flag${checked ? ' is-on' : ''}"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><i></i><span><b>${title}</b><small>${hint}</small></span></label>`;
-  const equippable = ['arme', 'armure', 'bijou'].includes(tplKey);
   return `<div class="si-meta-grid">
     ${flag('si-masque', 'Masqué aux joueurs', 'Visible uniquement du MJ et récupérable en butin.', !!item?.masque)}
     ${flag('si-new', 'Nouveauté', 'Présent dans le filtre Nouveautés pendant deux semaines.', newActive)}
     ${flag('si-has-recipe', 'Recette d’artisanat', 'Permet la fabrication via l’Artisan.', recipeChk)}
-    ${equippable ? flag('si-norecycle', '⭐ Non recyclable (signature)', 'Ses traits ne donnent aucun fragment au recyclage — reste exclusif à cet objet.', !!item?.noRecycle) : ''}
   </div>`;
 }
 
@@ -3821,9 +3832,13 @@ function _siReadDraftFromDom() {
   draft.masque = !!document.getElementById('si-masque')?.checked; draft.isNew = !!document.getElementById('si-new')?.checked;
   draft.hasRecipe = !!document.getElementById('si-has-recipe')?.checked;
   draft.consommable = !!document.getElementById('si-consommable')?.checked;
-  { const nr = document.getElementById('si-norecycle'); if (nr) draft.noRecycle = !!nr.checked; }
   draft.actions = _shopCollectActions(); draft.damageProfile = _shopCollectDamageProfile() || draft.damageProfile || {};
-  draft.traits = [...document.querySelectorAll('#si-traits-list input')].map(el => el.value.trim()).filter(Boolean);
+  const traitRows = [...document.querySelectorAll('#si-traits-list .si-trait-row')];
+  const traitLocks = _shopTraitLocksGet();
+  draft.traits = traitRows.map(row => row.querySelector('input')?.value.trim()).filter(Boolean);
+  draft.nonRecyclableTraits = cleanNonRecyclableTraits(draft.traits,
+    traitRows.map((row, index) => traitLocks[index] ? row.querySelector('input')?.value.trim() : '').filter(Boolean));
+  delete draft.noRecycle;
   if (document.getElementById('si-skill-chips')) {
     draft.skillBonuses = {};
     document.querySelectorAll('#si-skill-chips .sh-skill-chip').forEach(chip => {
@@ -3923,6 +3938,7 @@ function _siInstallCloseGuard() {
 }
 
 async function openItemModal(itemId, seedItem = null) {
+  _siPendingImage = undefined;
   const catalogItem = seedItem || (itemId ? _items.find(i=>i.id===itemId) : null);
   const storedContent = itemId ? await getDocDataSilent('shopContent', itemId) : null;
   _shopReadableDraft = {
@@ -4212,14 +4228,20 @@ function _buildFieldsHtml(tpl,item) {
     } else if(f.type==='trait_list'){
       const traitsArr = Array.isArray(item?.traits) ? item.traits : (item?.trait ? [item.trait] : []);
       const traitsJson = JSON.stringify(traitsArr).replace(/"/g,'&quot;');
+      const locked = new Set(nonRecyclableTraitNames(item).map(name => _norm(name)));
+      const locksJson = JSON.stringify(traitsArr.map(name => locked.has(_norm(name)))).replace(/"/g,'&quot;');
       html+=`<div class="form-group sh-field-full">
         <label>${f.label}</label>
         <input type="hidden" id="si-traits-data" value="${traitsJson}">
+        <input type="hidden" id="si-trait-locks-data" value="${locksJson}">
         <div id="si-traits-list" class="si-traits-list">
           ${traitsArr.map((t,i)=>`
-          <div class="si-trait-row" data-trait-idx="${i}">
+          <div class="si-trait-row${locked.has(_norm(t)) ? ' is-no-recycle' : ''}" data-trait-idx="${i}">
             <input class="input-field" value="${t.replace(/"/g,'&quot;')}"
               data-sh-action="traitUpdate" data-sh-on="input" data-idx="${i}" placeholder="Trait...">
+            <button type="button" class="si-trait-recycle" data-sh-action="traitRecycle" data-idx="${i}"
+              title="${locked.has(_norm(t)) ? 'Rendre ce trait recyclable' : 'Empêcher la récupération de ce trait'}"
+              aria-label="${locked.has(_norm(t)) ? 'Trait non recyclable' : 'Trait recyclable'}" aria-pressed="${locked.has(_norm(t))}">♻</button>
             <button type="button" data-sh-action="traitRemove" data-idx="${i}" aria-label="Retirer le trait">✕</button>
           </div>`).join('')}
         </div>
@@ -4274,18 +4296,30 @@ function _shopTraitsSet(arr) {
   const hidden = document.getElementById('si-traits-data');
   if (hidden) hidden.value = JSON.stringify(arr);
 }
+function _shopTraitLocksGet() {
+  const hidden = document.getElementById('si-trait-locks-data');
+  try { return JSON.parse(hidden?.value || '[]').map(Boolean); } catch { return []; }
+}
+function _shopTraitLocksSet(arr) {
+  const hidden = document.getElementById('si-trait-locks-data');
+  if (hidden) hidden.value = JSON.stringify(arr.map(Boolean));
+}
 function _shopTraitsRender(arr) {
   const list = document.getElementById('si-traits-list');
   if (!list) return;
+  const locks = _shopTraitLocksGet();
   list.innerHTML = arr.map((t,i)=>`
-    <div class="si-trait-row" data-trait-idx="${i}">
+    <div class="si-trait-row${locks[i] ? ' is-no-recycle' : ''}" data-trait-idx="${i}">
       <input class="input-field" value="${t.replace(/"/g,'&quot;')}"
         data-sh-action="traitUpdate" data-sh-on="input" data-idx="${i}" placeholder="Trait...">
+      <button type="button" class="si-trait-recycle" data-sh-action="traitRecycle" data-idx="${i}"
+        title="${locks[i] ? 'Rendre ce trait recyclable' : 'Empêcher la récupération de ce trait'}"
+        aria-label="${locks[i] ? 'Trait non recyclable' : 'Trait recyclable'}" aria-pressed="${!!locks[i]}">♻</button>
       <button type="button" data-sh-action="traitRemove" data-idx="${i}" aria-label="Retirer le trait">✕</button>
     </div>`).join('');
 }
 function addShopTrait() {
-  const arr = _shopTraitsGet(); arr.push(''); _shopTraitsSet(arr); _shopTraitsRender(arr);
+  const arr = _shopTraitsGet(); const locks = _shopTraitLocksGet(); arr.push(''); locks.push(false); _shopTraitsSet(arr); _shopTraitLocksSet(locks); _shopTraitsRender(arr);
   const list = document.getElementById('si-traits-list');
   const inputs = list?.querySelectorAll('input');
   inputs?.[inputs.length-1]?.focus();
@@ -4294,7 +4328,10 @@ function updateShopTrait(i, val) {
   const arr = _shopTraitsGet(); arr[i] = val; _shopTraitsSet(arr);
 }
 function removeShopTrait(i) {
-  const arr = _shopTraitsGet(); arr.splice(i,1); _shopTraitsSet(arr); _shopTraitsRender(arr);
+  const arr = _shopTraitsGet(); const locks = _shopTraitLocksGet(); arr.splice(i,1); locks.splice(i,1); _shopTraitsSet(arr); _shopTraitLocksSet(locks); _shopTraitsRender(arr);
+}
+function toggleShopTraitRecycling(i) {
+  const locks = _shopTraitLocksGet(); locks[i] = !locks[i]; _shopTraitLocksSet(locks); _shopTraitsRender(_shopTraitsGet());
 }
 
 // ── Gestion dynamique des modificateurs de dégâts ─────────────────────────────
@@ -4378,7 +4415,8 @@ function addShopTraitsFromInput(input) {
   const additions = String(input?.value || '').split(/[,;]+/).map(value => value.trim()).filter(Boolean);
   if (!additions.length) return;
   const arr = [..._shopTraitsGet(), ...additions];
-  _shopTraitsSet(arr); _shopTraitsRender(arr);
+  const locks = [..._shopTraitLocksGet(), ...additions.map(() => false)];
+  _shopTraitsSet(arr); _shopTraitLocksSet(locks); _shopTraitsRender(arr);
   input.value = '';
   _siRefreshLive();
   requestAnimationFrame(() => input.focus({ preventScroll: true }));
@@ -4442,6 +4480,7 @@ function _siDestroyImageCropper() {
 }
 
 function _siApplyCroppedImage(b64, previewId, hiddenId) {
+  _siPendingImage = b64;
   const hidden = document.getElementById(hiddenId);
   if (hidden) hidden.value = b64;
   const preview = document.getElementById(previewId);
@@ -4468,44 +4507,87 @@ async function _siSaveCroppedImage(previewId, hiddenId) {
 }
 
 function _siOpenImageCropper(dataUrl, previewId, hiddenId) {
+  if (!dataUrl) {
+    showNotif('Impossible de charger cette image.', 'error');
+    return;
+  }
   _siReadDraftFromDom();
   _siDestroyImageCropper();
+  const cropW = Math.max(220, Math.min(480, (window.innerWidth || 560) - 64));
+  const cropH = Math.round(cropW * 0.75);
   pushModal('Cadrer l’image', `
-    ${panZoomCropHTML({ idPrefix: 'si-image-crop', viewW: 320, viewH: 240 })}
-    <div style="display:flex;gap:.6rem;justify-content:flex-end;width:320px;max-width:100%;margin:.8rem auto 0">
-      <button type="button" class="btn btn-outline" id="si-image-crop-cancel">Annuler</button>
-      <button type="button" class="btn btn-gold" id="si-image-crop-save">Utiliser cette image</button>
+    <div class="si-image-crop-dialog">
+      <div class="si-image-crop-intro">
+        <strong>Aperçu de l’article</strong>
+        <span>Fais glisser l’image pour la déplacer. Utilise la molette ou le curseur pour zoomer.</span>
+      </div>
+      <div class="si-image-crop-stage">
+        ${panZoomCropHTML({ idPrefix: 'si-image-crop', viewW: cropW, viewH: cropH, hint: false })}
+        <div id="si-image-crop-status" class="si-image-crop-status is-loading" role="status"><i></i><span>Chargement de l’image…</span></div>
+      </div>
+      <div class="si-image-crop-presets" aria-label="Modes de cadrage">
+        <button type="button" id="si-image-crop-contain">Image entière</button>
+        <button type="button" id="si-image-crop-cover">Remplir le cadre</button>
+      </div>
+      <div class="si-image-crop-footer">
+        <small id="si-image-crop-meta">Format final 4:3 · 640 × 480 px</small>
+        <button type="button" class="btn btn-outline" id="si-image-crop-cancel">Annuler</button>
+        <button type="button" class="btn btn-gold" id="si-image-crop-save" disabled>Utiliser cette image</button>
+      </div>
     </div>
   `, null, {
-    subtitle: 'Zoome et déplace l’image dans le cadre 4:3',
+    subtitle: 'L’image sera optimisée automatiquement pour la boutique',
     accent: '#4f8cff',
     onDismiss: _siDestroyImageCropper,
   });
   requestAnimationFrame(() => {
+    const saveBtn = document.getElementById('si-image-crop-save');
+    const status = document.getElementById('si-image-crop-status');
+    const meta = document.getElementById('si-image-crop-meta');
     _siImageCropper = attachPanZoomCrop({
       idPrefix: 'si-image-crop', dataUrl,
-      viewW: 320, viewH: 240, outputW: 640, outputH: 480,
-      constrainCover: true,
+      viewW: cropW, viewH: cropH, outputW: 640, outputH: 480,
+      constrainCover: false,
+      initialFit: 'contain',
+      onReady: ({ width, height }) => {
+        if (status) status.hidden = true;
+        if (meta) meta.textContent = `Source ${width} × ${height} px · sortie 640 × 480 px`;
+        if (saveBtn) saveBtn.disabled = false;
+      },
+      onError: () => {
+        if (status) {
+          status.classList.remove('is-loading');
+          status.classList.add('is-error');
+          status.innerHTML = '<span>Cette image ne peut pas être affichée. Essaie un fichier JPG, PNG ou WebP.</span>';
+        }
+      },
     });
+    document.getElementById('si-image-crop-contain')?.addEventListener('click', () => _siImageCropper?.fitContain?.());
+    document.getElementById('si-image-crop-cover')?.addEventListener('click', () => _siImageCropper?.fitCover?.());
     document.getElementById('si-image-crop-cancel')?.addEventListener('click', popModal, { once: true });
     document.getElementById('si-image-crop-save')?.addEventListener('click', () => _siSaveCroppedImage(previewId, hiddenId), { once: true });
   });
 }
 
-function previewUpload(fileInputId, previewId, hiddenId) {
+async function previewUpload(fileInputId, previewId, hiddenId) {
   const input = document.getElementById(fileInputId);
   const file = input?.files?.[0];
   if (!file) return;
   input.value = '';
-  if (!file.type?.startsWith('image/')) {
+  const imageByType = file.type?.startsWith('image/');
+  const imageByName = /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(file.name || '');
+  if (!imageByType && !imageByName) {
     showNotif('Sélectionne un fichier image.', 'warning');
     return;
   }
-  const reader = new FileReader();
-  reader.addEventListener('load', () => {
-    if (typeof reader.result === 'string') _siOpenImageCropper(reader.result, previewId, hiddenId);
-  }, { once: true });
-  reader.readAsDataURL(file);
+  try {
+    const dataUrl = await readImageFileAsDataUrl(file);
+    if (!dataUrl) throw new Error('Fichier image illisible.');
+    _siOpenImageCropper(dataUrl, previewId, hiddenId);
+  } catch (error) {
+    console.warn('[shop] lecture image impossible', error);
+    showNotif('Impossible de lire cette image. Essaie un fichier JPG, PNG ou WebP.', 'error');
+  }
 }
 
 async function saveShopItem(itemId, { createAnother = false } = {}) {
@@ -4527,11 +4609,15 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
     const sameCategory = item && item.categorieId === catId;
     const categoryItems = _items.filter(entry => entry.id !== itemId && entry.categorieId === catId);
     const existingOrder = manualOrderValue(item);
+    const imageField = document.getElementById('si-img-b64');
+    const selectedImage = _siPendingImage !== undefined
+      ? _siPendingImage
+      : (imageField?.value ?? _siEditorState?.draft?.image ?? item?.image ?? '');
     const data={
       nom,
       categorieId:catId,
       template:tplKey,
-      image:document.getElementById('si-img-b64')?.value||'',
+      image:selectedImage,
       // La rareté appartient à tous les articles, pas seulement aux templates
       // d'équipement. Elle est lue depuis l'identité commune afin que les
       // consommables, composants, livres et objets libres la conservent aussi.
@@ -4591,9 +4677,12 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
         });
         data.skillBonuses = out;
       } else if (f.type === 'trait_list') {
-        const inputs = document.querySelectorAll('#si-traits-list input');
-        const arr = [...inputs].map(inp=>inp.value.trim()).filter(Boolean);
+        const rows = [...document.querySelectorAll('#si-traits-list .si-trait-row')];
+        const locks = _shopTraitLocksGet();
+        const arr = rows.map(row => row.querySelector('input')?.value.trim()).filter(Boolean);
         data.traits = arr;
+        data.nonRecyclableTraits = cleanNonRecyclableTraits(arr,
+          rows.map((row, index) => locks[index] ? row.querySelector('input')?.value.trim() : '').filter(Boolean));
       } else if (f.type === 'textarea') {
         const el = document.getElementById(`si-${f.id}`);
         if (el) data[f.id] = el.value;
@@ -4637,8 +4726,8 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
     data.consommable = !!document.getElementById('si-consommable')?.checked;
     // Masqué aux joueurs (MJ) — confort d'affichage, cf. _visibleItems.
     data.masque = !!document.getElementById('si-masque')?.checked;
-    // Signature MJ (équipables) : objet non recyclable en fragments à l'Artisan.
-    if (document.getElementById('si-norecycle')) data.noRecycle = !!document.getElementById('si-norecycle').checked;
+    // Migration terminée : le verrou est désormais porté par chaque trait.
+    delete data.noRecycle;
 
     // Nouveauté : toggle → fenêtre de 2 semaines (newUntil). On ne ré-arme la
     // fenêtre que si elle n'est pas déjà active (éditer un item en cours de
@@ -4663,8 +4752,32 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
     }
 
     let savedItemId = itemId;
+    let inventorySyncItem = null;
+    if (itemId) {
+      inventorySyncItem = normalizeShopItemForTemplate({ ...item, ...data, id: itemId });
+      // updateDoc fusionne les champs : retire explicitement ceux de l'ancien
+      // type, sinon une potion issue d'une arme garde ses dégâts en mémoire.
+      SHOP_TEMPLATE_MANAGED_FIELDS.forEach(key => {
+        if (item?.[key] !== undefined && inventorySyncItem[key] === undefined) data[key] = deleteField();
+      });
+    }
     if(itemId) await updateInCol('shop',itemId,data);
     else savedItemId = await addToCol('shop',data);
+
+    // `updateInCol` confirme bien l'écriture et patche le cache Firestore, mais
+    // `_items` est une copie normalisée propre à la page. Sans ce patch local,
+    // le rendu suivant réutilisait encore l'ancienne image jusqu'au rechargement
+    // complet de la boutique, donnant l'impression que le changement était perdu.
+    const persistedItem = itemId
+      ? { ...(inventorySyncItem || normalizeShopItemForTemplate({ ...item, ...data })), id: itemId }
+      : { ...normalizeShopItemForTemplate(data), id: savedItemId };
+    // Le texte long vit dans shopContent ; ne jamais conserver un deleteField
+    // ou une ancienne copie lourde dans l'état local du catalogue.
+    delete persistedItem.readableContent;
+    const localIndex = _items.findIndex(entry => entry.id === savedItemId);
+    if (localIndex >= 0) _items[localIndex] = persistedItem;
+    else _items.push(persistedItem);
+    _items.sort(compareManualOrder);
 
     if (hasReadableContent) {
       await saveDoc('shopContent', savedItemId, {
@@ -4676,11 +4789,12 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
       await deleteFromCol('shopContent', savedItemId);
     }
 
-    if (itemId) await _syncCharactersAfterItemUpdate(itemId, data);
+    if (itemId) await _syncCharactersAfterItemUpdate(itemId, inventorySyncItem || { ...data, id: itemId });
 
     markQuillSaved('si-readable-content');
     const nextSeed = createAnother ? { categorieId: catId, template: tplKey } : null;
     if (_siEditorState) { _siEditorState.dirty = false; _siEditorState.saving = false; }
+    _siPendingImage = undefined;
     clearModalCloseGuard(); closeModalDirect(); showNotif('Article enregistré !','success'); renderShop();
     if (nextSeed) await openItemModal('', nextSeed);
   } catch (e) {
@@ -4691,80 +4805,66 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
 
 /**
  * Après modification d'un article boutique :
- * - Met à jour les copies dans les inventaires des personnages (source:'boutique', itemId = itemId)
+ * - Met à jour toutes les copies liées par itemId, quelle que soit leur provenance
  * - Met à jour les slots d'équipement qui référencent cet itemId
  */
 async function _syncCharactersAfterItemUpdate(itemId, newData) {
-  const chars = STATE.characters || [];
-  if (!chars.length) return;
+  return _syncCharactersWithCatalog(new Map([[itemId, { ...newData, id: itemId }]]), { notify: true });
+}
 
-  // Tous les champs présents dans `newData` sont propagés SAUF ceux qui n'ont
-  // pas de sens dans un inventaire (méta boutique). Ce blocklist est aligné avec
-  // celui de `shopItemToInvEntry` (assets/js/shared/inventory-utils.js) pour
-  // garantir la cohérence des 4 paths (achat / butin take / butin add / sync).
-  const SYNC_BLOCKLIST = new Set([
-    'id', 'image', 'dispo', 'recipeMeta', 'prix', 'categorieId', 'newUntil', 'isNew',
-    // Les textes longs restent dans le catalogue et sont lus à la demande par
-    // l'inventaire : ne pas les dupliquer dans chaque document personnage.
-    'readableContent', 'readableTitle', 'hasReadableContent',
-  ]);
-  const SYNC_FIELDS = Object.keys(newData).filter(k => !SYNC_BLOCKLIST.has(k));
-
+async function _syncCharactersWithCatalog(catalogById, { notify = false } = {}) {
   const updates = [];
-
-  chars.forEach(c => {
+  for (const c of STATE.characters || []) {
+    const before = Array.isArray(c.inventaire) ? c.inventaire : [];
     let changed = false;
-    const inv   = Array.isArray(c.inventaire) ? [...c.inventaire] : [];
-    const equip = { ...(c.equipement||{}) };
-
-    inv.forEach((item, i) => {
-      if (item.source === 'boutique' && item.itemId === itemId) {
-        SYNC_FIELDS.forEach(f => {
-          if (newData[f] !== undefined) inv[i] = { ...inv[i], [f]: newData[f] };
-        });
-        if (newData.prix !== undefined) inv[i].prixAchat = parseFloat(newData.prix)||0;
-        changed = true;
-      }
+    const inv = before.map(entry => {
+      const linkedId = entry?.itemId || entry?.shopItemId || '';
+      const catalogItem = linkedId ? catalogById.get(linkedId) : null;
+      if (!catalogItem) return entry;
+      const next = syncInventoryEntryFromShop(entry, catalogItem);
+      if (next !== entry) changed = true;
+      return next;
     });
+    if (!changed) continue;
 
-    Object.entries(equip).forEach(([slot, equipped]) => {
-      if (equipped?.itemId === itemId) {
-        const syncEquip = {};
-        SYNC_FIELDS.forEach(f => { if (newData[f] !== undefined) syncEquip[f] = newData[f]; });
-        if (newData.nom !== undefined) syncEquip.nom = newData.nom;
-        equip[slot] = { ...equipped, ...syncEquip };
-        changed = true;
-      } else if (equipped?.sourceInvIndex !== undefined) {
-        const invItem = inv[equipped.sourceInvIndex];
-        if (invItem?.itemId === itemId) {
-          const syncEquip = {};
-          SYNC_FIELDS.forEach(f => { if (newData[f] !== undefined) syncEquip[f] = newData[f]; });
-          equip[slot] = { ...equipped, ...syncEquip };
-          changed = true;
-        }
-      }
-    });
-
-    if (changed) {
-      // Recalcule statsBonus en fonction du nouvel équipement —
-      // crucial quand le MJ change les stats d'un objet (ex: +Int → +Sa)
-      // pour que les bonus du perso restent en phase avec l'objet équipé.
-      const newStatsBonus = computeEquipStatsBonus(equip);
-      c.inventaire = inv;
-      c.equipement = equip;
-      c.statsBonus = newStatsBonus;
-      updates.push(updateInCol('characters', c.id, {
-        inventaire: inv,
-        equipement: equip,
-        statsBonus: newStatsBonus,
-      }));
-    }
-  });
-
-  if (updates.length > 0) {
-    await Promise.all(updates);
-    showNotif(`🔄 ${updates.length} personnage${updates.length>1?'s':''} mis à jour.`, 'success');
+    // L'équipement est une projection de l'inventaire : il est reconstruit
+    // depuis les exemplaires actualisés, puis ses bonus sont recalculés.
+    const draftChar = { ...c, inventaire: inv };
+    const equipSync = syncEquipmentAfterInventoryMutation(draftChar, []);
+    const payload = {
+      inventaire: inv,
+      equipement: equipSync.equipement,
+      statsBonus: equipSync.statsBonus,
+    };
+    c.inventaire = inv;
+    c.equipement = equipSync.equipement;
+    c.statsBonus = equipSync.statsBonus;
+    patchBuildLocally(c, { equipement: equipSync.equipement, statsBonus: equipSync.statsBonus });
+    payload.builds = characterBuildsForStorage(c);
+    payload.activeBuildId = c.activeBuildId;
+    updates.push(updateInCol('characters', c.id, payload));
   }
+  if (updates.length) {
+    await Promise.all(updates);
+    if (notify) showNotif(`${updates.length} personnage${updates.length > 1 ? 's' : ''} actualisé${updates.length > 1 ? 's' : ''}.`, 'success');
+  }
+  return updates.length;
+}
+
+async function _syncAllLinkedInventoryCopies() {
+  const scope = STATE.adventure?.id || '';
+  if (!scope || _shopInventorySyncScope === scope) return;
+  if (_shopInventorySyncPromise?.scope === scope) return _shopInventorySyncPromise.promise;
+  const promise = _syncCharactersWithCatalog(new Map(_items.map(item => [item.id, item])))
+    .then(count => {
+      _shopInventorySyncScope = scope;
+      if (count) showNotif(`${count} inventaire${count > 1 ? 's' : ''} remis à jour.`, 'success');
+    })
+    .finally(() => {
+      if (_shopInventorySyncPromise?.scope === scope) _shopInventorySyncPromise = null;
+    });
+  _shopInventorySyncPromise = { scope, promise };
+  return promise;
 }
 
 async function deleteShopItem(itemId) {
@@ -5559,8 +5659,7 @@ Object.assign(shHandlers, {
   openItemModal:  (el) => openItemModal(el.dataset.id || ''),
   openWeaponFmts: () => openWeaponFormatsAdmin(),
   openRarities:   () => openRaritiesAdmin(),
-  openUpgradeStg: () => openUpgradeSettingsAdmin(),
-  openCraftStg: () => openCraftSettingsAdmin(),
+  openArtisanStg: () => openArtisanSettings(),
   openExport:     () => openShopExport({
     getCats: () => _cats,
     getItems: () => _items,
@@ -5735,6 +5834,7 @@ Object.assign(shHandlers, {
   // Modal article : traits + degats stats + skills
   traitAdd:       () => { addShopTrait(); _siRefreshLive(); },
   traitUpdate:    (el) => { updateShopTrait(parseInt(el.dataset.idx), el.value); _siRefreshLive(); },
+  traitRecycle:   (el) => { toggleShopTraitRecycling(parseInt(el.dataset.idx)); _siRefreshLive(); },
   traitRemove:    (el) => { removeShopTrait(parseInt(el.dataset.idx)); _siRefreshLive(); },
   degatsAdd:      () => { addShopDegatsStat(); _siRefreshLive(); },
   degatsUpdate:   (el) => { updateShopDegatsStat(parseInt(el.dataset.idx), el.value); _siRefreshLive(); },

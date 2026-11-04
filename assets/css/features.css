@@ -2329,7 +2329,8 @@ body .modal:has(.rka) > #modal-body { height:auto !important; min-height:0 !impo
 .rka-card-badge { display:inline-flex; align-items:center; align-self:flex-start; gap:5px; height:22px; padding:0 8px; border:1px solid color-mix(in srgb,var(--c) 50%,transparent); border-radius:999px; color:var(--text); background:color-mix(in srgb,var(--c) 20%,var(--surface-1)); font-size:10px; font-weight:750; }
 .rka-card.bestiary .rka-card-badge { position:absolute; z-index:1; top:9px; left:9px; }
 .rka-card-body { display:flex; flex-direction:column; gap:4px; padding:11px 13px; }
-.rka-card.achievement .rka-card-body { gap:6px; border-left:3px solid var(--c); }
+.rka-card.achievement .rka-card-body,
+.rka-card.rarity .rka-card-body { gap:6px; border-left:3px solid var(--c); }
 .rka-card-body > b { font-family:var(--font-display,'Cinzel',serif); font-size:13.5px; font-weight:600; }
 .rka-card-body > small { color:var(--text-muted); font-size:10.5px; line-height:1.4; }
 .rka-card-body > small.mono { color:var(--text-dim); font-family:'JetBrains Mono',monospace; font-size:9.5px; }

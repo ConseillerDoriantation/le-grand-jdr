@@ -3776,7 +3776,7 @@ const PAGES = {
       };
     });
 
-    // ── Réglages (13 modales, 5 groupes) ──
+    // ── Réglages (14 modales, 5 groupes) ──
     const settingsGroups = [
       { id: 'fiche', label: 'Fiche de personnage', items: [
         { t: 'Règles de personnage', s: 'Modificateurs, PV, PM, CA, deck', ic: 'sigma', a: '#5bc0eb', fn: 'openCharacterRulesAdmin', mod: 'characters' },
@@ -3798,6 +3798,7 @@ const PAGES = {
         { t: 'Émotes VTT', s: 'Réactions sur la table', ic: 'smile', a: '#22c38e', fn: '_ouvrirGestionEmotes', mod: 'vtt/vtt' },
       ] },
       { id: 'cat', label: 'Catalogues', items: [
+        { t: 'Raretés d’objets', s: 'Noms, ordre et couleurs', ic: 'star', a: '#c084fc', fn: 'openRaritiesAdmin', mod: '../shared/rarity' },
         { t: 'Catégories de hauts-faits', s: 'Galerie, filtres et couleurs', ic: 'trophy', a: '#e8b84b', fn: 'openAchievementCategoriesAdmin', mod: 'achievements', requires: 'achievements' },
         { t: 'Rangs du bestiaire', s: 'Menaces, filtres et couleurs', ic: 'skull', a: '#ff5a7e', fn: 'openBestiaryRanksAdmin', mod: 'bestiary', requires: 'bestiaire' },
       ] },
@@ -4614,13 +4615,14 @@ registerActions({
     const mod = btn.dataset.module;
     // Les modales admin empruntent les styles de leur feature d'origine → on
     // charge la feuille correspondante AVANT d'ouvrir (sinon modale sans style).
-    const cssPage = { 'characters': 'characters', 'histoire': 'histoire', 'vtt/vtt': 'vtt' }[mod];
+    const cssPage = { 'characters': 'characters', 'histoire': 'histoire', 'vtt/vtt': 'vtt', '../shared/rarity': 'shop' }[mod];
     if (cssPage) {
       try { const { _ensureFeatureCss } = await import('../core/navigation.js'); await _ensureFeatureCss(cssPage); } catch {}
     }
     if (window[fn]) { window[fn](); return; }
-    await import(`./${mod}.js`);
+    const loaded = await import(`./${mod}.js`);
     if (window[fn]) { window[fn](); return; }
+    if (typeof loaded?.[fn] === 'function') { loaded[fn](); return; }
     const proxy = document.createElement('button');
     proxy.dataset.action = fn;
     dispatchAction(proxy, new Event('click'));

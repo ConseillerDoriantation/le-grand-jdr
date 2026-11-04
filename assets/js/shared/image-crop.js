@@ -62,15 +62,15 @@ export function panZoomCropHTML({
   const w = viewW ?? viewSize;
   const h = viewH ?? viewSize;
   const hintHtml = hint
-    ? `<p style="font-size:.75rem;color:var(--text-dim);margin-bottom:.5rem;text-align:center">Glisse pour repositionner · Scroll ou slider pour zoomer</p>`
+    ? `<p class="image-crop-hint" style="font-size:.75rem;color:var(--text-dim);margin-bottom:.5rem;text-align:center">Glisse pour repositionner · Scroll ou slider pour zoomer</p>`
     : '';
   return `
     ${hintHtml}
-    <div id="${idPrefix}-zone" style="position:relative;width:${w}px;height:${h}px;margin:0 auto;border-radius:14px;overflow:hidden;background:#111827;cursor:grab;touch-action:none;border:2px solid var(--border-bright)">
+    <div id="${idPrefix}-zone" class="image-crop-zone" style="position:relative;width:${w}px;height:${h}px;margin:0 auto;border-radius:14px;overflow:hidden;background:#111827;cursor:grab;touch-action:none;border:2px solid var(--border-bright)">
       <img id="${idPrefix}-img" alt="" style="position:absolute;transform-origin:0 0;pointer-events:none;display:block;user-select:none;max-width:none;max-height:none">
-      <div style="position:absolute;inset:0;pointer-events:none;border:1px dashed rgba(255,255,255,.15);border-radius:12px"></div>
+      <div class="image-crop-frame" style="position:absolute;inset:0;pointer-events:none;border:1px dashed rgba(255,255,255,.15);border-radius:12px"></div>
     </div>
-    <div style="width:${w}px;margin:.75rem auto 0;max-width:100%">
+    <div class="image-crop-controls" style="width:${w}px;margin:.75rem auto 0;max-width:100%">
       <div style="display:flex;align-items:center;gap:.6rem">
         <span style="font-size:.65rem;color:var(--text-dim)">-</span>
         <input type="range" id="${idPrefix}-zoom" min="0.1" max="4" step="0.01" value="1" style="flex:1;accent-color:var(--gold)">
@@ -91,7 +91,10 @@ export function attachPanZoomCrop({
   jpegQuality = 0.88,
   background = '#111827',
   onChange = null,
+  onReady = null,
+  onError = null,
   constrainCover = false,
+  initialFit = 'cover',
 }) {
   // Résolution des dimensions effectives (viewport + output)
   const vw = viewW ?? viewSize;
@@ -118,6 +121,20 @@ export function attachPanZoomCrop({
     s.oy = cy - (cy - s.oy) * (newScale / s.scale);
     s.scale = newScale;
     clampOffsets();
+  };
+  const fitTo = (mode = 'cover') => {
+    if (!s.naturalW || !s.naturalH) return false;
+    const next = mode === 'contain'
+      ? Math.min(vw / s.naturalW, vh / s.naturalH)
+      : Math.max(vw / s.naturalW, vh / s.naturalH);
+    s.scale = next;
+    s.ox = (vw - s.naturalW * next) / 2;
+    s.oy = (vh - s.naturalH * next) / 2;
+    clampOffsets();
+    slider.value = next;
+    apply();
+    onChange?.();
+    return true;
   };
 
   const h = {
@@ -160,14 +177,21 @@ export function attachPanZoomCrop({
   img.onload = () => {
     s.naturalW = img.naturalWidth; s.naturalH = img.naturalHeight;
     // Initial scale : "cover" du viewport — l'image remplit au minimum la zone
-    const init = Math.max(vw / s.naturalW, vh / s.naturalH);
+    const contain = Math.min(vw / s.naturalW, vh / s.naturalH);
+    const cover = Math.max(vw / s.naturalW, vh / s.naturalH);
+    const init = initialFit === 'contain' && !constrainCover ? contain : cover;
     s.scale = init;
-    slider.min = (constrainCover ? init : Math.min(vw / s.naturalW, vh / s.naturalH) * 0.5).toFixed(3);
-    slider.max = (init * 6).toFixed(3);
+    slider.min = (constrainCover ? cover : contain * 0.5).toFixed(3);
+    slider.max = (cover * 6).toFixed(3);
     slider.value = init;
     s.ox = (vw - s.naturalW * init) / 2;
     s.oy = (vh - s.naturalH * init) / 2;
     apply();
+    onReady?.({ width: s.naturalW, height: s.naturalH });
+  };
+  img.onerror = () => {
+    s.naturalW = 0; s.naturalH = 0;
+    onError?.(new Error('Décodage de l’image impossible.'));
   };
   img.src = dataUrl;
 
@@ -223,6 +247,8 @@ export function attachPanZoomCrop({
       const cover = Math.max(vw / s.naturalW, vh / s.naturalH);
       return cover > 0 ? s.scale / cover : null;
     },
+    fitContain() { return fitTo('contain'); },
+    fitCover() { return fitTo('cover'); },
     // Restaure un cadrage depuis des params précédemment sauvegardés.
     // Attend que l'image soit chargée si elle ne l'est pas encore.
     setCropParams(params) {
@@ -247,7 +273,7 @@ export function attachPanZoomCrop({
         img.onload = () => { if (typeof prev === 'function') prev(); apply2(); };
       }
     },
-    destroy() { unbind.forEach(fn => fn()); },
+    destroy() { img.onload = null; img.onerror = null; unbind.forEach(fn => fn()); },
   };
 }
 
