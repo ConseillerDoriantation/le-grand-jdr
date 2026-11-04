@@ -273,21 +273,18 @@ function _bidButtons(view, cls = '') {
 
 // Bouton « Adjuger » (vendeur ou MJ) : désactivé, avec la raison, si l'objet
 // n'est pas rangé chez le vendeur.
-function _adjudicateButton(view, cls = '', label = 'Adjuger') {
+function _adjudicateButton(view, cls = 'bs-w-go', label = 'Adjuger') {
   if (!view.auction || !view.bid) return '';
   const warn = _availWarn(view);
   return warn
-    ? `<button type="button" class="bs-w-btn bs-w-go ${cls}" disabled title="${_esc(warn)}">${label} · ${_esc(_gold(view.bid.amount))}</button>`
-    : `<button type="button" class="bs-w-btn bs-w-go ${cls}" data-action="_mkAdjudicate" data-id="${_esc(view.id)}" data-amount="${view.bid.amount}" title="Accepter l’offre de ${_esc(view.bid.name)}">${label} · ${_esc(_gold(view.bid.amount))}</button>`;
+    ? `<button type="button" class="bs-w-btn ${cls}" disabled title="${_esc(warn)}">${label} · ${_esc(_gold(view.bid.amount))}</button>`
+    : `<button type="button" class="bs-w-btn ${cls}" data-action="_mkAdjudicate" data-id="${_esc(view.id)}" data-amount="${view.bid.amount}" title="Accepter l’offre de ${_esc(view.bid.name)}">${label} · ${_esc(_gold(view.bid.amount))}</button>`;
 }
 
-// Actions du vendeur. Enchère : il adjuge quand l'offre lui convient, ou la
-// retire (la meilleure offre est remboursée).
+// Actions du vendeur : modifier (prix ; enchère : départ et achat immédiat),
+// retirer, et pour une enchère adjuger quand l'offre lui convient.
 function _sellerButtons(view, cls = '') {
-  if (view.auction) {
-    return `${_adjudicateButton(view, cls)}<button type="button" class="bs-w-btn ${cls}" data-action="_mkWithdraw" data-id="${_esc(view.id)}">Retirer</button>`;
-  }
-  return `<button type="button" class="bs-w-btn ${cls}" data-action="_mkPrice" data-id="${_esc(view.id)}">Modifier le prix</button><button type="button" class="bs-w-btn ${cls}" data-action="_mkWithdraw" data-id="${_esc(view.id)}">Retirer</button>`;
+  return `${_adjudicateButton(view, `bs-w-go ${cls}`)}<button type="button" class="bs-w-btn ${cls}" data-action="_mkPrice" data-id="${_esc(view.id)}">${view.auction ? 'Modifier' : 'Modifier le prix'}</button><button type="button" class="bs-w-btn ${cls}" data-action="_mkWithdraw" data-id="${_esc(view.id)}">Retirer</button>`;
 }
 
 // ══════════════════════════════════════════════
@@ -419,7 +416,7 @@ function _sheetActions(view) {
     hint = 'Il faut un personnage de cette aventure pour acheter.';
   }
   const moderate = !_isMine(view) && STATE.isAdmin
-    ? `${_adjudicateButton(view, 'bs-w-sm', 'Adjuger (MJ)')}<button type="button" class="bs-w-btn bs-w-sm bs-mk-ghost" data-action="_mkWithdraw" data-id="${_esc(view.id)}">${view.auction && view.bid ? 'Annuler l’enchère (MJ)' : 'Retirer (MJ)'}</button>` : '';
+    ? `${_adjudicateButton(view, 'bs-w-sm bs-mk-ghost', 'Adjuger (MJ)')}<button type="button" class="bs-w-btn bs-w-sm bs-mk-ghost" data-action="_mkPrice" data-id="${_esc(view.id)}">Modifier (MJ)</button><button type="button" class="bs-w-btn bs-w-sm bs-mk-ghost" data-action="_mkWithdraw" data-id="${_esc(view.id)}">${view.auction && view.bid ? 'Annuler l’enchère (MJ)' : 'Retirer (MJ)'}</button>` : '';
   return `<footer class="bs-mk-acts">
     <div class="bs-mk-acts-price"><b>${_esc(_gold(_shown(view)))}</b>${view.qty > 1 && !view.auction ? `<small>${_esc(_gold(view.unitPrice))} / u.</small>` : ''}</div>
     ${_auctionLine(view)}
@@ -788,11 +785,13 @@ export async function withdrawMarketListing(id, { confirm = true, deleting = fal
   }
 }
 
+// Prix fixe : une saisie. Enchère : modale départ + achat immédiat.
 async function _editPrice(id) {
   if (MK.busy) return;
   const post = _post(id);
   const view = post ? marketListingView(post) : null;
   if (!view || view.state !== 'open' || !_canManage(view)) return;
+  if (view.auction) { _openAuctionEdit(view); return; }
   const value = await promptModal(`Nouveau prix de <b>${_esc(_lot(view))}</b>, en or :`, {
     title: 'Modifier le prix', default: String(view.price), confirmLabel: 'Enregistrer', required: true,
   }).catch(() => null);
@@ -800,16 +799,60 @@ async function _editPrice(id) {
   const price = normalizeMarketPrice(value);
   if (!price) { showNotif(`Indique un prix entre 1 et ${_gold(MARKET_PRICE_MAX)}.`, 'error'); return; }
   if (price === view.price) return;
+  await _savePrices(id, { price });
+}
+
+function _openAuctionEdit(view) {
+  const field = (label, input, hint) => `<label class="bs-mk-field"><span>${label}</span>
+    <span class="bs-mk-price-in">${input}<b>or</b></span><small>${hint}</small></label>`;
+  const num = (id, value, extra = '') => `<input id="${id}" type="number" min="1" max="${MARKET_PRICE_MAX}" step="1" inputmode="numeric" value="${_esc(value)}"${extra}>`;
+  openModal('⚖ Modifier l’enchère', `<div class="bs-mk-sell">
+    <p class="bs-mk-note">${view.bid ? `Meilleure offre : <b>${_esc(_gold(view.bid.amount))}</b> (${_esc(view.bid.name)}) · ${_bidCount(view)}.` : 'Aucune offre pour l’instant : tout se modifie.'}</p>
+    ${field('Prix de départ', num('bs-mk-edit-price', view.price, view.bid ? ' disabled' : ' data-modal-initial-focus'),
+      view.bid ? 'Des offres ont été faites : le départ ne change plus.' : 'La première offre doit l’atteindre.')}
+    ${field('Achat immédiat <em>facultatif</em>', num('bs-mk-edit-buynow', view.buyNow || '', ` placeholder="—"${view.bid ? ' data-modal-initial-focus' : ''}`),
+      `Doit dépasser ${view.bid ? `la meilleure offre (${_esc(_gold(view.bid.amount))})` : 'le prix de départ'}. Vide = pas d’achat immédiat.`)}
+    <div class="bs-mk-sell-ft">
+      <button type="button" class="bs-w-btn" data-action="close-modal">Annuler</button>
+      <button type="button" class="bs-w-btn bs-w-go" data-action="_mkAuctionSave" data-id="${_esc(view.id)}">Enregistrer</button>
+    </div>
+  </div>`, { subtitle: `${_lot(view)} · vendu par ${view.sellerName}`, accent: '#22c38e' });
+}
+
+// Vérifié d'abord sur la copie locale (la modale reste ouverte pour corriger),
+// puis dans la transaction sur l'annonce fraîche (une offre a pu arriver).
+async function _saveAuctionEdit(id) {
+  if (MK.busy) return;
+  const post = _post(id);
+  if (!post) return;
+  const view = marketListingView(post);
+  const price = view.bid ? view.price : document.getElementById('bs-mk-edit-price')?.value;
+  const buyNow = document.getElementById('bs-mk-edit-buynow')?.value ?? '';
+  try {
+    const local = planMarketPrice({ post, price, buyNow });
+    if (local.price === view.price && local.buyNow === view.buyNow) { closeModalDirect(); return; }
+  } catch (error) {
+    _txError(error, 'Le prix n’a pas été modifié.');
+    return;
+  }
+  if (await _savePrices(id, { price, buyNow })) closeModalDirect();
+}
+
+async function _savePrices(id, { price, buyNow }) {
   MK.busy = true;
   try {
     const plan = await runDocsTransaction([{ col: COL, id }], ([fresh]) => {
-      const result = planMarketPrice({ post: fresh, price, now: Date.now() });
+      const result = planMarketPrice({ post: fresh, price, buyNow, now: Date.now() });
       return { writes: [{ col: COL, id, data: result.postPatch }], result };
     });
     _patchLocalPost(id, plan.postPatch);
-    showNotif(`Nouveau prix : ${_gold(plan.price)}.`, 'success');
+    showNotif(plan.view.auction
+      ? `Enchère mise à jour : départ ${_gold(plan.price)} · ${plan.buyNow ? `achat immédiat ${_gold(plan.buyNow)}` : 'sans achat immédiat'}.`
+      : `Nouveau prix : ${_gold(plan.price)}.`, 'success');
+    return true;
   } catch (error) {
     _txError(error, 'Le prix n’a pas été modifié.');
+    return false;
   } finally {
     MK.busy = false;
     _rerender();
@@ -915,7 +958,8 @@ function _sellHtml() {
 const _SELL_TITLE = '🪙 Mettre en vente au Bastion';
 const _SELL_OPTS = { subtitle: 'L’annonce paraît sur le mur et au Marché', accent: '#22c38e' };
 // Modale de mise en vente encore affichée (repeinte après un chargement async).
-const _sellOpen = () => !!document.querySelector('#modal-overlay.show #modal-body .bs-mk-sell');
+// Repérée à son bouton : la modale « Modifier l'enchère » a la même mise en page.
+const _sellOpen = () => !!document.querySelector('#modal-overlay.show #modal-body #bs-mk-sell-go');
 function _paintSell({ open = false } = {}) {
   if (open) openModal(_SELL_TITLE, _sellHtml(), _SELL_OPTS);
   else updateModalContent(_SELL_TITLE, _sellHtml(), _SELL_OPTS);
@@ -1027,6 +1071,7 @@ registerActions({
   _mkAdjudicate:  (btn) => _adjudicate(btn.dataset.id || '', btn.dataset.amount),
   _mkWithdraw:    (btn) => withdrawMarketListing(btn.dataset.id || ''),
   _mkPrice:       (btn) => _editPrice(btn.dataset.id || ''),
+  _mkAuctionSave: (btn) => _saveAuctionEdit(btn.dataset.id || ''),
   _mkOpenSell:    (btn) => openMarketSellModal({ fromComposer: btn?.dataset?.from === 'composer' }),
   _mkSellChar:    (el) => { if (MK.sell) { MK.sell = { ...MK.sell, charId: el.value, key: '', qty: 1 }; _paintSell(); void _loadOwnPosts(el.value); } },
   _mkSellItem:    (btn) => { if (MK.sell) { MK.sell.key = btn.dataset.key || ''; MK.sell.qty = 1; _paintSell(); } },

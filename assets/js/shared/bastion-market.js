@@ -324,15 +324,30 @@ export function planMarketWithdraw({ post, seller, bidder, now = Date.now(), dat
   };
 }
 
-export function planMarketPrice({ post, price, now = Date.now() } = {}) {
+// Nouveau prix d'une vente ouverte. Enchère : le départ ne change plus après
+// une offre ; l'achat immédiat (`buyNow` : '' = aucun, undefined = inchangé)
+// doit dépasser le départ et la meilleure offre.
+export function planMarketPrice({ post, price, buyNow, now = Date.now() } = {}) {
   const view = _assertOpen(post, {
     sold: () => 'Déjà vendu : le prix ne peut plus changer.',
     withdrawn: () => 'Cette vente est retirée.',
   });
-  if (view.auction) throw new MarketError('auction', 'Le prix d’une enchère ne se modifie pas.');
   const amount = normalizeMarketPrice(price);
   if (!amount) throw new MarketError('price', `Indique un prix entre 1 et ${_gold(MARKET_PRICE_MAX)}.`);
-  return { view, price: amount, postPatch: { listing: { ...post.listing, price: amount }, updatedAt: now } };
+  if (!view.auction) return { view, price: amount, postPatch: { listing: { ...post.listing, price: amount }, updatedAt: now } };
+  if (view.bid && amount !== view.price) throw new MarketError('bids', 'Des offres ont été faites : le prix de départ ne change plus.');
+  const raw = String((buyNow === undefined ? view.buyNow : buyNow) ?? '').trim();
+  const none = raw === '' || Number(raw) === 0;
+  const instant = none ? 0 : normalizeMarketPrice(raw);
+  if (!none && !instant) throw new MarketError('price', `Indique un achat immédiat entre 1 et ${_gold(MARKET_PRICE_MAX)}, ou laisse vide.`);
+  const floor = view.bid ? view.bid.amount : amount;
+  if (instant && instant <= floor) {
+    throw new MarketError('buyNow', `L’achat immédiat doit dépasser ${view.bid ? 'la meilleure offre' : 'le prix de départ'} (${_gold(floor)}).`);
+  }
+  const listing = { ...post.listing, price: amount };
+  if (instant) listing.buyNow = instant;
+  else delete listing.buyNow;
+  return { view, price: amount, buyNow: instant, postPatch: { listing, updatedAt: now } };
 }
 
 // Remboursement de la meilleure offre (or bloqué rendu à son auteur).
