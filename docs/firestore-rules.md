@@ -356,12 +356,13 @@ function canUseCharacterResourceViaToken(adventureId, charId, tokenId) {
            )
          );
 }
-// ── Vente d'objets sur le mur du Bastion ─────────────────────────────────
-// Une vente = une annonce `offre` de bastionAnnonces portant `listing` : les
-// objets EN DÉPÔT (déjà retirés de l'inventaire du vendeur), le prix et, une
-// fois vendue, l'acheteur. Le statut EST l'état de la vente : active = en vente,
-// resolved = vendue, cancelled = retirée (objet rendu). L'or et l'objet passent
-// par la clause « Don entre membres » de characters, dans la MÊME transaction.
+// ── Marché du Bastion ───────────────────────────────────────────────────
+// Une vente = une annonce `offre` de bastionAnnonces portant `listing` : l'objet
+// (copie d'affichage), le prix et, une fois vendue, l'acheteur. L'objet reste
+// dans l'inventaire du vendeur jusqu'à l'achat (v2 ; les ventes v1 l'avaient mis
+// en dépôt). Le statut EST l'état de la vente : active = en vente, resolved =
+// vendue, cancelled = retirée. À l'achat, l'objet et l'or passent par la clause
+// « Don entre membres » de characters, dans la MÊME transaction.
 function isMarketListing(data) {
   return data.get('type', '') == 'offre' && data.get('listing', null) is map;
 }
@@ -379,20 +380,41 @@ function marketCreateAllowed(data) {
     data.listing.get('items', []) is list &&
     data.listing.get('items', []).size() >= 1 &&
     data.listing.get('items', []).size() <= 50 &&
-    data.listing.get('buyerUid', '') == ''
+    data.listing.get('buyerUid', '') == '' &&
+    (data.listing.get('mode', 'fixed') != 'auction' || (
+      data.listing.get('bid', null) == null &&
+      data.listing.get('bidCount', 0) == 0
+    ))
   );
 }
-// Auteur : texte libre ; dans `listing`, seul le prix change, et seulement tant
-// que la vente est ouverte. Le statut ne va que de « en vente » à « retirée » :
-// rouvrir une vente close dupliquerait l'objet déjà rendu ou déjà vendu. Une
-// annonce ordinaire ne peut pas devenir une vente après coup (pas de dépôt).
+// Enchère : le départ ne change plus après une offre ; l'achat immédiat,
+// facultatif, dépasse le départ et la meilleure offre.
+function marketAuctionPricesAllowed(before, after) {
+  return (after.get('price', 0) == before.get('price', 0) || before.get('bid', null) == null) &&
+         (!('buyNow' in after) || (
+           after.buyNow is int &&
+           after.buyNow > after.get('price', 0) &&
+           after.buyNow <= 1000000 &&
+           (before.get('bid', null) == null || after.buyNow > before.bid.get('amount', 0))
+         ));
+}
+// Auteur : texte libre ; dans `listing`, seuls le prix (et, pour une enchère,
+// l'achat immédiat) changent, et seulement tant que la vente est ouverte. Le
+// statut ne va que de « en vente » à « retirée » (l'offre d'une enchère est
+// alors remboursée dans la même transaction) : rouvrir une vente close
+// dupliquerait l'objet déjà vendu (ou rendu en v1). Une annonce ordinaire ne
+// peut pas devenir une vente après coup.
 function marketAuthorUpdateAllowed(before, after) {
   return (!isMarketListing(before) && after.get('listing', null) == before.get('listing', null)) || (
     isMarketListing(before) &&
     isMarketListing(after) &&
-    after.listing.diff(before.listing).affectedKeys().hasOnly(['price']) &&
+    after.listing.diff(before.listing).affectedKeys().hasOnly(['price', 'buyNow']) &&
     marketPriceValid(after.listing) &&
-    (after.listing.get('price', 0) == before.listing.get('price', 0) || before.get('status', 'active') == 'active') &&
+    (after.listing.diff(before.listing).affectedKeys().size() == 0 || (
+      before.get('status', 'active') == 'active' && (
+        (before.listing.get('mode', 'fixed') == 'auction' && marketAuctionPricesAllowed(before.listing, after.listing)) ||
+        (before.listing.get('mode', 'fixed') != 'auction' && !after.listing.diff(before.listing).affectedKeys().hasAny(['buyNow']))
+      ))) &&
     (after.get('status', 'active') == before.get('status', 'active') ||
       (before.get('status', 'active') == 'active' && after.get('status', '') == 'cancelled'))
   );
@@ -408,7 +430,48 @@ function marketPurchaseAllowed(before, after) {
          isMarketListing(after) &&
          after.listing.diff(before.listing).affectedKeys()
            .hasOnly(['buyerUid', 'buyerCharId', 'buyerName', 'soldAt']) &&
-         after.listing.get('buyerUid', '') == request.auth.uid;
+         after.listing.get('buyerUid', '') == request.auth.uid &&
+         (before.listing.get('mode', 'fixed') != 'auction' || (
+           before.listing.get('buyNow', 0) is int &&
+           before.listing.get('buyNow', 0) > 0
+         ));
+}
+// Enchère (sans durée) : un membre (pas l'auteur) pose une offre à son nom,
+// plus haute que la précédente et au moins égale au départ. Seuls bid et
+// bidCount changent.
+function marketBidAllowed(adventureId, before, after) {
+  return isMarketListing(before) &&
+         before.listing.get('mode', 'fixed') == 'auction' &&
+         before.get('status', 'active') == 'active' &&
+         before.get('uid', '') != request.auth.uid &&
+         after.diff(before).affectedKeys().hasOnly(['listing', 'updatedAt']) &&
+         isMarketListing(after) &&
+         after.listing.diff(before.listing).affectedKeys().hasOnly(['bid', 'bidCount']) &&
+         after.listing.get('bid', null) is map &&
+         after.listing.bid.get('uid', '') == request.auth.uid &&
+         canControlAdventureCharacter(adventureId, after.listing.bid.get('charId', '')) &&
+         after.listing.bid.get('amount', 0) is int &&
+         after.listing.bid.amount >= before.listing.price &&
+         after.listing.bid.amount <= 1000000 &&
+         (before.listing.get('bid', null) == null || after.listing.bid.amount > before.listing.bid.amount) &&
+         after.listing.get('bidCount', 0) == before.listing.get('bidCount', 0) + 1;
+}
+// Adjudication : le vendeur (auteur) accepte la meilleure offre quand il le
+// décide ; l'annonce passe « vendue » au nom du meilleur enchérisseur. L'objet
+// et l'or passent par la clause « Don entre membres », dans la même transaction.
+function marketAdjudicateAllowed(before, after) {
+  return isMarketListing(before) &&
+         before.listing.get('mode', 'fixed') == 'auction' &&
+         before.get('status', 'active') == 'active' &&
+         before.get('uid', '') == request.auth.uid &&
+         before.listing.get('bid', null) is map &&
+         after.diff(before).affectedKeys().hasOnly(['status', 'listing', 'updatedAt']) &&
+         after.get('status', '') == 'resolved' &&
+         isMarketListing(after) &&
+         after.listing.diff(before.listing).affectedKeys()
+           .hasOnly(['buyerUid', 'buyerCharId', 'buyerName', 'soldAt']) &&
+         after.listing.get('buyerUid', '') == before.listing.bid.get('uid', '') &&
+         after.listing.get('buyerCharId', '') == before.listing.bid.get('charId', '');
 }
 // ── Collections LEGACY top-level — ADMIN ONLY ───────────────────────────
 // Toutes les données « métier » sont désormais scopées par aventure
@@ -644,7 +707,8 @@ match /adventures/{adventureId} {
         marketCreateAllowed(request.resource.data)
       )
     );
-    // Vente d'objet : prix (auteur) et achat (tout membre) passent ici.
+    // Marché : prix (auteur) et achat (tout membre) passent ici. Requête des
+    // ventes ouvertes = deux égalités (type + status), sans index composite.
     allow update: if inAdventure(adventureId) && (
       (id == 'main' && isAdvAdmin(adventureId)) ||
       isAdvAdmin(adventureId) ||
@@ -657,7 +721,9 @@ match /adventures/{adventureId} {
            && marketAuthorUpdateAllowed(resource.data, request.resource.data)) ||
       request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['reactions', 'commentCount', 'updatedAt']) ||
-      marketPurchaseAllowed(resource.data, request.resource.data)
+      marketPurchaseAllowed(resource.data, request.resource.data) ||
+      marketBidAllowed(adventureId, resource.data, request.resource.data) ||
+      marketAdjudicateAllowed(resource.data, request.resource.data)
     );
     allow delete: if inAdventure(adventureId) && (
       isAdvAdmin(adventureId) || resource.data.get('uid', '') == request.auth.uid
@@ -753,7 +819,7 @@ match /adventures/{adventureId} {
       isCharacterUidSelfRepair(resource.data, request.resource.data) ||
       isCharacterUidSameEmailRelink(adventureId, resource.data, request.resource.data) ||
       // Don entre membres : le destinataire recoit l'objet et sa trace dans
-      // l'historique au sein du meme batch atomique. La vente d'objets du Bastion s'en
+      // l'historique au sein du meme batch atomique. Le Marché du Bastion s'en
       // sert aussi : l'acheteur crédite le vendeur (`compte`) dans sa transaction.
       request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['inventaire', 'inventoryHistory', 'compte']) ||
