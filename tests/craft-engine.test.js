@@ -165,7 +165,7 @@ test('traits piochables : armure fusionne les slots, arme isolée', () => {
 });
 
 test('buildCraftedItem : socle + nom + rareté + trait + nature, sans méta boutique', () => {
-  const base = { id: 'shop_xyz', nom: 'Épée (base)', degats: '1d8', typeArme: 'Épée', prix: 100, dispo: true, traits: ['ignoré'] };
+  const base = { id: 'shop_xyz', nom: 'Épée (base)', degats: '1d8', typeArme: 'Épée', prix: 100, dispo: true, traits: ['ignoré'], nonRecyclableTraits: ['ignoré'], noRecycle: true };
   const item = buildCraftedItem(base, { name: 'Lame de l’Aube', nature: 'magique', rarete: 'rare', trait: { nom: 'Perce-armure' }, author: 'u1' });
   assert.equal(item.nom, 'Lame de l’Aube');
   assert.equal(item.rarete, 'rare');
@@ -177,6 +177,8 @@ test('buildCraftedItem : socle + nom + rareté + trait + nature, sans méta bout
   assert.equal(item.id, undefined);                  // pas d'id boutique
   assert.equal(item.prix, undefined);
   assert.equal(item.dispo, undefined);
+  assert.equal(item.noRecycle, undefined);
+  assert.equal(item.nonRecyclableTraits, undefined);
   // Nom par défaut si vide + trait sous forme de chaîne accepté.
   const i2 = buildCraftedItem({ nom: 'X' }, { trait: 'Aiguisé' });
   assert.deepEqual(i2.traits, ['Aiguisé']);
@@ -190,6 +192,11 @@ test('resolveCraftAttempt : matériaux manquants → bloqué', () => {
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'materials');
   assert.equal(r.missing[0].manque, 6);
+});
+
+test('resolveCraftAttempt : bloque un palier au-delà de la limite de fabrication', () => {
+  const result = resolveCraftAttempt({ tier: 3, config: { maxTier: 2 }, inventory: [], requirements: [] });
+  assert.deepEqual(result, { ok: false, reason: 'tier', maxTier: 2 });
 });
 
 test('resolveCraftAttempt : réussite → objet, échec → remboursement (0 par défaut)', () => {

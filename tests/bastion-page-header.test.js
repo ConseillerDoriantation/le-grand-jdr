@@ -20,3 +20,12 @@ test('le bandeau conserve les actions, le personnage actif et les onglets du Bas
   assert.match(bastionStyles, /\.bs-page-top\s*\{[^}]*border-bottom:[^;}]+var\(--border-strong\)/s);
   assert.match(bastionStyles, /\.bs-page-stats\s*\{[^}]*margin-left:\s*auto/s);
 });
+
+test('le bandeau du Bastion utilise des icônes SVG monochromes sans emoji décoratif', () => {
+  assert.match(bastionSource, /function _bsIcon\(/);
+  assert.match(bastionSource, /\['salles', 'rooms', 'Salles'\]/);
+  assert.match(bastionSource, /\$\{_bsIcon\('edit'\)\}Identité du Bastion/);
+  assert.doesNotMatch(bastionSource, /\['salles', '🧱'/);
+  assert.doesNotMatch(bastionSource, /<button data-action="_bastionEditIdentite">✏/);
+  assert.match(bastionStyles, /\.bs-page-icon\s*\{[^}]*color:\s*currentColor/s);
+});

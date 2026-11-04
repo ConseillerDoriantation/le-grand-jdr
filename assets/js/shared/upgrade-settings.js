@@ -3,7 +3,7 @@
 // Firestore : world/upgrade_settings
 //
 // Stocke les tarifs, plafonds et options du système d'amélioration
-// gérés depuis la console MJ (boutique → ⚙️ Améliorations).
+// gérés depuis la console MJ (boutique → Artisanat → Améliorer).
 // ══════════════════════════════════════════════
 
 import { getDocData, saveDoc } from '../data/firestore.js';
@@ -79,6 +79,14 @@ export const DEFAULT_UPGRADE_SETTINGS = {
   // Revente d'un objet amélioré : + X % du tarif ACTUEL des améliorations qu'il
   // porte (cf. upgrade-value.js). ex : 0.2 = 20 %. 0 = améliorations perdues.
   refundUpgradeRatio: 0,
+  // Métadonnées d'interface de la modale Artisanat. Les tarifs calculés restent
+  // toujours persistés dans weapon/amulet/ring pour les consommateurs métier.
+  pricing: {
+    '1H': { mode: 'manuel', base: 150, mult: 2 },
+    '2H': { mode: 'manuel', base: 250, mult: 2 },
+    amulet: { mode: 'manuel', base: 200, mult: 2 },
+    ring: { mode: 'manuel', base: 250, mult: 1 },
+  },
 }
 
 // ── Fusion défensive : préserve les défauts pour tout champ manquant ─────
@@ -105,6 +113,12 @@ function _mergeDefaults(stored = {}) {
     },
     reforge: mergeReforge(stored.reforge),
     refundUpgradeRatio: stored.refundUpgradeRatio ?? d.refundUpgradeRatio,
+    pricing: {
+      '1H': { ...d.pricing['1H'], ...(stored.pricing?.['1H'] || {}) },
+      '2H': { ...d.pricing['2H'], ...(stored.pricing?.['2H'] || {}) },
+      amulet: { ...d.pricing.amulet, ...(stored.pricing?.amulet || {}) },
+      ring: { ...d.pricing.ring, ...(stored.pricing?.ring || {}) },
+    },
   };
 }
 
@@ -179,11 +193,10 @@ export function hasUpgrades(item = {}) {
 // ══════════════════════════════════════════════
 
 export async function openUpgradeSettingsAdmin() {
-  await Promise.all([loadUpgradeSettings(), loadRarities().catch(() => null)]);
-  // Catalogue de salles pour les sélecteurs reforge (bastion/main = session-live).
-  try { const b = await getDocData('bastion', 'main'); _roomCatalog = Array.isArray(b?.roomCatalog) ? b.roomCatalog : []; }
-  catch { _roomCatalog = []; }
-  _renderUpgradeSettingsModal();
+  // Le chargement du catalogue a migré dans artisan-settings.js :
+  // getDocData('bastion', 'main') reste session-live et n'ajoute pas de listener.
+  const { openArtisanSettings } = await import('./artisan-settings.js');
+  return openArtisanSettings('ameliorer');
 }
 
 function _renderUpgradeSettingsModal() {

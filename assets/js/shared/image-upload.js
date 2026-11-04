@@ -13,7 +13,7 @@
 // ── Upload pur ───────────────────────────────────────────────────────────────
 
 export function readImageFileAsDataUrl(file) {
-  if (!file?.type?.startsWith('image/')) return Promise.resolve(null);
+  if (!file || (file.type && !file.type.startsWith('image/'))) return Promise.resolve(null);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => resolve(e.target.result);

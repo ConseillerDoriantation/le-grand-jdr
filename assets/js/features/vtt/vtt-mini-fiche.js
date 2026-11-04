@@ -25,6 +25,7 @@ import { loadCollection, getDocData } from '../../data/firestore.js'; // lecture
 // ── Craft génératif (« Forger ») ─────────────────────────────────────────────
 import { craftCategoryFor, craftCategoryForItem, itemCraftSignals, craftDiscipline, craftDD, craftRecycleQty, resolveCraftAttempt, countInventoryItem } from '../../shared/craft-engine.js';
 import { loadCraftSettings, getCraftSettings, craftRecipeMaterials } from '../../shared/craft-settings.js';
+import { loadUpgradeSettings, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import { loadRarities, _rareteLabel } from '../../shared/rarity.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
 import { normalizeWeaponDefaults } from '../../shared/weapon-family.js';
@@ -32,6 +33,7 @@ import { normalizeDiceSkills, DICE_SKILLS_DEFAULT } from '../../shared/dice-skil
 import { getArmorTypeOptions } from '../../shared/armor-set-settings.js';
 import { shopItemToInvEntry, getInventoryItemImage } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
+import { recyclableTraits } from '../../shared/trait-recycling.js';
 import { bumpSkill } from '../../shared/stats.js';
 import { _chrRef, _logCol } from './vtt-refs.js'; // refs Firestore perso + log VTT (leaf)
 import { _STAT_COLOR, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js'; // constantes pures (leaf)
@@ -787,8 +789,11 @@ async function _vttMsRecycle(charId, uid, invIndex) {
   if (!cat) { showNotif('Cet objet ne peut pas être démonté.', 'info'); return; }
 
   await _msEnsureShop();
-  try { await loadCraftSettings(); } catch {}
+  try { await Promise.all([loadCraftSettings(), loadUpgradeSettings()]); } catch {}
   const cfg = getCraftSettings();
+  const upgradeCfg = getUpgradeSettings();
+  const cost = Math.max(0, Number(upgradeCfg.trait?.deconstructCost) || 0);
+  if (cost > calcOr(c)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
   const tier = Math.max(1, Math.min(3, parseInt(item.rarete) || 1));
 
   // 1) Matériaux rendus = fraction de la recette du palier (rareté de l'objet).
@@ -808,7 +813,8 @@ async function _vttMsRecycle(charId, uid, invIndex) {
   const slot = sig.kind === 'armure' ? (item.slotArmure || '')
              : sig.kind === 'bijou'  ? (item.slotBijou  || '')
              : 'arme';
-  const traits = Array.isArray(item.traits) ? item.traits.filter(Boolean).map(String) : [];
+  const itemTraits = recyclableTraits(item, _getTraits(item).filter(Boolean).map(String));
+  const traits = upgradeCfg.trait?.extractAllTraits ? itemTraits : itemTraits.slice(0, 1);
   const gainFrags = !!(slot && traits.length);
 
   if (!returnedLog.length && !gainFrags) {
@@ -821,6 +827,7 @@ async function _vttMsRecycle(charId, uid, invIndex) {
   const prevBonus = { ...(c.statsBonus || {}) };
   const prevHist  = Array.isArray(c.inventoryHistory) ? [...c.inventoryHistory] : c.inventoryHistory;
   const prevFrags = c.traitFragments ? JSON.parse(JSON.stringify(c.traitFragments)) : undefined;
+  const prevCompte = c.compte ? JSON.parse(JSON.stringify(c.compte)) : undefined;
 
   const frags = c.traitFragments ? JSON.parse(JSON.stringify(c.traitFragments)) : {};
   if (gainFrags) {
@@ -840,14 +847,20 @@ async function _vttMsRecycle(charId, uid, invIndex) {
 
   c.equipement = sync.equipement; c.statsBonus = sync.statsBonus;
   c.traitFragments = frags; c.inventoryHistory = historyPatch.inventoryHistory;
+  if (cost > 0) {
+    const compte = { recettes: [], depenses: [], ...(c.compte || {}) };
+    c.compte = { ...compte, depenses: [...(compte.depenses || []), {
+      date: new Date().toISOString().slice(0, 10), libelle: `Démontage : ${item.nom || 'objet'}`, montant: cost,
+    }] };
+  }
   _msPop = null;
   _renderMiniSheet(uid);
   try {
-    await updateDoc(_chrRef(charId), { inventaire: newInv, equipement: sync.equipement, statsBonus: sync.statsBonus, traitFragments: frags, ...historyPatch });
+    await updateDoc(_chrRef(charId), { inventaire: newInv, equipement: sync.equipement, statsBonus: sync.statsBonus, traitFragments: frags, compte: c.compte || { recettes: [], depenses: [] }, ...historyPatch });
   } catch (e) {
     console.error('[vtt] recycle', e);
     c.inventaire = prevInv; c.equipement = prevEquip; c.statsBonus = prevBonus;
-    c.traitFragments = prevFrags; c.inventoryHistory = prevHist;
+    c.traitFragments = prevFrags; c.inventoryHistory = prevHist; c.compte = prevCompte;
     _renderMiniSheet(uid); showNotif('Erreur démontage', 'error'); return;
   }
 
@@ -856,9 +869,9 @@ async function _vttMsRecycle(charId, uid, invIndex) {
   showNotif(`🔧 ${item.nom || 'Objet'} démonté → ${matTxt}${fragTxt}`, 'success', { action: { label: 'Annuler', onClick: async () => {
     const cc = VS.characters[charId]; if (!cc) return;
     cc.inventaire = prevInv; cc.equipement = prevEquip; cc.statsBonus = prevBonus;
-    cc.traitFragments = prevFrags; cc.inventoryHistory = prevHist;
+    cc.traitFragments = prevFrags; cc.inventoryHistory = prevHist; cc.compte = prevCompte;
     _renderMiniSheet(uid);
-    updateDoc(_chrRef(charId), { inventaire: prevInv, equipement: prevEquip, statsBonus: prevBonus, traitFragments: prevFrags ?? {}, ...(prevHist !== undefined ? { inventoryHistory: prevHist } : {}) })
+    updateDoc(_chrRef(charId), { inventaire: prevInv, equipement: prevEquip, statsBonus: prevBonus, traitFragments: prevFrags ?? {}, compte: prevCompte ?? { recettes: [], depenses: [] }, ...(prevHist !== undefined ? { inventoryHistory: prevHist } : {}) })
       .catch(err => { console.error('[vtt] undo recycle', err); showNotif('Restauration impossible', 'error'); });
   } } });
 }
@@ -1833,7 +1846,7 @@ function _forgeTraitPool() {
   };
   const names = new Set();
   for (const it of (_forgeData?.shop || [])) {
-    if (match(it)) (Array.isArray(it.traits) ? it.traits : []).forEach(t => { if (t) names.add(String(t)); });
+    if (match(it)) recyclableTraits(it).forEach(t => { if (t) names.add(String(t)); });
   }
   return [...names].sort((a, b) => a.localeCompare(b, 'fr'));
 }
@@ -1892,6 +1905,8 @@ function _renderForge() {
   const { charId } = _forgeCtx || {};
   const c = VS.characters[charId]; if (!c) { _forgeOpen = false; return; }
   if (!_forgeData) { openModal('🔨 Forger un équipement', loadingHtml('Chargement du forgeron…', { compact: true })); return; }
+  const maxCraftTier = Math.max(1, Math.min(3, parseInt(getCraftSettings().maxTier, 10) || 3));
+  if (_forge.tier > maxCraftTier) _forge.tier = maxCraftTier;
 
   const cat = _forgeCategory();
   const base = _forgeBase();
@@ -1937,7 +1952,7 @@ function _renderForge() {
   const traitLock = _forge.tier >= 2 ? `<div class="vtt-forge-meta">🔒 Palier ${'★'.repeat(_forge.tier)} : seuls les traits <b>débloqués</b> (recyclage/loot) sont disponibles.</div>` : '';
   const matHtml = matRows.length
     ? matRows.map(m => `<span class="vtt-ms-craft-ingr">${_esc(m.name)}<b class="${m.ok ? 'ok' : 'ko'}">${m.have}/${m.need}</b></span>`).join('')
-    : `<span class="vtt-forge-warn">Aucun matériau lié pour « ${cat || '?'} » ${_rareteLabel(_forge.tier)} — à définir dans Réglages du craft.</span>`;
+    : `<span class="vtt-forge-warn">Aucun matériau lié pour « ${cat || '?'} » ${_rareteLabel(_forge.tier)} — à définir dans Artisanat › Fabriquer.</span>`;
   const baseSum = _forgeBaseSummary(base);
 
   openModal('🔨 Forger un équipement', `
@@ -1946,7 +1961,7 @@ function _renderForge() {
       ${kindSeg}
       ${specific}
       <label class="vtt-forge-row"><span>Palier</span><select id="forge-tier">
-        ${[1, 2, 3].map(t => opt(String(t), String(_forge.tier), `${'★'.repeat(t)} — ${_rareteLabel(t) || t}`)).join('')}
+        ${[1, 2, 3].filter(t => t <= maxCraftTier).map(t => opt(String(t), String(_forge.tier), `${'★'.repeat(t)} — ${_rareteLabel(t) || t}`)).join('')}
       </select></label>
       ${cat ? `<div class="vtt-forge-meta">Catégorie : <b>${cat}</b> · Discipline : <b>${comp.disc || '—'}</b> · Jet : d20 + ${_esc(comp.label || '—')} vs DD <b>${dd}</b></div>` : ''}
       ${baseSum ? `<div class="vtt-forge-base">Base : ${baseSum}</div>` : ''}
@@ -1992,11 +2007,13 @@ async function _forgeRun() {
   const { charId, uid } = _forgeCtx || {};
   if (!_msCanEdit(uid)) return;
   const c = VS.characters[charId]; if (!c) return;
+  const maxCraftTier = Math.max(1, Math.min(3, parseInt(getCraftSettings().maxTier, 10) || 3));
+  if (_forge.tier > maxCraftTier) { showNotif(`La fabrication est limitée à ${'★'.repeat(maxCraftTier)}. Utilise la reforge pour aller plus loin.`, 'error'); return; }
   const base = _forgeBase(); if (!base) { showNotif('Choisis un type.', 'info'); return; }
   const nameEl = document.getElementById('forge-name'); if (nameEl) _forge.name = nameEl.value;
   if (!_forge.traitName) { showNotif('Choisis un trait.', 'info'); return; }
   const requirements = _forgeRequirements();
-  if (!requirements.length) { showNotif('Aucun matériau lié pour cette catégorie/palier (Réglages du craft).', 'error'); return; }
+  if (!requirements.length) { showNotif('Aucun matériau lié pour cette catégorie/palier (Artisanat › Fabriquer).', 'error'); return; }
 
   // 1) Entrées à consommer, par itemId (convention 1 entrée = 1 unité).
   const oldInv = [...(c.inventaire || [])];

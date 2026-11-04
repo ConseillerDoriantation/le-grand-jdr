@@ -114,10 +114,52 @@ export function getInventoryReadableDocument(item = {}, catalogItem = null) {
 //   categorieId est conservé.
 // Tout le reste de l'item est conservé tel quel via spread.
 // ══════════════════════════════════════════════════════════════════════════════
-const _DEEP_CLONE_FIELDS = ['traits', 'degatsStats', 'actions'];
+const _DEEP_CLONE_FIELDS = ['traits', 'nonRecyclableTraits', 'degatsStats', 'actions'];
+
+const _SHOP_EQUIP_COMMON_FIELDS = [
+  'for', 'fo', 'dex', 'in', 'sa', 'co', 'ch',
+  'pvMaxBonus', 'pmMaxBonus', 'vitesseBonus', 'initiativeBonus', 'caBonus',
+  'skillBonuses', 'traits', 'nonRecyclableTraits', 'damageProfile', 'noRecycle', 'stats',
+];
+const _SHOP_TEMPLATE_FIELDS = {
+  arme: [
+    ..._SHOP_EQUIP_COMMON_FIELDS,
+    'format', 'formatId', 'sousType', 'nature', 'mains', 'degats', 'degatsStats',
+    'degatsStat', 'toucherStat', 'toucher', 'portee', 'statAttaque',
+  ],
+  armure: [..._SHOP_EQUIP_COMMON_FIELDS, 'slotArmure', 'typeArmure', 'ca'],
+  bijou: [..._SHOP_EQUIP_COMMON_FIELDS, 'slotBijou'],
+  classique: ['type', 'effet', 'description'],
+};
+
+// Champs dont la présence dépend du type d'article. Exporté pour que
+// l'éditeur retire aussi les anciennes valeurs du document boutique.
+export const SHOP_TEMPLATE_MANAGED_FIELDS = [...new Set(Object.values(_SHOP_TEMPLATE_FIELDS).flat())];
+
+function _shopTemplateOf(item = {}) {
+  if (item.template === 'libre') return 'classique';
+  if (_SHOP_TEMPLATE_FIELDS[item.template]) return item.template;
+  // Compatibilité avec les anciens catalogues sans champ `template`.
+  if (item.slotArmure || item.typeArmure || (item.ca !== undefined && item.ca !== '')) return 'armure';
+  if (item.slotBijou) return 'bijou';
+  if (item.degats || item.toucher || item.toucherStat || item.format || item.mains) return 'arme';
+  return 'classique';
+}
+
+/** Retire les champs d'un ancien type (ex. dégâts d'une arme devenue potion). */
+export function normalizeShopItemForTemplate(item = {}) {
+  const template = _shopTemplateOf(item);
+  const allowed = new Set(_SHOP_TEMPLATE_FIELDS[template] || _SHOP_TEMPLATE_FIELDS.classique);
+  const normalized = { ...item, template };
+  SHOP_TEMPLATE_MANAGED_FIELDS.forEach(key => {
+    if (!allowed.has(key)) delete normalized[key];
+  });
+  return normalized;
+}
 
 export function shopItemToInvEntry(item, opts = {}) {
   if (!item || typeof item !== 'object') return null;
+  item = normalizeShopItemForTemplate(item);
   const source     = opts.source     ?? 'boutique';
   const template   = opts.template   ?? item.template   ?? 'classique';
   const prixAchat  = opts.prixAchat  ?? item.prix       ?? item.prixAchat  ?? 0;
@@ -132,6 +174,10 @@ export function shopItemToInvEntry(item, opts = {}) {
   delete entry.dispo;     // stock boutique, sans rapport
   delete entry.recipeMeta;
   delete entry.prix;      // remplacé par prixAchat
+  delete entry.ordre;
+  delete entry.newUntil;
+  delete entry.isNew;
+  delete entry.masque;
   delete entry.readableContent; // contenu potentiellement long : source unique catalogue
   delete entry.readableTitle;
 
@@ -151,4 +197,43 @@ export function shopItemToInvEntry(item, opts = {}) {
   entry.prixVente = parseFloat(prixVente) || 0;
 
   return entry;
+}
+
+const _SHOP_INVENTORY_FIELDS = new Set([
+  ...SHOP_TEMPLATE_MANAGED_FIELDS,
+  'nom', 'categorieId', 'template', 'rarete', 'actions', 'consommable', 'masque',
+  'prixAchat', 'prixVente', 'hasReadableContent', 'image', 'imageUrl', 'illustration',
+  'ordre', 'newUntil', 'isNew', 'dispo', 'recipeMeta',
+]);
+
+function _stableInventoryValue(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(_stableInventoryValue).join(',')}]`;
+  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${_stableInventoryValue(value[key])}`).join(',')}}`;
+}
+
+/**
+ * Actualise une copie d'inventaire depuis son article source sans toucher aux
+ * données propres à l'exemplaire (note, améliorations, quantité, provenance…).
+ */
+export function syncInventoryEntryFromShop(entry = {}, shopItem = {}) {
+  const linkedId = entry.itemId || entry.shopItemId || '';
+  const catalogId = shopItem.id || shopItem.itemId || '';
+  if (!linkedId || linkedId !== catalogId) return entry;
+
+  const fresh = shopItemToInvEntry(shopItem, {
+    source: entry.source || 'boutique',
+    prixAchat: shopItem.prix ?? entry.prixAchat ?? 0,
+    prixVente: shopItem.prixVente,
+  });
+  if (!fresh) return entry;
+
+  const next = { ...entry };
+  _SHOP_INVENTORY_FIELDS.forEach(key => delete next[key]);
+  Object.assign(next, fresh, {
+    itemId: linkedId,
+    source: entry.source || fresh.source,
+  });
+  delete next.shopItemId;
+  return _stableInventoryValue(next) === _stableInventoryValue(entry) ? entry : next;
 }

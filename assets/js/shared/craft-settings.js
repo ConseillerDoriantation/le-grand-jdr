@@ -44,6 +44,7 @@ const OBJ_CATEGORIES = [
 function _merge(stored = {}) {
   const d = DEFAULT_CRAFT_CONFIG;
   return {
+    maxTier:               Math.max(1, Math.min(3, parseInt(stored.maxTier ?? d.maxTier, 10) || 3)),
     categorieDiscipline:  { ...d.categorieDiscipline,  ...(stored.categorieDiscipline  || {}) },
     disciplineCompetence: { ...d.disciplineCompetence, ...(stored.disciplineCompetence || {}) },
     ddParPalier:          { ...d.ddParPalier,          ...(stored.ddParPalier          || {}) },
@@ -90,14 +91,8 @@ async function _loadSkills() {
 // ADMIN — modale de réglage
 // ══════════════════════════════════════════════
 export async function openCraftSettingsAdmin() {
-  await loadCraftSettings();
-  await _loadSkills();
-  try {
-    _shopItems = (await loadCollection('shop') || [])
-      .filter(it => it && it.nom)
-      .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr'));
-  } catch { _shopItems = []; }
-  _renderModal();
+  const { openArtisanSettings } = await import('./artisan-settings.js');
+  return openArtisanSettings('fabriquer');
 }
 
 function _itemOptions(selected) {

@@ -2360,11 +2360,33 @@ async function _bastionQuickInvest(slug, amount) {
 // RENDU
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Onglets (coquille de page, construite comme l'Agenda) ────────────────────
+const _BS_ICONS = {
+  rooms: '<path d="M3 13.5V5.8L8 2.5l5 3.3v7.7M5.5 13.5V8h5v5.5M2 13.5h12"/>',
+  wall: '<path d="M3 11.5h2.2l6.3 2V2.5l-6.3 2H3zM5.2 11.5l1 2.2M13.5 5.2v5.6"/>',
+  market: '<path d="M2.5 6.5h11M3.5 6.5v6h9v-6M2.5 6.5l1.2-3h8.6l1.2 3M6 9.2h4"/>',
+  chest: '<path d="M2.5 6h11v7h-11zM2 3.5h12V6H2zM6.5 8.5h3v2h-3z"/>',
+  next: '<path d="M5 3.2 10 8l-5 4.8M10.5 3.2v9.6"/>',
+  undo: '<path d="M5.5 5H2.8V2.3M3 5a5.2 5.2 0 1 1-.2 5"/>',
+  edit: '<path d="m3 11.8.4-2.7L10.8 1.7l2.5 2.5-7.4 7.4zM8.8 3.7l2.5 2.5M2.5 13.5h11"/>',
+  building: '<path d="M2.5 13.5h11M3.5 13.5v-8h4v8M8.5 13.5v-11h4v11M5 7.5h1M5 10h1M10 5h1M10 7.5h1M10 10h1"/>',
+  users: '<path d="M5.5 7a2.2 2.2 0 1 0 0-4.4A2.2 2.2 0 0 0 5.5 7ZM1.8 13.2c.3-2.5 1.6-4 3.7-4s3.4 1.5 3.7 4M10.2 7a1.8 1.8 0 1 0 0-3.6M10.5 9.2c2 0 3.1 1.3 3.3 3.4"/>',
+  quest: '<path d="M4 2.5h8v11H4zM6.2 5.2h3.6M6.2 7.8h3.6M6.2 10.4h2.2"/>',
+  preview: '<path d="M1.8 8s2.2-3.5 6.2-3.5S14.2 8 14.2 8 12 11.5 8 11.5 1.8 8 1.8 8ZM8 9.8A1.8 1.8 0 1 0 8 6.2a1.8 1.8 0 0 0 0 3.6Z"/>',
+  history: '<path d="M3 5V2.5M3 5h2.5M3.2 5A5.5 5.5 0 1 1 2.5 9M8 4.8V8l2.2 1.4"/>',
+  export: '<path d="M8 2.2v7M5.2 5 8 2.2 10.8 5M3 8.5v4.8h10V8.5"/>',
+  plus: '<path d="M8 3v10M3 8h10"/>',
+  minus: '<path d="M3 8h10"/>',
+};
+
+function _bsIcon(name, className = '') {
+  return `<svg class="bs-page-icon${className ? ` ${className}` : ''}" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round">${_BS_ICONS[name] || _BS_ICONS.rooms}</svg>`;
+}
+
 const _BS_TABS = [
-  ['salles', '🧱', 'Salles'],
-  ['mur',    '📣', 'Mur'],
-  ['marche', '🪙', 'Marché'],
-  ['coffre', '📦', 'Coffre'],
+  ['salles', 'rooms', 'Salles'],
+  ['mur',    'wall', 'Mur'],
+  ['marche', 'market', 'Marché'],
+  ['coffre', 'chest', 'Coffre'],
 ];
 const _BS_TAB_KEY = 'bs-tab';
 
@@ -2456,20 +2478,20 @@ function _renderHeader(b) {
   const histoCount = (b.historique || []).filter(entry => !_ADMIN_HISTO_TYPES.has(entry.type)).length;
   const menuItems = isMj
     ? [
-        `<button data-action="_bastionAdvanceWeek">▶ Passer la période</button>`,
-        b._undoSnapshot ? `<button data-action="_bastionUndoWeek">↩ Annuler la période</button>` : '',
+        `<button data-action="_bastionAdvanceWeek">${_bsIcon('next')}Passer la période</button>`,
+        b._undoSnapshot ? `<button data-action="_bastionUndoWeek">${_bsIcon('undo')}Annuler la période</button>` : '',
         `<hr class="bs-menu-sep">`,
-        `<button data-action="_bastionEditIdentite">✏️ Identité du Bastion</button>`,
-        `<button data-action="_bastionOpenCatalogEditor">🏛 Éditer les salles</button>`,
-        `<button data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` (${b.personnel.length})` : ''}</button>`,
-        `<button data-action="_bastionOpenQuestEditor">📋 Quêtes du Bastion</button>`,
-        `<button data-action="_bastionOpenPreview">🔮 Prévisualiser la période</button>`,
-        `<button data-action="_bastionOpenHistory">📜 Historique${histoCount ? ` (${histoCount})` : ''}</button>`,
-        `<button data-action="_bastionExportJSON">💾 Exporter (JSON)</button>`,
+        `<button data-action="_bastionEditIdentite">${_bsIcon('edit')}Identité du Bastion</button>`,
+        `<button data-action="_bastionOpenCatalogEditor">${_bsIcon('building')}Éditer les salles</button>`,
+        `<button data-action="_bastionOpenPersonnel">${_bsIcon('users')}Personnel${b.personnel?.length ? ` (${b.personnel.length})` : ''}</button>`,
+        `<button data-action="_bastionOpenQuestEditor">${_bsIcon('quest')}Quêtes du Bastion</button>`,
+        `<button data-action="_bastionOpenPreview">${_bsIcon('preview')}Prévisualiser la période</button>`,
+        `<button data-action="_bastionOpenHistory">${_bsIcon('history')}Historique${histoCount ? ` (${histoCount})` : ''}</button>`,
+        `<button data-action="_bastionExportJSON">${_bsIcon('export')}Exporter (JSON)</button>`,
       ]
     : [
-        `<button data-action="_bastionOpenPersonnel">👥 Personnel${b.personnel?.length ? ` (${b.personnel.length})` : ''}</button>`,
-        `<button data-action="_bastionOpenHistory">📜 Historique${histoCount ? ` (${histoCount})` : ''}</button>`,
+        `<button data-action="_bastionOpenPersonnel">${_bsIcon('users')}Personnel${b.personnel?.length ? ` (${b.personnel.length})` : ''}</button>`,
+        `<button data-action="_bastionOpenHistory">${_bsIcon('history')}Historique${histoCount ? ` (${histoCount})` : ''}</button>`,
       ];
 
   return `
@@ -2487,8 +2509,8 @@ function _renderHeader(b) {
           </div>
           <div class="bs-page-actions">
             ${hasChar ? `
-              <button class="bs-page-btn is-primary" data-action="_bastionOpenTransfer" data-dir="deposit">＋ Verser</button>
-              ${bastionOr > 0 ? `<button class="bs-page-btn" data-action="_bastionOpenTransfer" data-dir="withdraw">− Retirer</button>` : ''}
+              <button class="bs-page-btn is-primary" data-action="_bastionOpenTransfer" data-dir="deposit">${_bsIcon('plus')}Verser</button>
+              ${bastionOr > 0 ? `<button class="bs-page-btn" data-action="_bastionOpenTransfer" data-dir="withdraw">${_bsIcon('minus')}Retirer</button>` : ''}
             ` : ''}
             <details class="ag-menu bs-menu">
               <summary class="ag-menu-btn" title="Actions du Bastion" aria-label="Actions du Bastion">⋯</summary>
@@ -2497,11 +2519,11 @@ function _renderHeader(b) {
           </div>
         </div>
         <nav class="ag-tabs bs-tabs" aria-label="Sections du Bastion">
-          ${_BS_TABS.map(([k, ic, lbl]) => {
+          ${_BS_TABS.map(([k, icon, lbl]) => {
             const on = k === activeTab;
             const badge = k === 'mur' && unread > 0 ? `<span class="bs-tab-badge">${unread}</span>` : '';
             return `<button class="ag-tab${on ? ' is-on' : ''}" data-action="_bastionSetTab" data-tab="${k}" data-nav-page="bastion" data-nav-sub="${k}" aria-pressed="${on}">
-              <span aria-hidden="true">${ic}</span> ${lbl}
+              ${_bsIcon(icon)}<span>${lbl}</span>
               <span class="ag-tab-cnt">${tabCounts[k]}</span>${badge}
             </button>`;
           }).join('')}

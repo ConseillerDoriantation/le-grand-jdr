@@ -2877,6 +2877,13 @@
   gap: 7px;
   flex: 0 0 auto;
 }
+.bs-page-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: currentColor;
+}
 .bs-page-btn {
   display: inline-flex;
   align-items: center;
@@ -2963,6 +2970,29 @@
 
 .bs-page-top .bs-tabs {
   min-width: 0;
+}
+.bs-page-top .bs-tabs .ag-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bs-page-top .bs-tabs .bs-page-icon {
+  width: 15px;
+  height: 15px;
+  opacity: .76;
+}
+.bs-page-top .bs-tabs .ag-tab.is-on .bs-page-icon {
+  opacity: 1;
+}
+.bs-page-top .ag-menu-pop button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bs-page-top .ag-menu-pop .bs-page-icon {
+  width: 13px;
+  height: 13px;
+  color: var(--text-dim);
 }
 
 .bs-page-body {

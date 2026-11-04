@@ -38,20 +38,26 @@ test('une chaîne de suppressions se résout vers le dernier remplacement', () =
   assert.equal(catalogReplacementFor('classique', changes), '');
 });
 
-test('les deux catalogues utilisent le module partagé et des écritures groupées', async () => {
+test('les trois catalogues utilisent le module partagé et des écritures groupées', async () => {
   const root = new URL('../', import.meta.url);
-  const [achievements, bestiary, shared, css] = await Promise.all([
+  const [achievements, bestiary, rarity, shared, css] = await Promise.all([
     readFile(new URL('assets/js/features/achievements.js', root), 'utf8'),
     readFile(new URL('assets/js/features/bestiary.js', root), 'utf8'),
+    readFile(new URL('assets/js/shared/rarity.js', root), 'utf8'),
     readFile(new URL('assets/js/shared/catalog-admin.js', root), 'utf8'),
     readFile(new URL('assets/css/features.css', root), 'utf8'),
   ]);
   assert.match(achievements, /openCatalogAdmin\(/);
   assert.match(bestiary, /openCatalogAdmin\(/);
+  assert.match(rarity, /openCatalogAdmin\(/);
+  assert.match(rarity, /kind: 'rarity'/);
+  assert.match(rarity, /reassignInSave: true/);
+  assert.match(rarity, /batchSaveInCol/);
   assert.match(achievements, /batchUpdateInCol/);
   assert.match(bestiary, /batchUpdateInCol/);
   assert.match(shared, /setModalCloseGuard/);
   assert.match(shared, /makeSortable/);
+  assert.match(shared, /config\.kind === 'rarity'/);
   assert.match(css, /\.rka-body\s*\{[^}]*340px/s);
   assert.match(css, /\.rka\s*\{[^}]*height:min\(720px/s);
 });

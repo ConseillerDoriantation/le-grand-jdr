@@ -14,8 +14,9 @@ export const DEFAULT_REFORGE = {
   disciplineRoom: { forge: 'forge', confection: 'atelier_confection', orfevre: 'atelier_orfevre' },
   // Rareté cible → niveau de salle requis (I/II/III). 5★ = salle maxée.
   roomLevelForRarity: { 2: 1, 3: 1, 4: 2, 5: 3 },
-  // Rareté cible → coût en or (doux par défaut : les matériaux sont le vrai sink).
-  goldForRarity: { 2: 0, 3: 50, 4: 100, 5: 150 },
+  // Rareté cible → coût en or. Calibré pour des matériaux achetables librement
+  // (illimités en boutique) : l'or reste un vrai frein sur le haut de gamme.
+  goldForRarity: { 2: 0, 3: 150, 4: 400, 5: 800 },
   // % de la recette de craft consommé par une reforge (dial indépendant du craft).
   // 100 = recette complète ; 50 = moitié ; 0 = aucun matériau (reforge or seul).
   materialPercent: 50,

@@ -85,9 +85,11 @@ test('mergeReforge préserve les défauts pour les champs absents', () => {
   assert.deepEqual(m.disciplineRoom, DEFAULT_REFORGE.disciplineRoom);
 });
 
-test('défauts doux : or 0/50/100/150 et matériaux à 50 %', () => {
+test('défauts : or 0/150/400/800 (matériaux illimités) et matériaux à 50 %', () => {
   assert.equal(DEFAULT_REFORGE.goldForRarity[2], 0);
-  assert.equal(DEFAULT_REFORGE.goldForRarity[5], 150);
+  assert.equal(DEFAULT_REFORGE.goldForRarity[3], 150);
+  assert.equal(DEFAULT_REFORGE.goldForRarity[4], 400);
+  assert.equal(DEFAULT_REFORGE.goldForRarity[5], 800);
   assert.equal(DEFAULT_REFORGE.materialPercent, 50);
 });
 

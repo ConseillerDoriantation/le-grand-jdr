@@ -38,6 +38,8 @@ function _fieldStatus(item, index) {
   const errors = catalogItemErrors(_state.draft, item);
   if (errors.includes('name')) return ['Nom requis', 'error'];
   if (errors.includes('duplicate')) return ['Nom déjà pris', 'error'];
+  const custom = _state.config.rowStatus?.(item, index);
+  if (Array.isArray(custom)) return custom;
   if (index === 0) return ['Par défaut', 'default'];
   return ['', ''];
 }
@@ -124,6 +126,10 @@ function _mainHtml() {
 function _sampleHtml(item) {
   const config = _state.config;
   const sample = config.sample?.() || {};
+  if (config.kind === 'rarity') {
+    const level = Math.max(1, _state.draft.indexOf(item) + 1);
+    return `<div class="rka-card rarity" style="--c:${_esc(item.color)}"><div class="rka-card-body"><span class="rka-card-badge">${'★'.repeat(level)} ${_esc(item.label || '…')}</span><b>${_esc(sample.title || 'Objet de la boutique')}</b><small>${_esc(sample.subtitle || 'Type d’objet · Catégorie')}</small><small class="mono">${_esc(sample.meta || 'Prix · Stock · Propriétés')}</small></div></div>`;
+  }
   if (config.kind === 'bestiary') {
     const portrait = sample.image
       ? `<img src="${_esc(sample.image)}" alt="" loading="lazy">`
@@ -141,10 +147,13 @@ function _previewHtml() {
   const filterLabel = item => config.plural ? (item.plural || catalogAutoPlural(item.label)) : item.label;
   const filters = _state.draft.map(item => `<button type="button" class="rka-filter${item.id === current.id ? ' on' : ''}" style="--c:${_esc(item.color)}" data-action="_rkaSelect" data-id="${_esc(item.id)}">${config.emoji ? `${_esc(item.emoji)} ` : '<i></i>'}${_esc(filterLabel(item) || '…')} <em>${_state.counts[item.id] || 0}</em></button>`).join('');
   const picker = _state.draft.map((item, index) => `<button type="button" class="rka-picker${item.id === current.id ? ' on' : ''}" style="--c:${_esc(item.color)}" data-action="_rkaSelect" data-id="${_esc(item.id)}">${config.emoji ? `${_esc(item.emoji)} ` : ''}${_esc(item.label || '…')}${index === 0 ? '<sup>défaut</sup>' : ''}</button>`).join('');
-  return `<h3>Aperçu joueur</h3><p>Tel qu’affiché dans ${config.kind === 'bestiary' ? 'le bestiaire' : 'la galerie des hauts-faits'}. Clique sur un filtre pour le sélectionner.</p>
+  const context = config.kind === 'bestiary' ? 'le bestiaire' : config.kind === 'rarity' ? 'la boutique et les inventaires' : 'la galerie des hauts-faits';
+  const cardLabel = config.kind === 'bestiary' ? 'Carte' : config.kind === 'rarity' ? 'Article' : 'Carte';
+  const pickerLabel = config.kind === 'bestiary' ? 'Fiche créature' : config.kind === 'rarity' ? 'Sélecteur de rareté' : 'Création d’un haut-fait';
+  return `<h3>Aperçu joueur</h3><p>Tel qu’affiché dans ${context}. Clique sur un filtre pour le sélectionner.</p>
     <section><span class="rka-label">Filtres</span><div class="rka-filters"><span class="rka-filter all">${_esc(config.all)} <em>${total}</em></span>${filters}</div></section>
-    <section><span class="rka-label">Carte</span>${_sampleHtml(current)}</section>
-    <section><span class="rka-label">${config.kind === 'bestiary' ? 'Fiche créature' : 'Création d’un haut-fait'}</span><div class="rka-pickers">${picker}</div></section>`;
+    <section><span class="rka-label">${cardLabel}</span>${_sampleHtml(current)}</section>
+    <section><span class="rka-label">${pickerLabel}</span><div class="rka-pickers">${picker}</div></section>`;
 }
 
 function _footerHtml() {
@@ -237,8 +246,9 @@ async function _save() {
   _state.saving = true;
   _renderFooter();
   try {
-    const saved = await _state.config.save(_clone(_state.draft));
-    if (_state.reassign.length) await _state.config.reassign?.(_clone(_state.reassign));
+    const changes = _clone(_state.reassign);
+    const saved = await _state.config.save(_clone(_state.draft), { reassign: changes });
+    if (changes.length && !_state.config.reassignInSave) await _state.config.reassign?.(changes);
     _state.saved = _clone(saved || _state.draft);
     _state.draft = _clone(_state.saved);
     _state.reassign = [];

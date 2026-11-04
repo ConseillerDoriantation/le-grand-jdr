@@ -8,7 +8,9 @@ import {
   getInventoryItemImage,
   getInventoryReadableDocument,
   getShopItemEditableText,
+  normalizeShopItemForTemplate,
   shopItemToInvEntry,
+  syncInventoryEntryFromShop,
 } from '../assets/js/shared/inventory-utils.js';
 
 test('inventaireNeedsNorm : vrai dès qu’une entrée a qte > 1', () => {
@@ -96,4 +98,63 @@ test('un texte long reste dans le catalogue et ne gonfle pas chaque inventaire',
   assert.equal(entry.itemId, 'livre-1');
   assert.equal(entry.readableTitle, undefined);
   assert.equal(entry.readableContent, undefined);
+});
+
+test('les verrous de recyclage restent associés aux traits dans l’inventaire', () => {
+  const source = {
+    id: 'lame-1', nom: 'Lame liée', template: 'arme', traits: ['Finesse', 'Liée'],
+    nonRecyclableTraits: ['Liée'],
+  };
+  const entry = shopItemToInvEntry(source);
+  assert.deepEqual(entry.nonRecyclableTraits, ['Liée']);
+  assert.notEqual(entry.nonRecyclableTraits, source.nonRecyclableTraits, 'la liste doit être clonée');
+
+  const synced = syncInventoryEntryFromShop(
+    { ...entry, nonRecyclableTraits: ['Finesse'] },
+    { ...source, nonRecyclableTraits: ['Finesse', 'Liée'] },
+  );
+  assert.deepEqual(synced.nonRecyclableTraits, ['Finesse', 'Liée']);
+});
+
+test('un changement de type retire les anciens champs incompatibles', () => {
+  const normalized = normalizeShopItemForTemplate({
+    id: 'potion', template: 'classique', nom: 'Potion', type: 'Consommable',
+    degats: '2d6', toucherStat: 'force', format: 'Dague', slotArmure: 'Torse', ca: 4,
+  });
+  assert.equal(normalized.type, 'Consommable');
+  assert.equal(normalized.degats, undefined);
+  assert.equal(normalized.toucherStat, undefined);
+  assert.equal(normalized.slotArmure, undefined);
+  assert.equal(normalized.ca, undefined);
+  assert.equal(shopItemToInvEntry(normalized).template, 'classique');
+});
+
+test('un ancien article sans template conserve sa nature déductible', () => {
+  const weapon = normalizeShopItemForTemplate({ id: 'old', nom: 'Vieille lame', degats: '1d8', format: 'Épée' });
+  assert.equal(weapon.template, 'arme');
+  assert.equal(weapon.degats, '1d8');
+  assert.equal(weapon.format, 'Épée');
+});
+
+test('une copie liée se synchronise quelle que soit sa provenance', () => {
+  const current = {
+    id: 'instance-1', itemId: 'catalog-1', source: 'butin', nom: 'Ancien nom',
+    template: 'arme', degats: '1d6', notePerso: 'À rendre', upgrades: { effectBonus: 2 },
+  };
+  const next = syncInventoryEntryFromShop(current, {
+    id: 'catalog-1', nom: 'Nouveau nom', categorieId: 'potions', template: 'classique',
+    type: 'Consommable', effet: 'Rend 5 PV', prix: 20,
+  });
+  assert.equal(next.nom, 'Nouveau nom');
+  assert.equal(next.type, 'Consommable');
+  assert.equal(next.categorieId, 'potions');
+  assert.equal(next.degats, undefined);
+  assert.equal(next.source, 'butin');
+  assert.equal(next.notePerso, 'À rendre');
+  assert.deepEqual(next.upgrades, { effectBonus: 2 });
+  assert.equal(next.id, 'instance-1');
+  assert.equal(syncInventoryEntryFromShop(next, {
+    id: 'catalog-1', nom: 'Nouveau nom', categorieId: 'potions', template: 'classique',
+    type: 'Consommable', effet: 'Rend 5 PV', prix: 20,
+  }), next, 'une seconde passe ne doit provoquer aucune écriture');
 });
