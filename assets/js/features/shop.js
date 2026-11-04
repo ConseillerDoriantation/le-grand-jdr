@@ -3461,10 +3461,12 @@ function _siMetaHtml(item, tplKey) {
   const newUntilMs = _itemNewUntilMs(item);
   const newActive = item ? (newUntilMs > Date.now() || item.isNew === true) : true;
   const flag = (id, title, hint, checked) => `<label class="si-flag${checked ? ' is-on' : ''}"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><i></i><span><b>${title}</b><small>${hint}</small></span></label>`;
+  const equippable = ['arme', 'armure', 'bijou'].includes(tplKey);
   return `<div class="si-meta-grid">
     ${flag('si-masque', 'Masqué aux joueurs', 'Visible uniquement du MJ et récupérable en butin.', !!item?.masque)}
     ${flag('si-new', 'Nouveauté', 'Présent dans le filtre Nouveautés pendant deux semaines.', newActive)}
     ${flag('si-has-recipe', 'Recette d’artisanat', 'Permet la fabrication via l’Artisan.', recipeChk)}
+    ${equippable ? flag('si-norecycle', '⭐ Non recyclable (signature)', 'Ses traits ne donnent aucun fragment au recyclage — reste exclusif à cet objet.', !!item?.noRecycle) : ''}
   </div>`;
 }
 
@@ -3711,6 +3713,7 @@ function _siReadDraftFromDom() {
   draft.masque = !!document.getElementById('si-masque')?.checked; draft.isNew = !!document.getElementById('si-new')?.checked;
   draft.hasRecipe = !!document.getElementById('si-has-recipe')?.checked;
   draft.consommable = !!document.getElementById('si-consommable')?.checked;
+  { const nr = document.getElementById('si-norecycle'); if (nr) draft.noRecycle = !!nr.checked; }
   draft.actions = _shopCollectActions(); draft.damageProfile = _shopCollectDamageProfile() || draft.damageProfile || {};
   draft.traits = [...document.querySelectorAll('#si-traits-list input')].map(el => el.value.trim()).filter(Boolean);
   if (document.getElementById('si-skill-chips')) {
@@ -4481,6 +4484,8 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
     data.consommable = !!document.getElementById('si-consommable')?.checked;
     // Masqué aux joueurs (MJ) — confort d'affichage, cf. _visibleItems.
     data.masque = !!document.getElementById('si-masque')?.checked;
+    // Signature MJ (équipables) : objet non recyclable en fragments à l'Artisan.
+    if (document.getElementById('si-norecycle')) data.noRecycle = !!document.getElementById('si-norecycle').checked;
 
     // Nouveauté : toggle → fenêtre de 2 semaines (newUntil). On ne ré-arme la
     // fenêtre que si elle n'est pas déjà active (éditer un item en cours de

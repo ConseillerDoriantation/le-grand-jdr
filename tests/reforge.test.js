@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { DEFAULT_REFORGE, mergeReforge, evaluateReforge } from '../assets/js/shared/reforge.js';
+import { DEFAULT_REFORGE, mergeReforge, evaluateReforge, scaleMaterials } from '../assets/js/shared/reforge.js';
 
 const root = new URL('../', import.meta.url);
 const artisan = readFileSync(new URL('assets/js/features/artisan.js', root), 'utf8');
@@ -85,6 +85,26 @@ test('mergeReforge préserve les défauts pour les champs absents', () => {
   assert.deepEqual(m.disciplineRoom, DEFAULT_REFORGE.disciplineRoom);
 });
 
+test('défauts doux : or 0/50/100/150 et matériaux à 50 %', () => {
+  assert.equal(DEFAULT_REFORGE.goldForRarity[2], 0);
+  assert.equal(DEFAULT_REFORGE.goldForRarity[5], 150);
+  assert.equal(DEFAULT_REFORGE.materialPercent, 50);
+});
+
+test('mergeReforge borne materialPercent dans [0,100]', () => {
+  assert.equal(mergeReforge({ materialPercent: 200 }).materialPercent, 100);
+  assert.equal(mergeReforge({ materialPercent: -5 }).materialPercent, 0);
+  assert.equal(mergeReforge({}).materialPercent, DEFAULT_REFORGE.materialPercent);
+});
+
+test('scaleMaterials applique le pourcentage (arrondi, ≥ 0)', () => {
+  assert.deepEqual(scaleMaterials([{ itemId: 'x', quantite: 10 }], 50), [{ itemId: 'x', quantite: 5 }]);
+  assert.deepEqual(scaleMaterials([{ itemId: 'x', quantite: 15 }], 50), [{ itemId: 'x', quantite: 8 }]); // round(7.5)
+  assert.deepEqual(scaleMaterials([{ itemId: 'x', quantite: 10 }], 0), [{ itemId: 'x', quantite: 0 }]);
+  assert.deepEqual(scaleMaterials([{ itemId: 'x', quantite: 10 }], 100), [{ itemId: 'x', quantite: 10 }]);
+  assert.deepEqual(scaleMaterials([], 50), []);
+});
+
 test('câblage artisan : section reforge, action, consommation matériaux, +1 rareté', () => {
   assert.match(artisan, /_renderReforgeSection\(item, i, c\)/);        // branchée dans l'établi
   assert.match(artisan, /_artisanReforge: \(btn\) =>/);                // action enregistrée
@@ -92,6 +112,11 @@ test('câblage artisan : section reforge, action, consommation matériaux, +1 ra
   assert.match(artisan, /_consumeMaterials\(inv, materialReq\)/);      // consomme les matériaux
   assert.match(artisan, /op: 'reforge', from: fromName, to: toName/); // tracé dans l'historique
   assert.match(artisan, /STORE\.bastion\?\.salles\?\.\[roomSlug\]\?\.niveau/); // lit le niveau de salle
+  assert.match(artisan, /scaleMaterials\(craftRecipeMaterials\([^)]*\), cfg\?\.materialPercent\)/); // % de la recette
+});
+
+test('admin : champ materialPercent éditable', () => {
+  assert.match(upg, /data-field="reforge\.materialPercent"/);
 });
 
 test('upgrade-settings stocke la config reforge (par aventure)', () => {

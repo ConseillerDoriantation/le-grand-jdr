@@ -15,7 +15,6 @@ import { _esc } from './html.js';
 import { getRarities, loadRarities } from './rarity.js';
 import { DEFAULT_RARITY_CAPS, rarityCapFromTable } from './rarity-caps.js';
 import { DEFAULT_REFORGE, mergeReforge } from './reforge.js';
-import { DEFAULT_SIGNATURE_TRAITS, parseSignatureInput } from './signature-traits.js';
 import { upgradeResaleBonus } from './upgrade-value.js';
 
 let _settings = null;
@@ -77,9 +76,6 @@ export const DEFAULT_UPGRADE_SETTINGS = {
   // Reforge (monter la rareté) — gatée Bastion. Logique pure dans reforge.js.
   // Améliorer stats/traits reste libre ; seule la reforge dépend d'une salle.
   reforge: DEFAULT_REFORGE,
-  // Traits « signature » (noms) : exclusifs au MJ, NON recyclables en fragment.
-  // Logique pure dans signature-traits.js. Vide par défaut, réglé par aventure.
-  signatureTraits: DEFAULT_SIGNATURE_TRAITS,
   // Revente d'un objet amélioré : + X % du tarif ACTUEL des améliorations qu'il
   // porte (cf. upgrade-value.js). ex : 0.2 = 20 %. 0 = améliorations perdues.
   refundUpgradeRatio: 0,
@@ -108,9 +104,6 @@ function _mergeDefaults(stored = {}) {
       stats:  { ...d.rarityCaps.stats,  ...(stored.rarityCaps?.stats  || {}) },
     },
     reforge: mergeReforge(stored.reforge),
-    signatureTraits: Array.isArray(stored.signatureTraits)
-      ? stored.signatureTraits.filter(x => typeof x === 'string' && x.trim())
-      : [...d.signatureTraits],
     refundUpgradeRatio: stored.refundUpgradeRatio ?? d.refundUpgradeRatio,
   };
 }
@@ -354,6 +347,13 @@ function _renderUpgradeSettingsModal() {
           <input type="checkbox" ${s.reforge?.enabled ? 'checked' : ''} data-change="_upgCheck" data-field="reforge.enabled">
           <span>Activer la reforge</span>
         </label>
+        <div class="sh-admin-row-line">
+          <span class="sh-admin-row-lbl">Matériaux consommés (% de la recette de craft)</span>
+          <input type="number" class="sh-admin-row-input small" value="${s.reforge?.materialPercent ?? 50}" min="0" max="100" step="5"
+            data-input="_upgField" data-field="reforge.materialPercent">
+          <span class="sh-admin-row-unit">%</span>
+        </div>
+        <p class="sh-admin-section-hint" style="margin:2px 0 4px">100 % = recette complète (= crafter un objet neuf) · 50 % = moitié · 0 % = or seul.</p>
         <p class="sh-admin-section-hint" style="margin:8px 0 4px">Discipline de craft → salle du Bastion :</p>
         ${discRow('forge', '⚒️ Forge')}
         ${discRow('confection', '🧵 Confection')}
@@ -362,14 +362,6 @@ function _renderUpgradeSettingsModal() {
         ${rarities.filter(r => r.value >= 2).length
           ? rarities.filter(r => r.value >= 2).map(reforgeRarityRow).join('')
           : '<p class="sh-admin-section-hint">Aucune rareté ≥ 2★ définie.</p>'}
-      </div>
-
-      <!-- ── Traits signature (non recyclables) ────────────── -->
-      <div class="sh-admin-section">
-        <div class="sh-admin-section-title">⭐ Traits signature <small style="font-weight:400;color:var(--text-dim);font-family:inherit">— exclusifs, non recyclables</small></div>
-        <p class="sh-admin-section-hint">Un trait dont le nom figure ici ne peut <b style="color:var(--text)">pas</b> être recyclé en fragment : il reste lié à l'objet que tu as posé. Les joueurs ne peuvent donc pas récupérer tes meilleures synergies pour les reposer ailleurs. Un nom par ligne (ou séparés par virgules). Insensible à la casse et aux accents.</p>
-        <textarea class="sh-admin-row-input" rows="4" style="width:100%;resize:vertical;font-family:inherit"
-          placeholder="Ex. : Lame de l'Aube&#10;Souffle du Dragon" data-change="_upgList" data-field="signatureTraits">${_esc((s.signatureTraits || []).join('\n'))}</textarea>
       </div>
 
       <!-- ── Revente ───────────────────────────────────────── -->
@@ -437,7 +429,6 @@ registerActions({
   _upgSave: () => _upgSaveAndClose(),
   _upgField: (el) => _upgSetField(el.dataset.field, +el.value),
   _upgStr: (el) => _upgSetField(el.dataset.field, el.value),
-  _upgList: (el) => _upgSetField(el.dataset.field, parseSignatureInput(el.value)),
   _upgCheck: (el) => _upgSetField(el.dataset.field, el.checked),
   _upgRatio: (el) => _upgSetField('refundUpgradeRatio', (+el.value) / 100),
 });

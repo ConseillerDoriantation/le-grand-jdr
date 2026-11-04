@@ -35,8 +35,7 @@ import { FRAGMENT_CATEGORIES, getItemFragmentCategory } from '../shared/upgrade-
 // Reforge (monter la rareté) — gatée Bastion, Option A. Réutilise le mapping craft.
 import { craftCategoryForItem, craftDiscipline } from '../shared/craft-engine.js';
 import { craftRecipeMaterials, loadCraftSettings, getCraftSettings } from '../shared/craft-settings.js';
-import { evaluateReforge } from '../shared/reforge.js';
-import { partitionTraits } from '../shared/signature-traits.js';
+import { evaluateReforge, scaleMaterials } from '../shared/reforge.js';
 import { getRarities, loadRarities, RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import { getDocData } from '../data/firestore.js';
 
@@ -800,8 +799,11 @@ function _reforgeContext(item, c) {
   const maxRarete = rarities.length ? Math.max(...rarities.map(r => r.value)) : 5;
   const cur = Math.max(1, parseInt(item.rarete) || 1);
   const tier = Math.min(cur + 1, 3);  // recettes de craft : paliers 1..3
-  const materialReq = category ? craftRecipeMaterials(category, tier, craftCfg) : [];
   const cfg = upg.reforge;
+  // Reforge = fraction de la recette de craft (materialPercent, dial indépendant).
+  const materialReq = category
+    ? scaleMaterials(craftRecipeMaterials(category, tier, craftCfg), cfg?.materialPercent)
+    : [];
   const roomSlug = discipline ? (cfg?.disciplineRoom?.[discipline] || null) : null;
   const roomLevel = roomSlug ? (STORE.bastion?.salles?.[roomSlug]?.niveau || 0) : 0;
   const ev = evaluateReforge({
@@ -976,15 +978,16 @@ async function _artisanDestroyStart(invIndex) {
   const s = getUpgradeSettings();
   const allTraits = _getTraits(item);
   if (!allTraits.length) return;
-  // Les traits signature (exclusifs au MJ) ne sont JAMAIS récupérables en fragment.
-  const { transferable, signature } = partitionTraits(allTraits, s.signatureTraits);
+  // Objet « signature » (non recyclable, flag posé par le MJ) → aucun fragment.
+  const locked = !!item.noRecycle;
+  const transferable = locked ? [] : allTraits;
   const cost = s.trait.deconstructCost || 0;
   const costTxt = STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`;
-  const sigWarn = signature.length
-    ? `<br><span style="color:#ff8ca7">⭐ ${signature.length} trait${signature.length > 1 ? 's' : ''} signature non récupérable${signature.length > 1 ? 's' : ''} (${signature.map(t => `« ${_esc(t)} »`).join(', ')}).</span>`
+  const sigWarn = locked
+    ? `<br><span style="color:#ff8ca7">⭐ Objet signature : ses traits ne sont pas récupérables.</span>`
     : '';
 
-  // Aucun trait transférable (tous signature) → on détruit sans fragment.
+  // Aucun trait transférable (objet signature) → on détruit sans fragment.
   if (!transferable.length) {
     if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Aucun fragment récupérable.${sigWarn}<br>L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
       { title: '♻️ Recycler en fragments', confirmLabel: 'Recycler', danger: true, icon: '♻️' })) return;
@@ -1036,8 +1039,8 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   const s    = getUpgradeSettings();
   const cost = s.trait.deconstructCost || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
-  // Sécurité : jamais de fragment pour un trait signature (même en appel direct).
-  traitsToExtract = partitionTraits(traitsToExtract, s.signatureTraits).transferable;
+  // Sécurité : un objet signature ne rend jamais de fragment (même en appel direct).
+  if (item.noRecycle) traitsToExtract = [];
 
   // 1) Supprimer l'item de l'inventaire
   const inv = [...(c.inventaire || [])];

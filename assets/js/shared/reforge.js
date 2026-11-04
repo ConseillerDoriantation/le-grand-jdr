@@ -14,8 +14,11 @@ export const DEFAULT_REFORGE = {
   disciplineRoom: { forge: 'forge', confection: 'atelier_confection', orfevre: 'atelier_orfevre' },
   // Rareté cible → niveau de salle requis (I/II/III). 5★ = salle maxée.
   roomLevelForRarity: { 2: 1, 3: 1, 4: 2, 5: 3 },
-  // Rareté cible → coût en or.
-  goldForRarity: { 2: 100, 3: 200, 4: 400, 5: 800 },
+  // Rareté cible → coût en or (doux par défaut : les matériaux sont le vrai sink).
+  goldForRarity: { 2: 0, 3: 50, 4: 100, 5: 150 },
+  // % de la recette de craft consommé par une reforge (dial indépendant du craft).
+  // 100 = recette complète ; 50 = moitié ; 0 = aucun matériau (reforge or seul).
+  materialPercent: 50,
 };
 
 // Fusion défensive avec les défauts (champ par champ).
@@ -27,7 +30,21 @@ export function mergeReforge(stored = {}) {
     disciplineRoom:     { ...d.disciplineRoom,     ...(s.disciplineRoom     || {}) },
     roomLevelForRarity: { ...d.roomLevelForRarity, ...(s.roomLevelForRarity || {}) },
     goldForRarity:      { ...d.goldForRarity,      ...(s.goldForRarity      || {}) },
+    materialPercent: s.materialPercent != null
+      ? Math.max(0, Math.min(100, parseInt(s.materialPercent) || 0))
+      : d.materialPercent,
   };
+}
+
+// Applique un pourcentage aux quantités d'une recette [{itemId,quantite}].
+// Arrondi, borné à ≥ 0. Garde l'entrée (quantite 0 = « recette sans matériau »).
+export function scaleMaterials(reqs, percent = 100) {
+  const p = Math.max(0, Math.min(100, parseInt(percent)));
+  const pct = Number.isFinite(p) ? p : 100;
+  return (Array.isArray(reqs) ? reqs : []).map(r => ({
+    ...r,
+    quantite: Math.max(0, Math.round((parseInt(r.quantite) || 0) * pct / 100)),
+  }));
 }
 
 /**
