@@ -49,8 +49,8 @@ test('la carte Or ouvre directement Ajouter Retirer et Envoyer', () => {
   assert.match(sheet, /identityFormula = 'Gains − dépenses'/);
 });
 
-test('le design Compte est borné, responsive et respecte reduced motion', () => {
-  assert.match(css, /\.cpt \{[^}]*max-width:920px;[^}]*container-type:inline-size;/s);
+test('le design Compte occupe la largeur disponible, reste responsive et respecte reduced motion', () => {
+  assert.match(css, /\.cpt \{[^}]*width:100%;[^}]*max-width:none;[^}]*min-width:0;[^}]*container-type:inline-size;/s);
   assert.match(css, /\.cpt-num b \{[^}]*font-size:46px;/s);
   assert.match(css, /@container \(max-width:640px\)/);
   assert.match(css, /@container \(max-width:460px\)/);
