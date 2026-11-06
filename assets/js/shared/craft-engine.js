@@ -97,11 +97,23 @@ export function itemCraftSignals(item = {}) {
 /** Catégorie de craft d'un objet d'inventaire (applique bouclier→lourde, main libre→distance). */
 export function craftCategoryForItem(item = {}) {
   const s = itemCraftSignals(item);
+  // Un « Objet magique » utilise les traits de bijou dans l'Artisan mais ne
+  // doit jamais hériter de la recette / discipline des anneaux.
+  if (s.kind === 'bijou' && String(s.bijouSlot || '').trim().toLocaleLowerCase('fr') === 'objet magique') return null;
   if (s.kind === 'arme') {
     if (s.bouclier) return 'armureLourde';
     if (s.mainLibre) return 'armeDist';
   }
   return craftCategoryFor(s);
+}
+
+/** Recette pure d'une catégorie et d'un palier à partir de la config fournie. */
+export function craftRecipeMaterialsFromConfig(type, tier, config = DEFAULT_CRAFT_CONFIG) {
+  const cfg = _CFG(config);
+  const recipe = cfg?.recipes?.[type]?.[tier];
+  if (!recipe?.itemId) return [];
+  const fallback = cfg.quantiteParPalier?.[tier] ?? DEFAULT_CRAFT_CONFIG.quantiteParPalier[tier];
+  return [{ itemId: String(recipe.itemId), quantite: Math.max(1, parseInt(recipe.quantite, 10) || fallback) }];
 }
 
 /** Quantité de matériaux rendue en recyclant (arrondi inférieur). */

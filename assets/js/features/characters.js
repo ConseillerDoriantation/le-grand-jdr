@@ -44,9 +44,12 @@ import {
 import { toggleCharElement, setFavoriteElement } from './characters/combat.js';
 import {
   renderCharLedger,
-  _csV3LedgerSaveField, _csV3LedgerSaveAmount,
-  _csV3LedgerSetSearch, _csV3LedgerSetKind, _csV3LedgerSetAddKind,
-  _csV3AddLedger, _csV3DeleteLedger, _csV3LedgerMore,
+  _csV3LedgerSetSearch, _csV3LedgerSetKind, _csV3LedgerMore,
+  ledgerSetMode, ledgerCommit, ledgerToggleRow, ledgerSaveEntry, ledgerDeleteEntry,
+  ledgerSetSource, ledgerInputAmount, ledgerInputReason, ledgerInputDate,
+  ledgerSetRecipient, ledgerSetSuggestion, ledgerToggleDate, ledgerStartBalance,
+  ledgerClearSearch, ledgerClearFilters, ledgerSetEditSign, ledgerEditInput,
+  openLedgerMode,
 } from './characters/ledger.js';
 import { renderCharCapacites } from './characters/capacites.js';
 import {
@@ -406,14 +409,14 @@ function _computeCharCalculation(btn) {
     result = `${calcOr(c)} or`;
     rows = totalR > 0 || totalD > 0
       ? [
-          _calcRow('Recettes', `+${Math.round(totalR * 100) / 100} or`),
+          _calcRow('Gains', `+${Math.round(totalR * 100) / 100} or`),
           _calcRow('Dépenses', `−${Math.round(totalD * 100) / 100} or`),
         ].join('')
       : _calcRow('Or disponible', `${calcOr(c)} or`, 'Solde direct du personnage');
-    identityFormula = 'Recettes − dépenses';
+    identityFormula = 'Gains − dépenses';
     identityItems = totalR > 0 || totalD > 0
       ? [
-          { label: 'Recettes', value: `+${Math.round(totalR * 100) / 100} or` },
+          { label: 'Gains', value: `+${Math.round(totalR * 100) / 100} or` },
           { label: 'Dépenses', value: `−${Math.round(totalD * 100) / 100} or` },
         ]
       : [{ label: 'Or disponible', value: `${calcOr(c)} or` }];
@@ -492,9 +495,10 @@ function toggleCharDerivative(btn) {
     <div class="ids-vital-total"><span>Total</span><b>${_esc(String(d.result))}</b></div>
     ${key === 'or' ? `<div class="ids-brk-a">
       ${canControlCharacter(getCharacterById(btn.dataset.id) || charSession.getCurrentChar())
-        ? `<button class="ids-btn gold" data-action="openSendGoldModal" data-id="${_esc(btn.dataset.id)}">↗ Envoyer</button>`
+        ? `<button class="ids-btn gold" data-action="openIdentityLedger" data-id="${_esc(btn.dataset.id)}" data-mode="add">＋ Ajouter</button>
+          <button class="ids-btn" data-action="openIdentityLedger" data-id="${_esc(btn.dataset.id)}" data-mode="sub">− Retirer</button>
+          <button class="ids-btn" data-action="openIdentityLedger" data-id="${_esc(btn.dataset.id)}" data-mode="send">↗ Envoyer</button>`
         : ''}
-      <button class="ids-btn" data-action="showCharTab" data-tab="compte">Historique</button>
     </div>` : ''}`;
   panel.classList.add('on');
 }
@@ -2189,8 +2193,6 @@ async function _saveCombatMasteryName(el) {
 }
 
 registerCharBlurActions({
-  csV3LedgerSaveField: (el) => _csV3LedgerSaveField(el, el.dataset.kind, Number(el.dataset.idx), el.dataset.field),
-  csV3LedgerSaveAmount: (el) => _csV3LedgerSaveAmount(el, el.dataset.kind, Number(el.dataset.idx), Number(el.dataset.sign)),
   csV3SaveIdentityValue: (el) => _csV3SaveIdentityValue(el.dataset.id, el.dataset.key, el.value),
   csV3SaveQuote: (el) => { el.classList.toggle('is-empty', !el.value); _csV3SaveQuote(el.dataset.id, el.value); },
 });
@@ -2200,6 +2202,10 @@ registerActions({
   saveXpDirect:            (el)     => saveXpDirect(el.dataset.id, el),
   previewXpBar:            (el)     => previewXpBar(el, Number(el.dataset.palier)),
   _csV3LedgerSetSearch:    (el)     => _csV3LedgerSetSearch(el.dataset.id, el.value),
+  ledgerInputAmount:       (el)     => ledgerInputAmount(el),
+  ledgerInputReason:       (el)     => ledgerInputReason(el),
+  ledgerInputDate:         (el)     => ledgerInputDate(el),
+  ledgerEditInput:         (el)     => ledgerEditInput(el),
   _csQuoteToggleEmpty:     (el)     => el.classList.toggle('is-empty', !el.value),
   _csV3SaveVisibility:     (el)     => _csV3SaveVisibility(el.dataset.id, el.dataset.key, el.checked),
   saveCombatMasteryNote:   (el)     => _saveCombatMasteryNote(el),
@@ -2253,13 +2259,24 @@ registerActions({
   setCharAuraColor:        (el)     => setCharAuraColor(el.dataset.id, el.value),
   setCharacterLifeStatus:  (btn)    => _setCharacterLifeStatus(btn),
   openSendGoldModal:       (btn)    => openSendGoldModal(btn.dataset.id),
+  openIdentityLedger:      (btn)    => { openLedgerMode(btn.dataset.id, btn.dataset.mode); showCharTab('compte', btn); },
 
   // Ledger
   csV3LedgerSetKind:       (btn)    => _csV3LedgerSetKind(btn.dataset.id, btn.dataset.kind),
-  csV3LedgerSetAddKind:    (btn)    => _csV3LedgerSetAddKind(btn.dataset.kind, btn.dataset.id),
-  csV3AddLedger:           (btn)    => _csV3AddLedger(btn.dataset.id),
-  csV3DeleteLedger:        (btn)    => _csV3DeleteLedger(btn.dataset.id, btn.dataset.kind, Number(btn.dataset.idx)),
   csV3LedgerMore:          (btn)    => _csV3LedgerMore(btn.dataset.id),
+  ledgerSetMode:           (btn)    => ledgerSetMode(btn),
+  ledgerCommit:            (btn)    => ledgerCommit(btn),
+  ledgerToggleRow:         (btn)    => ledgerToggleRow(btn),
+  ledgerSaveEntry:         (btn)    => ledgerSaveEntry(btn),
+  ledgerDeleteEntry:       (btn)    => ledgerDeleteEntry(btn),
+  ledgerSetSource:         (btn)    => ledgerSetSource(btn),
+  ledgerSetRecipient:      (btn)    => ledgerSetRecipient(btn),
+  ledgerSetSuggestion:     (btn)    => ledgerSetSuggestion(btn),
+  ledgerToggleDate:        (btn)    => ledgerToggleDate(btn),
+  ledgerStartBalance:      (btn)    => ledgerStartBalance(btn),
+  ledgerClearSearch:       (btn)    => ledgerClearSearch(btn),
+  ledgerClearFilters:      (btn)    => ledgerClearFilters(btn),
+  ledgerSetEditSign:       (btn)    => ledgerSetEditSign(btn),
 
   // Journal
   csV3JournalSub:          (btn)    => _csV3JournalSub(btn.dataset.sub),

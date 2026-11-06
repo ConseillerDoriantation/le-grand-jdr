@@ -21,6 +21,9 @@ import { STATE } from '../core/state.js';
 import { charSession } from './char-session.js';
 import { updateInCol } from '../data/firestore.js';
 import { calcOr } from './char-stats.js';
+import { buildGoldAccount } from './ledger-logic.js';
+
+export { buildGoldAccount };
 
 const _today = () => new Date().toLocaleDateString('fr-FR');
 
@@ -59,21 +62,7 @@ async function _applyGold(charId, entries, opts = {}) {
     }
   }
 
-  const compte = { recettes: [], depenses: [], ...(c.compte || {}) };
-  const newRecettes = [...(compte.recettes || [])];
-  const newDepenses = [...(compte.depenses || [])];
-
-  for (const e of entries) {
-    const delta = Number(e?.delta) || 0;
-    if (delta === 0) continue;
-    const date    = e.date || _today();
-    const libelle = String(e.reason || 'Transaction').slice(0, 100);
-    const montant = Math.abs(delta);
-    if (delta > 0) newRecettes.push({ date, libelle, montant });
-    else           newDepenses.push({ date, libelle, montant });
-  }
-
-  const newCompte = { ...compte, recettes: newRecettes, depenses: newDepenses };
+  const newCompte = buildGoldAccount(c, entries, { date: _today() });
   const payload = { compte: newCompte, ...(opts.extraPayload || {}) };
 
   try {

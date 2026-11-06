@@ -6,7 +6,7 @@ import { loadCollection } from '../../data/firestore.js';
 import { openModal, closeModal, pushModal, popModal, closeModalDirect, updateModalContent, confirmModal, promptModal, setModalCloseGuard, clearModalCloseGuard } from '../../shared/modal.js';
 import { showNotif, notifySaveError } from '../../shared/notifications.js';
 import { _esc, _nl2br, _norm } from '../../shared/html.js';
-import { calcDeckMax, calcPMMax, getMaitriseBonus as getSharedMaitriseBonus } from '../../shared/char-stats.js';
+import { calcDeckMax, calcPMMax, getMaitriseBonus as getSharedMaitriseBonus, statShort } from '../../shared/char-stats.js';
 import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell, spellValidationState as _sortValidationState } from '../../shared/spell-deck.js';
 import { loadDamageTypes } from '../../shared/damage-types.js';
 import { loadConditionLibrary, conditionSpellRunes } from '../../shared/conditions.js';
@@ -247,6 +247,8 @@ let _noyauIdsEdit = [];   // noyaux élémentaires sélectionnés (multi). [0] =
 let _sortTypesEdit = new Set(['utilitaire']);
 let _deplModeEdit = null;
 let _deplSwapEdit = false;   // déplacement Soi : échange de place lanceur ↔ cible autorisé
+let _deplSaveStatEdit = 'dexterite'; // résistance des déplacements imposés
+let _deplSaveDCEdit = 11;
 let _actionModeEdit = 'reaction';
 let _protModesEdit = [];   // mode de chaque rune Protection (multi-modes) — [0] = _protModeEdit
 let _protModeEdit = 'ca';   // mode rune Protection en cours d'édition ('ca'|'soin'|'mana') — source fiable (≠ DOM périmé)
@@ -1436,6 +1438,11 @@ function _spellEffectChips(s, c) {
     const dIcon = depl.mode === 'self' ? '🏃' : depl.mode === 'pull' ? '↙' : '↗';
     const dVal  = depl.max != null ? `1–${depl.max}c` : `${depl.distance}c`;
     chips.push({ icon: dIcon, val: dVal, color:'#e8b84b', lbl: depl.mode === 'self' ? 'Déplacement du lanceur (cases)' : depl.mode === 'pull' ? 'Attire la cible (cases)' : 'Repousse la cible (cases)', dim:true });
+    if (depl.mode !== 'self') {
+      const saveStat = s.deplacement?.saveStat || 'dexterite';
+      const saveDC = Math.max(1, parseInt(s.deplacement?.saveDC, 10) || 11);
+      chips.push({ icon:'🛡', val:`${statShort(saveStat) || 'Dex'} DD ${saveDC}`, color:'#ef4444', lbl:'Jet de sauvegarde de la cible pour résister au déplacement', dim:true });
+    }
   }
   // Durée : affichée uniquement pour les sorts persistants
   if (_needsDureeBase(s)) {
@@ -2822,6 +2829,8 @@ export async function openSortModal(idx, s) {
   _sortTypesEdit  = new Set(typesInit);
   _deplModeEdit   = s?.deplacement?.mode || (s?.ampMode === 'deplacement' ? 'self' : null);
   _deplSwapEdit   = !!s?.deplacement?.swap;
+  _deplSaveStatEdit = s?.deplacement?.saveStat || 'dexterite';
+  _deplSaveDCEdit = Math.max(1, parseInt(s?.deplacement?.saveDC, 10) || 11);
   _invImageEdit   = s?.invocation?.image || '';
   _invOriginal    = (s?.invocation && typeof s.invocation === 'object') ? s.invocation : null;
 
@@ -3240,6 +3249,16 @@ export async function openSortModal(idx, s) {
         <div style="font-size:.74rem;color:var(--text-dim);padding:.25rem .1rem">
           Portée : <b id="s-amp-depl-range" style="color:var(--text)">1 à ${_ampLength(nbAmp) || 0} cases</b>
           <span> · selon le nombre de runes Amplification</span>
+        </div>
+        <div id="s-depl-resist-row" class="cs-spell-inline-row" style="${deplCur === 'self' ? 'display:none' : ''}">
+          <span class="cs-spell-inline-label">🛡 Résistance</span>
+          <select id="s-depl-save-stat" class="input-field" style="flex:1;min-width:0">
+            ${[['force','Force'],['dexterite','Dextérité'],['constitution','Constitution'],['intelligence','Intelligence'],['sagesse','Sagesse'],['charisme','Charisme']]
+              .map(([value, label]) => `<option value="${value}" ${_deplSaveStatEdit === value ? 'selected' : ''}>${label}</option>`).join('')}
+          </select>
+          <label style="display:flex;align-items:center;gap:.35rem;color:var(--text-dim);font-size:.72rem">
+            DD <input id="s-depl-save-dc" class="input-field" type="number" min="1" max="40" value="${_deplSaveDCEdit}" style="width:4.5rem">
+          </label>
         </div>
         <div style="font-size:.7rem;color:#e8b84b;padding:0 .1rem .2rem">⚠ Les sorts de déplacement n'infligent pas de dégâts.</div>
       </div>
@@ -4352,9 +4371,15 @@ async function _libInvDeleteAction(aidx) {
 }
 
 // Payload `deplacement` sauvegardé : l'échange n'a de sens qu'en mode Soi.
+// Un déplacement imposé porte toujours son JS configurable ; les anciens sorts
+// retombent sur Dextérité DD 11 sans migration nécessaire.
 function _deplPayload(mode) {
   if (!mode) return null;
-  return mode === 'self' && _deplSwapEdit ? { mode, swap: true } : { mode };
+  if (mode === 'self') return _deplSwapEdit ? { mode, swap: true } : { mode };
+  const saveStat = document.getElementById('s-depl-save-stat')?.value || _deplSaveStatEdit || 'dexterite';
+  const saveDC = Math.max(1, Math.min(40,
+    parseInt(document.getElementById('s-depl-save-dc')?.value, 10) || _deplSaveDCEdit || 11));
+  return { mode, saveStat, saveDC };
 }
 
 function _selectDeplSwap(val) {
@@ -4364,6 +4389,8 @@ function _selectDeplSwap(val) {
 
 function _selectDeplMode(mode) {
   _deplModeEdit = mode;
+  const resistRow = document.getElementById('s-depl-resist-row');
+  if (resistRow) resistRow.style.display = mode === 'self' ? 'none' : '';
   const DEPL_CFG = { self:'#22c38e', push:'#e8b84b', pull:'#4f8cff' };
   ['self', 'push', 'pull'].forEach(v => {
     const btn = document.getElementById(`s-depl-${v}`);

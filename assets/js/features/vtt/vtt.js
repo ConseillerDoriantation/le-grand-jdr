@@ -3989,7 +3989,11 @@ function _vttSpellMods(s) {
     deplacement: (!isAmpDisp && nbEnch === 0 && s.ampMode === 'deplacement' && nbAmp > 0)
       ? { mode: s.deplacement?.mode || 'self', cells: Math.max(1, 3 * nbAmp),
           // Échange de place (mode Soi uniquement, opt-in sur le sort).
-          swap: (s.deplacement?.mode || 'self') === 'self' && !!s.deplacement?.swap }
+          swap: (s.deplacement?.mode || 'self') === 'self' && !!s.deplacement?.swap,
+          // Compatibilité des sorts existants : tout déplacement imposé demande
+          // par défaut un JS Dextérité DD 11, désormais modifiable dans la forge.
+          saveStat: s.deplacement?.saveStat || 'dexterite',
+          saveDC: Math.max(1, Math.min(40, parseInt(s.deplacement?.saveDC, 10) || 11)) }
       : null,
     // Enchantement mode Dégâts : bonus dégâts sur les attaques d'arme de l'allié
     // Formule auto : (1+Puiss)d4 +2 — appliquée pendant la durée du sort
@@ -4350,6 +4354,117 @@ function _selfCellOccupied(col, row, dim, src) {
   });
 }
 
+function _vttMovementAuthorName() {
+  return STATE.profile?.pseudo || STATE.profile?.prenom || STATE.user?.displayName || 'MJ';
+}
+
+function _vttMovementStatLabel(statKey) {
+  return _STAT_SHORT[statKey] || statShort(statKey) || statKey || 'Dex';
+}
+
+function _vttSetTokenGridPosition(token, col, row) {
+  if (!token) return;
+  Object.assign(token, { col, row });
+  const dims = _tokenDims(token);
+  VS.tokens[token.id]?.shape?.to?.({
+    x: col * CELL + dims.w * CELL / 2,
+    y: row * CELL + dims.h * CELL / 2,
+    duration: .08,
+  });
+  VS.layers.token?.batchDraw();
+  fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+}
+
+async function _vttPublishMovementCast(src, targetIds, opt, undo, castEffect, roll = {}, statsDelta = null) {
+  const names = (targetIds || []).map(id => {
+    const token = VS.tokens[id]?.data;
+    return token ? (_live(token).displayName ?? token.name) : null;
+  }).filter(Boolean);
+  const live = _live(src);
+  return _vttPublishOptimisticLog({
+    ..._statsLogMeta(opt),
+    type: 'cast', undo,
+    ...(statsDelta && _hasStatsDelta(statsDelta) ? { statsDelta } : {}),
+    ..._vttLogSourceFields(src),
+    ..._vttLogSingleTargetFields(targetIds),
+    authorId: STATE.user?.uid || null,
+    authorName: _vttMovementAuthorName(),
+    casterName: live.displayName ?? src.name,
+    characterImage: _combatLogImage(live.displayImage),
+    targetName: names.join(', '),
+    optLabel: opt.label,
+    pmCost: opt.pmCost,
+    ...(roll.d20 != null ? {
+      castD20: roll.d20,
+      castIsCrit: !!roll.crit,
+      castIsFumble: !!roll.fumble,
+      ...(roll.fumble ? { castEC: true } : {}),
+    } : {}),
+    castEffect,
+    createdAt: serverTimestamp(),
+  });
+}
+
+async function _vttRollSelfMovement(src, opt) {
+  if (opt.autoHit) return { d20: null, crit: false, fumble: false };
+  const conditionMode = _conditionStatRollMode(src, 'dexterite', 'check');
+  const d1 = Math.floor(Math.random() * 20) + 1;
+  const d2 = conditionMode === 'advantage' || conditionMode === 'disadvantage'
+    ? Math.floor(Math.random() * 20) + 1 : null;
+  let d20 = conditionMode === 'advantage' ? Math.max(d1, d2)
+    : conditionMode === 'disadvantage' ? Math.min(d1, d2) : d1;
+  const luck = await _consumeLuckyReroll(src.id, src, d20, d20 === 1);
+  if (luck) d20 = luck.d20;
+  const critThreshold = Math.max(2, Math.min(20,
+    (opt.mods?.chance?.rc ?? 20) - _conditionCritRangeBonusOf(src) - _armorSetCritRangeBonusOf(src)));
+  return { d20, crit: d20 >= critThreshold, fumble: d20 === 1 };
+}
+
+async function _vttRollMovementSave(target, opt, movement) {
+  const saveStat = movement.saveStat || 'dexterite';
+  const saveDC = Math.max(1, Math.min(40, parseInt(movement.saveDC, 10) || 11));
+  const conditionMode = _conditionStatRollMode(target, saveStat, 'save') || 'normal';
+  const d1 = Math.floor(Math.random() * 20) + 1;
+  const d2 = conditionMode === 'advantage' || conditionMode === 'disadvantage'
+    ? Math.floor(Math.random() * 20) + 1 : null;
+  let d20 = conditionMode === 'advantage' ? Math.max(d1, d2)
+    : conditionMode === 'disadvantage' ? Math.min(d1, d2) : d1;
+  const character = _characterForToken(target);
+  const setSaveBonus = character ? (getArmorSetData(character).modifiers.saveBonus?.[saveStat] || 0) : 0;
+  const mod = _tokenStatMod(target, saveStat) + setSaveBonus;
+  let total = d20 + mod;
+  const luck = await _consumeLuckyReroll(target.id, target, d20, d20 === 1 || total < saveDC);
+  if (luck) { d20 = luck.d20; total = d20 + mod; }
+  return {
+    saveStat, saveDC, mod, d20, total,
+    d20rolls: luck ? [d1, ...(d2 == null ? [] : [d2]), luck.reroll] : (d2 == null ? null : [d1, d2]),
+    rollMode: conditionMode,
+    passed: d20 === 20 || (d20 !== 1 && total >= saveDC),
+  };
+}
+
+async function _vttPublishMovementSave(target, opt, result, conditionLabel) {
+  const live = _live(target);
+  return _vttPublishOptimisticLog({
+    type: 'save',
+    statsExcluded: opt?.countInStats === false,
+    statsSource: opt?._itemAction ? 'item' : 'spell',
+    authorId: STATE.user?.uid || null,
+    authorName: _vttMovementAuthorName(),
+    tokenName: live.displayName ?? target.name,
+    characterImage: _combatLogImage(live.displayImage),
+    ..._vttLogTargetFields(target),
+    conditionLabel,
+    sortLabel: opt.label || 'Déplacement',
+    statLabel: _vttMovementStatLabel(result.saveStat),
+    mod: result.mod, d20: result.d20,
+    d20rolls: result.d20rolls, rollMode: result.rollMode,
+    total: result.total, dd: result.saveDC,
+    passed: result.passed,
+    createdAt: serverTimestamp(),
+  });
+}
+
 // Push/Pull : déplace la cible cliquée le long de l'axe lanceur↔cible (sans dégât).
 async function _vttCastPushPull(srcId, tgtId, opt, d) {
   const src = VS.tokens[srcId]?.data, tgt = VS.tokens[tgtId]?.data;
@@ -4359,10 +4474,28 @@ async function _vttCastPushPull(srcId, tgtId, opt, d) {
     showNotif(`Cible hors de portée (${opt.portee || 1}c)`, 'error');
     return;
   }
+  const undo = _captureUndoSnapshot(srcId, [tgtId], {
+    positionIds: [tgtId], cooldownIds: [srcId],
+  });
   if (!(await _vttSpendSpellPm(src, opt))) return;
-  const moved = await _vttApplyDeplacement(src, tgt, d.mode, d.cells);
+  await _vttStartSpellCooldown(src, opt);
   const verb = d.mode === 'pull' ? '↙ attirée' : '↗ poussée';
   const tgtName = _live(tgt).displayName ?? tgt.name;
+  const statLabel = _vttMovementStatLabel(d.saveStat || 'dexterite').toUpperCase();
+  const statsDelta = _applyCastStatsDelta(src, opt);
+  await _vttPublishMovementCast(src, [tgtId], opt, undo,
+    `${verb === '↙ attirée' ? '↙ Tente d’attirer' : '↗ Tente de pousser'} ${tgtName} · JS ${statLabel} DD ${d.saveDC || 11}`,
+    {}, statsDelta).catch(() => {});
+  const save = await _vttRollMovementSave(tgt, opt, d);
+  const moved = save.passed ? 0 : await _vttApplyDeplacement(src, tgt, d.mode, d.cells);
+  await _vttPublishMovementSave(tgt, opt, save,
+    save.passed ? 'Déplacement forcé' : moved > 0
+      ? `${verb} de ${moved} case${moved > 1 ? 's' : ''}`
+      : 'Déplacement bloqué par un obstacle').catch(() => {});
+  if (save.passed) {
+    showNotif(`🛡 ${tgtName} résiste à ${opt.label}`, 'info');
+    return;
+  }
   showNotif(moved > 0
     ? `${verb} de ${moved} case${moved > 1 ? 's' : ''} — ${tgtName}`
     : `${tgtName} n'a pas pu être déplacée (obstacle)`, moved > 0 ? 'success' : 'info');
@@ -4454,7 +4587,23 @@ async function _selfSwapWith(tgtId) {
   _selfClear();
   if (!src || !tgt) return;
   if (!_selfSwapFits(src, tgt)) { showNotif('Échange impossible (place occupée)', 'error'); return; }
+  const undo = _captureUndoSnapshot(srcId, [tgtId], {
+    positionIds: [srcId, tgtId], cooldownIds: [srcId],
+  });
   if (!(await _vttSpendSpellPm(src, opt))) return;
+  await _vttStartSpellCooldown(src, opt);
+  const castRoll = await _vttRollSelfMovement(src, opt);
+  const statsDelta = _applyCastStatsDelta(src, opt, {
+    natural: castRoll.d20, result: castRoll.d20, crit: castRoll.crit, fumble: castRoll.fumble,
+  });
+  const name = _live(src).displayName ?? src.name;
+  const tgtName = _live(tgt).displayName ?? tgt.name;
+  if (castRoll.fumble) {
+    await _vttPublishMovementCast(src, [tgtId], opt, undo,
+      '💔 Échec critique (d20 = 1) — échange de place raté', castRoll, statsDelta).catch(() => {});
+    showNotif(`💔 Échec critique ! ${opt.label} raté`, 'error');
+    return;
+  }
   const from = { col: src.col, row: src.row }, to = { col: tgt.col, row: tgt.row };
   try {
     const batch = writeBatch(db);
@@ -4466,8 +4615,11 @@ async function _selfSwapWith(tgtId) {
     showNotif('Échange refusé par Firestore', 'error');
     return;
   }
-  const name = _live(src).displayName ?? src.name;
-  const tgtName = _live(tgt).displayName ?? tgt.name;
+  _vttSetTokenGridPosition(src, to.col, to.row);
+  _vttSetTokenGridPosition(tgt, from.col, from.row);
+  await _vttPublishMovementCast(src, [tgtId], opt, undo,
+    `${castRoll.d20 == null ? '✅ Réussite automatique' : `🎲 ${castRoll.d20}${castRoll.crit ? ' 💥 RC' : ''}`} · 🔄 échange sa place avec ${tgtName}`,
+    castRoll, statsDelta).catch(() => {});
   showNotif(`🔄 ${name} échange sa place avec ${tgtName} (${opt.label})`, 'success');
 }
 
@@ -4478,7 +4630,21 @@ async function _selfMoveTo(col, row) {
   const dist = Math.abs(col - src.col) + Math.abs(row - src.row);
   const name = _live(src).displayName ?? src.name;
   _selfClear();
+  const undo = _captureUndoSnapshot(srcId, [], {
+    positionIds: [srcId], cooldownIds: [srcId],
+  });
   if (!(await _vttSpendSpellPm(src, opt))) return;
+  await _vttStartSpellCooldown(src, opt);
+  const castRoll = await _vttRollSelfMovement(src, opt);
+  const statsDelta = _applyCastStatsDelta(src, opt, {
+    natural: castRoll.d20, result: castRoll.d20, crit: castRoll.crit, fumble: castRoll.fumble,
+  });
+  if (castRoll.fumble) {
+    await _vttPublishMovementCast(src, [srcId], opt, undo,
+      '💔 Échec critique (d20 = 1) — déplacement personnel raté', castRoll, statsDelta).catch(() => {});
+    showNotif(`💔 Échec critique ! ${opt.label} raté`, 'error');
+    return;
+  }
   try {
     await updateDoc(_tokRef(srcId), { col, row });
   } catch (err) {
@@ -4486,6 +4652,10 @@ async function _selfMoveTo(col, row) {
     showNotif('Déplacement refusé par Firestore', 'error');
     return;
   }
+  _vttSetTokenGridPosition(src, col, row);
+  await _vttPublishMovementCast(src, [srcId], opt, undo,
+    `${castRoll.d20 == null ? '✅ Réussite automatique' : `🎲 ${castRoll.d20}${castRoll.crit ? ' 💥 RC' : ''}`} · 🏃 déplacement réussi de ${dist} case${dist > 1 ? 's' : ''}`,
+    castRoll, statsDelta).catch(() => {});
   showNotif(`🏃 ${name} se déplace de ${dist} case${dist > 1 ? 's' : ''} (${opt.label})`, 'success');
 }
 
@@ -6363,13 +6533,20 @@ function _effectiveTokenPm(t) {
   return t.pm ?? null;
 }
 
-function _captureUndoSnapshot(srcId, targetIds) {
+function _captureUndoSnapshot(srcId, targetIds, { positionIds = [], cooldownIds = [] } = {}) {
   const ids = [...new Set([srcId, ...(targetIds || [])].filter(Boolean))];
+  const positions = new Set(positionIds);
+  const cooldowns = new Set(cooldownIds);
   const tokens = {}, chars = {};
   const addChar = (cid) => { if (cid && chars[cid] === undefined) { const c = VS.characters[cid]; chars[cid] = { pm: c ? _charPmCur(c) : null }; } };
   for (const id of ids) {
     const t = VS.tokens[id]?.data; if (!t) continue;
     tokens[id] = {
+      ...(positions.has(id) ? {
+        col: t.col,
+        row: t.row,
+      } : {}),
+      ...(cooldowns.has(id) ? { spellCooldowns: t.spellCooldowns ? { ...t.spellCooldowns } : {} } : {}),
       hp: _effectiveTokenHp(t),
       pvCombatHp: t.pvCombatHp ?? null,
       combatHpEstimate: VS.combatHpEstimates.has(t.id)
@@ -6456,6 +6633,15 @@ function _vttSpellPills(o, { includeTraits = true } = {}) {
     }
     const statLbl = (_STAT_SHORT[o.afflictionSaveStat] || o.afflictionSaveStat || '').toUpperCase();
     pills.push(_vttAoptPill('save', `🛡 JS ${statLbl} DD ${o.afflictionDD}`));
+  } else if (o.isDeplacement) {
+    const movement = o.mods?.deplacement || {};
+    const modeLabel = movement.mode === 'self' ? 'Déplacement du lanceur'
+      : movement.mode === 'pull' ? 'Attire la cible' : 'Repousse la cible';
+    pills.push(_vttAoptPill('util', `${o.icon || '↔'} ${modeLabel} · ${movement.cells || 1}c`));
+    if (movement.mode !== 'self') {
+      const statLbl = (_STAT_SHORT[movement.saveStat] || movement.saveStat || 'Dex').toUpperCase();
+      pills.push(_vttAoptPill('save', `🛡 JS ${statLbl} DD ${movement.saveDC || 11}`));
+    }
   } else if (isUtil) {
     const effetTxt = _effectDisplay(o, o.dice || '').trim();
     pills.push(_vttAoptPill('util', `🔧 ${effetTxt ? _esc(effetTxt) : 'Utilitaire'}`));
@@ -14464,6 +14650,11 @@ async function _vttUndoAction(logId) {
     for (const [tid, st] of Object.entries(snap.tokens || {})) {
       const t = VS.tokens[tid]?.data;
       const patch = { buffs: st.buffs || [], conditions: st.conditions || [] };
+      if (Number.isFinite(st.col) && Number.isFinite(st.row)) {
+        patch.col = st.col;
+        patch.row = st.row;
+      }
+      if (st.spellCooldowns) patch.spellCooldowns = st.spellCooldowns;
       if (st.pvCombatHp != null) patch.pvCombatHp = st.pvCombatHp;
       if (st.combatHpEstimate) VS.combatHpEstimates.set(tid, { ...st.combatHpEstimate });
       else VS.combatHpEstimates.delete(tid);
@@ -14471,6 +14662,16 @@ async function _vttUndoAction(logId) {
       if (st.pm != null)       patch.pm = st.pm;
       if (st.pmCombat != null) patch.pmCombat = st.pmCombat;
       await updateDoc(_tokRef(tid), patch).catch(() => {});
+      if (t && patch.spellCooldowns) t.spellCooldowns = patch.spellCooldowns;
+      if (t && patch.col != null && patch.row != null) {
+        Object.assign(t, { col: patch.col, row: patch.row });
+        const dims = _tokenDims(t);
+        VS.tokens[tid]?.shape?.to?.({
+          x: patch.col * CELL + dims.w * CELL / 2,
+          y: patch.row * CELL + dims.h * CELL / 2,
+          duration: .08,
+        });
+      }
       if (t && st.hp != null) await _setHp(t, st.hp).catch(() => {});
     }
     for (const [cid, st] of Object.entries(snap.chars || {})) {
@@ -14479,7 +14680,9 @@ async function _vttUndoAction(logId) {
     // Statistiques : réverse le delta enregistré avec l'action (décrémente).
     if (m.statsDelta) applyStatsDelta(m.statsDelta, -1);
     await updateDoc(doc(_logCol(), logId), { actionUndone: true, actionUndoneBy: STATE.user?.uid || null }).catch(() => {});
-    showNotif('↩ Action annulée — PV/PM/états restaurés', 'success');
+    VS.layers.token?.batchDraw();
+    fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
+    showNotif('↩ Action annulée — position et ressources restaurées', 'success');
   } catch (e) {
     console.error('[vtt] undo action', e);
     showNotif('Annulation échouée', 'error');

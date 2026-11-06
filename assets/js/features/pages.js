@@ -3792,6 +3792,9 @@ const PAGES = {
         { t: 'Système de sorts', s: 'Forge de runes ou création classique', ic: 'star', a: '#e8b84b', fn: 'openSpellSystemAdmin', mod: 'characters' },
         { t: 'Matrices de sorts', s: 'Runes, noyaux, combinaisons', ic: 'layers', a: '#bca0ff', fn: 'openSpellMatricesAdmin', mod: 'characters' },
       ] },
+      { id: 'artisanat', label: 'Artisanat', items: [
+        { t: 'Recettes d’artisanat', s: 'Matériaux, quantités et paliers de fabrication', ic: 'layers', a: '#31d2a0', fn: 'openArtisanRecipesAdmin', mod: '../shared/artisan-settings' },
+      ] },
       { id: 'table', label: 'Table & VTT', items: [
         { t: 'Compétences de dés', s: 'Jets proposés aux joueurs', ic: 'dice', a: '#4f8cff', fn: '_ouvrirGestionDes', mod: 'histoire' },
         { t: 'États & conditions', s: 'Effets appliqués aux tokens', ic: 'drop', a: '#f97316', fn: '_vttConditionConfig', mod: 'vtt/vtt' },
@@ -4615,7 +4618,7 @@ registerActions({
     const mod = btn.dataset.module;
     // Les modales admin empruntent les styles de leur feature d'origine → on
     // charge la feuille correspondante AVANT d'ouvrir (sinon modale sans style).
-    const cssPage = { 'characters': 'characters', 'histoire': 'histoire', 'vtt/vtt': 'vtt', '../shared/rarity': 'shop' }[mod];
+    const cssPage = { 'characters': 'characters', 'histoire': 'histoire', 'vtt/vtt': 'vtt', '../shared/rarity': 'shop', '../shared/artisan-settings': 'shop' }[mod];
     if (cssPage) {
       try { const { _ensureFeatureCss } = await import('../core/navigation.js'); await _ensureFeatureCss(cssPage); } catch {}
     }
