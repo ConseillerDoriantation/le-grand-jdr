@@ -10,6 +10,7 @@ import { _esc, _norm, _searchIncludes, loadingHtml, eyeIcon } from '../shared/ht
 import { lsJson } from '../shared/local-storage.js';
 import { calcOr, computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, calcCA, calcPVMax, calcPMMax, calcVitesse, ITEM_STAT_META, statShort as _statShort, getDefaultCharForUser } from '../shared/char-stats.js';
 import { useGold } from '../shared/economy.js';
+import { buildGoldAccount } from '../shared/ledger-logic.js';
 import { loadWeaponFormats } from '../shared/weapon-formats.js';
 import { WEAPON_HANDS_OPTIONS, hasWeaponDefaults, normalizeWeaponDefaults, resolveWeaponFamily, weaponHandsLabel } from '../shared/weapon-family.js';
 import { loadDamageTypes } from '../shared/damage-types.js';
@@ -432,7 +433,7 @@ export async function renderShop() {
   if ((STATE.characters || []).some(c => Array.isArray(c.inventaire) && c.inventaire.some(hasUpgrades))) await loadUpgradeSettings();
   const routeSection = getRouteSub('shop').split('/')[0];
   if (routeSection === 'atelier') _shopSection = _prepareAtelier() ? 'atelier' : 'shop';
-  else if (routeSection === 'artisan' && STATE.isAdmin) _shopSection = 'artisan';
+  else if (routeSection === 'artisan') _shopSection = 'artisan';
   else if (routeSection === 'shop') _shopSection = 'shop';
   const target = consumeTargetEntity('shop');
   const targetItemId = target?.id || _pendingTargetShopItemId;
@@ -552,10 +553,10 @@ export async function renderShop() {
           data-sh-action="setSection" data-section="atelier" data-nav-page="shop" data-nav-sub="atelier" role="tab" aria-selected="${_shopSection === 'atelier'}">
           ${_shopIcon('wand')} Atelier
         </button>
-        ${STATE.isAdmin ? `<button type="button" class="sh-page-tab ${_shopSection === 'artisan' ? 'active' : ''}"
+        <button type="button" class="sh-page-tab ${_shopSection === 'artisan' ? 'active' : ''}"
           data-sh-action="setSection" data-section="artisan" data-nav-page="shop" data-nav-sub="artisan" role="tab" aria-selected="${_shopSection === 'artisan'}">
           ${_shopIcon('hammer')} Artisan
-        </button>` : '' /* Artisan masqué aux joueurs — refonte du craft en cours */}
+        </button>
       </nav>
       </div>
     </header>
@@ -2220,18 +2221,7 @@ function _applyPurchase(char, item, qty, draft = _newPurchaseDraft(char)) {
 }
 
 function _accountPayloadForPurchase(char, delta, reason) {
-  const compte = { recettes: [], depenses: [], ...(char.compte || {}) };
-  const recettes = [...(compte.recettes || [])];
-  const depenses = [...(compte.depenses || [])];
-  const date = new Date().toLocaleDateString('fr-FR');
-  // Migration transparente des très anciennes fiches qui n'avaient qu'un
-  // champ `or`, sinon la première dépense ferait disparaître leur solde.
-  if (!recettes.length && !depenses.length && calcOr(char) > 0) {
-    recettes.push({ date, libelle: 'Solde initial', montant: calcOr(char) });
-  }
-  if (delta < 0) depenses.push({ date, libelle: reason, montant: Math.abs(delta) });
-  else if (delta > 0) recettes.push({ date, libelle: reason, montant: delta });
-  return { ...compte, recettes, depenses };
+  return buildGoldAccount(char, [{ delta, reason }]);
 }
 
 async function _commitPurchaseDraft(draft, { toast = true } = {}) {
@@ -2247,7 +2237,7 @@ async function _commitPurchaseDraft(draft, { toast = true } = {}) {
   }
   const equipSync = syncEquipmentAfterInventoryMutation(char, removed);
   const historyPatch = inventoryHistoryPayload(char, draft.history);
-  const compte = _accountPayloadForPurchase(char, -total, `Boutique · ${draft.count} article${draft.count > 1 ? 's' : ''}`);
+  const compte = _accountPayloadForPurchase(char, -total, `Achat : ${draft.count} article${draft.count > 1 ? 's' : ''}`);
   const payload = {
     inventaire: draft.inventory,
     inventoryHistory: historyPatch.inventoryHistory,
@@ -5460,7 +5450,7 @@ function shopSetSection(section) {
 document.addEventListener('app:route-sub-changed', event => {
   if (event.detail?.page !== 'shop') return;
   const section = String(event.detail.sub || '').split('/')[0];
-  if (!['shop', 'atelier', 'artisan'].includes(section) || (section === 'artisan' && !STATE.isAdmin)) return;
+  if (!['shop', 'atelier', 'artisan'].includes(section)) return;
   if (section === 'atelier' && !_prepareAtelier()) return;
   event.preventDefault();
   if (section === 'artisan') _artisanNeedsReset = true;

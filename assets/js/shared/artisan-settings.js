@@ -346,6 +346,12 @@ export async function openArtisanSettings(tab = 'bases') {
   changesOpen = false; loadLocal(tab); render({ preserveScroll: false });
 }
 
+// Point d'entrée dédié à la Console MJ : ouvre directement la matrice des
+// recettes sans obliger le MJ à retrouver l'onglet « Fabriquer ».
+export function openArtisanRecipesAdmin() {
+  return openArtisanSettings('fabriquer');
+}
+
 async function save() {
   if (!differences().length) return;
   const { craft, upgrade } = splitArtisanSettings(draft, craftBase, upgradeBase);

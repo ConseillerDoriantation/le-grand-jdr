@@ -1176,7 +1176,7 @@ function _sendTargetFilter(el) {
   if (empty) empty.style.display = shown ? 'none' : '';
 }
 
-async function _loadTransferTargets(fromCharId) {
+export async function _loadTransferTargets(fromCharId) {
   let sessionCharacters = [];
   try {
     // `characters` est alimentée par le cache session-live : cette lecture récupère
@@ -1397,8 +1397,10 @@ export async function openSendGoldModal(charId) {
         <div id="send-target-empty" style="display:none;padding:.5rem;text-align:center;color:var(--text-dim);font-size:.76rem">Aucun personnage trouvé</div>
       </div>`)}
     ${modalSection(`💰 Montant <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">(max ${orDispo} or)</span>`, `
-      <input type="number" class="input-field" id="gold-amount" min="1" max="${orDispo}" value="1"
-        placeholder="Montant en or" style="max-width:140px">`)}
+      <input type="number" class="input-field" id="gold-amount" min="0.01" step="0.01" max="${orDispo}" value="1"
+        placeholder="Montant en or" style="max-width:140px">
+      <input type="text" class="input-field" id="gold-reason" maxlength="80"
+        placeholder="Motif facultatif" style="margin-top:.45rem">`)}
     <div style="display:flex;gap:.5rem">
       <button class="btn btn-gold" style="flex:1" data-action="sendGold" data-id="${charId}">💰 Envoyer</button>
       <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
@@ -1417,26 +1419,52 @@ export async function sendGold(fromCharId) {
     || (_modalCharTargets || []).find(x => x.id === targetId);
   if (!toChar) { showNotif('Personnage introuvable.', 'error'); return; }
 
-  const montant = parseInt(document.getElementById('gold-amount')?.value) || 0;
-  if (montant < 1) { showNotif('Montant invalide.', 'error'); return; }
-
-  // Débit puis crédit SÉQUENTIELS avec rollback, via la couche économie (écriture
-  // immuable + vérification de solde). L'ancien Promise.all écrivait les deux
-  // comptes EN PARALLÈLE sans compensation : si une seule écriture échouait, de
-  // l'or était créé ou détruit. `charObj` permet de créditer une cible hors
-  // STATE.characters (autre session).
-  const debit = await useGold(fromCharId, -montant, `Or envoyé à ${toChar.nom || 'joueur'}`, { charObj: fromChar, refreshUI: false });
-  if (!debit.ok) { showNotif(debit.error || 'Transfert impossible.', 'error'); return; }
-  const credit = await useGold(targetId, +montant, `Or reçu de ${fromChar.nom || 'joueur'}`, { charObj: toChar, refreshUI: false });
-  if (!credit.ok) {
-    await useGold(fromCharId, +montant, '↻ Rollback transfert échoué', { charObj: fromChar, refreshUI: false });
-    showNotif(credit.error || 'Transfert échoué — débit annulé.', 'error');
-    return;
-  }
+  const montant = Math.abs(parseFloat(String(document.getElementById('gold-amount')?.value || '').replace(',', '.'))) || 0;
+  if (montant <= 0) { showNotif('Montant invalide.', 'error'); return; }
+  const motif = document.getElementById('gold-reason')?.value?.trim() || '';
+  const result = await sendGoldTo(fromCharId, targetId, montant, motif, { fromChar, toChar });
+  if (!result.ok) { showNotif(result.error || 'Transfert impossible.', 'error'); return; }
 
   closeModal();
   showNotif(`💰 ${montant} or envoyé à ${toChar.nom || 'joueur'} !`, 'success');
   _renderInventoryChar(fromChar, charSession.getCurrentCharTab() || 'inventaire');
+}
+
+/**
+ * Transfert partagé entre la modale d'inventaire et l'onglet Compte.
+ * Le débit est annulé si le crédit échoue, afin de ne jamais créer/détruire d'or.
+ */
+export async function sendGoldTo(fromCharId, toCharId, amount, motif = '', refs = {}) {
+  const fromChar = refs.fromChar
+    || STATE.characters?.find(character => character.id === fromCharId)
+    || (charSession.getCurrentChar()?.id === fromCharId ? charSession.getCurrentChar() : null)
+    || STATE.activeChar;
+  const toChar = refs.toChar
+    || STATE.characters?.find(character => character.id === toCharId)
+    || (_modalCharTargets || []).find(character => character.id === toCharId);
+  const montant = Math.abs(Number(amount) || 0);
+  if (!fromChar || !toChar) return { ok: false, error: 'Personnage introuvable.' };
+  if (fromCharId === toCharId) return { ok: false, error: 'Choisis un autre personnage.' };
+  if (!(montant > 0)) return { ok: false, error: 'Montant invalide.' };
+
+  const suffix = String(motif || '').trim();
+  const reason = suffix ? ` — ${suffix}` : '';
+  const debit = await useGold(fromCharId, -montant, `Or envoyé à ${toChar.nom || 'joueur'}${reason}`, {
+    charObj: fromChar,
+    refreshUI: false,
+  });
+  if (!debit.ok) return debit;
+
+  const credit = await useGold(toCharId, +montant, `Or reçu de ${fromChar.nom || 'joueur'}${reason}`, {
+    charObj: toChar,
+    refreshUI: false,
+  });
+  if (!credit.ok) {
+    await useGold(fromCharId, +montant, '↻ Rollback transfert échoué', { charObj: fromChar, refreshUI: false });
+    return { ok: false, error: credit.error || 'Transfert échoué — débit annulé.' };
+  }
+  try { charSession.refresh(fromChar); } catch {}
+  return { ok: true, fromChar, toChar, newBalance: debit.newBalance };
 }
 
 // ══════════════════════════════════════════════

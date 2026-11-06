@@ -89,7 +89,7 @@ test('la colonne ne bouge pas avec le scroll et tous les calculs utilisent le d�
     "identityFormula = 'Base + DEX + équipement'",
     "identityFormula = 'Base + FOR + équipement'",
     "identityFormula = 'Base + INT + niveau'",
-    "identityFormula = 'Recettes − dépenses'",
+    "identityFormula = 'Gains − dépenses'",
   ]) assert.ok(source.includes(formula));
   const toggle = source.slice(source.indexOf('function toggleCharDerivative'), source.indexOf('function registerCharBlurActions'));
   assert.match(toggle, /ids-vital-detail-head/);
@@ -130,7 +130,7 @@ test('les contrôles identité réutilisent les actions métier existantes', () 
   for (const action of [
     'reassignCharOwner', '_setDefaultCharacter', 'openCharExportMenu', 'deleteChar',
     'open-character-photo', 'switchCharacterBuild', 'createCharacterBuild', 'deleteCharacterBuild',
-    'adjustStat', '_adjVitalBase', 'toggleCharDerivative', 'openSendGoldModal',
+    'adjustStat', '_adjVitalBase', 'toggleCharDerivative', 'openIdentityLedger',
   ]) assert.match(source, new RegExp(`data-(?:action|change)="${action}"`));
   assert.match(source, /data-change="setCharAuraColor"/);
   assert.match(source, /data-action="setCharAura"/);

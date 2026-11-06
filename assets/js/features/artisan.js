@@ -14,7 +14,7 @@ import { registerActions } from '../core/actions.js';
 import { getShopCharId } from '../shared/shop-session.js';
 import { weaponHands } from '../shared/weapon-family.js';
 import { trySave } from '../shared/crud.js';
-import { openModal, pushModal, closeModalDirect, confirmModal, modalSection } from '../shared/modal.js';
+import { openModal, pushModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import {
@@ -40,6 +40,10 @@ import { getRarities, loadRarities, RARETE_NAMES, _rareteColor } from '../shared
 import { getDocData, loadCollection } from '../data/firestore.js';
 import { shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { isTraitRecyclable, recyclableTraits, nonRecyclableTraitNames } from '../shared/trait-recycling.js';
+import {
+  getItemTraitsSlotCount as getItemTraitsSlotCountPure, statCapAt, firstGainRarity,
+  ringTracks, possibleActions, isMaxed, dismantlePreview,
+} from '../shared/artisan-logic.js';
 
 export { FRAGMENT_CATEGORIES, getItemFragmentCategory };
 
@@ -52,6 +56,11 @@ const STORE = {
   inlineRootId: null,
   itemSearch: '',
   itemCategory: 'all',
+  hideEmpty: false,
+  operation: null,
+  flash: null,
+  resourceFlash: false,
+  shopItems: [],
   bastion: null,           // doc bastion/main (niveaux de salles) pour la reforge
 };
 
@@ -63,17 +72,17 @@ async function _artisanLoadSettings() {
     loadCraftSettings().catch(() => null),
     loadRarities().catch(() => null),
     getDocData('bastion', 'main').then(d => { STORE.bastion = d || null; }).catch(() => { STORE.bastion = null; }),
+    loadCollection('shop').then(items => { STORE.shopItems = items || []; }).catch(() => { STORE.shopItems = []; }),
   ]);
 }
 
-// Retourne le nombre de slots de traits autorisés pour un item.
-// La clé du plafond est directement la catégorie de fragment (artisan unifié).
 export function getItemTraitsSlotCount(item = {}) {
   const s = getUpgradeSettings();
   const cat = getItemFragmentCategory(item);
-  if (!cat) return 0;
-  // Plafond effectif = min(plafond catégorie, plafond rareté). La rareté borne dur.
-  return Math.min(s.caps?.traitsPerItem?.[cat] ?? 1, rarityCapFor('traits', item.rarete, s));
+  const cap = getItemTraitsSlotCountPure(item, s);
+  // Repli défensif pour une configuration historique incomplète. Le calcul
+  // normal reste centralisé dans artisan-logic.js.
+  return Number.isFinite(cap) ? cap : Math.min(s.caps?.traitsPerItem?.[cat] ?? 1, rarityCapFor('traits', item.rarete, s));
 }
 
 // ══════════════════════════════════════════════
@@ -141,8 +150,6 @@ function _getActiveArtisanChar() {
 // ══════════════════════════════════════════════
 
 export async function openArtisanModal() {
-  // Accès réservé au MJ le temps de la refonte du système de craft/artisanat.
-  if (!STATE.isAdmin) { showNotif('L\'Artisan est en cours de refonte — indisponible pour le moment.', 'info'); return; }
   await _artisanLoadSettings();
   STORE.inlineRootId = null;
   STORE.activeCharId = null; // reset à chaque ouverture
@@ -150,25 +157,23 @@ export async function openArtisanModal() {
   STORE.mjFreeMode = false;          // sécurité : MJ doit ré-activer le mode gratuit à chaque session
   STORE.itemSearch = '';
   STORE.itemCategory = 'all';
+  STORE.hideEmpty = false;
+  STORE.operation = null;
   _renderArtisanModal();
 }
 
 export async function mountArtisanPage(rootId = 'sh-artisan-page', { reset = false } = {}) {
-  // Accès réservé au MJ le temps de la refonte du système de craft/artisanat.
-  if (!STATE.isAdmin) {
-    const root = document.getElementById(rootId);
-    if (root) root.innerHTML = '<div style="padding:2.5rem 1rem;text-align:center;color:var(--text-dim)">🔨 L\'Artisan est en cours de refonte.<br>Il sera bientôt de retour.</div>';
-    STORE.inlineRootId = null;
-    return;
-  }
   await _artisanLoadSettings();
   STORE.inlineRootId = rootId;
+  // Le mode gratuit n'est jamais mémorisé d'une entrée dans l'Artisan à l'autre.
+  STORE.mjFreeMode = false;
   if (reset) {
     STORE.activeCharId = null;
     STORE.activeItemIndex = null;
-    STORE.mjFreeMode = false;
     STORE.itemSearch = '';
     STORE.itemCategory = 'all';
+    STORE.hideEmpty = false;
+    STORE.operation = null;
   }
   _renderArtisanModal();
 }
@@ -335,6 +340,8 @@ function _renderItemFilters(c) {
         data-action="_artisanFilterCategory" data-category="all">Tous <span>${eligible.length}</span></button>
       ${categories.map(cat => `<button type="button" class="art-item-category${STORE.itemCategory === cat.id ? ' is-active' : ''}"
         data-action="_artisanFilterCategory" data-category="${_esc(cat.id)}">${cat.icon} ${_esc(cat.label)} <span>${counts[cat.id]}</span></button>`).join('')}
+      <button type="button" class="art-item-category art-hide-empty${STORE.hideEmpty ? ' is-active' : ''}"
+        data-action="_artisanToggleHideEmpty" aria-pressed="${STORE.hideEmpty}">Masquer au max</button>
     </div>
   </div>`;
 }
@@ -348,15 +355,19 @@ function _renderFragmentBag(c, { page = false } = {}) {
     0,
   );
 
-  const sections = FRAGMENT_CATEGORIES.map(cat => {
+  const selectedIndex = STORE.activeItemIndex;
+  const renderFragmentCategory = cat => {
     const frags = bag[cat.id] || {};
     const entries = Object.entries(frags).filter(([, n]) => (parseInt(n) || 0) > 0);
     if (!entries.length) return '';
     const categoryCount = entries.reduce((sum, [, n]) => sum + (parseInt(n) || 0), 0);
     const rows = entries.map(([name, n]) =>
       `<div class="art-frag-entry" title="Compatible avec : ${_esc(cat.label)}">
-        <span class="art-frag-entry-name">${_esc(name)}</span>
+        <span class="art-frag-mark" aria-hidden="true">◆</span><span class="art-frag-entry-name">${_esc(name)}</span>
         <span class="art-frag-chip-n">×${n}</span>
+        ${selectedCategory === cat.id
+          ? `<button type="button" class="art-frag-use" data-action="_artisanTraitPanel" data-i="${selectedIndex}" data-frag="${_esc(name)}">Poser</button>`
+          : `<button type="button" class="art-frag-use" data-action="_artisanSelectCompatible" data-category="${_esc(cat.id)}">Voir</button>`}
       </div>`
     ).join('');
     return `<details class="art-frag-cat" ${!page || selectedCategory === cat.id ? 'open' : ''}>
@@ -366,16 +377,39 @@ function _renderFragmentBag(c, { page = false } = {}) {
       </summary>
       <div class="art-frag-cat-list">${rows}</div>
     </details>`;
-  }).filter(Boolean).join('');
+  };
+  const selectedMeta = FRAGMENT_CATEGORIES.find(cat => cat.id === selectedCategory);
+  const selectedSection = selectedMeta ? renderFragmentCategory(selectedMeta) : '';
+  const otherSections = FRAGMENT_CATEGORIES
+    .filter(cat => cat.id !== selectedCategory)
+    .map(renderFragmentCategory).filter(Boolean).join('');
+  const hasFragments = !!(selectedSection || otherSections);
+
+  const materialReq = selected ? (_reforgeContext(selected, c).materialReq || []) : [];
+  const materialRows = materialReq.map(req => {
+    const owned = (c?.inventaire || []).filter(entry => entry?.itemId === req.itemId).length;
+    const shopItem = STORE.shopItems.find(entry => entry.id === req.itemId);
+    const name = shopItem?.nom || (c?.inventaire || []).find(entry => entry?.itemId === req.itemId)?.nom || 'Matériau requis';
+    return `<div class="art-material-row${owned >= req.quantite ? ' is-ready' : ''}">
+      <span><i aria-hidden="true">⬡</i><b>${_esc(name)}</b><small>${owned}/${req.quantite}</small></span>
+      ${shopItem ? `<button type="button" data-sh-action="cartInc" data-id="${_esc(req.itemId)}">Panier +</button>` : ''}
+    </div>`;
+  }).join('');
 
   return `
-    <div class="art-frag-bag${page ? ' art-frag-bag--page' : ''}">
+    <div class="art-frag-bag${page ? ' art-frag-bag--page' : ''}${STORE.resourceFlash ? ' is-flash' : ''}">
       <div class="art-frag-bag-hd">
         <span class="art-frag-bag-title">🎒 Sac de fragments</span>
         <span class="art-frag-total">${totalCount}</span>
       </div>
-      <div class="art-frag-hint">Recycle un objet à trait, puis utilise son fragment sur un équipement de même catégorie.</div>
-      ${sections || `<div class="art-frag-empty">Aucun fragment — recycle un équipement à trait pour en obtenir.</div>`}
+      <div class="art-frag-hint">Les fragments gardent la famille de la pièce démontée.</div>
+      ${selectedCategory ? '<div class="art-bag-section-title">Pour cette pièce</div>' : ''}
+      ${selectedSection || (selectedCategory ? '<div class="art-frag-empty">Aucun fragment compatible.</div>' : '')}
+      ${otherSections ? '<div class="art-bag-section-title">Pour d’autres pièces</div>' + otherSections : ''}
+      ${hasFragments ? '' : `<div class="art-frag-empty">Aucun fragment — recycle un équipement à trait pour en obtenir.</div>`}
+      <div class="art-bag-section-title">Matériaux de reforge</div>
+      ${materialRows || '<div class="art-frag-empty">Sélectionne une pièce pour voir les matériaux requis.</div>'}
+      <div class="art-cycle"><strong>Le cycle de l’Artisan</strong><span>Démonte une pièce → récupère fragments et matériaux → améliore ou reforge ton équipement.</span></div>
     </div>`;
 }
 
@@ -414,7 +448,7 @@ function _renderItemList(c) {
       _itemSummary(it),
     ].filter(Boolean).join(' ');
     return _searchIncludes(haystack, q);
-  });
+  }).filter(({ it }) => !STORE.hideEmpty || !isMaxed(c, it, { upgrade: getUpgradeSettings() }));
 
   if (!allEligible.length) {
     return `<div class="art-empty">Aucun équipement améliorable dans l'inventaire.<br>
@@ -425,21 +459,32 @@ function _renderItemList(c) {
     return `<div class="art-empty">Aucun équipement ne correspond à ces filtres.</div>`;
   }
 
-  return `<div class="art-item-list">
-    ${eligible.map(({ it, idx, cat }) => {
+  const equippedIndices = new Set(Object.values(c.equipement || {}).map(eq => Number(eq?.sourceInvIndex)).filter(Number.isInteger));
+  const row = ({ it, idx, cat }) => {
       const meta = FRAGMENT_CAT_BY_ID[cat];
       const active = idx === STORE.activeItemIndex;
       const summary = _itemSummary(it);
-      return `<button class="art-item-card${active ? ' is-active' : ''}" data-action="_artisanSelectItem" data-i="${idx}">
-        <span class="art-item-cat" title="${_esc(meta?.label || '')}">${meta?.icon || '📦'}</span>
+      const traits = _getTraits(it).length, traitCap = getItemTraitsSlotCount(it);
+      const stats = _sumUpgradeStatPoints(it), statCap = statCapAt(it, it.rarete, getUpgradeSettings());
+      const reforge = _reforgeContext(it, c).ev;
+      const actions = possibleActions(c, it, { upgrade: getUpgradeSettings(), gold: calcOr(c), freeMode: STORE.mjFreeMode, reforgeEval: reforge });
+      const count = ['addTrait', 'replaceTrait', 'stat', 'reforge'].filter(key => actions[key]).length;
+      const rarete = Math.max(1, parseInt(it.rarete, 10) || 1);
+      const meter = (used, cap, tone) => `<span class="art-mini-meter is-${tone}">${Array.from({ length: Math.max(1, cap) }, (_, k) => `<i class="${k < used ? 'is-on' : ''}"></i>`).join('')}</span>`;
+      return `<button class="art-item-card${active ? ' is-active' : ''}${STORE.flash === idx ? ' is-flash' : ''}" data-action="_artisanSelectItem" data-i="${idx}">
+        <span class="art-item-cat" title="${_esc(meta?.label || '')}">${'◆'.repeat(Math.min(5, rarete))}</span>
         <span class="art-item-card-body">
-          <span class="art-item-name">${_esc(it.nom || 'Sans nom')}</span>
-          ${summary ? `<span class="art-item-sum">${summary}</span>` : ''}
+          <span class="art-item-name">${_esc(it.nom || 'Sans nom')}</span><span class="art-item-rarity">${_esc(RARETE_NAMES[rarete] || '')} · ${_esc(meta?.label || cat)}</span>
+          <span class="art-item-meters">${meter(traits, traitCap, 'trait')}${statCap ? meter(stats, statCap, 'stat') : ''}</span>
+          <span class="art-item-sum">${count ? `${count} possible${count > 1 ? 's' : ''}` : (summary || 'Au maximum')}</span>
         </span>
         <span class="art-item-chev">${active ? '▾' : '›'}</span>
       </button>`;
-    }).join('')}
-  </div>`;
+    };
+  const equipped = eligible.filter(entry => equippedIndices.has(entry.idx));
+  const bag = eligible.filter(entry => !equippedIndices.has(entry.idx));
+  const group = (label, entries) => entries.length ? `<div class="art-item-group"><div class="art-item-group-title">${label}<span>${entries.length}</span></div>${entries.map(row).join('')}</div>` : '';
+  return `<div class="art-item-list">${group('Équipé', equipped)}${group('Dans ton sac', bag)}</div>`;
 }
 
 // ── Établi (colonne droite) : tout ce qu'on peut faire à l'objet choisi ──
@@ -471,20 +516,66 @@ function _renderWorkbench(c) {
     ? `<button class="art-wb-hist" data-action="_artisanOpenHistory" data-i="${i}" title="Historique des améliorations">📜 ${item.upgrades.history.length}</button>`
     : '';
 
-  return `<div class="art-wb">
-    <div class="art-wb-hd">
-      <span class="art-wb-ico">${meta?.icon || '📦'}</span>
-      <span class="art-wb-name">${_esc(item.nom || 'Sans nom')}</span>
-      <span class="art-wb-cat">${_esc(meta?.label || cat)}${item.format ? ` · ${_esc(item.format)}` : ''}</span>
-      ${histBtn}
-    </div>
-    <div class="art-wb-state">${upBonus}${upBonus && allTraits.length ? '' : ''}${traitState}</div>
+  const rarity = Math.max(1, parseInt(item.rarete, 10) || 1);
+  const traitCap = getItemTraitsSlotCount(item);
+  const statCap = statCapAt(item, rarity, getUpgradeSettings());
+  const statUsed = _sumUpgradeStatPoints(item);
+  const nextGain = firstGainRarity(item, getUpgradeSettings());
+  const equipped = Object.entries(c.equipement || {}).find(([, eq]) => Number(eq?.sourceInvIndex) === i)?.[0] || '';
+  const propertyBits = [item.format, item.typeArmure, item.nature, item.portee].filter(Boolean);
+  const capacity = (label, used, cap, tone, target) => `<button type="button" class="art-capacity is-${tone}" data-action="_artisanScrollSection" data-target="${target}">
+    <span>${label}</span><strong>${used}/${cap || '—'}</strong><i>${cap ? `${Math.max(0, cap - used)} libre${cap - used > 1 ? 's' : ''}` : 'non applicable'}</i>
+  </button>`;
 
-    ${_renderTraitsSection(item, i, c, cat)}
-    ${_renderStatsSection(item, i, c, cat)}
-    ${_renderReforgeSection(item, i, c)}
+  return `<div class="art-wb">
+    <div class="art-wb-hero">
+      <span class="art-wb-ico">${meta?.icon || '◇'}</span>
+      <span class="art-wb-identity"><small style="color:${_rareteColor(RARETE_NAMES[rarity]) || 'var(--text-dim)'}">${'◆'.repeat(Math.min(5, rarity))} ${_esc(RARETE_NAMES[rarity] || '')}</small><strong>${_esc(item.nom || 'Sans nom')}</strong><em>${_esc(meta?.label || cat)}${propertyBits.length ? ` · ${_esc(propertyBits.join(' · '))}` : ''}</em></span>
+      ${equipped ? `<span class="art-equipped-badge">Équipé · ${_esc(equipped)}</span>` : ''}${histBtn}
+      <div class="art-wb-state">${upBonus}${traitState}</div>
+    </div>
+    <div class="art-capacities">
+      ${capacity('Traits', allTraits.length, traitCap, 'trait', 'art-section-traits')}
+      ${capacity('Stats', statUsed, statCap, 'stat', 'art-section-stats')}
+      ${capacity('Prochain gain', nextGain ? rarity : rarity, nextGain || rarity, 'rarity', 'art-section-reforge')}
+    </div>
+    ${_renderOperationPanel(item, i, c, cat)}
+    <div id="art-section-traits">${_renderTraitsSection(item, i, c, cat)}</div>
+    <div id="art-section-stats">${_renderStatsSection(item, i, c, cat)}</div>
+    <div id="art-section-reforge">${_renderReforgeSection(item, i, c)}</div>
     ${_renderRecycleSection(item, i, cat)}
   </div>`;
+}
+
+function _renderOperationPanel(item, invIndex, c, cat) {
+  const op = STORE.operation;
+  if (!op || op.invIndex !== invIndex) return '';
+  const close = '<button type="button" class="art-op-close" data-action="_artisanCloseOperation" aria-label="Fermer">×</button>';
+  const s = getUpgradeSettings();
+  const fragments = Object.entries(c.traitFragments?.[cat] || {}).filter(([, qty]) => (parseInt(qty, 10) || 0) > 0);
+  if (op.type === 'trait') {
+    const replace = !!op.oldTrait;
+    return `<section class="art-op-panel"><header><span><small>${replace ? 'Remplacer un trait' : 'Ajouter un trait'}</small><strong>${replace ? `« ${_esc(op.oldTrait)} » sera perdu` : 'Choisis un fragment compatible'}</strong></span>${close}</header>
+      <div class="art-op-options">${fragments.map(([name, qty]) => `<button type="button" class="${op.fragment === name ? 'is-selected' : ''}" data-action="_artisanOperationFragment" data-frag="${_esc(name)}"><span>◆ ${_esc(name)}</span><b>×${qty}</b></button>`).join('') || '<p>Aucun fragment compatible.</p>'}</div>
+      <footer><span>${STORE.mjFreeMode ? 'Gratuit · mode MJ' : `${replace ? s.trait.overwriteTrait : s.trait.addTraitFromFragment} PO`} · 1 fragment</span><button type="button" class="art-op-confirm" data-action="_artisanConfirmOperation" ${op.fragment ? '' : 'disabled'}>Confirmer</button></footer>
+    </section>`;
+  }
+  if (op.type === 'stat') {
+    const meta = ITEM_STAT_BY_FULL[op.stat];
+    return `<section class="art-op-panel"><header><span><small>Amélioration de statistique</small><strong>Ajouter +1 ${_esc(meta?.label || op.stat || 'Effet')}</strong></span>${close}</header>
+      <p class="art-op-copy">La modification est appliquée à cette pièce et immédiatement synchronisée si elle est équipée.</p>
+      <footer><span>${STORE.mjFreeMode ? 'Gratuit · mode MJ' : `${op.cost || 0} PO`}</span><button type="button" class="art-op-confirm" data-action="_artisanConfirmOperation">Confirmer</button></footer></section>`;
+  }
+  if (op.type === 'dismantle') {
+    const preview = dismantlePreview(item, s, getCraftSettings());
+    const extractAll = s.trait.extractAllTraits;
+    const selectable = preview.recoveredTraits;
+    return `<section class="art-op-panel is-danger"><header><span><small>Démontage définitif</small><strong>${_esc(item.nom || 'Objet')}</strong></span>${close}</header>
+      <div class="art-dis-preview"><div><b>Récupéré</b>${preview.materials.map(req => `<span>⬡ ${req.quantite}× ${_esc(STORE.shopItems.find(x => x.id === req.itemId)?.nom || 'matériau')}</span>`).join('') || '<span>Aucun matériau</span>'}${selectable.map(name => `<label><input type="radio" name="art-dis-trait" data-change="_artisanDismantleTrait" value="${_esc(name)}" ${extractAll || op.trait === name ? 'checked' : ''} ${extractAll ? 'disabled' : ''}>◆ ${_esc(name)}</label>`).join('')}</div>
+      <div><b>Perdu</b>${preview.lostTraits.map(name => `<span>🔒 ${_esc(name)}</span>`).join('') || '<span>Rien de verrouillé</span>'}<span>L’objet d’origine</span></div></div>
+      <footer><span>${STORE.mjFreeMode ? 'Gratuit · mode MJ' : `${preview.cost} PO`} · irréversible</span><button type="button" class="art-op-confirm is-danger" data-action="_artisanConfirmOperation" ${(selectable.length > 1 && !extractAll && !op.trait) ? 'disabled' : ''}>Démonter</button></footer></section>`;
+  }
+  return '';
 }
 
 // ── Toggle MJ gratuit (admins seulement) ────────────────────────────
@@ -755,8 +846,11 @@ async function _persistChar(c) {
     activeBuildId:  c.activeBuildId,
     ...(Array.isArray(c.inventoryHistory) ? { inventoryHistory: c.inventoryHistory } : {}),
   });
+  STORE.operation = null;
+  STORE.flash = STORE.activeItemIndex;
   closeModalDirect();
   _renderArtisanModal();
+  setTimeout(() => { STORE.flash = null; STORE.resourceFlash = false; }, 1400);
 }
 
 // ══════════════════════════════════════════════
@@ -839,10 +933,20 @@ function _renderReforgeSection(item, invIndex, c) {
   const goldLine = line(free || ev.goldOk, `${ev.goldCost} PO`);
 
   const allow = free || ev.ok;
-  const btn = `<button class="art-act art-act--gold" data-action="_artisanReforge" data-i="${invIndex}" ${allow ? '' : 'disabled'}>Reforger → <b style="color:${targetColor}">${_esc(targetName)}</b>${free ? ' <span class="art-act-cost">Gratuit (MJ)</span>' : ''}</button>`;
+  const gainRarity = firstGainRarity(item, getUpgradeSettings());
+  const useful = gainRarity === ev.target;
+  const btn = `<button class="art-act art-act--gold" data-action="_artisanReforge" data-i="${invIndex}" ${allow ? '' : 'disabled'}>${useful ? 'Reforger' : 'Reforge intermédiaire'} → <b style="color:${targetColor}">${_esc(targetName)}</b>${free ? ' <span class="art-act-cost">Gratuit (MJ)</span>' : ''}</button>`;
+  const ladder = getRarities().map(rarity => {
+    const traits = getItemTraitsSlotCountPure({ ...item, rarete: rarity.value }, getUpgradeSettings());
+    const stats = statCapAt(item, rarity.value, getUpgradeSettings());
+    const state = rarity.value < (parseInt(item.rarete, 10) || 1) ? ' is-past' : rarity.value === (parseInt(item.rarete, 10) || 1) ? ' is-current' : rarity.value === ev.target ? ' is-next' : '';
+    return `<span class="art-reforge-step${state}" style="--rarity:${_rareteColor(rarity.name) || '#8294ad'}"><i>◆</i><b>${_esc(rarity.name)}</b><small>${traits} trait${traits > 1 ? 's' : ''}${stats ? ` · ${stats} stat${stats > 1 ? 's' : ''}` : ''}</small></span>`;
+  }).join('');
 
   return `<div class="art-wb-sec">
     <div class="art-wb-sec-hd">⭐ Reforge <span class="art-wb-sec-sub">monter la rareté (définitif)</span></div>
+    <div class="art-reforge-ladder">${ladder}</div>
+    ${!useful && gainRarity ? `<div class="art-muted" style="font-size:.7rem;margin-bottom:6px">Cette étape prépare la pièce ; le prochain budget se débloque en ${_esc(RARETE_NAMES[gainRarity] || `rareté ${gainRarity}`)}.</div>` : ''}
     <div style="display:flex;flex-direction:column;gap:3px;margin:2px 0 8px">${roomLine}${matLines}${goldLine}</div>
     <div class="art-act-row">${btn}</div>
   </div>`;
@@ -876,13 +980,6 @@ async function _artisanReforge(invIndex) {
         return `${r.quantite}× ${_esc(name)}`;
       }).join(', ')
     : '';
-  if (!await confirmModal(
-    `Reforger « ${_esc(item.nom || 'objet')} » : <b>${_esc(fromName)}</b> → <b>${_esc(toName)}</b> ?<br>` +
-    `<span style="color:var(--gold)">${free ? 'Gratuit (MJ)' : `${ev.goldCost} PO`}</span>${matTxt}<br>` +
-    `<small style="color:var(--text-dim)">Action définitive.</small>`,
-    { title: '⭐ Reforger', confirmLabel: 'Reforger', danger: false, icon: '⭐' }
-  )) return;
-
   const inv = [...c.inventaire];
   const newItem = { ...item, rarete: ev.target };
   _logUpgradeHistory(newItem, { op: 'reforge', from: fromName, to: toName, cost: ev.goldCost });
@@ -895,7 +992,8 @@ async function _artisanReforge(invIndex) {
   if (!free) _logExpense(c, `Artisan : reforge ${item.nom || ''} → ${toName}`, ev.goldCost);
 
   await _persistChar(c);
-  showNotif(`« ${item.nom || 'Objet'} » reforgé en ${toName}.`, 'success');
+  STORE.flash = STORE.activeItemIndex;
+  showNotif(`Reforge réussie : « ${item.nom || 'Objet'} » devient ${toName}.`, 'success');
 }
 
 // ══════════════════════════════════════════════
@@ -933,9 +1031,8 @@ function _renderTraitsSection(item, invIndex, c, cat) {
   let addHtml = '';
   if (slotsLibres > 0) {
     addHtml = fragNames.length
-      ? `<div class="art-sub"><span class="art-sub-lbl art-sub-lbl--add">＋ Ajouter un trait</span>
-          <div class="art-act-row">${fragNames.map(f => `<button class="art-act art-act--gold" data-action="_artisanAddTrait" data-i="${invIndex}" data-frag="${_esc(f.name)}" title="Poser « ${_esc(f.name)} » (${s.trait.addTraitFromFragment} PO)">
-            <span class="art-act-lbl">${_esc(f.name)}</span><span class="art-act-cost">${s.trait.addTraitFromFragment} PO</span><span class="art-act-n">×${f.n}</span></button>`).join('')}</div>
+      ? `<div class="art-sub"><span class="art-sub-lbl art-sub-lbl--add">Emplacement libre</span>
+          <div class="art-act-row"><button class="art-act art-act--gold" data-action="_artisanTraitPanel" data-i="${invIndex}">＋ Choisir un fragment <span class="art-act-cost">${s.trait.addTraitFromFragment} PO</span></button></div>
         </div>`
       : `<div class="art-muted" style="font-size:.72rem">Aucun fragment « ${_esc(catMeta?.label || cat)} » dans ton sac. Recycle un objet pour en obtenir.</div>`;
   }
@@ -944,7 +1041,7 @@ function _renderTraitsSection(item, invIndex, c, cat) {
   let owHtml = '';
   if (replaceableTraits.length && fragNames.length) {
     owHtml = `<div class="art-sub"><span class="art-sub-lbl art-sub-lbl--replace">↻ Remplacer un trait</span>
-      <div class="art-act-row">${replaceableTraits.map(t => `<button class="art-act art-act--replace" data-action="_artisanOverwriteStart" data-i="${invIndex}" data-trait="${_esc(t)}" title="Remplacer « ${_esc(t)} » par un fragment (${s.trait.overwriteTrait} PO)">
+      <div class="art-act-row">${replaceableTraits.map(t => `<button class="art-act art-act--replace" data-action="_artisanTraitPanel" data-i="${invIndex}" data-trait="${_esc(t)}" title="Remplacer « ${_esc(t)} » par un fragment (${s.trait.overwriteTrait} PO)">
         <span class="art-act-lbl">${_esc(t)}</span><span class="art-act-cost">${s.trait.overwriteTrait} PO</span></button>`).join('')}</div>
     </div>`;
   }
@@ -970,7 +1067,7 @@ function _renderRecycleSection(item, invIndex, cat) {
   return `<div class="art-wb-sec art-wb-sec--danger">
     <div class="art-wb-sec-hd">♻️ Démonter</div>
     <div class="art-recycle">
-      <button class="art-act art-act--danger" data-action="_artisanDestroyStart" data-i="${invIndex}">♻️ Démonter <span class="art-act-cost">${s.trait.deconstructCost} PO</span></button>
+      <button class="art-act art-act--danger" data-action="_artisanDismantlePanel" data-i="${invIndex}">♻️ Démonter <span class="art-act-cost">${s.trait.deconstructCost} PO</span></button>
       <span class="art-muted" style="font-size:.72rem">Détruit l'objet. ${extractInfo}</span>
     </div>
   </div>`;
@@ -978,60 +1075,11 @@ function _renderRecycleSection(item, invIndex, cat) {
 
 // ── Détruire : si plusieurs traits et !extractAllTraits, demander lequel ──
 async function _artisanDestroyStart(invIndex) {
-  const c = _getActiveArtisanChar();
-  if (!c) return;
-  const item = (c.inventaire || [])[invIndex];
-  if (!item) return;
-
-  const s = getUpgradeSettings();
-  const allTraits = _getTraits(item);
-  // Le verrou est porté par chaque trait : les autres traits du même objet
-  // restent récupérables normalement.
-  const transferable = recyclableTraits(item, allTraits);
-  const lockedTraits = nonRecyclableTraitNames(item);
-  const cost = s.trait.deconstructCost || 0;
-  const costTxt = STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`;
-  const sigWarn = lockedTraits.length
-    ? `<br><span style="color:#ff8ca7">Traits non recyclables : ${lockedTraits.map(_esc).join(', ')}.</span>`
-    : '';
-
-  // Aucun trait transférable → on démonte tout de même pour les matériaux.
-  if (!transferable.length) {
-    if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Aucun fragment récupérable.${sigWarn}<br>L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
-      { title: '♻️ Recycler en fragments', confirmLabel: 'Recycler', danger: true, icon: '♻️' })) return;
-    return _artisanDoDestroy(invIndex, []);
-  }
-
-  if (s.trait.extractAllTraits || transferable.length === 1) {
-    // Cas simple → une seule confirmation.
-    const list = transferable.map(t => `« ${_esc(t)} »`).join(', ');
-    if (!await confirmModal(`Recycler « ${_esc(item.nom || 'objet')} » ?<br>Tu récupères ${transferable.length} fragment${transferable.length > 1 ? 's' : ''} (${list}).${sigWarn} L'objet est détruit.<br><span style="color:var(--gold)">${costTxt}</span>`,
-      { title: '♻️ Recycler en fragments', confirmLabel: 'Recycler', danger: true, icon: '♻️' })) return;
-    return _artisanDoDestroy(invIndex, transferable);
-  }
-
-  // Plusieurs traits transférables → le choix EST la confirmation (pas de 2ᵉ modale).
-  pushModal(`♻️ Recycler « ${item.nom || 'objet'} »`, `
-    <div class="art-muted" style="font-size:.8rem;margin-bottom:.6rem;line-height:1.5">
-      Quel trait veux-tu <strong>récupérer en fragment</strong> ? Les autres seront <strong style="color:#ff8ca7">perdus</strong>, et l'objet détruit.${sigWarn}<br>
-      <span style="color:var(--gold)">${costTxt}</span> · action <strong>immédiate</strong>.
-    </div>
-    <div class="art-ow-list">
-      ${transferable.map(t => `
-        <button class="art-ow-opt" data-action="_artisanDestroyConfirm" data-i="${invIndex}" data-trait="${_esc(t)}">
-          <span class="art-ow-opt-name">${_esc(t)}</span>
-          <span class="art-ow-opt-cta">♻️ Récupérer</span>
-        </button>
-      `).join('')}
-    </div>
-    <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">Annuler</button>
-    </div>
-  `);
+  STORE.operation = { type: 'dismantle', invIndex, trait: null };
+  _renderArtisanModal();
 };
 
 function _artisanDestroyConfirm(invIndex, traitName) {
-  closeModalDirect(); // ferme le sélecteur (qui servait de confirmation)
   _artisanDoDestroy(invIndex, [traitName]);
 }
 
@@ -1072,7 +1120,8 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   const inv = [...(c.inventaire || [])];
   inv.splice(invIndex, 1);
   c.inventaire = inv.concat(returned);
-  STORE.activeItemIndex = null;   // l'objet recyclé n'existe plus → établi vide
+  STORE.activeItemIndex = Math.min(invIndex, inv.length - 1);
+  STORE.operation = null;
 
   // 3) Sync équipement (décale les sourceInvIndex)
   const sync = syncEquipmentAfterInventoryMutation(c, [invIndex]);
@@ -1083,6 +1132,7 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
   let frags = c.traitFragments || {};
   traitsToExtract.forEach(t => { frags = _addFragment(frags, cat, t, +1); });
   c.traitFragments = frags;
+  STORE.resourceFlash = true;
   const historyEntries = [makeInventoryHistoryEntry('delete', item, 1, {
     actorUid: STATE.user?.uid || '',
     actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
@@ -1101,9 +1151,7 @@ async function _artisanDoDestroy(invIndex, traitsToExtract) {
 
   await _persistChar(c);
   const materialText = returnedLog.length ? ` · ${returnedLog.map(entry => `${entry.qty}× ${entry.shopItem.nom}`).join(', ')}` : '';
-  showNotif(traitsToExtract.length
-    ? `${traitsToExtract.length} fragment(s) ajouté(s) au sac${materialText}.`
-    : `Objet démonté${materialText || ' (aucun matériau ni fragment récupérable)'}.`, 'success');
+  showNotif(`Démontage de « ${item.nom || 'Objet'} » terminé${materialText}.`, 'success');
 }
 
 // ── Ajouter un trait (slot libre) ──
@@ -1127,9 +1175,6 @@ async function _artisanAddTrait(invIndex, fragmentName) {
   const cost = s.trait.addTraitFromFragment || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
 
-  if (!await confirmModal(`Poser le trait « ${_esc(fragmentName)} » sur « ${_esc(item.nom || 'objet')} » ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span> · consomme 1 fragment.`,
-    { title: '🔖 Ajouter un trait', confirmLabel: 'Poser', danger: false, icon: '🔖' })) return;
-
   // Mutation
   const inv = [...(c.inventaire || [])];
   const newItem = { ...item };
@@ -1146,6 +1191,7 @@ async function _artisanAddTrait(invIndex, fragmentName) {
   if (cost > 0) _logExpense(c, `Artisan : ajout du trait ${fragmentName} sur ${item.nom}`, cost);
 
   await _persistChar(c);
+  STORE.flash = invIndex;
   showNotif(`Trait « ${fragmentName} » ajouté.`, 'success');
 };
 
@@ -1162,33 +1208,12 @@ function _artisanOverwriteStart(invIndex, oldTraitName) {
 
   const cat = getItemFragmentCategory(item);
   const fragments = c.traitFragments?.[cat] || {};
-  const fragNames = Object.entries(fragments).filter(([, n]) => (parseInt(n) || 0) > 0).map(([name, n]) => ({ name, n }));
-
-  if (!fragNames.length) {
+  if (!Object.values(fragments).some(n => (parseInt(n, 10) || 0) > 0)) {
     showNotif('Aucun fragment compatible dans le sac.', 'error');
     return;
   }
-
-  const s = getUpgradeSettings();
-
-  pushModal(`↻ Remplacer « ${oldTraitName} »`, `
-    <div class="art-muted" style="font-size:.8rem;margin-bottom:.6rem;line-height:1.5">
-      Choisis le fragment à poser à la place. <strong style="color:#ff8ca7">« ${_esc(oldTraitName)} » sera définitivement perdu</strong>.<br>
-      Coût : <strong style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${s.trait.overwriteTrait} PO`}</strong> + 1 fragment. Le choix ci-dessous est <strong>immédiat</strong>.
-    </div>
-    <div class="art-ow-list">
-      ${fragNames.map(f => `
-        <button class="art-ow-opt" data-action="_artisanOverwriteConfirm" data-i="${invIndex}" data-old="${_esc(oldTraitName)}" data-frag="${_esc(f.name)}">
-          <span class="art-ow-opt-name">${_esc(f.name)}</span>
-          <span class="art-ow-opt-n">×${f.n}</span>
-          <span class="art-ow-opt-cta">↻ Poser${STORE.mjFreeMode ? '' : ` · ${s.trait.overwriteTrait} PO`}</span>
-        </button>
-      `).join('')}
-    </div>
-    <div style="display:flex;gap:.4rem;margin-top:.7rem">
-      <button class="btn btn-outline btn-sm" style="flex:1" data-action="_artisanBack">Annuler</button>
-    </div>
-  `);
+  STORE.operation = { type: 'trait', invIndex, oldTrait: oldTraitName, fragment: null };
+  _renderArtisanModal();
 };
 
 async function _artisanOverwriteConfirm(invIndex, oldTraitName, newFragmentName) {
@@ -1214,8 +1239,6 @@ async function _artisanOverwriteConfirm(invIndex, oldTraitName, newFragmentName)
 
   // Le sélecteur de fragment EST la confirmation (il annonce clairement la perte
   // et le coût) → on applique directement, sans 2ᵉ modale.
-  closeModalDirect(); // ferme le sélecteur
-
   // Mutation
   const inv = [...(c.inventaire || [])];
   const newItem = { ...item };
@@ -1255,6 +1278,7 @@ async function _artisanOverwriteConfirm(invIndex, oldTraitName, newFragmentName)
   if (cost > 0) _logExpense(c, `Artisan : écrasement ${oldTraitName} → ${newFragmentName} sur ${item.nom}`, cost);
 
   await _persistChar(c);
+  STORE.flash = invIndex;
   showNotif(`Trait « ${oldTraitName} » remplacé par « ${newFragmentName} ».`, 'success');
 }
 
@@ -1269,12 +1293,14 @@ function _artisanSelectChar(id) {
   STORE.activeItemIndex = null;   // repart sans objet sélectionné
   STORE.itemSearch = '';
   STORE.itemCategory = 'all';
+  STORE.operation = null;
   _renderArtisanModal();
 };
 
 // Sélection d'un objet dans la colonne gauche → affiche/masque son établi.
 function _artisanSelectItem(invIndex) {
   STORE.activeItemIndex = (STORE.activeItemIndex === invIndex) ? null : invIndex;
+  STORE.operation = null;
   _renderArtisanModal();
 }
 
@@ -1295,6 +1321,97 @@ function _artisanFilterCategory(category) {
     btn.classList.toggle('is-active', btn.dataset.category === STORE.itemCategory);
   });
   _refreshInlineItemList();
+}
+
+function _artisanToggleHideEmpty() {
+  STORE.hideEmpty = !STORE.hideEmpty;
+  _renderArtisanModal();
+}
+
+function _artisanSelectCompatible(category) {
+  const c = _getActiveArtisanChar();
+  const compatible = _getEligibleItems(c).find(entry => entry.cat === category);
+  if (!compatible) { showNotif('Aucune pièce compatible dans cet inventaire.', 'info'); return; }
+  STORE.activeItemIndex = compatible.idx;
+  STORE.itemCategory = category;
+  STORE.operation = null;
+  _renderArtisanModal();
+}
+
+function _artisanTraitPanel(invIndex, oldTrait = '', fragment = '') {
+  const c = _getActiveArtisanChar();
+  const item = c?.inventaire?.[invIndex];
+  if (!item) return;
+  if (oldTrait && !isTraitRecyclable(item, oldTrait)) {
+    showNotif(`Le trait « ${oldTrait} » est verrouillé et ne peut pas être remplacé.`, 'warning');
+    return;
+  }
+  STORE.activeItemIndex = invIndex;
+  STORE.operation = { type: 'trait', invIndex, oldTrait: oldTrait || null, fragment: fragment || null };
+  _renderArtisanModal();
+}
+
+function _artisanStatPanel(invIndex, kind, stat, cost) {
+  STORE.activeItemIndex = invIndex;
+  STORE.operation = { type: 'stat', invIndex, kind, stat, cost: parseInt(cost, 10) || 0 };
+  _renderArtisanModal();
+}
+
+function _artisanDismantlePanel(invIndex) {
+  STORE.activeItemIndex = invIndex;
+  STORE.operation = { type: 'dismantle', invIndex, trait: null };
+  _renderArtisanModal();
+}
+
+function _artisanOperationFragment(name) {
+  if (!STORE.operation || STORE.operation.type !== 'trait') return;
+  STORE.operation = { ...STORE.operation, fragment: name };
+  _renderArtisanModal();
+}
+
+function _artisanDismantleTrait(value) {
+  if (!STORE.operation || STORE.operation.type !== 'dismantle') return;
+  STORE.operation = { ...STORE.operation, trait: value };
+  _renderArtisanModal();
+}
+
+function _artisanCloseOperation() {
+  STORE.operation = null;
+  _renderArtisanModal();
+}
+
+async function _artisanConfirmOperation() {
+  const op = STORE.operation;
+  if (!op) return;
+  if (op.type === 'trait') {
+    if (!op.fragment) return;
+    if (op.oldTrait) await _artisanOverwriteConfirm(op.invIndex, op.oldTrait, op.fragment);
+    else await _artisanAddTrait(op.invIndex, op.fragment);
+    return;
+  }
+  if (op.type === 'stat') {
+    if (op.kind === 'ring-stat') await _artisanRingUpgradeStat(op.invIndex, op.stat);
+    else if (op.kind === 'ring-effect') await _artisanRingUpgradeEffect(op.invIndex);
+    else if (op.kind === 'amulet') await _artisanAmuletAddStat(op.invIndex, op.stat);
+    else if (op.kind === 'weapon') await _artisanWeaponAddPoint(op.invIndex, op.stat);
+    return;
+  }
+  if (op.type === 'dismantle') {
+    const c = _getActiveArtisanChar();
+    const item = c?.inventaire?.[op.invIndex];
+    if (!item) return;
+    const allTraits = _getTraits(item);
+    const transferable = recyclableTraits(item, allTraits);
+    const selected = getUpgradeSettings().trait.extractAllTraits
+      ? transferable
+      : transferable.length <= 1 ? transferable : (op.trait ? [op.trait] : []);
+    if (transferable.length > 1 && !getUpgradeSettings().trait.extractAllTraits && !selected.length) return;
+    await _artisanDoDestroy(op.invIndex, selected);
+  }
+}
+
+function _artisanScrollSection(id) {
+  document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
 }
 
 // Section « Stats » de l'établi — dispatch inline selon la catégorie.
@@ -1351,20 +1468,21 @@ function _renderRingStats(item, invIndex, c) {
     const nextLevel = level + 1;
     if (nextLevel > cap) return [];
     const cost = s.ring?.[nextLevel] || 0;
-    return [`<button class="art-act art-act--emerald" data-action="_artisanRingUpgradeStat" data-i="${invIndex}" data-stat="${_esc(meta.full)}">📈 +1 ${meta.short} <span class="art-act-cost">${cost} PO</span></button>`];
+    return [`<button class="art-act art-act--emerald" data-action="_artisanStatPanel" data-i="${invIndex}" data-kind="ring-stat" data-stat="${_esc(meta.full)}" data-cost="${cost}">📈 +1 ${meta.short} <span class="art-act-cost">${cost} PO</span></button>`];
   });
   const acts = [...statActs];
   const nextEff = effectLevel + 1;
   if (nextEff <= cap) {
     const cost = s.ring?.[nextEff] || 0;
-    acts.push(`<button class="art-act art-act--gold" data-action="_artisanRingUpgradeEffect" data-i="${invIndex}">✨ Renforcer l'effet <span class="art-act-cost">${cost} PO</span></button>`);
+    // L'effet n'existe que si l'anneau propose réellement un bonus dérivé.
+    if (ringTracks(item, s).some(track => track.kind === 'effect')) acts.push(`<button class="art-act art-act--gold" data-action="_artisanStatPanel" data-i="${invIndex}" data-kind="ring-effect" data-stat="effect" data-cost="${cost}">✨ Renforcer l'effet <span class="art-act-cost">${cost} PO</span></button>`);
   }
 
   const cur = stats.map(({ meta, base, level }) => {
     const total = base + level;
     return `<span class="art-up-chip stat-tone stat-${meta.full}" title="${_esc(meta.label)} : ${base > 0 ? '+' : ''}${base} de base${level ? `, +${level} par l'Artisan` : ''}">${total > 0 ? '+' : ''}${total} ${meta.short}</span>`;
   });
-  cur.push(`<span class="art-up-chip">Effet +${effectLevel}</span>`);
+  if (ringTracks(item, s).some(track => track.kind === 'effect')) cur.push(`<span class="art-up-chip">Effet +${effectLevel}</span>`);
   const maxedStats = stats.filter(({ level }) => level >= cap).length;
   const statProgress = stats.length ? `${maxedStats}/${stats.length} stats au maximum` : 'aucune stat proposée';
   const baseEffect = item.effet ? `<div class="art-muted" style="font-size:.7rem;margin-top:.35rem">Effet : <em>${_esc(item.effet)}</em></div>` : '';
@@ -1389,7 +1507,7 @@ function _renderAmuletStats(item, invIndex, c) {
 
   const cur = used.length ? used.map(e => `<span class="art-up-chip">+${e.val} ${e.meta.short}</span>`).join('') : '<span class="art-muted" style="font-size:.72rem">aucune stat améliorée</span>';
   const add = canAdd
-    ? `<div class="art-act-row">${remaining.map(m => `<button class="art-act art-act--emerald" data-action="_artisanAmuletAddStat" data-i="${invIndex}" data-stat="${_esc(m.full)}">+1 ${m.short} <span class="art-act-cost">${cost} PO</span></button>`).join('')}</div>`
+    ? `<div class="art-act-row">${remaining.map(m => `<button class="art-act art-act--emerald" data-action="_artisanStatPanel" data-i="${invIndex}" data-kind="amulet" data-stat="${_esc(m.full)}" data-cost="${cost}">+1 ${m.short} <span class="art-act-cost">${cost} PO</span></button>`).join('')}</div>`
     : `<div class="art-muted" style="font-size:.72rem">${used.length >= cap ? `Plafond atteint (${cap} stats).` : 'Toutes les stats sont déjà améliorées.'}</div>`;
 
   return `<div class="art-wb-sec">
@@ -1413,7 +1531,7 @@ function _renderWeaponStats(item, invIndex, c) {
   const cur = used.length ? used.map(e => `<span class="art-up-chip">+${e.val} ${e.meta.short}</span>`).join('') : '<span class="art-muted" style="font-size:.72rem">aucun point placé</span>';
   const bar = `<span class="art-bar"><span style="width:${Math.round(total / cap * 100)}%"></span></span>`;
   const add = canAdd
-    ? `<div class="art-act-row">${ITEM_STAT_META.map(m => `<button class="art-act art-act--emerald" data-action="_artisanWeaponAddPoint" data-i="${invIndex}" data-stat="${_esc(m.full)}">+1 ${m.short} <span class="art-act-cost">${cost} PO</span></button>`).join('')}</div>`
+    ? `<div class="art-act-row">${ITEM_STAT_META.map(m => `<button class="art-act art-act--emerald" data-action="_artisanStatPanel" data-i="${invIndex}" data-kind="weapon" data-stat="${_esc(m.full)}" data-cost="${cost}">+1 ${m.short} <span class="art-act-cost">${cost} PO</span></button>`).join('')}</div>`
     : `<div class="art-muted" style="font-size:.72rem">Plafond atteint (${total}/${cap} points).</div>`;
 
   return `<div class="art-wb-sec">
@@ -1443,9 +1561,6 @@ async function _artisanRingUpgradeStat(invIndex, statFullKey) {
   const cost = s.ring?.[nextLevel] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
 
-  if (!await confirmModal(`Améliorer ${meta.label} au palier ${nextLevel} ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span>`,
-    { title: '📈 Améliorer la stat', confirmLabel: 'Améliorer', danger: false, icon: '📈' })) return;
-
   const inv = [...c.inventaire];
   const newItem = { ...item };
   const up = newItem.upgrades || {};
@@ -1460,6 +1575,7 @@ async function _artisanRingUpgradeStat(invIndex, statFullKey) {
   if (cost > 0) _logExpense(c, `Artisan : anneau ${item.nom || ''} stat ${meta.short} +${nextLevel}`, cost);
 
   await _persistChar(c);
+  STORE.flash = invIndex;
   showNotif(`Stat ${meta.label} améliorée au palier ${nextLevel}.`, 'success');
 }
 
@@ -1479,9 +1595,6 @@ async function _artisanRingUpgradeEffect(invIndex) {
   const cost = s.ring?.[nextLevel] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
 
-  if (!await confirmModal(`Renforcer l'effet de l'anneau au palier ${nextLevel} ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span>`,
-    { title: '✨ Renforcer l\'effet', confirmLabel: 'Renforcer', danger: false, icon: '✨' })) return;
-
   const inv = [...c.inventaire];
   const newItem = { ...item };
   const up = newItem.upgrades || {};
@@ -1493,6 +1606,7 @@ async function _artisanRingUpgradeEffect(invIndex) {
   if (cost > 0) _logExpense(c, `Artisan : anneau ${item.nom || ''} effet +${nextLevel}`, cost);
 
   await _persistChar(c);
+  STORE.flash = invIndex;
   showNotif(`Effet renforcé au palier ${nextLevel}.`, 'success');
 }
 
@@ -1521,9 +1635,6 @@ async function _artisanAmuletAddStat(invIndex, statFullKey) {
   const cost = s.amulet?.[slotN] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
 
-  if (!await confirmModal(`Ajouter +1 ${meta.label} à l'amulette ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span>`,
-    { title: '📈 Améliorer l\'amulette', confirmLabel: 'Ajouter', danger: false, icon: '📈' })) return;
-
   const inv = [...c.inventaire];
   const newItem = { ...item };
   const up = newItem.upgrades || {};
@@ -1538,6 +1649,7 @@ async function _artisanAmuletAddStat(invIndex, statFullKey) {
   if (cost > 0) _logExpense(c, `Artisan : amulette ${item.nom || ''} +1 ${meta.short}`, cost);
 
   await _persistChar(c);
+  STORE.flash = invIndex;
   showNotif(`+1 ${meta.label} ajouté à l'amulette.`, 'success');
 }
 
@@ -1567,9 +1679,6 @@ async function _artisanWeaponAddPoint(invIndex, statFullKey) {
   const cost = tariffTable[slotN] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
 
-  if (!await confirmModal(`Ajouter +1 ${meta.label} à l'arme ?<br><span style="color:var(--gold)">${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} PO`}</span>`,
-    { title: '📈 Améliorer l\'arme', confirmLabel: 'Ajouter', danger: false, icon: '📈' })) return;
-
   const inv = [...c.inventaire];
   const newItem = { ...item };
   const up = newItem.upgrades || {};
@@ -1585,6 +1694,7 @@ async function _artisanWeaponAddPoint(invIndex, statFullKey) {
   if (cost > 0) _logExpense(c, `Artisan : arme ${item.nom || ''} +1 ${meta.short}`, cost);
 
   await _persistChar(c);
+  STORE.flash = invIndex;
   showNotif(`+1 ${meta.label} ajouté à l'arme.`, 'success');
 };
 
@@ -1594,6 +1704,16 @@ registerActions({
   _artisanSelectItem: (btn) => _artisanSelectItem(Number(btn.dataset.i)),
   _artisanFilterItems: (el) => _artisanFilterItems(el.value),
   _artisanFilterCategory: (btn) => _artisanFilterCategory(btn.dataset.category),
+  _artisanToggleHideEmpty: () => _artisanToggleHideEmpty(),
+  _artisanSelectCompatible: (btn) => _artisanSelectCompatible(btn.dataset.category),
+  _artisanTraitPanel: (btn) => _artisanTraitPanel(Number(btn.dataset.i), btn.dataset.trait, btn.dataset.frag),
+  _artisanStatPanel: (btn) => _artisanStatPanel(Number(btn.dataset.i), btn.dataset.kind, btn.dataset.stat, btn.dataset.cost),
+  _artisanDismantlePanel: (btn) => _artisanDismantlePanel(Number(btn.dataset.i)),
+  _artisanOperationFragment: (btn) => _artisanOperationFragment(btn.dataset.frag),
+  _artisanDismantleTrait: (el) => _artisanDismantleTrait(el.value),
+  _artisanCloseOperation: () => _artisanCloseOperation(),
+  _artisanConfirmOperation: () => _artisanConfirmOperation(),
+  _artisanScrollSection: (btn) => _artisanScrollSection(btn.dataset.target),
   _artisanToggleMjFree: (el) => _artisanToggleMjFree(el.checked),
   _artisanOpenHistory: (btn) => _artisanOpenHistory(Number(btn.dataset.i)),
   _artisanRevertUpgrade: (btn) => _artisanRevertUpgrade(Number(btn.dataset.i), Number(btn.dataset.h)),
@@ -1609,4 +1729,10 @@ registerActions({
   _artisanReforge: (btn) => _artisanReforge(Number(btn.dataset.i)),
   _artisanCloseModal: () => closeModalDirect(),
   _artisanBack: () => closeModalDirect(),
+});
+
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || !STORE.operation) return;
+  event.preventDefault();
+  _artisanCloseOperation();
 });
