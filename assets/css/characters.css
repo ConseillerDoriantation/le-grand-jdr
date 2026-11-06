@@ -23580,7 +23580,7 @@ button.cs-grim-tg:hover { background:var(--surface-3); color:var(--text); }
 /* ═══════════════════════════════════════════════════════════════════════════
    COMPTE — bourse intégrée et historique
    ═══════════════════════════════════════════════════════════════════════════ */
-.cpt { --up:var(--emerald); --dn:var(--crimson-light); --au:var(--amber); --bl:var(--gold-2); --upk:#03170f; --dnk:#2a0811; display:flex; flex-direction:column; gap:26px; max-width:920px; container-type:inline-size; font-size:13px; line-height:1.45; }
+.cpt { --up:var(--emerald); --dn:var(--crimson-light); --au:var(--amber); --bl:var(--gold-2); --upk:#03170f; --dnk:#2a0811; display:flex; flex-direction:column; gap:26px; width:100%; max-width:none; min-width:0; box-sizing:border-box; container-type:inline-size; font-size:13px; line-height:1.45; }
 [data-theme="light"] .cpt { --up:#0b8457; --dn:#c81e45; --au:#8a5a00; --bl:#1d4ed8; --upk:#fff; --dnk:#fff; }
 :where(.cpt) button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; text-align:inherit; }
 :where(.cpt) button:disabled { cursor:not-allowed; }
