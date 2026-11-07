@@ -4363,8 +4363,23 @@ function removeShopDegatsStat(i) {
 // Applique les défauts du type choisi aux champs VIDES, ou encore égaux à ce
 // qu'un type précédent avait pré-rempli (data-type-default) : une valeur saisie
 // à la main n'est jamais écrasée.
+function _siApplyWeaponFamilyIdentity(target, selectedValue) {
+  if (!target) return null;
+  const selected = String(selectedValue || '').trim();
+  const family = _weaponFormats.find(entry => entry.label === selected) || null;
+  const label = family?.label || selected;
+  // `formatId`, `format`, `sousType` et `typeArme` ont tous servi de source de
+  // vérité au fil des versions. Les garder alignés évite qu'une ancienne valeur
+  // reprenne la priorité quand l'éditeur reconstruit la section Combat.
+  target.format = label;
+  target.formatId = family?.id || '';
+  target.sousType = label;
+  target.typeArme = label;
+  return family;
+}
+
 function applyWeaponTypeDefaults(select) {
-  const family = _weaponFormats.find(f => f.label === select?.value);
+  const family = _siApplyWeaponFamilyIdentity(_siEditorState?.draft, select?.value);
   if (!family || !hasWeaponDefaults(family.defaults)) return;
   const trackedFields = ['degats','toucherStat','portee','mains','nature','caBonus'];
   const before = Object.fromEntries(trackedFields.map(key => [key, document.getElementById(`si-${key}`)?.value ?? '']));
@@ -4693,9 +4708,7 @@ async function saveShopItem(itemId, { createAnother = false } = {}) {
 
     if (tplKey === 'arme') {
       // Le type d'arme (ex-format) alimente aussi sousType : maîtrises, filtres, recettes.
-      const family = _weaponFormats.find(f => f.label === data.format);
-      if (family) { data.formatId = family.id; data.sousType = family.label; }
-      else if (data.format) data.sousType = data.format;
+      _siApplyWeaponFamilyIdentity(data, data.format);
       data.toucher = _legacyToucherTextFromData(data);
       data.stats = _legacyStatsTextFromData(data);
       // `statAttaque` reste écrit pour les anciens consommateurs, mais doit

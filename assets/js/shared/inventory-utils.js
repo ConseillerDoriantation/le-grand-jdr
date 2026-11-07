@@ -124,7 +124,7 @@ const _SHOP_EQUIP_COMMON_FIELDS = [
 const _SHOP_TEMPLATE_FIELDS = {
   arme: [
     ..._SHOP_EQUIP_COMMON_FIELDS,
-    'format', 'formatId', 'sousType', 'nature', 'mains', 'degats', 'degatsStats',
+    'format', 'formatId', 'sousType', 'typeArme', 'nature', 'mains', 'degats', 'degatsStats',
     'degatsStat', 'toucherStat', 'toucher', 'portee', 'statAttaque',
   ],
   armure: [..._SHOP_EQUIP_COMMON_FIELDS, 'slotArmure', 'typeArmure', 'ca'],
