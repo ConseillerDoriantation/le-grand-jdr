@@ -50,6 +50,12 @@ test('l’éditeur remplace les onglets par une page structurée et un aperçu l
   assert.match(shop, /!_siEditorState\.templateExplicit && cat\?\.template/);
   assert.match(shop, /_siEditorState\.templateExplicit = true/);
   assert.match(shop, /data\.statAttaque = data\.toucherStat \|\| data\.degatsStat \|\| ''/);
+  assert.match(shop, /function _siApplyWeaponFamilyIdentity\(target, selectedValue\)/);
+  assert.match(shop, /target\.formatId = family\?\.id \|\| ''/);
+  assert.match(shop, /target\.sousType = label/);
+  assert.match(shop, /target\.typeArme = label/);
+  assert.match(shop, /_siApplyWeaponFamilyIdentity\(_siEditorState\?\.draft, select\?\.value\)/);
+  assert.match(shop, /_siApplyWeaponFamilyIdentity\(data, data\.format\)/);
   assert.match(shop, /function _siBonusHtml/);
   assert.match(shop, /const _SHOP_EDITOR_RELATION_COLORS/);
   assert.match(shop, /id="si-trait-new"/);

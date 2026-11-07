@@ -275,7 +275,10 @@ export function _applyEmotes(escaped) {
 // Favoris (« Roue ») + récents — stockés en localStorage (clés inchangées).
 const _EMOTE_WHEEL_LIMIT = 12;
 const _EMOTE_SHORTCUT_LIMIT = 8;
-const _EMOTE_WHEEL_RADIUS = 112;
+const _EMOTE_WHEEL_MAX_SIZE = 372;
+const _EMOTE_WHEEL_MIN_SIZE = 288;
+const _EMOTE_WHEEL_RADIUS_RATIO = 0.382;
+const _EMOTE_WHEEL_SLOT_RATIO = 0.168;
 export const _getFavs = () => resolveEmoteNames(lsJson.get('vtt-emote-favs', []), _emotes);
 export const _setFavs = v => lsJson.set('vtt-emote-favs', v);
 export const _getRecents = () => resolveEmoteNames(lsJson.get('vtt-emote-recents', []), _emotes);
@@ -740,15 +743,24 @@ function _emoteOpenWheel() {
   const byName = new Map(_emotes.map(e => [e.name, e]));
   const favs = _getFavs().slice(0, _EMOTE_WHEEL_LIMIT).map(n => byName.get(n)).filter(Boolean);
   if (!favs.length) { showNotif('Roue vide : clique ☆ sur une émote pour l\'ajouter', 'info'); return; }
-  const x = Math.max(160, Math.min(innerWidth - 160, _emoteMouse.x));
-  const y = Math.max(160, Math.min(innerHeight - 160, _emoteMouse.y));
+  const wheelSize = Math.max(_EMOTE_WHEEL_MIN_SIZE, Math.min(_EMOTE_WHEEL_MAX_SIZE, innerWidth - 24, innerHeight - 24));
+  const wheelRadius = Math.round(wheelSize * _EMOTE_WHEEL_RADIUS_RATIO);
+  const slotSize = Math.round(Math.max(50, Math.min(64, wheelSize * _EMOTE_WHEEL_SLOT_RATIO)));
+  const edge = wheelSize / 2 + 8;
+  const clampCenter = (value, extent) => extent < edge * 2 ? extent / 2 : Math.max(edge, Math.min(extent - edge, value));
+  const x = clampCenter(_emoteMouse.x, innerWidth);
+  const y = clampCenter(_emoteMouse.y, innerHeight);
   const w = document.createElement('div');
   w.className = 'vtt-emote-wheel';
+  w.style.setProperty('--vtt-emote-wheel-size', `${wheelSize}px`);
+  w.style.setProperty('--vtt-emote-wheel-half', `${-wheelSize / 2}px`);
+  w.style.setProperty('--vtt-emote-wheel-slot', `${slotSize}px`);
+  w.style.setProperty('--vtt-emote-wheel-slot-half', `${-slotSize / 2}px`);
   w.style.left = x + 'px'; w.style.top = y + 'px';
   w.innerHTML = '<div class="vtt-emote-wheel-bg"></div>' + favs.map((em, i) => {
     const a = -Math.PI / 2 + i * 2 * Math.PI / favs.length;
     const shortcut = i < _EMOTE_SHORTCUT_LIMIT ? `<kbd>${i + 1}</kbd>` : '';
-    return `<div class="vtt-emote-wslot" data-i="${i}" style="left:${Math.cos(a) * _EMOTE_WHEEL_RADIUS}px;top:${Math.sin(a) * _EMOTE_WHEEL_RADIUS}px"><img src="${em.url}" alt="">${shortcut}</div>`;
+    return `<div class="vtt-emote-wslot" data-i="${i}" style="left:${Math.cos(a) * wheelRadius}px;top:${Math.sin(a) * wheelRadius}px"><img src="${em.url}" alt="">${shortcut}</div>`;
   }).join('') + '<div class="vtt-emote-wcenter" id="vtt-emote-wc"></div>';
   document.body.appendChild(w);
   _EW = { el: w, x, y, favs, sel: null };

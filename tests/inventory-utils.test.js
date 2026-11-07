@@ -119,11 +119,12 @@ test('les verrous de recyclage restent associés aux traits dans l’inventaire'
 test('un changement de type retire les anciens champs incompatibles', () => {
   const normalized = normalizeShopItemForTemplate({
     id: 'potion', template: 'classique', nom: 'Potion', type: 'Consommable',
-    degats: '2d6', toucherStat: 'force', format: 'Dague', slotArmure: 'Torse', ca: 4,
+    degats: '2d6', toucherStat: 'force', format: 'Dague', typeArme: 'Dague', slotArmure: 'Torse', ca: 4,
   });
   assert.equal(normalized.type, 'Consommable');
   assert.equal(normalized.degats, undefined);
   assert.equal(normalized.toucherStat, undefined);
+  assert.equal(normalized.typeArme, undefined);
   assert.equal(normalized.slotArmure, undefined);
   assert.equal(normalized.ca, undefined);
   assert.equal(shopItemToInvEntry(normalized).template, 'classique');
