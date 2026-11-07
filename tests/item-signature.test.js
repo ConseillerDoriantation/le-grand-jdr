@@ -28,11 +28,11 @@ test('recyclage : le verrou appartient au trait, pas à tout l’objet', () => {
 });
 
 test('amélioration : un trait non recyclable ne peut pas être écrasé', () => {
-  assert.match(artisan, /const replaceableTraits = allTraits\.filter\(trait => isTraitRecyclable\(item, trait\)\)/);
-  assert.match(artisan, /replaceableTraits\.map\(t =>/);
+  assert.match(artisan, /const signature = !isTraitRecyclable\(item, trait\)/);
+  assert.match(artisan, /signature \? '<span class="art-slot-lock"/);
   const guards = artisan.match(/if \(!isTraitRecyclable\(item, oldTraitName\)\)/g) || [];
   assert.equal(guards.length, 2, 'le démarrage et la confirmation doivent tous deux être protégés');
-  assert.match(artisan, /art-trait-chip--locked/);
+  assert.match(artisan, /art-trait-slot is-filled\$\{signature \? ' is-signature'/);
 });
 
 test('recyclage : les anciens objets noRecycle restent protégés pendant la migration', () => {
