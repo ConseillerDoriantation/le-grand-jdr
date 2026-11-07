@@ -155,3 +155,11 @@ test('ajouter une émote aux favoris conserve le défilement du sélecteur', () 
   assert.match(toggleFav, /_refreshEmoteSearchResults\(\{ preserveScroll: true \}\)/);
   assert.doesNotMatch(toggleFav, /_renderEmotePicker\(\)/);
 });
+
+test('la roue rapide affiche douze émotes sans inventer de raccourcis après huit', () => {
+  assert.match(emotes, /const _EMOTE_WHEEL_LIMIT = 12/);
+  assert.match(emotes, /const _EMOTE_SHORTCUT_LIMIT = 8/);
+  assert.match(emotes, /slice\(0, _EMOTE_WHEEL_LIMIT\)/);
+  assert.match(emotes, /i < _EMOTE_SHORTCUT_LIMIT \? `<kbd>\$\{i \+ 1\}<\/kbd>` : ''/);
+  assert.match(css, /\.vtt-emote-wheel-bg \{[^}]*width:304px;[^}]*height:304px;/);
+});

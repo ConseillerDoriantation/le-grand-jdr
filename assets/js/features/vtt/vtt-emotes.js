@@ -273,6 +273,9 @@ export function _applyEmotes(escaped) {
 }
 
 // Favoris (« Roue ») + récents — stockés en localStorage (clés inchangées).
+const _EMOTE_WHEEL_LIMIT = 12;
+const _EMOTE_SHORTCUT_LIMIT = 8;
+const _EMOTE_WHEEL_RADIUS = 112;
 export const _getFavs = () => resolveEmoteNames(lsJson.get('vtt-emote-favs', []), _emotes);
 export const _setFavs = v => lsJson.set('vtt-emote-favs', v);
 export const _getRecents = () => resolveEmoteNames(lsJson.get('vtt-emote-recents', []), _emotes);
@@ -360,7 +363,7 @@ function _emoteTiles(list, favs) {
     const safe = _esc(em.name);
     const fi = favs.indexOf(em.name);
     const isFav = fi >= 0;
-    const kbd = isFav && fi < 8 ? `<kbd>${fi + 1}</kbd>` : '';
+    const kbd = isFav && fi < _EMOTE_SHORTCUT_LIMIT ? `<kbd>${fi + 1}</kbd>` : '';
     return `<div class="vtt-emote-tile${isFav ? ' is-favorite' : ''}" data-emote="${safe}" title=":${safe}:">
       <img src="${em.url}" alt=":${safe}:" loading="lazy" draggable="false">${kbd}
       <button class="vtt-emote-star${isFav ? ' on' : ''}" data-vtt-fn="_vttToggleFav" data-vtt-args="${safe}" title="${isFav ? 'Retirer de la roue' : 'Ajouter à la roue'}" aria-label="${isFav ? 'Retirer cette émote des favoris' : 'Ajouter cette émote aux favoris'}" aria-pressed="${isFav}">${isFav ? '★' : '☆'}</button>
@@ -499,7 +502,12 @@ export function _vttToggleFav(name) {
   const had = idx >= 0;
   if (had) favs.splice(idx, 1); else favs.push(name);
   _setFavs(favs);
-  showNotif(had ? 'Retirée de la roue' : (favs.length > 8 ? 'Ajoutée — la roue affiche les 8 premières' : `Ajoutée à la roue · touche ${favs.length}`), 'info');
+  const addedMessage = favs.length > _EMOTE_WHEEL_LIMIT
+    ? `Ajoutée — la roue affiche les ${_EMOTE_WHEEL_LIMIT} premières`
+    : favs.length <= _EMOTE_SHORTCUT_LIMIT
+      ? `Ajoutée à la roue · touche ${favs.length}`
+      : `Ajoutée à la roue · emplacement ${favs.length}`;
+  showNotif(had ? 'Retirée de la roue' : addedMessage, 'info');
   _refreshEmoteSearchResults({ preserveScroll: true });
 }
 
@@ -727,19 +735,20 @@ export function _initEmoteGestures() {
   window.addEventListener('blur', () => { _emoteCloseWheel(false); _emoteEndDrag(); });
 }
 
-// ── Roue rapide des 8 premiers favoris (zone morte 30 px) ──
+// ── Roue rapide des 12 premiers favoris (raccourcis clavier sur les 8 premiers) ──
 function _emoteOpenWheel() {
   const byName = new Map(_emotes.map(e => [e.name, e]));
-  const favs = _getFavs().slice(0, 8).map(n => byName.get(n)).filter(Boolean);
+  const favs = _getFavs().slice(0, _EMOTE_WHEEL_LIMIT).map(n => byName.get(n)).filter(Boolean);
   if (!favs.length) { showNotif('Roue vide : clique ☆ sur une émote pour l\'ajouter', 'info'); return; }
-  const x = Math.max(130, Math.min(innerWidth - 130, _emoteMouse.x));
-  const y = Math.max(130, Math.min(innerHeight - 130, _emoteMouse.y));
+  const x = Math.max(160, Math.min(innerWidth - 160, _emoteMouse.x));
+  const y = Math.max(160, Math.min(innerHeight - 160, _emoteMouse.y));
   const w = document.createElement('div');
   w.className = 'vtt-emote-wheel';
   w.style.left = x + 'px'; w.style.top = y + 'px';
   w.innerHTML = '<div class="vtt-emote-wheel-bg"></div>' + favs.map((em, i) => {
     const a = -Math.PI / 2 + i * 2 * Math.PI / favs.length;
-    return `<div class="vtt-emote-wslot" data-i="${i}" style="left:${Math.cos(a) * 84}px;top:${Math.sin(a) * 84}px"><img src="${em.url}" alt=""><kbd>${i + 1}</kbd></div>`;
+    const shortcut = i < _EMOTE_SHORTCUT_LIMIT ? `<kbd>${i + 1}</kbd>` : '';
+    return `<div class="vtt-emote-wslot" data-i="${i}" style="left:${Math.cos(a) * _EMOTE_WHEEL_RADIUS}px;top:${Math.sin(a) * _EMOTE_WHEEL_RADIUS}px"><img src="${em.url}" alt="">${shortcut}</div>`;
   }).join('') + '<div class="vtt-emote-wcenter" id="vtt-emote-wc"></div>';
   document.body.appendChild(w);
   _EW = { el: w, x, y, favs, sel: null };

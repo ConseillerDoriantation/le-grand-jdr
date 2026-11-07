@@ -33,21 +33,57 @@ import { characterAvatarHtml } from '../shared/portraits.js';
 // Catégories de fragments : partagées avec la revente (valeur des améliorations).
 import { FRAGMENT_CATEGORIES, getItemFragmentCategory } from '../shared/upgrade-value.js';
 // Reforge (monter la rareté) — gatée Bastion, Option A. Réutilise le mapping craft.
-import { craftCategoryForItem, craftDiscipline, craftRecycleQty } from '../shared/craft-engine.js';
+import { craftCategoryForItem, craftDiscipline, craftRecycleQty, countInventoryItem } from '../shared/craft-engine.js';
 import { craftRecipeMaterials, loadCraftSettings, getCraftSettings } from '../shared/craft-settings.js';
 import { evaluateReforge, scaleMaterials } from '../shared/reforge.js';
 import { getRarities, loadRarities, RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import { getDocData, loadCollection } from '../data/firestore.js';
-import { shopItemToInvEntry } from '../shared/inventory-utils.js';
+import { getInventoryItemImage, shopItemToInvEntry } from '../shared/inventory-utils.js';
 import { isTraitRecyclable, recyclableTraits, nonRecyclableTraitNames } from '../shared/trait-recycling.js';
 import {
-  getItemTraitsSlotCount as getItemTraitsSlotCountPure, statCapAt, firstGainRarity,
+  getItemTraitsSlotCount as getItemTraitsSlotCountPure, traitCapAt, statCapAt, unlockRarity, firstGainRarity,
   ringTracks, possibleActions, isMaxed, dismantlePreview,
 } from '../shared/artisan-logic.js';
 
 export { FRAGMENT_CATEGORIES, getItemFragmentCategory };
 
 const FRAGMENT_CAT_BY_ID = Object.fromEntries(FRAGMENT_CATEGORIES.map(c => [c.id, c]));
+const ARTISAN_FAMILIES = [
+  { id: 'all', label: 'Tout', icon: '' },
+  { id: 'weapons', label: 'Armes', icon: '⚔' },
+  { id: 'armor', label: 'Armures', icon: '⬟' },
+  { id: 'jewelry', label: 'Bijoux', icon: '◉' },
+  { id: 'magic', label: 'Objets magiques', icon: '✦' },
+];
+const ARTISAN_STAT_COLORS = {
+  force: '#ff6b6b', dexterite: '#4f8cff', constitution: '#22c38e',
+  intelligence: '#9d6fff', sagesse: '#f4c430', charisme: '#ff78c8',
+};
+
+function _artisanFamily(category) {
+  if (category === 'arme') return 'weapons';
+  if (['Tête', 'Torse', 'Pieds'].includes(category)) return 'armor';
+  if (['Amulette', 'Anneau'].includes(category)) return 'jewelry';
+  if (category === 'Objet magique') return 'magic';
+  return 'all';
+}
+
+function _catalogItem(item = {}) {
+  const id = item.itemId || item.shopItemId || '';
+  return id ? STORE.shopItems.find(entry => entry.id === id) || null : null;
+}
+
+function _artisanItemImage(item = {}) {
+  return getInventoryItemImage(item, _catalogItem(item));
+}
+
+function _artisanItemVisual(item = {}, category = getItemFragmentCategory(item), className = '') {
+  const image = _artisanItemImage(item);
+  const glyph = FRAGMENT_CAT_BY_ID[category]?.icon || '◇';
+  return `<span class="art-item-visual ${className}${image ? ' has-image' : ''}" aria-hidden="true">${image
+    ? `<img src="${_esc(image)}" alt="" loading="lazy">`
+    : `<span>${glyph}</span>`}</span>`;
+}
 
 const STORE = {
   activeCharId: null,
@@ -273,37 +309,31 @@ function _renderArtisanModal() {
     </div>
   `;
 
-  const inlineBody = `${toolbar}
-    <div class="art-page-grid">
-      <section class="art-page-pane art-equipment-pane">
-        <div class="art-pane-head">
-          <span><small>Inventaire</small><strong>Équipement améliorable</strong></span>
-          <span class="art-pane-count">${_getEligibleItems(c).length}</span>
+  const mjBanner = STATE.isAdmin ? `<div class="art-mj-banner${STORE.mjFreeMode ? ' is-active' : ''}">
+    <strong>Maître du jeu</strong>
+    <label><input type="checkbox" ${STORE.mjFreeMode ? 'checked' : ''} data-change="_artisanToggleMjFree"><span class="art-mj-switch" aria-hidden="true"><span></span></span><b>Mode gratuit</b></label>
+    <span>${STORE.mjFreeMode ? 'Coûts et conditions ignorés. Les opérations sont marquées MJ dans l’historique.' : 'Les coûts et conditions s’appliquent comme pour le joueur.'}</span>
+  </div>` : '';
+
+  const inlineBody = `${mjBanner}
+    <div class="art-shell">
+      <section class="art-panel art-equipment-pane">
+        <div class="art-panel-head">
+          <h2>Équipement<small>${_getEligibleItems(c).length} pièce${_getEligibleItems(c).length > 1 ? 's' : ''} améliorable${_getEligibleItems(c).length > 1 ? 's' : ''}</small></h2>
         </div>
         ${_renderItemFilters(c)}
         <div id="art-inline-item-list">${_renderItemList(c)}</div>
       </section>
-      <main class="art-page-pane art-workbench-pane">
-        <div class="art-pane-head art-pane-head--workbench">
-          <span><small>Objet sélectionné</small><strong>Établi</strong></span>
-        </div>
+      <main class="art-workbench-pane">
         <div id="art-inline-workbench">${_renderWorkbench(c)}</div>
       </main>
-      <aside class="art-page-pane art-resources-pane">
+      <aside class="art-panel art-resources-pane">
         ${_renderFragmentBag(c, { page: true })}
       </aside>
     </div>`;
 
   if (inlineRoot) {
-    inlineRoot.innerHTML = `
-      <div class="sh-tool-heading sh-tool-heading--artisan">
-        <span class="sh-tool-heading-icon" aria-hidden="true">🔨</span>
-        <span>
-          <strong>Établi d'amélioration</strong>
-          <small>Choisis un objet pour le renforcer, le sertir ou le recycler.</small>
-        </span>
-      </div>
-      ${inlineBody}`;
+    inlineRoot.innerHTML = inlineBody;
     return;
   }
 
@@ -325,23 +355,21 @@ function _getEligibleItems(c) {
 function _renderItemFilters(c) {
   const eligible = _getEligibleItems(c);
   const counts = eligible.reduce((acc, { cat }) => {
-    acc[cat] = (acc[cat] || 0) + 1;
+    const family = _artisanFamily(cat);
+    acc[family] = (acc[family] || 0) + 1;
     return acc;
   }, {});
-  const categories = FRAGMENT_CATEGORIES.filter(cat => counts[cat.id]);
+  counts.all = eligible.length;
+  const families = ARTISAN_FAMILIES.filter(family => family.id === 'all' || counts[family.id]);
   return `<div class="art-item-tools">
     <div class="art-item-search">
-      <span aria-hidden="true">🔎</span>
-      <input type="search" value="${_esc(STORE.itemSearch)}" placeholder="Rechercher un équipement…"
+      <span aria-hidden="true">⌕</span>
+      <input type="search" value="${_esc(STORE.itemSearch)}" placeholder="Rechercher une pièce, un trait…"
         data-input="_artisanFilterItems" aria-label="Rechercher un équipement améliorable">
     </div>
-    <div class="art-item-categories" aria-label="Filtrer par type d'équipement">
-      <button type="button" class="art-item-category${STORE.itemCategory === 'all' ? ' is-active' : ''}"
-        data-action="_artisanFilterCategory" data-category="all">Tous <span>${eligible.length}</span></button>
-      ${categories.map(cat => `<button type="button" class="art-item-category${STORE.itemCategory === cat.id ? ' is-active' : ''}"
-        data-action="_artisanFilterCategory" data-category="${_esc(cat.id)}">${cat.icon} ${_esc(cat.label)} <span>${counts[cat.id]}</span></button>`).join('')}
-      <button type="button" class="art-item-category art-hide-empty${STORE.hideEmpty ? ' is-active' : ''}"
-        data-action="_artisanToggleHideEmpty" aria-pressed="${STORE.hideEmpty}">Masquer au max</button>
+    <div class="art-item-categories" role="group" aria-label="Filtrer par famille">
+      ${families.map(family => `<button type="button" class="art-item-category${STORE.itemCategory === family.id ? ' is-active' : ''}"
+        data-action="_artisanFilterCategory" data-category="${family.id}" aria-pressed="${STORE.itemCategory === family.id}" title="${_esc(family.label)}">${family.icon ? `<i aria-hidden="true">${family.icon}</i>` : ''}${_esc(family.label)} <span>${counts[family.id] || 0}</span></button>`).join('')}
     </div>
   </div>`;
 }
@@ -350,67 +378,36 @@ function _renderFragmentBag(c, { page = false } = {}) {
   const bag = getCharacterFragments(c);
   const selected = (c?.inventaire || [])[STORE.activeItemIndex];
   const selectedCategory = selected ? getItemFragmentCategory(selected) : null;
-  const totalCount = Object.values(bag).reduce(
-    (s, frags) => s + Object.values(frags || {}).reduce((s2, n) => s2 + (parseInt(n) || 0), 0),
-    0,
-  );
-
-  const selectedIndex = STORE.activeItemIndex;
-  const renderFragmentCategory = cat => {
-    const frags = bag[cat.id] || {};
-    const entries = Object.entries(frags).filter(([, n]) => (parseInt(n) || 0) > 0);
-    if (!entries.length) return '';
-    const categoryCount = entries.reduce((sum, [, n]) => sum + (parseInt(n) || 0), 0);
-    const rows = entries.map(([name, n]) =>
-      `<div class="art-frag-entry" title="Compatible avec : ${_esc(cat.label)}">
-        <span class="art-frag-mark" aria-hidden="true">◆</span><span class="art-frag-entry-name">${_esc(name)}</span>
-        <span class="art-frag-chip-n">×${n}</span>
-        ${selectedCategory === cat.id
-          ? `<button type="button" class="art-frag-use" data-action="_artisanTraitPanel" data-i="${selectedIndex}" data-frag="${_esc(name)}">Poser</button>`
-          : `<button type="button" class="art-frag-use" data-action="_artisanSelectCompatible" data-category="${_esc(cat.id)}">Voir</button>`}
-      </div>`
-    ).join('');
-    return `<details class="art-frag-cat" ${!page || selectedCategory === cat.id ? 'open' : ''}>
-      <summary class="art-frag-cat-hd">
-        <span>${cat.icon} ${_esc(cat.label)}</span>
-        <span class="art-frag-cat-count">${categoryCount}</span>
-      </summary>
-      <div class="art-frag-cat-list">${rows}</div>
-    </details>`;
+  const fragmentEntries = FRAGMENT_CATEGORIES.flatMap(category => Object.entries(bag[category.id] || {})
+    .filter(([, qty]) => (parseInt(qty, 10) || 0) > 0)
+    .map(([name, qty]) => ({ category, name, qty: parseInt(qty, 10) || 0 })));
+  const totalCount = fragmentEntries.reduce((sum, entry) => sum + entry.qty, 0);
+  const fragmentRow = entry => {
+    const mine = selectedCategory === entry.category.id;
+    return `<div class="art-fragment-row${mine ? ' is-compatible' : ''}" data-fragment-category="${_esc(entry.category.id)}"><span class="art-fragment-glyph">◆</span><span><b>${_esc(entry.name)}</b><small>Fragment ${_esc(entry.category.label.toLowerCase())}</small></span><em>×${entry.qty}</em>${mine ? `<button type="button" data-action="_artisanTraitPanel" data-i="${STORE.activeItemIndex}" data-frag="${_esc(entry.name)}">Poser</button>` : `<button type="button" data-action="_artisanSelectCompatible" data-category="${_esc(entry.category.id)}">Voir</button>`}</div>`;
   };
-  const selectedMeta = FRAGMENT_CATEGORIES.find(cat => cat.id === selectedCategory);
-  const selectedSection = selectedMeta ? renderFragmentCategory(selectedMeta) : '';
-  const otherSections = FRAGMENT_CATEGORIES
-    .filter(cat => cat.id !== selectedCategory)
-    .map(renderFragmentCategory).filter(Boolean).join('');
-  const hasFragments = !!(selectedSection || otherSections);
+  const mine = fragmentEntries.filter(entry => entry.category.id === selectedCategory);
+  const others = fragmentEntries.filter(entry => entry.category.id !== selectedCategory);
 
   const materialReq = selected ? (_reforgeContext(selected, c).materialReq || []) : [];
-  const materialRows = materialReq.map(req => {
-    const owned = (c?.inventaire || []).filter(entry => entry?.itemId === req.itemId).length;
-    const shopItem = STORE.shopItems.find(entry => entry.id === req.itemId);
-    const name = shopItem?.nom || (c?.inventaire || []).find(entry => entry?.itemId === req.itemId)?.nom || 'Matériau requis';
-    return `<div class="art-material-row${owned >= req.quantite ? ' is-ready' : ''}">
-      <span><i aria-hidden="true">⬡</i><b>${_esc(name)}</b><small>${owned}/${req.quantite}</small></span>
-      ${shopItem ? `<button type="button" data-sh-action="cartInc" data-id="${_esc(req.itemId)}">Panier +</button>` : ''}
-    </div>`;
-  }).join('');
+  const reqById = new Map(materialReq.map(req => [req.itemId, req]));
+  const materialIds = new Set(materialReq.map(req => req.itemId));
+  const collectIds = value => {
+    if (!value || typeof value !== 'object') return;
+    if (value.itemId) materialIds.add(String(value.itemId));
+    Object.values(value).forEach(collectIds);
+  };
+  collectIds(getCraftSettings()?.recipes || {});
+  const materials = [...materialIds].map(itemId => {
+    const req = reqById.get(itemId);
+    const owned = countInventoryItem(c?.inventaire || [], itemId);
+    const shopItem = STORE.shopItems.find(entry => entry.id === itemId);
+    const invItem = (c?.inventaire || []).find(entry => entry?.itemId === itemId);
+    return { itemId, req, owned, shopItem, name: shopItem?.nom || invItem?.nom || 'Matériau' };
+  }).filter(entry => entry.req || entry.owned > 0).sort((a, b) => Number(!!b.req) - Number(!!a.req) || a.name.localeCompare(b.name, 'fr'));
+  const materialRow = entry => `<div class="art-material-row${entry.req ? ' is-required' : ''}${entry.req && entry.owned >= entry.req.quantite ? ' is-ready' : ''}"><span class="art-material-glyph">⬡</span><span><b>${_esc(entry.name)}</b>${entry.req ? `<small>Reforge : ${entry.req.quantite} requis</small>` : '<small>Matériau d’artisanat</small>'}</span><em>${entry.owned}</em>${entry.req && entry.shopItem && entry.owned < entry.req.quantite ? `<button type="button" data-sh-action="cartInc" data-id="${_esc(entry.itemId)}">Panier +</button>` : ''}</div>`;
 
-  return `
-    <div class="art-frag-bag${page ? ' art-frag-bag--page' : ''}${STORE.resourceFlash ? ' is-flash' : ''}">
-      <div class="art-frag-bag-hd">
-        <span class="art-frag-bag-title">🎒 Sac de fragments</span>
-        <span class="art-frag-total">${totalCount}</span>
-      </div>
-      <div class="art-frag-hint">Les fragments gardent la famille de la pièce démontée.</div>
-      ${selectedCategory ? '<div class="art-bag-section-title">Pour cette pièce</div>' : ''}
-      ${selectedSection || (selectedCategory ? '<div class="art-frag-empty">Aucun fragment compatible.</div>' : '')}
-      ${otherSections ? '<div class="art-bag-section-title">Pour d’autres pièces</div>' + otherSections : ''}
-      ${hasFragments ? '' : `<div class="art-frag-empty">Aucun fragment — recycle un équipement à trait pour en obtenir.</div>`}
-      <div class="art-bag-section-title">Matériaux de reforge</div>
-      ${materialRows || '<div class="art-frag-empty">Sélectionne une pièce pour voir les matériaux requis.</div>'}
-      <div class="art-cycle"><strong>Le cycle de l’Artisan</strong><span>Démonte une pièce → récupère fragments et matériaux → améliore ou reforge ton équipement.</span></div>
-    </div>`;
+  return `<div class="art-frag-bag${page ? ' art-frag-bag--page' : ''}${STORE.resourceFlash ? ' is-flash' : ''}"><div class="art-panel-head"><h2>Ton sac<small>Fragments et matériaux</small></h2></div><section class="art-bag-section"><header><b>Fragments</b><em>${totalCount}</em></header>${!fragmentEntries.length ? '<p class="art-frag-empty">Aucun fragment pour l’instant.</p>' : ''}${mine.length ? `<h3>Pour cette pièce</h3>${mine.map(fragmentRow).join('')}` : selectedCategory ? '<p class="art-frag-empty">Aucun fragment compatible avec cette pièce.</p>' : ''}${others.length ? `<h3>${selected ? 'Pour d’autres pièces' : 'Tous'}</h3>${others.map(fragmentRow).join('')}` : ''}</section><section class="art-bag-section"><header><b>Matériaux</b><em>${materials.reduce((sum, entry) => sum + entry.owned, 0)}</em></header>${materials.length ? `${materialReq.length ? '<h3>Pour cette pièce</h3>' : ''}${materials.map(materialRow).join('')}` : '<p class="art-frag-empty">Aucun matériau pour l’instant.</p>'}</section><div class="art-cycle"><strong>Le cycle de l’artisan</strong><ol><li>Démonte une pièce qui porte un trait.</li><li>Son trait devient un fragment dans ton sac.</li><li>Pose ce fragment sur une pièce de la même catégorie.</li></ol></div></div>`;
 }
 
 // Résumé d'un item pour la liste (traits + bonus de stats en une ligne courte).
@@ -427,13 +424,38 @@ function _itemSummary(item) {
   return parts.join(' · ');
 }
 
+function _artisanHeroProperties(item = {}) {
+  const toucher = item.toucherStat || item.statAttaque || item.toucher || '';
+  const toucherMeta = ITEM_STAT_META.find(meta => [meta.full, meta.store, ...(meta.aliases || [])].includes(String(toucher).toLowerCase()));
+  return [
+    item.degats ? ['Dégâts', item.degats] : null,
+    toucher ? ['Toucher', toucherMeta?.short || String(toucher).slice(0, 3).toUpperCase()] : null,
+    Number(item.ca) || Number(item.caBonus) ? ['CA', `${(Number(item.ca) || 0) + (Number(item.caBonus) || 0)}`] : null,
+    item.portee ? ['Portée', item.portee] : null,
+  ].filter(Boolean).map(([label, value]) => `<span class="art-hero-fact"><small>${_esc(label)}</small><b>${_esc(value)}</b></span>`).join('');
+}
+
+function _artisanHeroStats(item = {}) {
+  const stats = ITEM_STAT_META.map(meta => {
+    const base = getItemBaseStatBonus(item, meta.full);
+    const upgrade = getItemUpgradeStatBonus(item, meta.full);
+    const total = base + upgrade;
+    return total ? `<span class="art-hero-stat" style="--stat:${ARTISAN_STAT_COLORS[meta.full] || '#8294ad'}"><b>${meta.short}</b>${total > 0 ? '+' : ''}${total}${upgrade ? `<i>+${upgrade}</i>` : ''}</span>` : '';
+  }).filter(Boolean);
+  const effect = Math.max(0, parseInt(item.upgrades?.effectBonus, 10) || 0);
+  const derived = [
+    ['PV', item.pvMaxBonus], ['PM', item.pmMaxBonus], ['Vit', item.vitesseBonus], ['Init', item.initiativeBonus],
+  ].filter(([, value]) => Number(value) > 0).map(([label, value]) => `<span class="art-hero-derived">${label} +${Number(value) + effect}${effect ? `<i>+${effect} artisan</i>` : ''}</span>`);
+  return [...stats, ...derived].join('');
+}
+
 // ── Liste des objets améliorables (colonne gauche, sélectionnable) ──────
 function _renderItemList(c) {
   if (!c) return `<div class="art-empty">Sélectionne un personnage.</div>`;
   const allEligible = _getEligibleItems(c);
   const q = _norm(STORE.itemSearch);
   const eligible = allEligible.filter(({ it, cat }) => {
-    if (STORE.itemCategory !== 'all' && cat !== STORE.itemCategory) return false;
+    if (STORE.itemCategory !== 'all' && _artisanFamily(cat) !== STORE.itemCategory) return false;
     if (!q) return true;
     const meta = FRAGMENT_CAT_BY_ID[cat];
     const haystack = [
@@ -460,25 +482,37 @@ function _renderItemList(c) {
   }
 
   const equippedIndices = new Set(Object.values(c.equipement || {}).map(eq => Number(eq?.sourceInvIndex)).filter(Number.isInteger));
+  const maxRarity = Math.max(5, ...getRarities().map(rarity => Number(rarity.value) || 0));
   const row = ({ it, idx, cat }) => {
       const meta = FRAGMENT_CAT_BY_ID[cat];
       const active = idx === STORE.activeItemIndex;
-      const summary = _itemSummary(it);
-      const traits = _getTraits(it).length, traitCap = getItemTraitsSlotCount(it);
+      const traits = _getTraits(it).length;
+      const traitCap = getItemTraitsSlotCount(it);
+      const traitFamilyCap = traitCapAt(it, maxRarity, getUpgradeSettings());
       const stats = _sumUpgradeStatPoints(it), statCap = statCapAt(it, it.rarete, getUpgradeSettings());
+      const statFamilyCap = statCapAt(it, maxRarity, getUpgradeSettings());
       const reforge = _reforgeContext(it, c).ev;
       const actions = possibleActions(c, it, { upgrade: getUpgradeSettings(), gold: calcOr(c), freeMode: STORE.mjFreeMode, reforgeEval: reforge });
-      const count = ['addTrait', 'replaceTrait', 'stat', 'reforge'].filter(key => actions[key]).length;
+      const possible = [actions.addTrait && 'Poser un trait', actions.stat && 'Améliorer une stat', actions.reforge && 'Reforger'].filter(Boolean);
       const rarete = Math.max(1, parseInt(it.rarete, 10) || 1);
-      const meter = (used, cap, tone) => `<span class="art-mini-meter is-${tone}">${Array.from({ length: Math.max(1, cap) }, (_, k) => `<i class="${k < used ? 'is-on' : ''}"></i>`).join('')}</span>`;
-      return `<button class="art-item-card${active ? ' is-active' : ''}${STORE.flash === idx ? ' is-flash' : ''}" data-action="_artisanSelectItem" data-i="${idx}">
-        <span class="art-item-cat" title="${_esc(meta?.label || '')}">${'◆'.repeat(Math.min(5, rarete))}</span>
+      const rarityName = RARETE_NAMES[rarete] || `Rareté ${rarete}`;
+      const rarityColor = _rareteColor(rarityName) || '#8294ad';
+      const meter = (used, cap, familyCap, tone) => familyCap > 0 ? `<span class="art-mini-meter is-${tone}" title="${tone === 'trait' ? 'Traits' : 'Points de stats'} : ${used}/${cap}">${Array.from({ length: familyCap }, (_, k) => `<i class="${k < used ? 'is-used' : k < cap ? 'is-free' : 'is-locked'}"></i>`).join('')}</span>` : '';
+      const tracks = cat === 'Anneau' ? ringTracks(it, getUpgradeSettings()) : [];
+      const ringMeter = tracks.length ? `<span class="art-mini-meter is-ring" title="Bonus renforcés : ${tracks.filter(track => track.level > 0).length}/${tracks.length}">${tracks.map(track => `<i class="${track.level > 0 ? 'is-used' : 'is-free'}"></i>`).join('')}</span>` : '';
+      const type = it.format || it.typeArmure || it.slotBijou || meta?.label || cat;
+      const status = possible.length
+        ? `<span class="art-item-possible" title="Possible maintenant : ${_esc(possible.join(', '))}">${possible.length} possible${possible.length > 1 ? 's' : ''}</span>`
+        : isMaxed(c, it, { upgrade: getUpgradeSettings(), gold: calcOr(c), freeMode: STORE.mjFreeMode, reforgeEval: reforge })
+          ? '<span class="art-item-maxed" title="Plus rien à améliorer sur cette pièce">Au max</span>' : '';
+      return `<button class="art-item-card${active ? ' is-active' : ''}${STORE.flash === idx ? ' is-flash' : ''}" data-action="_artisanSelectItem" data-i="${idx}" style="--art-rarity:${rarityColor}" aria-pressed="${active}">
+        ${_artisanItemVisual(it, cat)}
         <span class="art-item-card-body">
-          <span class="art-item-name">${_esc(it.nom || 'Sans nom')}</span><span class="art-item-rarity">${_esc(RARETE_NAMES[rarete] || '')} · ${_esc(meta?.label || cat)}</span>
-          <span class="art-item-meters">${meter(traits, traitCap, 'trait')}${statCap ? meter(stats, statCap, 'stat') : ''}</span>
-          <span class="art-item-sum">${count ? `${count} possible${count > 1 ? 's' : ''}` : (summary || 'Au maximum')}</span>
+          <span class="art-item-name">${_esc(it.nom || 'Sans nom')}</span>
+          <span class="art-item-rarity"><i>${'★'.repeat(Math.min(5, rarete))}</i> ${_esc(rarityName)} · ${_esc(type)}</span>
+          <span class="art-item-meters">${meter(traits, traitCap, traitFamilyCap, 'trait')}${cat === 'Anneau' ? ringMeter : meter(stats, statCap, statFamilyCap, 'stat')}</span>
         </span>
-        <span class="art-item-chev">${active ? '▾' : '›'}</span>
+        <span class="art-item-state">${status}</span>
       </button>`;
     };
   const equipped = eligible.filter(entry => equippedIndices.has(entry.idx));
@@ -491,10 +525,7 @@ function _renderItemList(c) {
 function _renderWorkbench(c) {
   if (!c) return '';
   if (STORE.activeItemIndex == null) {
-    return `<div class="art-wb-empty">
-      <div class="art-wb-empty-ic">🔨</div>
-      <div>Choisis un objet à gauche pour voir ce que tu peux améliorer.</div>
-    </div>`;
+    return `<section class="art-panel art-wb-empty"><span aria-hidden="true">◇</span><b>Choisis une pièce</b><p>Sélectionne une pièce dans la liste pour voir tout ce que tu peux lui faire.</p></section>`;
   }
   const item = (c.inventaire || [])[STORE.activeItemIndex];
   const cat = item ? getItemFragmentCategory(item) : null;
@@ -502,19 +533,8 @@ function _renderWorkbench(c) {
   const meta = FRAGMENT_CAT_BY_ID[cat];
   const i = STORE.activeItemIndex;
 
-  // État actuel (bonus de stats + traits)
-  const upBonus = ITEM_STAT_META
-    .map(m => [m.short, getItemUpgradeStatBonus(item, m.full)])
-    .filter(([, v]) => v > 0)
-    .map(([s, v]) => `<span class="art-up-chip">+${v} ${s}</span>`).join('');
   const allTraits = _getTraits(item);
-  const traitState = allTraits.length
-    ? allTraits.map(t => `<span class="art-trait-chip">${_esc(t)}</span>`).join('')
-    : '<span class="art-muted" style="font-size:.72rem">aucun trait</span>';
-
-  const histBtn = Array.isArray(item?.upgrades?.history) && item.upgrades.history.length
-    ? `<button class="art-wb-hist" data-action="_artisanOpenHistory" data-i="${i}" title="Historique des améliorations">📜 ${item.upgrades.history.length}</button>`
-    : '';
+  const historyCount = Array.isArray(item?.upgrades?.history) ? item.upgrades.history.length : 0;
 
   const rarity = Math.max(1, parseInt(item.rarete, 10) || 1);
   const traitCap = getItemTraitsSlotCount(item);
@@ -522,34 +542,46 @@ function _renderWorkbench(c) {
   const statUsed = _sumUpgradeStatPoints(item);
   const nextGain = firstGainRarity(item, getUpgradeSettings());
   const equipped = Object.entries(c.equipement || {}).find(([, eq]) => Number(eq?.sourceInvIndex) === i)?.[0] || '';
-  const propertyBits = [item.format, item.typeArmure, item.nature, item.portee].filter(Boolean);
-  const capacity = (label, used, cap, tone, target) => `<button type="button" class="art-capacity is-${tone}" data-action="_artisanScrollSection" data-target="${target}">
-    <span>${label}</span><strong>${used}/${cap || '—'}</strong><i>${cap ? `${Math.max(0, cap - used)} libre${cap - used > 1 ? 's' : ''}` : 'non applicable'}</i>
-  </button>`;
+  const rarityName = RARETE_NAMES[rarity] || `Rareté ${rarity}`;
+  const rarityColor = _rareteColor(rarityName) || '#8294ad';
+  const type = item.format || item.typeArmure || item.slotBijou || meta?.label || cat;
+  const traitUnlock = unlockRarity(item, 'traits', traitCap + 1, getUpgradeSettings());
+  const statUnlock = unlockRarity(item, 'stats', statCap + 1, getUpgradeSettings());
+  const tracks = cat === 'Anneau' ? ringTracks(item, getUpgradeSettings()) : [];
+  const capacity = (label, value, sub, tone, target) => `<button type="button" class="art-capacity is-${tone}" data-action="_artisanScrollSection" data-target="${target}"><span>${label}</span><strong>${value}</strong><i>${sub}</i></button>`;
+  const traitSub = traitCap > allTraits.length
+    ? `${traitCap - allTraits.length} libre${traitCap - allTraits.length > 1 ? 's' : ''}${traitUnlock ? ` · +1 en ${RARETE_NAMES[traitUnlock] || traitUnlock}` : ''}`
+    : traitUnlock ? `+1 en ${RARETE_NAMES[traitUnlock] || traitUnlock}` : 'Capacité atteinte';
+  const statValue = cat === 'Anneau' ? `${tracks.filter(track => track.level > 0).length}/${tracks.length || 0}` : statCap ? `${statUsed}/${statCap}` : '—';
+  const statSub = cat === 'Anneau' ? 'Bonus renforcés' : statCap > statUsed
+    ? `${statCap - statUsed} disponible${statCap - statUsed > 1 ? 's' : ''}${statUnlock ? ` · +1 en ${RARETE_NAMES[statUnlock] || statUnlock}` : ''}`
+    : statUnlock ? `+1 en ${RARETE_NAMES[statUnlock] || statUnlock}` : statCap ? 'Capacité atteinte' : 'Non applicable';
+  const nextRarity = _reforgeContext(item, c).ev.target;
+  const raritySub = nextRarity ? (nextGain === nextRarity ? `Débloque de la capacité en ${RARETE_NAMES[nextRarity] || nextRarity}` : `Prochaine : ${RARETE_NAMES[nextRarity] || nextRarity}`) : 'Rareté maximale';
 
   return `<div class="art-wb">
-    <div class="art-wb-hero">
-      <span class="art-wb-ico">${meta?.icon || '◇'}</span>
-      <span class="art-wb-identity"><small style="color:${_rareteColor(RARETE_NAMES[rarity]) || 'var(--text-dim)'}">${'◆'.repeat(Math.min(5, rarity))} ${_esc(RARETE_NAMES[rarity] || '')}</small><strong>${_esc(item.nom || 'Sans nom')}</strong><em>${_esc(meta?.label || cat)}${propertyBits.length ? ` · ${_esc(propertyBits.join(' · '))}` : ''}</em></span>
-      ${equipped ? `<span class="art-equipped-badge">Équipé · ${_esc(equipped)}</span>` : ''}${histBtn}
-      <div class="art-wb-state">${upBonus}${traitState}</div>
-    </div>
+    <section class="art-panel art-wb-hero" style="--art-rarity:${rarityColor}">
+      <div class="art-hero-top">
+        ${_artisanItemVisual(item, cat, 'art-hero-image')}
+        <div class="art-wb-identity"><h2>${_esc(item.nom || 'Sans nom')}</h2><div><span class="art-rarity-pill">${'★'.repeat(Math.min(5, rarity))} ${_esc(rarityName)}</span><span>${_esc(type)}</span>${equipped ? `<span class="art-equipped-badge">✓ Équipement · ${_esc(equipped.toLowerCase())}</span>` : '<span>Dans ton sac</span>'}</div><div class="art-hero-properties">${_artisanHeroProperties(item)}${_artisanHeroStats(item)}</div></div>
+        <button class="art-wb-hist" data-action="_artisanOpenHistory" data-i="${i}"${historyCount ? '' : ' disabled'}><span aria-hidden="true">↶</span> Historique${historyCount ? `<em>${historyCount}</em>` : ''}</button>
+      </div>
     <div class="art-capacities">
-      ${capacity('Traits', allTraits.length, traitCap, 'trait', 'art-section-traits')}
-      ${capacity('Stats', statUsed, statCap, 'stat', 'art-section-stats')}
-      ${capacity('Prochain gain', nextGain ? rarity : rarity, nextGain || rarity, 'rarity', 'art-section-reforge')}
+      ${capacity('Traits', `${allTraits.length}/${traitCap}`, traitSub, 'trait', 'art-section-traits')}
+      ${capacity(cat === 'Anneau' ? 'Bonus renforcés' : 'Points de stats', statValue, statSub, 'stat', 'art-section-stats')}
+      ${capacity('Rareté', rarityName, raritySub, 'rarity', 'art-section-reforge')}
     </div>
-    ${_renderOperationPanel(item, i, c, cat)}
+    </section>
     <div id="art-section-traits">${_renderTraitsSection(item, i, c, cat)}</div>
     <div id="art-section-stats">${_renderStatsSection(item, i, c, cat)}</div>
     <div id="art-section-reforge">${_renderReforgeSection(item, i, c)}</div>
-    ${_renderRecycleSection(item, i, cat)}
+    ${_renderRecycleSection(item, i, cat, c)}
   </div>`;
 }
 
-function _renderOperationPanel(item, invIndex, c, cat) {
+function _renderOperationPanel(item, invIndex, c, cat, onlyType = '') {
   const op = STORE.operation;
-  if (!op || op.invIndex !== invIndex) return '';
+  if (!op || op.invIndex !== invIndex || (onlyType && op.type !== onlyType)) return '';
   const close = '<button type="button" class="art-op-close" data-action="_artisanCloseOperation" aria-label="Fermer">×</button>';
   const s = getUpgradeSettings();
   const fragments = Object.entries(c.traitFragments?.[cat] || {}).filter(([, qty]) => (parseInt(qty, 10) || 0) > 0);
@@ -557,7 +589,8 @@ function _renderOperationPanel(item, invIndex, c, cat) {
     const replace = !!op.oldTrait;
     return `<section class="art-op-panel"><header><span><small>${replace ? 'Remplacer un trait' : 'Ajouter un trait'}</small><strong>${replace ? `« ${_esc(op.oldTrait)} » sera perdu` : 'Choisis un fragment compatible'}</strong></span>${close}</header>
       <div class="art-op-options">${fragments.map(([name, qty]) => `<button type="button" class="${op.fragment === name ? 'is-selected' : ''}" data-action="_artisanOperationFragment" data-frag="${_esc(name)}"><span>◆ ${_esc(name)}</span><b>×${qty}</b></button>`).join('') || '<p>Aucun fragment compatible.</p>'}</div>
-      <footer><span>${STORE.mjFreeMode ? 'Gratuit · mode MJ' : `${replace ? s.trait.overwriteTrait : s.trait.addTraitFromFragment} PO`} · 1 fragment</span><button type="button" class="art-op-confirm" data-action="_artisanConfirmOperation" ${op.fragment ? '' : 'disabled'}>Confirmer</button></footer>
+      ${replace ? `<p class="art-op-warning">« ${_esc(op.oldTrait)} » sera perdu : il ne revient pas dans ton sac.</p>` : ''}
+      <footer><span>${STORE.mjFreeMode ? 'Gratuit (MJ) · solde non débité' : `${replace ? s.trait.overwriteTrait : s.trait.addTraitFromFragment} or · consomme 1 fragment`}</span><button type="button" class="art-op-confirm${replace ? ' is-replace' : ''}" data-action="_artisanConfirmOperation" ${op.fragment ? '' : 'disabled'}>${replace ? 'Remplacer définitivement' : op.fragment ? `Poser « ${_esc(op.fragment)} »` : 'Choisis un fragment'}</button></footer>
     </section>`;
   }
   if (op.type === 'stat') {
@@ -597,53 +630,23 @@ function _artisanOpenHistory(invIndex) {
     const d = new Date(e.at || 0);
     const date = isNaN(d) ? '?' : d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
     const op = e.op || 'upgrade';
-    const detail = [
-      e.stat   ? `stat ${e.stat}` : null,
-      e.level  ? `palier ${e.level}` : null,
-      e.trait  ? `trait « ${e.trait} »` : null,
-      e.value  ? `trait « ${e.value} »` : null,
-      (e.from || e.to) ? `${e.from || '?'} → ${e.to || '?'}` : null,
-    ].filter(Boolean).join(' · ');
+    const detail = _upgradeEntryLabel(e);
     const cost = parseInt(e.cost) || 0;
-    const mj   = e.mjOverride ? ' <span style="color:#ff6b6b;font-weight:700">MJ</span>' : '';
-    // MJ : bouton de suppression/correction par entrée (annule l'effet + rembourse).
-    const del = STATE.isAdmin
-      ? `<button class="btn btn-outline btn-sm" style="padding:.15rem .4rem;font-size:.72rem;border-color:var(--danger,#e5484d);color:var(--danger,#e5484d)"
-          data-action="_artisanRevertUpgrade" data-i="${invIndex}" data-h="${idx}"
-          title="Supprimer cette amélioration (annule l'effet et rembourse l'or)">🗑 Supprimer</button>`
+    const mj = e.mjOverride ? '<span class="art-history-mj">MJ</span>' : '';
+    const action = STATE.isAdmin
+      ? op === 'reforge'
+        ? '<small class="art-history-locked">non annulable</small>'
+        : `<button type="button" class="art-history-undo" data-action="_artisanRevertUpgrade" data-i="${invIndex}" data-h="${idx}" title="Retirer l’effet et rembourser">↶ Annuler</button>`
       : '';
-    return `<div style="display:flex;justify-content:space-between;gap:.5rem;align-items:center;
-      padding:.4rem .55rem;border-radius:6px;background:var(--bg-elevated);
-      border:1px solid var(--border);font-size:.78rem">
-      <div style="min-width:0">
-        <div style="font-weight:600;color:var(--text)">${_esc(op)}${mj}</div>
-        <div style="color:var(--text-dim);font-size:.72rem">${_esc(detail || '—')}</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:.5rem;white-space:nowrap">
-        <div style="text-align:right">
-          <div style="color:var(--gold);font-weight:700">${cost} PO</div>
-          <div style="color:var(--text-dim);font-size:.7rem">${date}</div>
-        </div>
-        ${del}
-      </div>
-    </div>`;
+    return `<div class="art-history-line"><span><b>${_esc(detail || op)}${mj}</b><small>${date}</small></span><strong>${cost ? `${cost} or` : 'Gratuit'}</strong>${action}</div>`;
   };
 
   const totalCost = hist.reduce((s, e) => s + (parseInt(e.cost) || 0), 0);
   const body = hist.length
-    ? `<div style="display:flex;flex-direction:column;gap:.4rem;max-height:50vh;overflow-y:auto">${hist.map(fmt).join('')}</div>
-       <div style="margin-top:.75rem;padding-top:.5rem;border-top:1px solid var(--border);
-         font-size:.8rem;color:var(--text-muted);display:flex;justify-content:space-between">
-         <span>Total investi</span><strong style="color:var(--gold)">${totalCost} PO</strong>
-       </div>`
-    : `<div style="padding:1rem;text-align:center;color:var(--text-dim);font-size:.85rem">
-         Aucun historique pour cet item.
-       </div>`;
+    ? `<div class="art-history-list">${hist.map(fmt).reverse().join('')}</div><div class="art-history-total"><span>Total investi</span><strong>${totalCost} or</strong></div>`
+    : '<div class="art-history-empty">Aucune amélioration pour cette pièce.</div>';
 
-  pushModal(`📜 Historique — ${_esc(item.nom || 'objet')}`, `${body}
-    <div style="margin-top:.85rem;text-align:right">
-      <button class="btn btn-outline btn-sm" data-action="_artisanCloseModal">Fermer</button>
-    </div>`);
+  pushModal(`Historique — ${_esc(item.nom || 'objet')}`, `<div class="art-history">${body}${STATE.isAdmin ? '<p>Annuler retire l’effet, rembourse l’or et rend le fragment consommé.</p>' : ''}<footer><button type="button" class="btn btn-outline btn-sm" data-action="_artisanCloseModal">Fermer</button></footer></div>`);
 };
 
 // ══════════════════════════════════════════════
@@ -911,45 +914,48 @@ function _reforgeContext(item, c) {
 
 function _renderReforgeSection(item, invIndex, c) {
   const { ev, discipline, roomSlug, roomLevel, materialReq } = _reforgeContext(item, c);
-  if (!discipline) return '';  // objet non reforgeable (pas de discipline de craft)
+  if (!discipline) return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-reforge">★</span><span><h3>Reforge</h3><p>Augmente la rareté pour débloquer de nouveaux emplacements.</p></span><em class="art-section-state is-muted">Non disponible</em></header><div class="art-operation-body"><p class="art-section-empty">Cette famille d’objet ne possède pas de recette de reforge.</p></div></section>`;
   if (!ev.target) {
-    return `<div class="art-wb-sec"><div class="art-wb-sec-hd">⭐ Reforge</div><div class="art-muted" style="font-size:.72rem">Rareté maximale atteinte.</div></div>`;
+    return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-reforge">★</span><span><h3>Reforge</h3><p>Augmente la rareté pour débloquer de nouveaux emplacements.</p></span><em class="art-section-state is-complete">Rareté maximale</em></header><div class="art-operation-body"><p class="art-section-empty">Cette pièce a atteint la rareté maximale.</p></div></section>`;
   }
   const free = STORE.mjFreeMode;
   const targetName = RARETE_NAMES[ev.target] || `Rareté ${ev.target}`;
   const targetColor = _rareteColor(RARETE_NAMES[ev.target]) || 'var(--text)';
-
-  const line = (ok, html) => `<div style="display:flex;gap:7px;align-items:baseline;font-size:.74rem;color:${ok ? 'var(--text-soft)' : 'var(--text-dim)'}"><span style="color:${ok ? 'var(--emerald)' : 'var(--text-dim)'}">${ok ? '✓' : '○'}</span><span>${html}</span></div>`;
-
-  const roomLine = line(free || ev.roomOk,
-    `Salle <b>${_esc(_roomLabel(roomSlug))}</b> niv. ${ev.requiredLevel} <span class="art-muted">(construite : niv. ${roomLevel})</span>`);
-  const matLines = materialReq.length
-    ? materialReq.map(req => {
-        const owned = (c.inventaire || []).filter(it => it && it.itemId === req.itemId).length;
-        const name = (c.inventaire || []).find(it => it && it.itemId === req.itemId)?.nom || 'Matériau requis';
-        return line(free || owned >= req.quantite, `${_esc(name)} <span class="art-muted">${owned}/${req.quantite}</span>`);
-      }).join('')
-    : line(false, '<span class="art-muted">Aucune recette de matériaux pour cette catégorie (console MJ → Craft).</span>');
-  const goldLine = line(free || ev.goldOk, `${ev.goldCost} PO`);
-
+  const requirement = (ok, label, detail, action = '') => `<div class="art-requirement ${ok ? 'is-ok' : 'is-missing'}${free && !ok ? ' is-ignored' : ''}"><span>${ok || free ? '✓' : '×'}</span><b>${label}</b><small>${free && !ok ? 'Ignoré (MJ)' : detail}</small>${!ok && !free ? action : ''}</div>`;
+  const roomLine = requirement(ev.roomOk, `${_esc(_roomLabel(roomSlug))} niv. ${ev.requiredLevel}`, roomLevel ? `la tienne : niv. ${roomLevel}` : 'pas encore construite', '<a href="#/bastion">Voir le Bastion</a>');
+  let missing = ev.roomOk ? 0 : 1;
+  const matLines = materialReq.length ? materialReq.map(req => {
+    const owned = countInventoryItem(c.inventaire || [], req.itemId);
+    const shopItem = STORE.shopItems.find(entry => entry.id === req.itemId);
+    const name = shopItem?.nom || (c.inventaire || []).find(it => it?.itemId === req.itemId)?.nom || 'Matériau requis';
+    const ok = owned >= req.quantite;
+    if (!ok) missing++;
+    return requirement(ok, `${req.quantite} × ${_esc(name)}`, `tu en as ${owned}`, shopItem ? `<button type="button" data-sh-action="cartInc" data-id="${_esc(req.itemId)}">Ajouter ${Math.max(1, req.quantite - owned)} au panier</button>` : '');
+  }).join('') : requirement(false, 'Recette de matériaux', 'aucune recette configurée');
+  if (!materialReq.length) missing++;
+  if (!ev.goldOk) missing++;
+  const goldLine = requirement(ev.goldOk, `${ev.goldCost} or`, `solde : ${Math.floor(calcOr(c))} or`);
   const allow = free || ev.ok;
   const gainRarity = firstGainRarity(item, getUpgradeSettings());
   const useful = gainRarity === ev.target;
-  const btn = `<button class="art-act art-act--gold" data-action="_artisanReforge" data-i="${invIndex}" ${allow ? '' : 'disabled'}>${useful ? 'Reforger' : 'Reforge intermédiaire'} → <b style="color:${targetColor}">${_esc(targetName)}</b>${free ? ' <span class="art-act-cost">Gratuit (MJ)</span>' : ''}</button>`;
+  const current = Math.max(1, parseInt(item.rarete, 10) || 1);
+  const currentTraits = traitCapAt(item, current, getUpgradeSettings());
+  const nextTraits = traitCapAt(item, ev.target, getUpgradeSettings());
+  const currentStats = statCapAt(item, current, getUpgradeSettings());
+  const nextStats = statCapAt(item, ev.target, getUpgradeSettings());
+  const gains = [nextTraits > currentTraits ? `+${nextTraits - currentTraits} emplacement${nextTraits - currentTraits > 1 ? 's' : ''} de trait` : '', nextStats > currentStats ? `+${nextStats - currentStats} point${nextStats - currentStats > 1 ? 's' : ''} de stats` : ''].filter(Boolean);
   const ladder = getRarities().map(rarity => {
     const traits = getItemTraitsSlotCountPure({ ...item, rarete: rarity.value }, getUpgradeSettings());
     const stats = statCapAt(item, rarity.value, getUpgradeSettings());
-    const state = rarity.value < (parseInt(item.rarete, 10) || 1) ? ' is-past' : rarity.value === (parseInt(item.rarete, 10) || 1) ? ' is-current' : rarity.value === ev.target ? ' is-next' : '';
-    return `<span class="art-reforge-step${state}" style="--rarity:${_rareteColor(rarity.name) || '#8294ad'}"><i>◆</i><b>${_esc(rarity.name)}</b><small>${traits} trait${traits > 1 ? 's' : ''}${stats ? ` · ${stats} stat${stats > 1 ? 's' : ''}` : ''}</small></span>`;
+    const state = rarity.value < current ? ' is-past' : rarity.value === current ? ' is-current' : rarity.value === ev.target ? ' is-next' : '';
+    const traitGain = state.includes('is-next') ? traits - currentTraits : 0;
+    const statGain = state.includes('is-next') ? stats - currentStats : 0;
+    return `<span class="art-reforge-step${state}" style="--rarity:${_rareteColor(rarity.name) || '#8294ad'}">${state.includes('is-current') ? '<em>Actuelle</em>' : state.includes('is-next') ? '<em>Prochaine</em>' : ''}<i>${'★'.repeat(Math.min(5, rarity.value))}</i><b>${_esc(rarity.name)}</b><small><span>◆ ${traits}${traitGain > 0 ? `<u>+${traitGain}</u>` : ''}</span>${stats ? `<span>● ${stats}${statGain > 0 ? `<u>+${statGain}</u>` : ''}</span>` : ''}</small></span>`;
   }).join('');
-
-  return `<div class="art-wb-sec">
-    <div class="art-wb-sec-hd">⭐ Reforge <span class="art-wb-sec-sub">monter la rareté (définitif)</span></div>
-    <div class="art-reforge-ladder">${ladder}</div>
-    ${!useful && gainRarity ? `<div class="art-muted" style="font-size:.7rem;margin-bottom:6px">Cette étape prépare la pièce ; le prochain budget se débloque en ${_esc(RARETE_NAMES[gainRarity] || `rareté ${gainRarity}`)}.</div>` : ''}
-    <div style="display:flex;flex-direction:column;gap:3px;margin:2px 0 8px">${roomLine}${matLines}${goldLine}</div>
-    <div class="art-act-row">${btn}</div>
-  </div>`;
+  const gainText = gains.length
+    ? `<p class="art-reforge-gain"><span>→</span>En ${_esc(targetName)} : <b>${gains.join(' et ')}</b>. Tes améliorations sont conservées.</p>`
+    : `<p class="art-section-hint"><span>i</span>${gainRarity ? `Rien de plus en ${_esc(targetName)} : le prochain gain arrive en ${_esc(RARETE_NAMES[gainRarity] || gainRarity)}.` : 'Rien à débloquer : cette pièce a atteint les limites de sa famille. La reforge ne changerait que la rareté.'}</p>`;
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-reforge">★</span><span><h3>Reforge</h3><p>Monte la rareté de la pièce. Cette opération est définitive.</p></span><em class="art-section-state is-reforge" style="--rarity:${targetColor}">${_esc(targetName)}</em></header><div class="art-operation-body"><div class="art-reforge-ladder">${ladder}</div>${gainText}<div class="art-requirements"><b>Pour passer en ${_esc(targetName)}</b>${roomLine}${matLines}${goldLine}</div><div class="art-operation-actions"><small>Définitif.</small><button type="button" class="${useful ? 'is-primary' : 'is-secondary'}" data-action="_artisanReforge" data-i="${invIndex}"${allow ? '' : ' disabled'}>${allow ? `Reforger en ${_esc(targetName)}${free ? ' · Gratuit (MJ)' : ev.goldCost ? ` · ${ev.goldCost} or` : ''}` : `Il manque ${missing} condition${missing > 1 ? 's' : ''}`}</button></div></div></section>`;
 }
 
 async function _artisanReforge(invIndex) {
@@ -1006,71 +1012,60 @@ function _renderTraitsSection(item, invIndex, c, cat) {
   const allTraits  = [..._getTraits(item)];
   const slotCount  = getItemTraitsSlotCount(item);
   const totalUsed  = allTraits.length;
-  const slotsLibres= Math.max(0, slotCount - totalUsed);
   const s          = getUpgradeSettings();
   const fragments  = c.traitFragments?.[cat] || {};
   const fragNames  = Object.entries(fragments).filter(([, n]) => (parseInt(n) || 0) > 0).map(([name, n]) => ({ name, n }));
-  const replaceableTraits = allTraits.filter(trait => isTraitRecyclable(item, trait));
-
-  if (slotCount <= 0) return '';
-
-  // Pastilles d'emplacements (pleins / libres)
-  const pips = Array.from({ length: slotCount }, (_, k) =>
-    `<span class="art-pip${k < totalUsed ? ' is-on' : ''}"></span>`).join('');
-
-  // Chips des traits actuels (base + ajoutés★) — lecture seule (le remplacement
-  // a maintenant sa propre rangée d'actions, aussi visible que l'ajout).
-  const traitRows = allTraits.length
-    ? allTraits.map((t, k) => {
-        const locked = !isTraitRecyclable(item, t);
-        return `<span class="art-trait-chip${k >= baseTraits.length ? ' art-trait-chip--added' : ''}${locked ? ' art-trait-chip--locked' : ''}"${locked ? ' title="Trait non recyclable et non remplaçable"' : ''}>${locked ? '<span aria-hidden="true">🔒</span> ' : ''}${_esc(t)}${k >= baseTraits.length ? ' ★' : ''}</span>`;
-      }).join('')
-    : '<span class="art-muted" style="font-size:.72rem">Aucun trait posé.</span>';
-
-  // ── Ajouter (slot libre) ──
-  let addHtml = '';
-  if (slotsLibres > 0) {
-    addHtml = fragNames.length
-      ? `<div class="art-sub"><span class="art-sub-lbl art-sub-lbl--add">Emplacement libre</span>
-          <div class="art-act-row"><button class="art-act art-act--gold" data-action="_artisanTraitPanel" data-i="${invIndex}">＋ Choisir un fragment <span class="art-act-cost">${s.trait.addTraitFromFragment} PO</span></button></div>
-        </div>`
-      : `<div class="art-muted" style="font-size:.72rem">Aucun fragment « ${_esc(catMeta?.label || cat)} » dans ton sac. Recycle un objet pour en obtenir.</div>`;
-  }
-
-  // ── Remplacer (même poids visuel que l'ajout) ──
-  let owHtml = '';
-  if (replaceableTraits.length && fragNames.length) {
-    owHtml = `<div class="art-sub"><span class="art-sub-lbl art-sub-lbl--replace">↻ Remplacer un trait</span>
-      <div class="art-act-row">${replaceableTraits.map(t => `<button class="art-act art-act--replace" data-action="_artisanTraitPanel" data-i="${invIndex}" data-trait="${_esc(t)}" title="Remplacer « ${_esc(t)} » par un fragment (${s.trait.overwriteTrait} PO)">
-        <span class="art-act-lbl">${_esc(t)}</span><span class="art-act-cost">${s.trait.overwriteTrait} PO</span></button>`).join('')}</div>
-    </div>`;
-  }
-
-  return `<div class="art-wb-sec">
-    <div class="art-wb-sec-hd">🔖 Traits <span class="art-wb-sec-sub">${totalUsed}/${slotCount} emplacement${slotCount > 1 ? 's' : ''}</span><span class="art-pips">${pips}</span></div>
-    <div class="art-trait-current">${traitRows}</div>
-    ${addHtml}${owHtml}
-    ${(slotsLibres <= 0 && !allTraits.length) ? '' : ''}
-  </div>`;
+  const maxRarity = Math.max(5, ...getRarities().map(rarity => Number(rarity.value) || 0));
+  const familyCap = Math.max(slotCount, totalUsed, traitCapAt(item, maxRarity, s));
+  const added = new Set(_getAddedTraits(item));
+  const price = STORE.mjFreeMode ? 'Gratuit (MJ)' : `${s.trait.addTraitFromFragment} or`;
+  const sockets = familyCap > 0 ? Array.from({ length: familyCap }, (_, index) => {
+    const trait = allTraits[index];
+    if (trait) {
+      const signature = !isTraitRecyclable(item, trait);
+      const replacing = STORE.operation?.type === 'trait' && STORE.operation?.invIndex === invIndex && STORE.operation?.oldTrait === trait;
+      return `<div class="art-trait-slot is-filled${signature ? ' is-signature' : ''}${replacing ? ' is-active' : ''}"><span class="art-slot-mark"></span><span class="art-slot-copy"><b>${_esc(trait)}</b><small>${signature ? 'Trait signature · ni remplaçable, ni récupérable' : added.has(trait) ? 'Ajouté à l’artisan' : 'D’origine'}</small></span>${signature ? '<span class="art-slot-lock" title="Trait verrouillé">▣</span>' : fragNames.length ? `<button type="button" class="art-slot-link" data-action="_artisanTraitPanel" data-i="${invIndex}" data-trait="${_esc(trait)}">${replacing ? 'En cours…' : 'Remplacer'}</button>` : ''}</div>`;
+    }
+    if (index < slotCount) {
+      const selected = STORE.operation?.type === 'trait' && STORE.operation?.invIndex === invIndex && !STORE.operation?.oldTrait;
+      return fragNames.length
+        ? `<button type="button" class="art-trait-slot is-free${selected ? ' is-active' : ''}" data-action="_artisanTraitPanel" data-i="${invIndex}"><span class="art-slot-mark"></span><span class="art-slot-copy"><b>${selected && STORE.operation?.fragment ? _esc(STORE.operation.fragment) : 'Emplacement libre'}</b><small>${selected && STORE.operation?.fragment ? 'Aperçu · pas encore posé' : `Poser un fragment · ${price}`}</small></span><span class="art-slot-plus">＋</span></button>`
+        : `<div class="art-trait-slot is-free is-disabled"><span class="art-slot-mark"></span><span class="art-slot-copy"><b>Emplacement libre</b><small>Aucun fragment ${_esc(catMeta?.label || cat).toLowerCase()} dans ton sac</small></span></div>`;
+    }
+    const unlock = unlockRarity(item, 'traits', index + 1, s);
+    return `<div class="art-trait-slot is-locked"><span class="art-slot-lock">▣</span><span class="art-slot-copy"><b>Emplacement verrouillé</b><small>${unlock ? `Se débloque en <em>${_esc(RARETE_NAMES[unlock] || `rareté ${unlock}`)}</em> · <button type="button" data-action="_artisanScrollSection" data-target="art-section-reforge">voir la reforge</button>` : 'Non disponible sur cette pièce'}</small></span></div>`;
+  }).join('') : '<p class="art-section-empty">Cette pièce ne possède aucun emplacement de trait.</p>';
+  const state = totalUsed >= slotCount && !unlockRarity(item, 'traits', slotCount + 1, s) ? ['Complet', 'is-complete'] : [`${totalUsed}/${slotCount}`, totalUsed < slotCount ? 'is-open' : ''];
+  const hint = !fragNames.length && allTraits.some(trait => isTraitRecyclable(item, trait))
+    ? `<p class="art-section-hint"><span>i</span>Aucun fragment compatible dans ton sac. Pour en obtenir, démonte une pièce qui porte un trait.</p>` : '';
+  return `<section class="art-panel art-operation" id="art-traits-card"><header class="art-operation-head"><span class="art-operation-icon is-trait">◆</span><span><h3>Traits</h3><p>Pose un fragment dans un emplacement libre, ou remplace un trait existant.</p></span><em class="art-section-state ${state[1]}">${state[0]}</em></header><div class="art-operation-body"><div class="art-trait-slots">${sockets}</div>${hint}${_renderOperationPanel(item, invIndex, c, cat, 'trait')}</div></section>`;
 }
 
 // Section « Recycler » (ex-destruction) — récupère les traits en fragments.
-function _renderRecycleSection(item, invIndex, cat) {
+function _renderRecycleSection(item, invIndex, cat, c) {
   const s = getUpgradeSettings();
   const allTraits = _getTraits(item);
-  if (!allTraits.length && !craftCategoryForItem(item)) return '';
-  const extractInfo = !allTraits.length
-    ? 'Aucun fragment, mais la part configurée de la recette est rendue.'
-    : s.trait.extractAllTraits
-    ? `Tu récupères ${allTraits.length} fragment${allTraits.length > 1 ? 's' : ''}.`
-    : (allTraits.length > 1 ? 'Tu choisiras le trait à récupérer (les autres sont perdus).' : 'Tu récupères son trait en fragment.');
-  return `<div class="art-wb-sec art-wb-sec--danger">
-    <div class="art-wb-sec-hd">♻️ Démonter</div>
-    <div class="art-recycle">
-      <button class="art-act art-act--danger" data-action="_artisanDismantlePanel" data-i="${invIndex}">♻️ Démonter <span class="art-act-cost">${s.trait.deconstructCost} PO</span></button>
-      <span class="art-muted" style="font-size:.72rem">Détruit l'objet. ${extractInfo}</span>
-    </div>
-  </div>`;
+  const preview = dismantlePreview(item, s, getCraftSettings());
+  const recoveredTraits = preview.recoveredTraits;
+  const chosenTrait = !s.trait.extractAllTraits && recoveredTraits.length > 1;
+  const recovered = [
+    chosenTrait ? `<p class="art-dismantle-note">Un seul trait revient en fragment : tu le choisiras à la confirmation.</p>` : '',
+    ...recoveredTraits.map(trait => `<span><i class="is-fragment">◆</i>Fragment « ${_esc(trait)} »</span>`),
+    ...preview.materials.map(req => {
+      const catalog = STORE.shopItems.find(entry => entry.id === req.itemId);
+      const name = catalog?.nom || c?.inventaire?.find(entry => entry?.itemId === req.itemId)?.nom || 'Matériau';
+      return `<span><i class="is-material">⬡</i>${req.quantite} × ${_esc(name)}</span>`;
+    }),
+  ].join('') || '<p>Rien à récupérer.</p>';
+  const invested = (item.upgrades?.history || []).reduce((sum, entry) => sum + (parseInt(entry.cost, 10) || 0), 0);
+  const lost = [
+    `<span><i>×</i>La pièce « ${_esc(item.nom || 'Objet')} »</span>`,
+    allTraits.length ? `<span><i>×</i>Ses améliorations et traits non récupérés</span>` : '',
+    ...preview.lostTraits.map(trait => `<span><i>×</i>Trait signature « ${_esc(trait)} »</span>`),
+    invested ? `<span><i>×</i>${invested} or investis</span>` : '',
+    '<span><i>×</i>Son emplacement d’inventaire est libéré</span>',
+  ].filter(Boolean).join('');
+  return `<section class="art-panel art-operation is-danger"><header class="art-operation-head"><span class="art-operation-icon is-danger">□</span><span><h3>Démonter</h3><p>Détruis la pièce pour récupérer ses traits et une partie de ses matériaux.</p></span><em class="art-section-state is-danger">Définitif</em></header><div class="art-operation-body"><div class="art-dismantle-grid"><div><b>Tu récupères</b>${recovered}</div><div><b>Tu perds</b>${lost}</div></div><div class="art-operation-actions"><small>Coût : ${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${preview.cost} or`}</small><button type="button" class="is-danger" data-action="_artisanDismantlePanel" data-i="${invIndex}">Démonter…</button></div>${_renderOperationPanel(item, invIndex, c, cat, 'dismantle')}</div></section>`;
 }
 
 // ── Détruire : si plusieurs traits et !extractAllTraits, demander lequel ──
@@ -1316,7 +1311,7 @@ function _artisanFilterItems(value) {
 }
 
 function _artisanFilterCategory(category) {
-  STORE.itemCategory = FRAGMENT_CAT_BY_ID[category] ? category : 'all';
+  STORE.itemCategory = ARTISAN_FAMILIES.some(family => family.id === category) ? category : 'all';
   document.querySelectorAll('.art-item-category').forEach(btn => {
     btn.classList.toggle('is-active', btn.dataset.category === STORE.itemCategory);
   });
@@ -1330,10 +1325,11 @@ function _artisanToggleHideEmpty() {
 
 function _artisanSelectCompatible(category) {
   const c = _getActiveArtisanChar();
-  const compatible = _getEligibleItems(c).find(entry => entry.cat === category);
+  const candidates = _getEligibleItems(c).filter(entry => entry.cat === category);
+  const compatible = candidates.find(entry => _getTraits(entry.it).length < getItemTraitsSlotCount(entry.it)) || candidates[0];
   if (!compatible) { showNotif('Aucune pièce compatible dans cet inventaire.', 'info'); return; }
   STORE.activeItemIndex = compatible.idx;
-  STORE.itemCategory = category;
+  STORE.itemCategory = _artisanFamily(category);
   STORE.operation = null;
   _renderArtisanModal();
 }
@@ -1419,10 +1415,7 @@ function _renderStatsSection(item, invIndex, c, cat) {
   if (cat === 'Anneau')   return _renderRingStats(item, invIndex, c);
   if (cat === 'Amulette') return _renderAmuletStats(item, invIndex, c);
   if (cat === 'arme')     return _renderWeaponStats(item, invIndex, c);
-  return `<div class="art-wb-sec">
-    <div class="art-wb-sec-hd">📈 Stats</div>
-    <div class="art-muted" style="font-size:.72rem">Cet objet s'améliore uniquement par ses <strong>traits</strong> (pas de bonus de stats).</div>
-  </div>`;
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Les améliorations chiffrées disponibles pour cette pièce.</p></span><em class="art-section-state is-muted">Non applicable</em></header><div class="art-operation-body"><p class="art-section-empty">Cette pièce s’améliore uniquement par ses traits.</p></div></section>`;
 }
 
 // ── Helpers communs ──────────────────────────────────────────────────
@@ -1449,6 +1442,25 @@ function _getUpgradedStatEntries(item) {
     .filter(({ val }) => val > 0);
 }
 
+function _renderStatTrack(item, used, cap, familyCap, tariff = {}) {
+  const sequence = _getUpgradedStatEntries(item).flatMap(entry => Array.from({ length: entry.val }, () => entry.meta));
+  return `<div class="art-stat-track" style="--steps:${Math.max(1, familyCap)}">${Array.from({ length: Math.max(1, familyCap) }, (_, index) => {
+    const ordinal = index === 0 ? '1er point' : `${index + 1}e point`;
+    if (index < used) {
+      const meta = sequence[index];
+      return `<div class="art-stat-step is-done"><span>${ordinal}</span><b style="--stat:${ARTISAN_STAT_COLORS[meta?.full] || '#22c38e'}">+1 ${meta?.short || 'Stat'}</b><small>Placé</small></div>`;
+    }
+    if (index < cap) return `<div class="art-stat-step${index === used ? ' is-next' : ''}"><span>${ordinal}</span><b>${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${tariff[index + 1] || 0} or`}</b><small>${index === used ? 'Prochain' : 'Ensuite'}</small></div>`;
+    const unlock = unlockRarity(item, 'stats', index + 1, getUpgradeSettings());
+    return `<div class="art-stat-step is-locked"><span>${ordinal}</span><b>▣ ${unlock ? _esc(RARETE_NAMES[unlock] || `Rareté ${unlock}`) : '—'}</b><small>${unlock ? 'après reforge' : 'non disponible'}</small></div>`;
+  }).join('')}</div>`;
+}
+
+function _statChoice(meta, item, invIndex, kind, cost, disabled = false) {
+  const current = getItemBaseStatBonus(item, meta.full) + getItemUpgradeStatBonus(item, meta.full);
+  return `<button type="button" class="art-stat-choice" style="--stat:${ARTISAN_STAT_COLORS[meta.full] || '#8294ad'}" data-action="_artisanStatPanel" data-i="${invIndex}" data-kind="${kind}" data-stat="${_esc(meta.full)}" data-cost="${cost}"${disabled ? ' disabled' : ''}><span>${meta.short}</span><small>${_esc(meta.label)}</small><b>${disabled ? 'Déjà fait' : `${current >= 0 ? '+' : ''}${current} → ${current + 1 >= 0 ? '+' : ''}${current + 1}`}</b></button>`;
+}
+
 // ══════════════════════════════════════════════
 // ANNEAU — TRACKS INDÉPENDANTS
 //   • Chaque stat proposée par l'objet — paliers 1..cap
@@ -1457,42 +1469,16 @@ function _getUpgradedStatEntries(item) {
 // ══════════════════════════════════════════════
 function _renderRingStats(item, invIndex, c) {
   const s = getUpgradeSettings();
-  const cap = s.caps?.ring ?? 1;
-  const stats = _getBaseStatEntries(item).map(entry => ({
-    ...entry,
-    level: getItemUpgradeStatBonus(item, entry.meta.full),
-  }));
-  const effectLevel = parseInt(item.upgrades?.effectBonus) || 0;
-
-  const statActs = stats.flatMap(({ meta, level }) => {
-    const nextLevel = level + 1;
-    if (nextLevel > cap) return [];
-    const cost = s.ring?.[nextLevel] || 0;
-    return [`<button class="art-act art-act--emerald" data-action="_artisanStatPanel" data-i="${invIndex}" data-kind="ring-stat" data-stat="${_esc(meta.full)}" data-cost="${cost}">📈 +1 ${meta.short} <span class="art-act-cost">${cost} PO</span></button>`];
-  });
-  const acts = [...statActs];
-  const nextEff = effectLevel + 1;
-  if (nextEff <= cap) {
-    const cost = s.ring?.[nextEff] || 0;
-    // L'effet n'existe que si l'anneau propose réellement un bonus dérivé.
-    if (ringTracks(item, s).some(track => track.kind === 'effect')) acts.push(`<button class="art-act art-act--gold" data-action="_artisanStatPanel" data-i="${invIndex}" data-kind="ring-effect" data-stat="effect" data-cost="${cost}">✨ Renforcer l'effet <span class="art-act-cost">${cost} PO</span></button>`);
-  }
-
-  const cur = stats.map(({ meta, base, level }) => {
-    const total = base + level;
-    return `<span class="art-up-chip stat-tone stat-${meta.full}" title="${_esc(meta.label)} : ${base > 0 ? '+' : ''}${base} de base${level ? `, +${level} par l'Artisan` : ''}">${total > 0 ? '+' : ''}${total} ${meta.short}</span>`;
-  });
-  if (ringTracks(item, s).some(track => track.kind === 'effect')) cur.push(`<span class="art-up-chip">Effet +${effectLevel}</span>`);
-  const maxedStats = stats.filter(({ level }) => level >= cap).length;
-  const statProgress = stats.length ? `${maxedStats}/${stats.length} stats au maximum` : 'aucune stat proposée';
-  const baseEffect = item.effet ? `<div class="art-muted" style="font-size:.7rem;margin-top:.35rem">Effet : <em>${_esc(item.effet)}</em></div>` : '';
-
-  return `<div class="art-wb-sec">
-    <div class="art-wb-sec-hd">📈 Stats d'anneau <span class="art-wb-sec-sub">${statProgress} · effet ${effectLevel}/${cap}</span></div>
-    <div class="art-trait-current">${cur.join('')}</div>
-    ${acts.length ? `<div class="art-act-row">${acts.join('')}</div>` : `<div class="art-muted" style="font-size:.72rem">Tout est au palier maximum.</div>`}
-    ${baseEffect}
-  </div>`;
+  const tracks = ringTracks(item, s);
+  const left = tracks.filter(track => track.level < track.cap).length;
+  const rows = tracks.map(track => {
+    const meta = track.kind === 'stat' ? ITEM_STAT_BY_FULL[track.id] : null;
+    const cost = s.ring?.[track.level + 1] || 0;
+    const action = track.kind === 'effect' ? 'ring-effect' : 'ring-stat';
+    const preview = track.kind === 'effect' ? `Palier ${track.level} → ${track.level + 1}` : `${track.base + track.level >= 0 ? '+' : ''}${track.base + track.level} → ${track.base + track.level + 1 >= 0 ? '+' : ''}${track.base + track.level + 1}`;
+    return `<div class="art-ring-track${track.level >= track.cap ? ' is-done' : ''}"><span class="art-ring-key" style="--stat:${meta ? ARTISAN_STAT_COLORS[meta.full] : '#f4c430'}">${meta?.short || '✦'}</span><span><b>${_esc(track.label)}</b><small>${track.kind === 'effect' ? 'Bonus chiffrés de l’anneau' : 'Bonus de l’anneau'}</small></span><strong>${preview}</strong>${track.level >= track.cap ? '<em>✓ Renforcé</em>' : `<button type="button" data-action="_artisanStatPanel" data-i="${invIndex}" data-kind="${action}" data-stat="${_esc(track.id)}" data-cost="${cost}">Renforcer · ${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${cost} or`}</button>`}</div>`;
+  }).join('');
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Bonus de l’anneau</h3><p>Chaque bonus de l’anneau se renforce indépendamment.</p></span><em class="art-section-state ${left ? 'is-open' : 'is-complete'}">${left ? `${left} possible${left > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${rows ? `<div class="art-ring-tracks">${rows}</div>` : '<p class="art-section-empty">Cet anneau n’a aucun bonus chiffré à renforcer.</p>'}${_renderOperationPanel(item, invIndex, c, 'Anneau', 'stat')}</div></section>`;
 }
 
 function _renderAmuletStats(item, invIndex, c) {
@@ -1505,16 +1491,9 @@ function _renderAmuletStats(item, invIndex, c) {
   const remaining = ITEM_STAT_META.filter(m => !usedSet.has(m.full));
   const canAdd = used.length < cap && remaining.length > 0;
 
-  const cur = used.length ? used.map(e => `<span class="art-up-chip">+${e.val} ${e.meta.short}</span>`).join('') : '<span class="art-muted" style="font-size:.72rem">aucune stat améliorée</span>';
-  const add = canAdd
-    ? `<div class="art-act-row">${remaining.map(m => `<button class="art-act art-act--emerald" data-action="_artisanStatPanel" data-i="${invIndex}" data-kind="amulet" data-stat="${_esc(m.full)}" data-cost="${cost}">+1 ${m.short} <span class="art-act-cost">${cost} PO</span></button>`).join('')}</div>`
-    : `<div class="art-muted" style="font-size:.72rem">${used.length >= cap ? `Plafond atteint (${cap} stats).` : 'Toutes les stats sont déjà améliorées.'}</div>`;
-
-  return `<div class="art-wb-sec">
-    <div class="art-wb-sec-hd">📈 Stats d'amulette <span class="art-wb-sec-sub">${used.length}/${cap} stats</span></div>
-    <div class="art-trait-current">${cur}</div>
-    ${add}
-  </div>`;
+  const familyCap = statCapAt(item, 5, s);
+  const choices = ITEM_STAT_META.map(meta => _statChoice(meta, item, invIndex, 'amulet', cost, usedSet.has(meta.full))).join('');
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Une caractéristique différente à chaque amélioration.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${used.length}/${cap}</em></header><div class="art-operation-body">${_renderStatTrack(item, used.length, cap, familyCap, s.amulet || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Les caractéristiques déjà améliorées sont indisponibles.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>${used.length >= cap ? `Les ${cap} points autorisés à cette rareté sont placés.` : 'Toutes les caractéristiques ont déjà été améliorées.'}</p>`}${_renderOperationPanel(item, invIndex, c, 'Amulette', 'stat')}</div></section>`;
 }
 
 function _renderWeaponStats(item, invIndex, c) {
@@ -1528,17 +1507,10 @@ function _renderWeaponStats(item, invIndex, c) {
   const cost = total < cap ? (tariff[slotN] || 0) : 0;
   const canAdd = total < cap;
 
-  const cur = used.length ? used.map(e => `<span class="art-up-chip">+${e.val} ${e.meta.short}</span>`).join('') : '<span class="art-muted" style="font-size:.72rem">aucun point placé</span>';
-  const bar = `<span class="art-bar"><span style="width:${Math.round(total / cap * 100)}%"></span></span>`;
-  const add = canAdd
-    ? `<div class="art-act-row">${ITEM_STAT_META.map(m => `<button class="art-act art-act--emerald" data-action="_artisanStatPanel" data-i="${invIndex}" data-kind="weapon" data-stat="${_esc(m.full)}" data-cost="${cost}">+1 ${m.short} <span class="art-act-cost">${cost} PO</span></button>`).join('')}</div>`
-    : `<div class="art-muted" style="font-size:.72rem">Plafond atteint (${total}/${cap} points).</div>`;
-
-  return `<div class="art-wb-sec">
-    <div class="art-wb-sec-hd">📈 Stats d'arme <span class="art-wb-sec-sub">${total}/${cap} points</span>${bar}</div>
-    <div class="art-trait-current">${cur}</div>
-    ${add}
-  </div>`;
+  const familyCap = statCapAt(item, 5, s);
+  const choices = ITEM_STAT_META.map(meta => _statChoice(meta, item, invIndex, 'weapon', cost)).join('');
+  const nextUnlock = unlockRarity(item, 'stats', cap + 1, s);
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Choisis où placer chaque point accordé à cette arme.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${total}/${cap}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, tariff)}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Tu peux cumuler plusieurs points sur la même caractéristique.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>Les ${cap} points autorisés en ${_esc(RARETE_NAMES[item.rarete] || 'cette rareté')} sont placés.${nextUnlock ? ` Reforge en ${_esc(RARETE_NAMES[nextUnlock] || nextUnlock)} pour un point supplémentaire.` : ''}</p>`}${_renderOperationPanel(item, invIndex, c, 'arme', 'stat')}</div></section>`;
 }
 
 // — Action : améliorer une seule des stats proposées par l'anneau
