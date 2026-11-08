@@ -12,7 +12,7 @@
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { getShopCharId } from '../shared/shop-session.js';
-import { weaponHands } from '../shared/weapon-family.js';
+import { weaponHands, weaponHandsLabel } from '../shared/weapon-family.js';
 import { trySave } from '../shared/crud.js';
 import { openModal, pushModal, closeModalDirect, confirmModal } from '../shared/modal.js';
 import { showNotif } from '../shared/notifications.js';
@@ -42,7 +42,7 @@ import { getInventoryItemImage, shopItemToInvEntry } from '../shared/inventory-u
 import { isTraitRecyclable, recyclableTraits, nonRecyclableTraitNames } from '../shared/trait-recycling.js';
 import {
   getItemTraitsSlotCount as getItemTraitsSlotCountPure, traitCapAt, statCapAt, unlockRarity, firstGainRarity,
-  ringTracks, possibleActions, isMaxed, dismantlePreview,
+  ringTracks, statPointUse, possibleActions, isMaxed, dismantlePreview,
 } from '../shared/artisan-logic.js';
 
 export { FRAGMENT_CATEGORIES, getItemFragmentCategory };
@@ -489,7 +489,7 @@ function _renderItemList(c) {
       const traits = _getTraits(it).length;
       const traitCap = getItemTraitsSlotCount(it);
       const traitFamilyCap = traitCapAt(it, maxRarity, getUpgradeSettings());
-      const stats = _sumUpgradeStatPoints(it), statCap = statCapAt(it, it.rarete, getUpgradeSettings());
+      const stats = statPointUse(it), statCap = statCapAt(it, it.rarete, getUpgradeSettings());
       const statFamilyCap = statCapAt(it, maxRarity, getUpgradeSettings());
       const reforge = _reforgeContext(it, c).ev;
       const actions = possibleActions(c, it, { upgrade: getUpgradeSettings(), gold: calcOr(c), freeMode: STORE.mjFreeMode, reforgeEval: reforge });
@@ -539,16 +539,23 @@ function _renderWorkbench(c) {
   const rarity = Math.max(1, parseInt(item.rarete, 10) || 1);
   const traitCap = getItemTraitsSlotCount(item);
   const statCap = statCapAt(item, rarity, getUpgradeSettings());
-  const statUsed = _sumUpgradeStatPoints(item);
+  const statUsed = statPointUse(item);
   const nextGain = firstGainRarity(item, getUpgradeSettings());
   const equipped = Object.entries(c.equipement || {}).find(([, eq]) => Number(eq?.sourceInvIndex) === i)?.[0] || '';
   const rarityName = RARETE_NAMES[rarity] || `Rareté ${rarity}`;
   const rarityColor = _rareteColor(rarityName) || '#8294ad';
   const type = item.format || item.typeArmure || item.slotBijou || meta?.label || cat;
+  const typeDetail = cat === 'arme' ? `${type} · ${weaponHandsLabel(item)}` : type;
   const traitUnlock = unlockRarity(item, 'traits', traitCap + 1, getUpgradeSettings());
   const statUnlock = unlockRarity(item, 'stats', statCap + 1, getUpgradeSettings());
   const tracks = cat === 'Anneau' ? ringTracks(item, getUpgradeSettings()) : [];
-  const capacity = (label, value, sub, tone, target) => `<button type="button" class="art-capacity is-${tone}" data-action="_artisanScrollSection" data-target="${target}"><span>${label}</span><strong>${value}</strong><i>${sub}</i></button>`;
+  const capacityValue = value => {
+    const match = String(value).match(/^(\d+)\/(\d+)$/);
+    return match
+      ? `<strong><span>${match[1]}</span><small>/${match[2]}</small></strong>`
+      : `<strong><span>${_esc(value)}</span></strong>`;
+  };
+  const capacity = (label, value, sub, tone, target) => `<button type="button" class="art-capacity is-${tone}" data-action="_artisanScrollSection" data-target="${target}"><span class="art-capacity-label"><i aria-hidden="true"></i>${label}</span>${capacityValue(value)}<span class="art-capacity-sub">${sub}</span></button>`;
   const traitSub = traitCap > allTraits.length
     ? `${traitCap - allTraits.length} libre${traitCap - allTraits.length > 1 ? 's' : ''}${traitUnlock ? ` · +1 en ${RARETE_NAMES[traitUnlock] || traitUnlock}` : ''}`
     : traitUnlock ? `+1 en ${RARETE_NAMES[traitUnlock] || traitUnlock}` : 'Capacité atteinte';
@@ -563,7 +570,7 @@ function _renderWorkbench(c) {
     <section class="art-panel art-wb-hero" style="--art-rarity:${rarityColor}">
       <div class="art-hero-top">
         ${_artisanItemVisual(item, cat, 'art-hero-image')}
-        <div class="art-wb-identity"><h2>${_esc(item.nom || 'Sans nom')}</h2><div><span class="art-rarity-pill">${'★'.repeat(Math.min(5, rarity))} ${_esc(rarityName)}</span><span>${_esc(type)}</span>${equipped ? `<span class="art-equipped-badge">✓ Équipement · ${_esc(equipped.toLowerCase())}</span>` : '<span>Dans ton sac</span>'}</div><div class="art-hero-properties">${_artisanHeroProperties(item)}${_artisanHeroStats(item)}</div></div>
+        <div class="art-wb-identity"><h2>${_esc(item.nom || 'Sans nom')}</h2><div><span class="art-rarity-pill">${'★'.repeat(Math.min(5, rarity))} ${_esc(rarityName)}</span><span>${_esc(typeDetail)}</span>${equipped ? `<span class="art-equipped-badge">✓ Équipement · ${_esc(equipped.toLowerCase())}</span>` : '<span>Dans ton sac</span>'}</div><div class="art-hero-properties">${_artisanHeroProperties(item)}${_artisanHeroStats(item)}</div></div>
         <button class="art-wb-hist" data-action="_artisanOpenHistory" data-i="${i}"${historyCount ? '' : ' disabled'}><span aria-hidden="true">↶</span> Historique${historyCount ? `<em>${historyCount}</em>` : ''}</button>
       </div>
     <div class="art-capacities">
@@ -1035,7 +1042,12 @@ function _renderTraitsSection(item, invIndex, c, cat) {
     const unlock = unlockRarity(item, 'traits', index + 1, s);
     return `<div class="art-trait-slot is-locked"><span class="art-slot-lock">▣</span><span class="art-slot-copy"><b>Emplacement verrouillé</b><small>${unlock ? `Se débloque en <em>${_esc(RARETE_NAMES[unlock] || `rareté ${unlock}`)}</em> · <button type="button" data-action="_artisanScrollSection" data-target="art-section-reforge">voir la reforge</button>` : 'Non disponible sur cette pièce'}</small></span></div>`;
   }).join('') : '<p class="art-section-empty">Cette pièce ne possède aucun emplacement de trait.</p>';
-  const state = totalUsed >= slotCount && !unlockRarity(item, 'traits', slotCount + 1, s) ? ['Complet', 'is-complete'] : [`${totalUsed}/${slotCount}`, totalUsed < slotCount ? 'is-open' : ''];
+  const freeSlots = Math.max(0, slotCount - totalUsed);
+  const state = freeSlots > 0
+    ? [`${freeSlots} libre${freeSlots > 1 ? 's' : ''}`, 'is-open']
+    : totalUsed >= slotCount && !unlockRarity(item, 'traits', slotCount + 1, s)
+      ? ['Complet', 'is-complete']
+      : ['Reforge possible', ''];
   const hint = !fragNames.length && allTraits.some(trait => isTraitRecyclable(item, trait))
     ? `<p class="art-section-hint"><span>i</span>Aucun fragment compatible dans ton sac. Pour en obtenir, démonte une pièce qui porte un trait.</p>` : '';
   return `<section class="art-panel art-operation" id="art-traits-card"><header class="art-operation-head"><span class="art-operation-icon is-trait">◆</span><span><h3>Traits</h3><p>Pose un fragment dans un emplacement libre, ou remplace un trait existant.</p></span><em class="art-section-state ${state[1]}">${state[0]}</em></header><div class="art-operation-body"><div class="art-trait-slots">${sockets}</div>${hint}${_renderOperationPanel(item, invIndex, c, cat, 'trait')}</div></section>`;
@@ -1428,12 +1440,6 @@ function _getBaseStatEntries(item) {
     .filter(({ base }) => base !== 0);
 }
 
-// Somme totale des points de stats déjà ajoutés via upgrades.
-function _sumUpgradeStatPoints(item) {
-  const sb = item?.upgrades?.statBonus || {};
-  return Object.values(sb).reduce((s, v) => s + (parseInt(v) || 0), 0);
-}
-
 // Liste des stats déjà améliorées avec leur valeur.
 function _getUpgradedStatEntries(item) {
   const sb = item?.upgrades?.statBonus || {};
@@ -1442,13 +1448,27 @@ function _getUpgradedStatEntries(item) {
     .filter(({ val }) => val > 0);
 }
 
+// Ordre d'occupation du potentiel : les points natifs sont placés avant ceux
+// ajoutés à l'Artisan afin que la piste explique correctement le plafond.
+function _statPointSequence(item) {
+  const base = ITEM_STAT_META.flatMap(meta => Array.from(
+    { length: Math.max(0, getItemBaseStatBonus(item, meta.full)) },
+    () => ({ meta, origin: true }),
+  ));
+  const upgraded = _getUpgradedStatEntries(item).flatMap(entry => Array.from(
+    { length: entry.val },
+    () => ({ meta: entry.meta, origin: false }),
+  ));
+  return [...base, ...upgraded];
+}
+
 function _renderStatTrack(item, used, cap, familyCap, tariff = {}) {
-  const sequence = _getUpgradedStatEntries(item).flatMap(entry => Array.from({ length: entry.val }, () => entry.meta));
+  const sequence = _statPointSequence(item);
   return `<div class="art-stat-track" style="--steps:${Math.max(1, familyCap)}">${Array.from({ length: Math.max(1, familyCap) }, (_, index) => {
     const ordinal = index === 0 ? '1er point' : `${index + 1}e point`;
     if (index < used) {
-      const meta = sequence[index];
-      return `<div class="art-stat-step is-done"><span>${ordinal}</span><b style="--stat:${ARTISAN_STAT_COLORS[meta?.full] || '#22c38e'}">+1 ${meta?.short || 'Stat'}</b><small>Placé</small></div>`;
+      const point = sequence[index];
+      return `<div class="art-stat-step is-done"><span>${ordinal}</span><b style="--stat:${ARTISAN_STAT_COLORS[point?.meta?.full] || '#22c38e'}">+1 ${point?.meta?.short || 'Stat'}</b><small>${point?.origin ? 'D’origine' : 'Placé'}</small></div>`;
     }
     if (index < cap) return `<div class="art-stat-step${index === used ? ' is-next' : ''}"><span>${ordinal}</span><b>${STORE.mjFreeMode ? 'Gratuit (MJ)' : `${tariff[index + 1] || 0} or`}</b><small>${index === used ? 'Prochain' : 'Ensuite'}</small></div>`;
     const unlock = unlockRarity(item, 'stats', index + 1, getUpgradeSettings());
@@ -1485,15 +1505,20 @@ function _renderAmuletStats(item, invIndex, c) {
   const s = getUpgradeSettings();
   const cap = Math.min(s.caps?.amulet ?? 3, rarityCapFor('stats', item.rarete, s));
   const used = _getUpgradedStatEntries(item);
-  const usedSet = new Set(used.map(e => e.meta.full));
-  const slotN = used.length + 1;
+  const usedSet = new Set([
+    ..._getBaseStatEntries(item).filter(entry => entry.base > 0).map(entry => entry.meta.full),
+    ...used.map(entry => entry.meta.full),
+  ]);
+  const usedPoints = statPointUse(item);
+  const slotN = usedPoints + 1;
   const cost = slotN <= cap ? (s.amulet?.[slotN] || 0) : 0;
   const remaining = ITEM_STAT_META.filter(m => !usedSet.has(m.full));
-  const canAdd = used.length < cap && remaining.length > 0;
+  const canAdd = usedPoints < cap && remaining.length > 0;
 
   const familyCap = statCapAt(item, 5, s);
   const choices = ITEM_STAT_META.map(meta => _statChoice(meta, item, invIndex, 'amulet', cost, usedSet.has(meta.full))).join('');
-  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Une caractéristique différente à chaque amélioration.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${used.length}/${cap}</em></header><div class="art-operation-body">${_renderStatTrack(item, used.length, cap, familyCap, s.amulet || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Les caractéristiques déjà améliorées sont indisponibles.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>${used.length >= cap ? `Les ${cap} points autorisés à cette rareté sont placés.` : 'Toutes les caractéristiques ont déjà été améliorées.'}</p>`}${_renderOperationPanel(item, invIndex, c, 'Amulette', 'stat')}</div></section>`;
+  const available = Math.max(0, cap - usedPoints);
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Une caractéristique différente à chaque amélioration.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, usedPoints, cap, familyCap, s.amulet || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Les caractéristiques déjà présentes ou améliorées sont indisponibles.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>${usedPoints >= cap ? `Les ${cap} points autorisés à cette rareté sont déjà présents sur l’objet.` : 'Toutes les caractéristiques ont déjà été améliorées.'}</p>`}${_renderOperationPanel(item, invIndex, c, 'Amulette', 'stat')}</div></section>`;
 }
 
 function _renderWeaponStats(item, invIndex, c) {
@@ -1501,8 +1526,7 @@ function _renderWeaponStats(item, invIndex, c) {
   const is2H = weaponHands(item) === 2;
   const cap = Math.min(is2H ? (s.caps?.weapon2H ?? 4) : (s.caps?.weapon1H ?? 2), rarityCapFor('stats', item.rarete, s));
   const tariff = is2H ? (s.weapon?.['2H'] || {}) : (s.weapon?.['1H'] || {});
-  const used = _getUpgradedStatEntries(item);
-  const total = used.reduce((a, e) => a + e.val, 0);
+  const total = statPointUse(item);
   const slotN = total + 1;
   const cost = total < cap ? (tariff[slotN] || 0) : 0;
   const canAdd = total < cap;
@@ -1510,7 +1534,8 @@ function _renderWeaponStats(item, invIndex, c) {
   const familyCap = statCapAt(item, 5, s);
   const choices = ITEM_STAT_META.map(meta => _statChoice(meta, item, invIndex, 'weapon', cost)).join('');
   const nextUnlock = unlockRarity(item, 'stats', cap + 1, s);
-  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Choisis où placer chaque point accordé à cette arme.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${total}/${cap}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, tariff)}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Tu peux cumuler plusieurs points sur la même caractéristique.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>Les ${cap} points autorisés en ${_esc(RARETE_NAMES[item.rarete] || 'cette rareté')} sont placés.${nextUnlock ? ` Reforge en ${_esc(RARETE_NAMES[nextUnlock] || nextUnlock)} pour un point supplémentaire.` : ''}</p>`}${_renderOperationPanel(item, invIndex, c, 'arme', 'stat')}</div></section>`;
+  const available = Math.max(0, cap - total);
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Choisis où placer chaque point accordé à cette arme.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, tariff)}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Tu peux cumuler plusieurs points sur la même caractéristique.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>Les ${cap} points autorisés en ${_esc(RARETE_NAMES[item.rarete] || 'cette rareté')} sont placés.${nextUnlock ? ` Reforge en ${_esc(RARETE_NAMES[nextUnlock] || nextUnlock)} pour un point supplémentaire.` : ''}</p>`}${_renderOperationPanel(item, invIndex, c, 'arme', 'stat')}</div></section>`;
 }
 
 // — Action : améliorer une seule des stats proposées par l'anneau
@@ -1598,12 +1623,17 @@ async function _artisanAmuletAddStat(invIndex, statFullKey) {
   const cap = Math.min(s.caps?.amulet ?? 3, rarityCapFor('stats', item.rarete, s));
 
   const used = _getUpgradedStatEntries(item);
-  if (used.length >= cap) { showNotif(`Plafond amulette atteint (${cap}).`, 'error'); return; }
-  if (used.some(e => e.meta.full === meta.full)) {
-    showNotif(`Stat ${meta.label} déjà améliorée.`, 'error'); return;
+  const usedPoints = statPointUse(item);
+  const usedSet = new Set([
+    ..._getBaseStatEntries(item).filter(entry => entry.base > 0).map(entry => entry.meta.full),
+    ...used.map(entry => entry.meta.full),
+  ]);
+  if (usedPoints >= cap) { showNotif(`Plafond amulette atteint (${cap}).`, 'error'); return; }
+  if (usedSet.has(meta.full)) {
+    showNotif(`Stat ${meta.label} déjà présente sur l’objet.`, 'error'); return;
   }
 
-  const slotN = used.length + 1;
+  const slotN = usedPoints + 1;
   const cost = s.amulet?.[slotN] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
 
@@ -1643,8 +1673,7 @@ async function _artisanWeaponAddPoint(invIndex, statFullKey) {
   const cap = Math.min(is2H ? (s.caps?.weapon2H ?? 4) : (s.caps?.weapon1H ?? 2), rarityCapFor('stats', item.rarete, s));
   const tariffTable = is2H ? (s.weapon?.['2H'] || {}) : (s.weapon?.['1H'] || {});
 
-  const sb = item.upgrades?.statBonus || {};
-  const total = Object.values(sb).reduce((s2, v) => s2 + (parseInt(v) || 0), 0);
+  const total = statPointUse(item);
   if (total >= cap) { showNotif(`Plafond atteint (${cap} points).`, 'error'); return; }
 
   const slotN = total + 1;

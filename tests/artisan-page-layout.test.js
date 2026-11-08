@@ -39,6 +39,24 @@ test('les capacités montrent les emplacements verrouillés et leur rareté de d
   assert.match(css, /\.sh-artisan-page \.art-mini-meter i\.is-locked/);
 });
 
+test('le héros et les sections de l établi reprennent la hiérarchie de la maquette', () => {
+  assert.match(css, /body \.sh-artisan-page \.art-wb-hero \{[^}]*display:flex;[^}]*flex-direction:column;/);
+  assert.match(css, /body \.sh-artisan-page \.art-capacity strong \{[^}]*font-size:21px/);
+  assert.match(css, /body \.sh-artisan-page \.art-trait-slots \{[^}]*grid-template-columns:repeat\(auto-fill,minmax\(220px,1fr\)\)/);
+  assert.match(css, /body \.sh-artisan-page \.art-operation-head h3 \{[^}]*font:600 15px/);
+  assert.match(artisan, /weaponHandsLabel\(item\)/);
+  assert.match(artisan, /\$\{freeSlots\} libre/);
+  assert.match(artisan, /\$\{available\} disponible/);
+});
+
+test('la colonne Équipement reprend la densité et les proportions de la maquette', () => {
+  assert.match(css, /body \.sh-artisan-page \.art-equipment-pane \.art-item-category \{[^}]*height:28px;[^}]*border-radius:8px;[^}]*font-size:12px/);
+  assert.match(css, /body \.sh-artisan-page \.art-equipment-pane \.art-item-card \{[^}]*grid-template-columns:40px minmax\(0,1fr\) auto/);
+  assert.match(css, /body \.sh-artisan-page \.art-equipment-pane \.art-item-visual \{[^}]*width:40px;[^}]*height:40px/);
+  assert.match(css, /body \.sh-artisan-page \.art-equipment-pane \.art-item-name \{[^}]*font-size:13px;[^}]*font-weight:600/);
+  assert.match(css, /body \.sh-artisan-page \.art-equipment-pane #art-inline-item-list \{[^}]*overflow-y:auto/);
+});
+
 test('le responsive Artisan passe à deux puis une colonne et utilise les container queries', () => {
   assert.match(css, /@media \(max-width:1320px\)[\s\S]*?grid-template-areas:'equipment workbench' 'resources workbench'/);
   assert.match(css, /@media \(max-width:1080px\)[\s\S]*?\.art-shell \{ display:flex; flex-direction:column;/);

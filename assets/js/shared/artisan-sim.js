@@ -86,7 +86,7 @@ export function simulateArtisan(view, {
       cost: Math.max(0, Number(view.dis.cost) || 0),
       quantity: family === 'objmag' ? 0 : craftRecycleQty(quantity, craftCfg),
       materialId: recipe.mat || '', materialName: materialNames[recipe.mat] || '',
-      traits: view.dis.all ? 'tous ses traits' : 'son 1er trait',
+      traits: view.dis.all ? 'tous ses traits' : 'un trait recyclable au choix',
     },
     resale: Math.round(upgradeTotal * Math.max(0, Math.min(100, Number(view.resale.pct) || 0)) / 100),
   };

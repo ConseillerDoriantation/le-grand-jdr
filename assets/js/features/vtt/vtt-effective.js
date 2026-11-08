@@ -156,6 +156,12 @@ export function _live(t) {
   const n = t.npcId       ? VS.npcs[t.npcId]             : null;
   const b = t.beastId     ? VS.bestiary[t.beastId]       : null;
   const e = c || n || b;
+  // Les PNJ peuvent conserver plusieurs portraits. Le VTT suit toujours celui
+  // sélectionné sur la fiche, même si un ancien document n'a pas encore remis
+  // à jour son champ de compatibilité `imageUrl`.
+  const activeNpcPortrait = n && Array.isArray(n.portraits)
+    ? n.portraits.find(portrait => portrait?.id === n.activePortraitId)
+    : null;
 
   if (!e) {
     // Token SANS fiche liée (invocation, ennemi custom) : on applique quand même
@@ -269,7 +275,7 @@ export function _live(t) {
     // Ennemis : le nom du token (instance) prime sur le nom générique du bestiaire
     // Joueurs/PNJ : le nom de la fiche prime (toujours à jour)
     displayName:       b ? (t.name || b.nom) : (e.nom || t.name),
-    displayImage:      e.photoURL || e.photo || e.avatar || e.imageUrl || t.imageUrl || null,
+    displayImage:      e.photoURL || e.photo || e.avatar || activeNpcPortrait?.imageUrl || e.imageUrl || t.imageUrl || null,
     displayHp:         hpCurrent,
     displayHpMax:      hpMax,
     // État « à terre » (KO) dérivé des PV RÉELS, avant tout masquage joueur : permet

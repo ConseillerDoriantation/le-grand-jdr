@@ -11,7 +11,7 @@
 //     npc_affinites/npc_affinite_types   → types d'affinités {id,label,emoji,couleur}
 //     npc_affinites/npc_affinite_seuils  → seuils valeur→niveau
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, addToCol, updateInCol, deleteFromCol, saveDoc } from '../data/firestore.js';
+import { loadCollection, addToCol, updateInCol, deleteFromCol, saveDoc, batchSaveInCol } from '../data/firestore.js';
 import { watchPageCollection } from '../shared/realtime.js';
 import { openModal, closeModal, pushModal, popModal, updateModalContent, confirmModal } from '../shared/modal.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -53,6 +53,8 @@ import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 import { replaceHtmlPreservingView } from '../shared/view-context.js';
 import { getRouteSub, setRouteSub } from '../shared/route.js';
+import { lsJson } from '../shared/local-storage.js';
+import { makeSortable } from '../shared/sortable-helper.js';
 
 // ── Stats PNJ (admin) ────────────────────────────────────────────────────────
 // Les vitales/caractéristiques saisies sont les valeurs DE BASE. Les objets
@@ -84,6 +86,27 @@ const NPC_STAT_LABELS = {
 const NPC_BASE_STATS = Object.fromEntries(NPC_STATS.map(s => [s.key, 10]));
 const NPC_BASE_VITALS = { pv: 20, pm: 0, ca: 10, vitesse: 6 };
 const NPC_COMBAT_DEFAULT = { weaponName: '', damage: '', range: null };
+const NPC_UI_ICON_PATHS = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="m3 3 18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.9 8.4 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+  pin: '<path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  role: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+  sword: '<path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="m13 19 6-6M16 16l4 4M19 21l2-2"/>',
+  sparkles: '<path d="m12 3 1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="m18.5 15.5.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+  book: '<path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/>',
+  trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  cog: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+  bastion: '<path d="M4 10V4h4v3h3V4h4v3h3V4h2v16H4z"/><path d="M8 20v-6h8v6M4 10h16"/>',
+  tag: '<path d="M20 13 13 20 4 11V4h7z"/><circle cx="8.5" cy="8.5" r="1.5"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>',
+};
+const _npcUiIcon = (name, className = '') => `<svg class="npc-rd-icon${className ? ` ${className}` : ''}" viewBox="0 0 24 24" aria-hidden="true">${NPC_UI_ICON_PATHS[name] || ''}</svg>`;
 // `actions` est l'ancien stockage des capacités PNJ. Le nouvel onglet Sorts
 // utilise `deck_sorts`, tout en gardant les anciennes actions lisibles tant
 // qu'un PNJ n'a pas encore enregistré son deck au nouveau format.
@@ -103,7 +126,7 @@ const NPC_EQUIP_SLOTS = [
   { slot: 'Objet magique',   icon: '🔮', kind: 'bijou' },
 ];
 const NPC_ACTIVITES = [
-  ['forge', '🔨 Forge'], ['atelier_confection', '🧵 Atelier de confection'],
+  ['forge', '🔨 Forge'], ['atelier_confection', '🧵 Confection'],
   ['atelier_orfevre', '💎 Orfèvre'], ['herboristerie', '🌿 Herboristerie'],
   ['taverne', '🍻 Taverne'], ['comptoir', '💰 Comptoir'],
   ['bibliotheque', '📜 Bibliothèque'], ['sanctuaire', '✨ Sanctuaire'],
@@ -239,7 +262,8 @@ const AFFINITE = [
 
 // ── Émojis et couleurs pour les affinités spécifiques ────────────────────────
 const EMOJI_PRESET = [
-  '🤝','❤️','🖤','💔','🫂',
+  '🤝','❤️','🖤','💔','💘','🫂','🙏','🫡',
+  '😊','😏','🤔','😐','🤨','😤','😒','😨','💢',
   '⚔️','🗡️','🛡️','☠️','🩸','👹',
   '😈','👑','🏆','🎖️','🪖','⚖️',
   '🔮','🧙','🧛','🧝','🧟','🪄','📜',
@@ -258,11 +282,51 @@ const TYPE_COLORS = ['#d63031','#e74c3c','#ff6b6b','#ff7675','#ff4757','#e84393'
 const DEFAULT_AFFINITE_TYPE = {
   id: '__relation__', label: 'Relation', emoji: '🔗', couleur: '#4f8cff', builtin: true,
 };
+// Catalogue proposé à une aventure qui n'a encore jamais enregistré ses types.
+// Dès que le MJ modifie ou supprime un type, le document existe (même vide) et
+// devient la source de vérité : les valeurs par défaut ne réapparaissent donc pas.
+const DEFAULT_AFFINITE_TYPES = [
+  { id: 'aft_attache',      label: 'Attaché',      emoji: '❤️', couleur: '#e63946', order: 10 },
+  { id: 'aft_confiance',    label: 'Confiance',    emoji: '🤝', couleur: '#2a6fdb', order: 20 },
+  { id: 'aft_reconnaissant',label: 'Reconnaissant',emoji: '🙏', couleur: '#e9a23b', order: 30 },
+  { id: 'aft_respecte',     label: 'Respecte',     emoji: '🫡', couleur: '#3d5a80', order: 40 },
+  { id: 'aft_apprecie',     label: 'Apprécie',     emoji: '😊', couleur: '#7fb069', order: 50 },
+  { id: 'aft_complice',     label: 'Complice',     emoji: '😏', couleur: '#9b5de5', order: 60 },
+  { id: 'aft_admire',       label: 'Admire',       emoji: '✨', couleur: '#f4c430', order: 70 },
+  { id: 'aft_epris',        label: 'Épris',        emoji: '💘', couleur: '#ff5da2', order: 80 },
+  { id: 'aft_intrigue',     label: 'Intrigué',     emoji: '🤔', couleur: '#48cae4', order: 90 },
+  { id: 'aft_neutre',       label: 'Neutre',       emoji: '😐', couleur: '#9aa0a6', order: 100 },
+  { id: 'aft_mefiant',      label: 'Méfiant',      emoji: '🤨', couleur: '#b08968', order: 110 },
+  { id: 'aft_decu',         label: 'Déçu',         emoji: '💔', couleur: '#6c7a89', order: 120 },
+  { id: 'aft_rancune',      label: 'Rancune',      emoji: '😤', couleur: '#7b2d26', order: 130 },
+  { id: 'aft_meprise',      label: 'Méprise',      emoji: '😒', couleur: '#5e4b56', order: 140 },
+  { id: 'aft_craint',       label: 'Craint',       emoji: '😨', couleur: '#9d8df1', order: 150 },
+  { id: 'aft_hostile',      label: 'Hostile',      emoji: '💢', couleur: '#c1121f', order: 160 },
+];
+const _sortAffiniteTypes = (types = []) => [...types].sort((a, b) => {
+  const ao = Number(a?.order), bo = Number(b?.order);
+  if (Number.isFinite(ao) || Number.isFinite(bo)) {
+    if (!Number.isFinite(ao)) return 1;
+    if (!Number.isFinite(bo)) return -1;
+    if (ao !== bo) return ao - bo;
+  }
+  return (a?.label || '').localeCompare(b?.label || '', 'fr', { sensitivity: 'base' });
+});
+const _defaultAffiniteTypes = () => DEFAULT_AFFINITE_TYPES.map(type => ({ ...type }));
+const AFFINITE_TYPE_PALETTE = ['#ff5a7e', '#ff4757', '#ff9544', '#f4c430', '#22c38e', '#34d399', '#7dd3fc', '#4f8cff', '#9d6fff', '#bca0ff', '#a0aec0'];
+
+// Une fiche PNJ reste un document Firestore unique. La galerie est donc bornée
+// et chaque variante est recompressée : plusieurs portraits ne doivent jamais
+// faire approcher silencieusement la limite de 1 Mio du document.
+const NPC_MAX_PORTRAITS = 6;
+const NPC_PORTRAIT_BYTES = 36_000;
+const NPC_PORTRAIT_FULL_BYTES = 55_000;
 
 const afx = (n) => AFFINITE[Math.max(0, Math.min(4, n ?? 2))];
 // Variables CSS inline pour les couleurs dynamiques d'affinité (consommées par npcs.css).
 const _afVars = (af) => `--af:${af.couleur};--af-bg:${af.bg};--af-bd:${af.border}`;
 const AFFINITE_TYPES_DOC_ID  = 'npc_affinite_types';
+const AFFINITE_TYPES_DEFAULTS_VERSION = 1;
 const AFFINITE_SEUILS_DOC_ID = 'npc_affinite_seuils';
 const ORG_ICONS_DOC_ID       = 'npc_org_icons'; // { icons: { [orgName]: emoji } }
 
@@ -275,6 +339,10 @@ let _npcs           = [];
 let _affiPerso      = [];   // [{id, npcId, charId, charNom, typeId, typeLabel, note, notePublique}]
 let _affiniteTypes  = [];   // [{id, label, emoji, couleur}]
 let _affiniteSeuils = { ...SEUILS_DEFAULT };
+// Dernier état d'affinité effectivement rendu. Firestore émet aussi nos propres
+// écritures dans le listener temps réel : cette signature évite de reconstruire
+// deux fois la fiche pour une seule interaction locale.
+let _npcAffiRenderedSignature = '';
 let _places        = [];   // [{ id, name }] — alimente l'autocomplete Lieu
 let _organisations = [];   // [{ id, name }] — alimente la sélection Organisations
 let _orgIcons      = {};   // { [orgName]: emoji } — émoji personnalisé par catégorie (MJ)
@@ -289,39 +357,58 @@ let _activeId      = null;
 let _pendingTargetNpcId = null;
 let _filterSearch  = '';
 let _activeOrgFilter = null;
-let _listView      = 'cat';  // 'cat' (par catégorie) | 'az' (liste à plat A→Z)
+let _listView      = 'org';  // 'org' | 'place' | 'az'
 let _filterStatus  = '';     // ''=tous | 'mort' | 'disparu' | 'alive' (ni mort ni disparu)
 let _filterHidden  = false;  // MJ : n'afficher que les PNJ cachés
+let _filterIncomplete = false;
+let _filterMine = false;
 let _histEditDelta = 0;
-let _npcPanel      = 'dossier';
-let _npcSheetTab   = 'combat';   // onglet actif de la fiche PNJ : 'combat' | 'sorts'
+let _npcPanel      = 'fiche';
+let _npcSheetTab   = 'fiche';   // onglet actif conservé quand on change de PNJ
 let _npcRelSel     = null;       // id du lien d'affinité sélectionné dans le Cercle des relations
 let _npcLink       = { npcId: null, charId: null, charNom: '', typeId: null };  // sélection en cours dans le modal « Lier »
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
+let _npcView = 'mj';
+let _npcPreviewUid = '';
+let _npcExpressOpen = false;
+let _npcExpressName = '';
+let _npcCollapsedGroups = new Set(lsJson.get('npc:collapsed-groups', []));
+let _npcCrossFilter = 'notables';
+let _npcCrossSearch = '';
+let _npcCrossSort = 'name';
+let _npcCrossOpen = '';
+const _npcExpandedHistories = new Set();
+let _npcSavedFlashTimer = null;
+let _npcHeaderObserver = null;
+let _npcTabsResizeObserver = null;
+let _affiniteDefaultsWritePending = false;
+let _affiniteTypesSortable = null;
 
-const NPC_ROUTE_PANELS = ['dossier', 'tactique', 'relations', 'chronologie'];
-const NPC_ROUTE_SHEET_TABS = ['combat', 'sorts'];
+const NPC_ROUTE_SHEET_TABS = ['fiche', 'combat', 'sorts'];
+const NPC_ROUTE_ALIASES = {
+  dossier: 'fiche', relations: 'fiche', chronologie: 'fiche', tactique: 'combat',
+};
 
-function _npcRouteSub(id = _activeId, panel = _npcPanel, sheetTab = _npcSheetTab) {
+function _npcRouteSub(id = _activeId, sheetTab = _npcSheetTab) {
   if (!id) return '';
-  const safePanel = NPC_ROUTE_PANELS.includes(panel) && (panel !== 'tactique' || STATE.isAdmin)
-    ? panel
-    : 'dossier';
-  const safeTab = NPC_ROUTE_SHEET_TABS.includes(sheetTab) ? sheetTab : 'combat';
-  return `${id}/${safePanel}/${safeTab}`;
+  const safeTab = NPC_ROUTE_SHEET_TABS.includes(sheetTab) ? sheetTab : 'fiche';
+  return `${id}/${safeTab}`;
 }
 
 function _applyNpcRoute(sub) {
-  const [id, panel = 'dossier', sheetTab = 'combat'] = String(sub || '').split('/');
+  const parts = String(sub || '').split('/').filter(Boolean);
+  const id = parts[0];
   if (!id || !_npcs.some(npc => npc.id === id)) return false;
+  const requested = parts.length >= 3 ? parts[1] : (parts[1] || 'fiche');
+  const sheetTab = NPC_ROUTE_ALIASES[requested] || requested;
   _activeId = id;
-  _npcPanel = NPC_ROUTE_PANELS.includes(panel) && (panel !== 'tactique' || STATE.isAdmin)
-    ? panel
-    : 'dossier';
-  _npcSheetTab = NPC_ROUTE_SHEET_TABS.includes(sheetTab) ? sheetTab : 'combat';
+  _npcPanel = 'fiche';
+  _npcSheetTab = NPC_ROUTE_SHEET_TABS.includes(sheetTab) ? sheetTab : 'fiche';
   _filterSearch = '';
   _filterStatus = '';
   _filterHidden = false;
+  _filterIncomplete = false;
+  _filterMine = false;
   _activeOrgFilter = null;
   return true;
 }
@@ -406,6 +493,126 @@ const _affiniteNiveau = (n) => {
 };
 const _affiniteMode = (n) => n?.affinite?.mode === 'valeur' ? 'valeur' : 'groupe';
 
+const NPC_SENT_TO_LEVEL = { ennemi: 0, mefiance: 1, neutre: 2, allie: 3, lien: 4 };
+const NPC_LEVEL_TO_SENT = ['ennemi', 'mefiance', 'neutre', 'allie', 'lien'];
+const NPC_LEVEL_LABELS = ['Hostile', 'Méfiant', 'Neutre', 'Amical', 'Allié'];
+
+function _npcCharacterOwnerUid(c = {}) {
+  return c.uid || c.ownerUid || c.userId || c.ownerId || '';
+}
+
+function _npcMyCharacters() {
+  const uid = STATE.isAdmin && _npcView === 'player'
+    ? (_npcPreviewUid || _npcCharacterOwnerUid(_npcLinkableCharacters()[0]))
+    : STATE.user?.uid;
+  return uid ? getMyCharacters(_npcLinkableCharacters(), uid) : [];
+}
+
+function _npcPlayerChoices() {
+  const byUid = new Map();
+  _npcLinkableCharacters().forEach(c => {
+    const uid = _npcCharacterOwnerUid(c);
+    if (!uid || byUid.has(uid)) return;
+    const profile = _playerProfiles.find(p => (p.uid || p.userId || p.id) === uid);
+    byUid.set(uid, profile?.pseudo || profile?.displayName || c.ownerPseudo || c.ownerName || c.joueur || 'Joueur');
+  });
+  return [...byUid.entries()].sort((a, b) => a[1].localeCompare(b[1], 'fr'));
+}
+
+function _npcExceptionFor(npcId, charId) {
+  return _affiPerso.find(a => a.npcId === npcId && a.charId === charId) || null;
+}
+
+function _npcFeelingFor(npcId, character) {
+  return (character?.relations || []).find(r => r?.npcId === npcId) || null;
+}
+
+function _npcExceptionLevel(n, exception, { player = false } = {}) {
+  if (!exception || (player && exception.secret)) return null;
+  const raw = exception.niveau;
+  return raw === null || raw === undefined || raw === ''
+    ? null
+    : Math.max(0, Math.min(4, parseInt(raw, 10)));
+}
+
+function _npcCombatUntouched(n = {}) {
+  const stats = _npcBaseStats(n);
+  return Math.max(1, parseInt(n.niveau, 10) || 1) === 1
+    && NPC_STATS.every(s => Number(stats[s.key] ?? 10) === 10)
+    && !Object.keys(n.equipement || {}).length
+    && !_npcSpellList(n).length;
+}
+
+function _npcMissing(n = {}) {
+  const items = [];
+  if (!(n.description || '').trim()) items.push('Description');
+  if (!(n.lieu || '').trim() && !(n.organisations || []).filter(Boolean).length) items.push('Lieu ou organisation');
+  if (_npcCombatUntouched(n)) items.push('Combat');
+  return items;
+}
+
+function _npcIsPlayerView() {
+  return !STATE.isAdmin || _npcView === 'player';
+}
+
+function _npcFlashSaved() {
+  const el = document.getElementById('npc-rd-saved');
+  if (!el) return;
+  el.classList.add('is-on');
+  clearTimeout(_npcSavedFlashTimer);
+  _npcSavedFlashTimer = setTimeout(() => el.classList.remove('is-on'), 1500);
+}
+
+function _npcAffiUiSignature() {
+  const links = _affiPerso.map(link => [
+    link.id || '', link.npcId || '', link.charId || '', link.niveau ?? null,
+    !!link.secret, link.typeId || '', link.typeLabel || '',
+    link.notePublique || '', link.note || '',
+  ]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  const types = _affiniteTypes.map(type => [
+    type.id || '', type.label || '', type.emoji || '', type.couleur || '', Number(type.order) || 0,
+  ]);
+  const thresholds = SEUILS_KEYS.map(key => [key, Number(_affiniteSeuils[key]) || 0]);
+  const icons = Object.entries(_orgIcons || {}).sort(([a], [b]) => a.localeCompare(b, 'fr'));
+  return JSON.stringify({ links, types, thresholds, icons });
+}
+
+function _bindNpcStickyIdentity() {
+  _npcHeaderObserver?.disconnect();
+  _npcTabsResizeObserver?.disconnect();
+  const header = document.querySelector('.npc-rd-sheethead');
+  const tabs = document.querySelector('.npc-rd-tabs');
+  const sheet = tabs?.closest('.npc-rd-sheet');
+  const detail = tabs?.closest('.npc-rd-detail');
+  if (!header || !tabs || !sheet || !detail || typeof IntersectionObserver !== 'function') return;
+  const syncGeometry = () => {
+    const rect = detail.getBoundingClientRect();
+    tabs.style.setProperty('--npc-tabs-left', `${Math.max(0, rect.left)}px`);
+    tabs.style.setProperty('--npc-tabs-width', `${Math.max(0, rect.width)}px`);
+  };
+  syncGeometry();
+  if (typeof ResizeObserver === 'function') {
+    _npcTabsResizeObserver = new ResizeObserver(syncGeometry);
+    _npcTabsResizeObserver.observe(detail);
+  }
+  _npcHeaderObserver = new IntersectionObserver(([entry]) => {
+    const fixed = !entry.isIntersecting && entry.boundingClientRect.bottom <= 0;
+    if (fixed) syncGeometry();
+    tabs.classList.toggle('is-condensed', fixed);
+    tabs.classList.toggle('is-fixed', fixed);
+    sheet.classList.toggle('has-fixed-tabs', fixed);
+  }, { threshold: 0 });
+  _npcHeaderObserver.observe(header);
+}
+
+function _npcHighlight(text = '') {
+  const safe = _esc(text);
+  const q = (_filterSearch || '').trim();
+  if (!q) return safe;
+  const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return safe.replace(new RegExp(`(${escaped})`, 'ig'), '<mark>$1</mark>');
+}
+
 // ── Delta picker (partagé entre modal événement et édition d'historique) ─────
 const _DELTA_PRESETS = [-2, -1, 0, 1, 2];
 const _deltaActiveBg = (v) => v < 0 ? 'rgba(255,107,107,.18)' : v > 0 ? 'rgba(34,195,142,.18)' : 'rgba(255,255,255,.1)';
@@ -464,6 +671,8 @@ export async function renderNpcs() {
   // (cf. _renderLoading dans navigation.js). En ajouter un second = flash splash→
   // spinner disgracieux. Le splash reste visible pendant _load, puis _renderPage.
   await _load();
+  _npcView = STATE.isAdmin ? (_npcView === 'player' ? 'player' : 'mj') : 'player';
+  if (!_npcPreviewUid) _npcPreviewUid = STATE.user?.uid || _npcPlayerChoices()[0]?.[0] || '';
   const target = consumeTargetEntity('npc');
   const targetId = target?.id || '';
   _pendingTargetNpcId = target?.id || _pendingTargetNpcId;
@@ -479,6 +688,7 @@ export async function renderNpcs() {
   if (!_npcs.some(npc => npc.id === _activeId)) _activeId = _npcs[0]?.id || null;
   _syncNpcRoute({ replace: true });
   _renderPage(content);
+  _npcAffiRenderedSignature = _npcAffiUiSignature();
   _bindCharPickOutside();
 
   // ── Abonnements temps réel ─────────────────────────────────────────────
@@ -507,21 +717,47 @@ export async function renderNpcs() {
     const typesDoc  = data.find(a => a.id === AFFINITE_TYPES_DOC_ID);
     const seuilsDoc = data.find(a => a.id === AFFINITE_SEUILS_DOC_ID);
     _orgIcons = data.find(a => a.id === ORG_ICONS_DOC_ID)?.icons || {};
-    _affiniteTypes = Array.isArray(typesDoc?.types) ? [...typesDoc.types] : [];
-    _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    const storedTypes = Array.isArray(typesDoc?.types) ? typesDoc.types.map(type => ({ ...type })) : null;
+    const needsDefaultMigration = !!typesDoc
+      && Number(typesDoc.defaultsVersion || 0) < AFFINITE_TYPES_DEFAULTS_VERSION;
+    if (needsDefaultMigration) {
+      // Migration unique des aventures qui avaient déjà leur propre catalogue :
+      // on ajoute seulement les libellés manquants. Le marqueur de version évite
+      // qu'un type supprimé volontairement ne revienne ensuite.
+      const merged = [...(storedTypes || [])];
+      const labels = new Set(merged.map(type => _norm(type.label || '')));
+      _defaultAffiniteTypes().forEach(type => {
+        if (!labels.has(_norm(type.label))) merged.push(type);
+      });
+      _affiniteTypes = _sortAffiniteTypes(merged);
+      if (STATE.isAdmin && !_affiniteDefaultsWritePending) {
+        _affiniteDefaultsWritePending = true;
+        saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, {
+          types: _affiniteTypes,
+          defaultsVersion: AFFINITE_TYPES_DEFAULTS_VERSION,
+        }).catch(error => console.error('[npcs] initialisation des types de relation', error))
+          .finally(() => { _affiniteDefaultsWritePending = false; });
+      }
+    } else {
+      // Document absent = première utilisation. Un document versionné avec un
+      // tableau vide signifie au contraire que le MJ a tout supprimé.
+      _affiniteTypes = _sortAffiniteTypes(storedTypes ?? _defaultAffiniteTypes());
+    }
     _affiniteSeuils = { ...SEUILS_DEFAULT, ...(seuilsDoc || {}) };
-    _refreshList({ keepScroll: true });
-    _refreshActivePanel();
+    _refreshNpcAffiUi({ list: true });
   });
 }
 
 function _renderPage(content) {
   const filtered = _getFiltered();
-  const active   = _npcs.find(n => n.id === _activeId) || filtered[0] || null;
+  const selected = _npcs.find(n => n.id === _activeId) || null;
+  const active   = (_npcIsPlayerView() && selected?.embauchable === false ? null : selected) || filtered[0] || null;
+  if (active && active.id !== _activeId) _activeId = active.id;
 
   content.innerHTML = _renderNpcsShell(filtered, active);
   _bindNpcListScroll();
   _scheduleNpcListScrollHint();
+  _bindNpcStickyIdentity();
   return;
 
   content.innerHTML = `
@@ -565,41 +801,66 @@ function _renderPage(content) {
 }
 
 function _renderNpcsShell(filtered, active) {
+  const playerChoices = _npcPlayerChoices();
+  const playerMode = _npcIsPlayerView();
   return `
-  <div class="npc-page npc-page-v2 npc-page-v3">
-    <aside class="npc-sidebar npc-roster-panel npc-command-panel">
-      <div class="npc-command-head">
-        <div>
-          <span class="npc-dashboard-kicker">Registre</span>
-          <h1>PNJ</h1>
+  <div class="npc-rd-page${playerMode ? ' is-player' : ''}">
+    <header class="npc-rd-topbar">
+      <div class="npc-rd-brand"><strong>PNJ</strong><span>REGISTRE · ${filtered.length} PERSONNAGE${filtered.length > 1 ? 'S' : ''} NON JOUEUR${filtered.length > 1 ? 'S' : ''}</span></div>
+      <div class="npc-rd-toptools">
+        <span id="npc-rd-saved" class="npc-rd-saved">✓ Enregistré</span>
+        ${STATE.isAdmin ? `<div class="npc-rd-segment" aria-label="Point de vue">
+          <button type="button" class="${_npcView === 'mj' ? 'is-on' : ''}" data-action="npcSetView" data-view="mj">Vue MJ</button>
+          <button type="button" class="${_npcView === 'player' ? 'is-on' : ''}" data-action="npcSetView" data-view="player">Aperçu joueur</button>
         </div>
-        ${STATE.isAdmin ? `<button class="npc-btn-icon npc-btn-icon--gold" data-action="npcCreate" title="Nouveau PNJ">+</button>` : ''}
+        ${_npcView === 'player' ? `<select class="npc-rd-player-select" aria-label="Joueur prévisualisé" data-change="npcSetPreviewPlayer">
+          ${playerChoices.map(([uid, name]) => `<option value="${_esc(uid)}" ${uid === _npcPreviewUid ? 'selected' : ''}>${_esc(name)}</option>`).join('')}
+        </select>` : ''}
+        ${_npcView === 'mj' ? `<button type="button" class="npc-rd-topbtn" data-action="openAffiniteTypesManager">${_npcUiIcon('tag')} Affinités spécifiques</button>
+          <button type="button" class="npc-rd-topbtn" data-action="_openMjStatsView">▦ Stats rapides</button>` : ''}` : ''}
       </div>
-
-      <label class="npc-searchbox npc-command-search">
-        <span>Recherche</span>
-        <input id="npc-search" class="input-field" placeholder="Nom, rôle, lieu, organisation..."
-          value="${_filterSearch}" data-input="_npcSearch">
-      </label>
-
-      ${_renderRosterMetrics(filtered)}
-
-      ${STATE.isAdmin ? `
-      <div class="npc-command-actions">
-        <button class="npc-primary-btn" data-action="npcCreate">+ Nouveau PNJ</button>
-        <button class="npc-secondary-btn" data-action="_openMjStatsView">Stats rapides</button>
-      </div>` : ''}
-
-      <div id="npc-list-shell" class="npc-list-shell">
-        <div id="npc-list-items" class="npc-list-items">
-          ${_buildListHtml(filtered)}
+    </header>
+    <div class="npc-rd-workspace">
+      <aside class="npc-rd-roster" aria-label="Registre des PNJ">
+        ${STATE.isAdmin && _npcView === 'mj' ? `<button type="button" class="npc-rd-new" data-action="npcExpressToggle">＋ Nouveau PNJ <kbd>N</kbd></button>
+          ${_npcExpressOpen ? _renderNpcExpressForm() : ''}` : ''}
+        <label class="npc-rd-search"><span>⌕</span><input id="npc-search" type="search" placeholder="Nom, rôle, lieu, organisation…" value="${_esc(_filterSearch)}" data-input="_npcSearch"><kbd>/</kbd></label>
+        <div class="npc-rd-selects">
+          <select aria-label="Organisation" data-change="npcSetOrgFilter">
+            <option value="">Toutes les organisations</option>
+            ${_npcKnownOrganizations().map(org => `<option value="${_esc(org)}" ${org === _activeOrgFilter ? 'selected' : ''}>${_esc(org)}</option>`).join('')}
+          </select>
+          <select aria-label="Regrouper" data-change="npcSetGroupBy">
+            <option value="org" ${_listView === 'org' ? 'selected' : ''}>Par organisation</option>
+            <option value="place" ${_listView === 'place' ? 'selected' : ''}>Par lieu</option>
+            <option value="az" ${_listView === 'az' ? 'selected' : ''}>A → Z</option>
+          </select>
         </div>
-      </div>
-    </aside>
+        <div id="npc-list-shell" class="npc-rd-list-shell">
+          <div id="npc-list-items" class="npc-rd-list">${_buildListHtml(filtered)}</div>
+        </div>
+        <footer class="npc-rd-roster-foot"><b>${filtered.length}</b> affiché${filtered.length > 1 ? 's' : ''}<span><kbd>↑</kbd><kbd>↓</kbd> parcourir · <kbd>/</kbd> chercher${STATE.isAdmin && _npcView === 'mj' ? ' · <kbd>N</kbd> nouveau' : ''}</span></footer>
+      </aside>
+      <main id="npc-detail-panel" class="npc-rd-detail">
+        ${active ? _renderFiche(active) : _renderEmpty()}
+      </main>
+    </div>
+    <datalist id="npc-rd-places">${_places.map(p => `<option value="${_esc(p.name)}"></option>`).join('')}</datalist>
+    <datalist id="npc-rd-orgs">${_npcKnownOrganizations().map(o => `<option value="${_esc(o)}"></option>`).join('')}</datalist>
+  </div>`;
+}
 
-    <main id="npc-detail-panel" class="npc-detail-panel">
-      ${active ? _renderFiche(active) : _renderEmpty()}
-    </main>
+function _npcKnownOrganizations() {
+  const names = new Set(_organisations.map(o => o.name).filter(Boolean));
+  _npcs.forEach(n => (n.organisations || []).forEach(o => o && names.add(o)));
+  return [...names].sort((a, b) => a.localeCompare(b, 'fr'));
+}
+
+function _renderNpcExpressForm() {
+  return `<div class="npc-rd-express">
+    <input id="npc-express-name" type="text" placeholder="Nom du PNJ" value="${_esc(_npcExpressName)}" data-input="npcExpressName" data-keydown="npcExpressKey">
+    <input id="npc-express-role" type="text" placeholder="Rôle (facultatif)" data-keydown="npcExpressKey">
+    <button type="button" data-action="npcExpressCreate">Créer ↵</button>
   </div>`;
 }
 
@@ -665,7 +926,7 @@ function _renderRosterMetrics(filtered) {
     </div>`;
 }
 
-function _renderNavItem(n) {
+function _renderNavItemLegacy(n) {
   const isActive = n.id === _activeId;
   const niv      = _affiniteNiveau(n);
   const af       = afx(niv);
@@ -696,6 +957,24 @@ function _renderNavItem(n) {
     </div>
 
   </div>`;
+}
+
+function _renderNavItem(n) {
+  const active = n.id === _activeId;
+  const playerView = _npcIsPlayerView();
+  const level = _affiniteNiveau(n);
+  const af = afx(level);
+  const missing = _npcMissing(n);
+  const myFeelings = _npcMyCharacters().map(c => _npcFeelingFor(n.id, c)).filter(Boolean);
+  const feelingLevel = myFeelings.find(f => f.sent)?.sent ? NPC_SENT_TO_LEVEL[myFeelings.find(f => f.sent).sent] : null;
+  const rolePlace = [n.role, n.lieu].filter(Boolean).join(' · ');
+  const initial = _esc((n.nom || '?')[0].toUpperCase());
+  return `<button type="button" class="npc-rd-row${active ? ' is-active' : ''}${n.statut === 'mort' ? ' is-dead' : ''}" style="--row-aff:${af.couleur}" data-action="selectNpc" data-id="${_esc(n.id)}" data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(n.id))}">
+    <span class="npc-rd-row-avatar">${n.imageUrl ? `<img src="${_esc(n.imageUrl)}" alt="">` : initial}${n.statut === 'mort' ? '<i>☠</i>' : n.statut === 'disparu' ? '<i>?</i>' : ''}</span>
+    <span class="npc-rd-row-copy"><b>${_npcHighlight(n.nom || 'Sans nom')}${n.isNew ? '<em>nouveau</em>' : ''}</b><small>${missing.length && STATE.isAdmin && _npcView === 'mj' ? '<mark>à compléter · </mark>' : ''}${_npcHighlight(rolePlace || 'Profil à compléter')}</small></span>
+    ${STATE.isAdmin && _npcView === 'mj' && n.embauchable === false ? '<span class="npc-rd-hidden" title="Caché des joueurs">⊘</span>' : ''}
+    <span class="npc-rd-row-aff" style="background:${playerView && feelingLevel != null ? AFFINITE[feelingLevel].couleur : af.couleur}" title="${playerView ? (feelingLevel == null ? 'Pas de ressenti' : AFFINITE[feelingLevel].label) : af.label}">${playerView ? '♥' : ''}</span>
+  </button>`;
 }
 
 // ══ Fiche PNJ — composants ════════════════════════════════════════════════════
@@ -782,83 +1061,31 @@ function _renderFicheHeader(n) {
 
 // Bloc "Profil bastion" : visible MJ toujours, joueur seulement si disposition = Allié
 function _renderBastionProfil(n) {
-  // Bastion désactivé pour l'aventure (ou non premium) → aucune info de recrutement.
   if (!isFeatureEnabled('bastion')) return '';
   const adm = STATE.isAdmin;
-  // Recrutement autorisé par le MJ pour ce PNJ (défaut = oui, pas de régression).
   const recrutable = n.recrutable !== false;
-  // Côté joueur : visible dès Amical (≥3), recrutable seulement une fois Allié (≥4).
   const niv = _affiniteNiveau(n);
   const canSee     = niv >= 3;
   const canRecruit = niv >= 4;
-  if (!adm && (!canSee || !recrutable)) return '';  // joueur : rien si non recrutable
-
+  if (!adm && (!canSee || !recrutable)) return '';
   const hasInfo = (n.activites && n.activites.length) || n.passif || n.salaireSuggere;
-  if (!adm && !hasInfo) return ''; // joueur : rien à montrer
-
+  if (!adm && !hasInfo) return '';
   const actSet = new Set(n.activites || []);
-
-  // ── Vue MJ : carte éditable (spécialités, passif, salaire, recrutable) ──
   if (adm) {
-    const mjFoot = niv < 3
-      ? `⚠ Les joueurs ne voient pas encore ce bloc (affinité groupe &lt; Amical).`
-      : (recrutable
-        ? `🛈 Visible par les joueurs dès <b>Amical</b> · recrutable à <b>Allié</b>.`
-        : `🚫 Masqué aux joueurs (marqué « non recrutable »).`);
-    return `
-    <section class="npc-bastion${recrutable ? '' : ' is-off'}">
-      <div class="npc-bastion-head">
-        <div class="npc-bastion-title"><span class="npc-bastion-ico">🏰</span><div><h3>Bastion</h3><small>Profil de recrutement</small></div></div>
-        <button type="button" class="npc-bastion-recruit${recrutable ? '' : ' off'}" data-action="npcToggleRecrutable" data-id="${n.id}"
-          title="Autoriser ou non le recrutement de ce PNJ au Bastion">${recrutable ? '✅ Recrutable' : '🚫 Non recrutable'}</button>
-      </div>
-      <div class="npc-bastion-body">
-        <div class="npc-bastion-block">
-          <span class="npc-bastion-lbl">Spécialités / activités</span>
-          <div class="npc-bastion-specs">
-            ${NPC_ACTIVITES.map(([slug, label]) => `
-              <button type="button" class="npc-bastion-spec${actSet.has(slug) ? ' is-on' : ''}" data-action="npcToggleActivite" data-id="${n.id}" data-slug="${slug}">${label}</button>`).join('')}
-          </div>
-        </div>
-        <div class="npc-bastion-grid">
-          <div class="npc-bastion-passif">
-            <div class="npc-bastion-passif-row">🎁 Passif employé</div>
-            <textarea class="npc-inline" data-change="npcInlineSave" data-npc-id="${n.id}" data-field="passif"
-              rows="2" placeholder="+20% production Forge · −10% achats…">${_esc(n.passif || '')}</textarea>
-          </div>
-          <div class="npc-bastion-salaire">
-            <span class="npc-bastion-sal-k">Salaire</span>
-            <span class="npc-bastion-sal-v"><input type="number" min="0" class="npc-inline" data-change="npcInlineSave"
-              data-npc-id="${n.id}" data-field="salaireSuggere" value="${parseInt(n.salaireSuggere) || ''}" placeholder="0"> <small>or/sem.</small></span>
-          </div>
-        </div>
-      </div>
-      <div class="npc-bastion-foot mj">${mjFoot}</div>
+    const visibility = !recrutable
+      ? 'Masqué des joueurs · recrutement désactivé.'
+      : niv < 3
+        ? 'Masqué des joueurs · visible à partir d’Amical.'
+        : 'Visible des joueurs · recrutable une fois Allié.';
+    return `<section class="npc-rd-bastion${recrutable ? '' : ' is-off'}">
+      <header class="npc-rd-bastion-head"><div><h2>${_npcUiIcon('bastion')} Bastion</h2><p>Profil de recrutement</p></div><button type="button" class="npc-rd-bastion-toggle${recrutable ? ' is-on' : ''}" data-action="npcToggleRecrutable" data-id="${_esc(n.id)}" aria-pressed="${recrutable}" title="Autoriser ou non le recrutement de ce PNJ"><i></i><span>${recrutable ? 'Recrutable' : 'Non recrutable'}</span></button></header>
+      <div class="npc-rd-bastion-activities" aria-label="Activités du Bastion">${NPC_ACTIVITES.map(([slug, label]) => `<button type="button" class="${actSet.has(slug) ? 'is-on' : ''}" data-action="npcToggleActivite" data-id="${_esc(n.id)}" data-slug="${_esc(slug)}">${_esc(label)}</button>`).join('')}</div>
+      <div class="npc-rd-bastion-fields"><label><span>Passif d’employé</span><input type="text" class="npc-inline" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="passif" value="${_esc(n.passif || '')}" placeholder="Réparations d’armes gratuites pour le groupe"></label><label class="npc-rd-bastion-salary"><span>Salaire</span><span><input type="number" min="0" class="npc-inline" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="salaireSuggere" value="${parseInt(n.salaireSuggere, 10) || ''}" placeholder="0"><small>or / sem.</small></span></label></div>
+      <footer>${visibility}</footer>
     </section>`;
   }
-
-  // ── Vue joueur (lecture seule) — gatée par l'affinité ──
   const activites = [...actSet].map(_actLabel);
-  const hasEco = n.passif || n.salaireSuggere;
-  return `
-  <section class="npc-bastion">
-    <div class="npc-bastion-head">
-      <div class="npc-bastion-title"><span class="npc-bastion-ico">🏰</span><div><h3>${canRecruit ? 'Recrutable au Bastion' : 'Profil bastion'}</h3><small>Bastion</small></div></div>
-    </div>
-    <div class="npc-bastion-body">
-      ${activites.length ? `<div class="npc-bastion-block">
-        <span class="npc-bastion-lbl">Spécialités</span>
-        <div class="npc-bastion-specs">${activites.map(a => `<span class="npc-bastion-spec is-on">${_esc(a)}</span>`).join('')}</div>
-      </div>` : ''}
-      ${hasEco ? `<div class="npc-bastion-grid">
-        ${n.passif ? `<div class="npc-bastion-passif"><div class="npc-bastion-passif-row">🎁 Passif</div><p>${_esc(n.passif)}</p></div>` : '<div></div>'}
-        ${n.salaireSuggere ? `<div class="npc-bastion-salaire"><span class="npc-bastion-sal-k">Salaire</span><span class="npc-bastion-sal-v">${n.salaireSuggere} <small>or/sem.</small></span></div>` : ''}
-      </div>` : ''}
-    </div>
-    <div class="npc-bastion-foot ${canRecruit ? 'ok' : 'lock'}">${canRecruit
-      ? `✅ Recrutable — l'affinité du groupe est suffisante (Allié).`
-      : `🔒 Recrutable une fois l'affinité du groupe au niveau <b>Allié</b>.`}</div>
-  </section>`;
+  return `<section class="npc-rd-bastion is-readonly"><header class="npc-rd-bastion-head"><div><h2>${_npcUiIcon('bastion')} Bastion</h2><p>Profil de recrutement</p></div><span class="npc-rd-bastion-state${canRecruit ? ' is-on' : ''}">${canRecruit ? 'Recrutable' : 'Bientôt recrutable'}</span></header>${activites.length ? `<div class="npc-rd-bastion-activities">${activites.map(label => `<span class="is-on">${_esc(label)}</span>`).join('')}</div>` : ''}<div class="npc-rd-bastion-fields">${n.passif ? `<div><span>Passif d’employé</span><p>${_esc(n.passif)}</p></div>` : ''}${n.salaireSuggere ? `<div class="npc-rd-bastion-salary"><span>Salaire</span><b>${parseInt(n.salaireSuggere, 10) || 0} <small>or / sem.</small></b></div>` : ''}</div><footer>${canRecruit ? 'Ce PNJ peut rejoindre le Bastion.' : 'Recrutable une fois Allié.'}</footer></section>`;
 }
 
 // Jauge d'affinité groupe (lecture seule — la modification passe par les événements)
@@ -1187,6 +1414,325 @@ function _renderFicheV3(n) {
 }
 
 function _renderFiche(n) {
+  const playerView = _npcIsPlayerView();
+  const af = afx(_affiniteNiveau(n));
+  if (playerView) clearSpellHost();
+  if (!playerView && _npcSheetTab === 'sorts') {
+    n.deck_sorts = _npcSpellList(n).map(spell => spell && typeof spell === 'object' && typeof spell.actif !== 'boolean'
+      ? { ...spell, actif: true }
+      : spell);
+    n.__spellCol = 'npcs';
+    setNpcSpellHost(n, () => _refreshActivePanel());
+  } else clearSpellHost();
+
+  const body = playerView
+    ? _renderNpcPlayerSheet(n)
+    : _npcSheetTab === 'combat'
+      ? _renderNpcCombatRedesign(n)
+      : _npcSheetTab === 'sorts'
+        ? _renderNpcSpellsRedesign(n)
+        : _renderNpcDossierRedesign(n);
+  return `<article class="npc-rd-sheet npc-sheet cs-v3" style="${_afVars(af)}">
+    ${_renderNpcRedesignHeader(n, playerView)}
+    ${playerView ? '' : _renderNpcRedesignTabs(n)}
+    <div class="npc-rd-body">${body}</div>
+  </article>`;
+}
+
+function _renderNpcRedesignHeader(n, playerView) {
+  const af = afx(_affiniteNiveau(n));
+  const orgs = (n.organisations || []).filter(Boolean);
+  const exceptions = _affiPerso.filter(a => a.npcId === n.id && _npcExceptionLevel(n, a) != null).length;
+  const initial = _esc((n.nom || '?')[0].toUpperCase());
+  const portrait = n.imageUrl ? `<img src="${_esc(n.imageUrl)}" alt="">` : `<span>${initial}</span>`;
+  const status = n.statut === 'mort' ? 'Mort' : n.statut === 'disparu' ? 'Disparu' : 'Vivant';
+  const portraitNode = n.imageUrl
+    ? `<button type="button" class="npc-rd-portrait" data-action="npcViewPhoto" data-id="${_esc(n.id)}" title="Voir le portrait">${portrait}</button>`
+    : playerView
+      ? `<div class="npc-rd-portrait is-empty" aria-hidden="true">${portrait}</div>`
+      : `<button type="button" class="npc-rd-portrait is-empty" data-action="npcSetPhoto" data-id="${_esc(n.id)}" title="Choisir un portrait">${portrait}</button>`;
+  const portraitCount = _npcPortraitEntries(n).length;
+  const portraitBlock = `<div class="npc-rd-portrait-wrap">
+    ${portraitNode}
+    ${playerView ? '' : `<button type="button" class="npc-rd-portrait-manage" data-action="npcSetPhoto" data-id="${_esc(n.id)}" title="Gérer les portraits (${portraitCount})" aria-label="Gérer les portraits de ${_esc(n.nom || 'ce PNJ')}">${_npcUiIcon('plus')}<span>${portraitCount}</span></button>`}
+  </div>`;
+  return `<header class="npc-rd-sheethead">
+    ${portraitBlock}
+    <div class="npc-rd-identity">
+      ${playerView
+        ? `<h1>${_esc(n.nom || 'PNJ')}</h1>`
+        : `<input class="npc-inline npc-rd-name" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="nom" value="${_esc(n.nom || '')}" placeholder="Nom du PNJ">`}
+      <div class="npc-rd-meta">
+        ${playerView
+          ? `${n.role ? `<span class="npc-rd-field">${_npcUiIcon('role')}${_esc(n.role)}</span>` : ''}${n.lieu ? `<span class="npc-rd-field">${_npcUiIcon('pin')}${_esc(n.lieu)}</span>` : ''}${orgs.map(o => `<span>${_orgIcon(o)} ${_esc(o)}</span>`).join('')}`
+          : `<label class="npc-rd-field">${_npcUiIcon('role')}<input class="npc-inline" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="role" value="${_esc(n.role || '')}" placeholder="Rôle"></label>
+             <label class="npc-rd-field">${_npcUiIcon('pin')}<input class="npc-inline" list="npc-rd-places" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="lieu" value="${_esc(n.lieu || '')}" placeholder="Lieu"></label>
+             ${orgs.map(o => `<span class="npc-rd-orgchip">${_orgIcon(o)} ${_esc(o)} <button type="button" data-action="npcRemoveOrg" data-id="${_esc(n.id)}" data-org="${_esc(o)}">×</button></span>`).join('')}
+             <label class="npc-rd-field npc-rd-addorg">${_npcUiIcon('plus')}<input class="npc-inline" list="npc-rd-orgs" data-change="npcAddOrg" data-id="${_esc(n.id)}" placeholder="Organisation"></label>`}
+      </div>
+      <div class="npc-rd-statusline">
+        ${playerView ? `<span>${status}</span>` : `<div class="npc-rd-segment">${[['', 'Vivant'], ['mort', 'Mort'], ['disparu', 'Disparu']].map(([value, label]) => `<button type="button" class="${(n.statut || '') === value ? 'is-on' : ''}" data-action="npcSetStatut" data-id="${_esc(n.id)}" data-statut="${value}">${label}</button>`).join('')}</div>`}
+        ${playerView
+          ? `<span class="npc-rd-level">Niv. ${Math.max(1, parseInt(n.niveau, 10) || 1)}</span><span class="npc-rd-posture">${_renderNpcLevelChip(_affiniteNiveau(n))}<span>envers le groupe</span></span>`
+          : `<button type="button" class="npc-rd-level" data-action="npcSetTab" data-tab="combat">Niv. <b>${Math.max(1, parseInt(n.niveau, 10) || 1)}</b></button><button type="button" class="npc-rd-posture" data-action="npcGoPosture">${_renderNpcLevelChip(_affiniteNiveau(n))}<span>envers le groupe${exceptions ? ` · <b>${exceptions}</b> exception${exceptions > 1 ? 's' : ''}` : ''}</span></button>`}
+      </div>
+    </div>
+    ${!playerView ? `<div class="npc-rd-head-actions">
+      <button type="button" class="npc-rd-visible${n.embauchable === false ? ' is-hidden' : ''}" data-action="npcToggleEmbauchable" data-id="${_esc(n.id)}">${_npcUiIcon(n.embauchable === false ? 'eyeOff' : 'eye')}<span>${n.embauchable === false ? 'Caché des joueurs' : 'Visible des joueurs'}</span></button>
+      <button type="button" class="npc-rd-delete" data-action="deleteNpc" data-id="${_esc(n.id)}" title="Supprimer ce PNJ" aria-label="Supprimer ce PNJ">${_npcUiIcon('trash')}</button>
+    </div>` : ''}
+  </header>`;
+}
+
+function _renderNpcRedesignTabs(n) {
+  const spells = _npcSpellList(n);
+  const deck = getDeckUsage(spells.map(s => typeof s?.actif === 'boolean' ? s : { ...s, actif: true }));
+  const counts = {
+    fiche: _affiPerso.filter(a => a.npcId === n.id).length,
+    combat: `niv. ${Math.max(1, parseInt(n.niveau, 10) || 1)}`,
+    sorts: `${deck.used}/${calcDeckMax(n)}`,
+  };
+  return `<nav class="npc-rd-tabs" role="tablist" aria-label="Sections de la fiche">
+    <span class="npc-rd-tab-identity">${n.imageUrl ? `<img src="${_esc(n.imageUrl)}" alt="">` : `<i>${_esc((n.nom || '?')[0].toUpperCase())}</i>`}<b>${_esc(n.nom || 'PNJ')}</b></span>
+    ${[['fiche', 'book', 'Dossier & relations'], ['combat', 'sword', 'Combat'], ['sorts', 'sparkles', 'Sorts']].map(([id, icon, label], idx) => `<button type="button" role="tab" aria-selected="${_npcSheetTab === id}" class="${_npcSheetTab === id ? 'is-on' : ''}" data-action="npcSetTab" data-tab="${id}" data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(n.id, id))}">${_npcUiIcon(icon)}${label}<small>${counts[id]}</small><kbd>${idx + 1}</kbd></button>`).join('')}
+  </nav>`;
+}
+
+function _renderNpcDossierRedesign(n) {
+  const missing = _npcMissing(n);
+  return `${missing.length ? `<div class="npc-rd-missing"><b>À compléter</b>${missing.map(item => `<button type="button" data-action="npcGoMissing" data-target="${item}">＋ ${_esc(item)}</button>`).join('')}</div>` : ''}
+    <div class="npc-rd-dual">
+      <section class="npc-rd-card"><div class="npc-rd-cardhead"><div><h2>Ce que les joueurs savent</h2><p>Apparence, réputation, ce qu’on raconte de lui.</p></div><span>⊙ Visible des joueurs</span></div><textarea id="npc-rd-description" class="npc-inline npc-rd-textarea" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="description" placeholder="Ce que les joueurs peuvent savoir…">${_esc(n.description || '')}</textarea></section>
+      <section class="npc-rd-card is-private"><div class="npc-rd-cardhead"><div><h2>▣ Notes MJ</h2><p>Secrets, objectifs, vraie identité.</p></div><span>Jamais montré aux joueurs</span></div><textarea class="npc-inline npc-rd-textarea" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="noteMJ" placeholder="Notes privées…">${_esc(n.noteMJ || '')}</textarea></section>
+    </div>
+    ${_renderNpcPosture(n)}
+    ${_renderNpcCrossRelations(n, true)}
+    ${_renderBastionProfil(n)}`;
+}
+
+function _renderNpcPosture(n) {
+  const level = _affiniteNiveau(n);
+  const af = afx(level);
+  const aff = n.affinite || {};
+  const fullHistory = Array.isArray(aff.historique) ? aff.historique : [];
+  const history = (_npcExpandedHistories.has(n.id) ? fullHistory : fullHistory.slice(-4)).map((entry, index) => ({
+    ...entry,
+    _index: _npcExpandedHistories.has(n.id) ? index : Math.max(0, fullHistory.length - 4) + index,
+  })).reverse();
+  const exceptionCount = _affiPerso.filter(a => a.npcId === n.id && _npcExceptionLevel(n, a) != null).length;
+  const inherited = Math.max(0, _npcLinkableCharacters().length - exceptionCount);
+  const thresholdLabel = index => index === 0
+    ? `< ${Number(_affiniteSeuils.mefiant) || 0}`
+    : `≥ ${Number([0, _affiniteSeuils.mefiant, _affiniteSeuils.neutre, _affiniteSeuils.amical, _affiniteSeuils.allie][index]) || 0}`;
+  const currentValue = Number(aff.valeur) || 0;
+  const nextThresholds = [
+    ['Méfiant', Number(_affiniteSeuils.mefiant) || 0],
+    ['Neutre', Number(_affiniteSeuils.neutre) || 0],
+    ['Amical', Number(_affiniteSeuils.amical) || 0],
+    ['Allié', Number(_affiniteSeuils.allie) || 0],
+  ];
+  const nextThreshold = nextThresholds.find(([, value]) => currentValue < value);
+  const nextThresholdText = nextThreshold ? `${nextThreshold[0]} à ${nextThreshold[1] >= 0 ? '+' : ''}${nextThreshold[1]}` : 'palier maximum';
+  return `<section id="npc-rd-posture" class="npc-rd-card npc-rd-posture-card">
+    <div class="npc-rd-cardhead"><div><h2>Posture envers le groupe</h2><p>Les cas particuliers se règlent personnage par personnage, plus bas.</p></div>
+      <div class="npc-rd-posture-mode"><span>Réglage</span><div class="npc-rd-segment"><button type="button" class="${_affiniteMode(n) === 'groupe' ? 'is-on' : ''}" data-action="npcSetAffiniteMode" data-id="${_esc(n.id)}" data-mode="groupe">Direct</button><button type="button" class="${_affiniteMode(n) === 'valeur' ? 'is-on' : ''}" data-action="npcSetAffiniteMode" data-id="${_esc(n.id)}" data-mode="valeur">Par événements</button></div>${_affiniteMode(n) === 'valeur' ? `<button type="button" class="npc-rd-seuils" data-action="openAffiniteSeuilsModal">${_npcUiIcon('cog')} Seuils</button>` : ''}</div>
+    </div>
+    <div class="npc-rd-scale">${AFFINITE.map((item, idx) => `<button type="button" class="${idx === level ? 'is-on' : ''}" style="--scale:${item.couleur}" data-action="npcSetAffiniteNiveau" data-id="${_esc(n.id)}" data-niveau="${idx}" ${_affiniteMode(n) === 'valeur' ? 'disabled' : ''}><span><i></i><b>${item.label}</b></span>${_affiniteMode(n) === 'valeur' ? `<small>${thresholdLabel(idx)}</small>` : ''}</button>`).join('')}</div>
+    <div class="npc-rd-posture-summary">${_renderNpcLevelChip(level)}<span>${af.desc}</span>${_affiniteMode(n) === 'valeur' ? `<span class="npc-rd-posture-value">valeur <b>${currentValue >= 0 ? '+' : ''}${currentValue}</b> · prochain palier : ${nextThresholdText}</span>` : ''}<small>${_npcUiIcon('users')} vaut pour <b>${inherited}</b> perso${inherited > 1 ? 's' : ''} sur ${_npcLinkableCharacters().length}${exceptionCount ? ` · ${exceptionCount} exception${exceptionCount > 1 ? 's' : ''}` : ''}</small></div>
+    <textarea class="npc-inline npc-rd-posture-note" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="affinite.note" placeholder="Note de posture…">${_esc(aff.note || '')}</textarea>
+    <div class="npc-rd-journal"><div class="npc-rd-journal-title"><b>${_npcUiIcon('clock')} Journal de la relation</b><span>${_affiniteMode(n) === 'valeur' ? 'Chaque événement déplace la valeur.' : 'En réglage direct, le journal garde la trace sans déplacer la posture.'}</span></div>
+      <div class="npc-rd-event-form"><div class="npc-rd-event-deltas" role="group" aria-label="Variation">${[-2, -1, 0, 1, 2].map(v => `<button type="button" class="${_histEditDelta === v ? 'is-on ' : ''}${v > 0 ? 'is-pos' : v < 0 ? 'is-neg' : ''}" data-action="npcEventDelta" data-value="${v}">${v > 0 ? `+${v}` : v || '±0'}</button>`).join('')}</div><input id="npc-rd-event-text" type="text" data-npc-id="${_esc(n.id)}" placeholder="Ce qui vient de se passer…" autocomplete="off"><button type="button" class="npc-rd-event-add" data-action="npcAddRelationEvent" data-id="${_esc(n.id)}">Ajouter</button></div>
+      <div class="npc-rd-event-list">${history.length ? history.map(entry => { const delta = Number(entry.delta) || 0; return `<div><b class="npc-rd-delta${delta < 0 ? ' is-neg' : delta > 0 ? ' is-pos' : ''}">${delta > 0 ? `+${delta}` : delta || '±0'}</b><span>${_esc(entry.texte || entry.text || '')}</span><time>${_esc(entry.date || '')}</time><button type="button" class="npc-rd-event-delete" data-action="npcDeleteRelationEvent" data-id="${_esc(n.id)}" data-index="${entry._index}" title="Supprimer cet événement" aria-label="Supprimer cet événement">${_npcUiIcon('trash')}</button></div>`; }).join('') : '<p class="npc-rd-event-empty">Aucun événement pour l’instant.</p>'}</div>
+      ${fullHistory.length > 4 ? `<button type="button" class="npc-rd-history-more" data-action="npcToggleRelationHistory" data-id="${_esc(n.id)}">${_npcExpandedHistories.has(n.id) ? 'Réduire' : `Tout afficher · ${fullHistory.length}`}</button>` : ''}
+    </div>
+  </section>`;
+}
+
+function _npcCrossRows(n) {
+  return _npcLinkableCharacters().map(character => {
+    const exception = _npcExceptionFor(n.id, character.id);
+    const feeling = _npcFeelingFor(n.id, character);
+    const exLevel = _npcExceptionLevel(n, exception);
+    const feelingLevel = feeling?.sent ? NPC_SENT_TO_LEVEL[feeling.sent] ?? null : null;
+    return { character, exception, feeling, exLevel, feelingLevel };
+  });
+}
+
+function _renderNpcDistributions(n, rows) {
+  const inheritedLevel = _affiniteNiveau(n);
+  const npcCounts = [0, 0, 0, 0, 0];
+  const feelingCounts = [0, 0, 0, 0, 0];
+  let inherited = 0;
+  let noFeeling = 0;
+  rows.forEach(row => {
+    const shownLevel = row.exLevel == null ? inheritedLevel : row.exLevel;
+    if (row.exLevel == null) inherited += 1; else npcCounts[shownLevel] += 1;
+    if (row.feelingLevel == null) noFeeling += 1; else feelingCounts[row.feelingLevel] += 1;
+  });
+  const segment = (count, level, className = '') => count
+    ? `<span class="${className}" style="--dist:${AFFINITE[level].couleur};flex:${count}" title="${count} · ${_esc(AFFINITE[level].label)}"></span>`
+    : '';
+  const key = (count, level, { inherited: isInherited = false } = {}) => count
+    ? `<span><i class="${isInherited ? 'is-inherited' : ''}" style="--dist:${AFFINITE[level].couleur}"></i><b>${count}</b> ${_esc(AFFINITE[level].label)}${isInherited ? ' · posture du groupe' : ''}</span>`
+    : '';
+  const npcSegments = `${segment(inherited, inheritedLevel, 'is-inherited')}${npcCounts.map((count, level) => segment(count, level)).join('')}`;
+  const feelingSegments = `${feelingCounts.map((count, level) => segment(count, level)).join('')}${noFeeling ? `<span class="is-none" style="flex:${noFeeling}" title="${noFeeling} sans avis"></span>` : ''}`;
+  const npcKeys = `${key(inherited, inheritedLevel, { inherited: true })}${npcCounts.map((count, level) => key(count, level)).join('')}`;
+  const feelingKeys = `${feelingCounts.map((count, level) => key(count, level)).join('')}${noFeeling ? `<span><i class="is-none"></i><b>${noFeeling}</b> sans avis</span>` : ''}`;
+  return `<div class="npc-rd-distribution">
+    <span class="npc-rd-dist-label">${_esc(n.nom || 'PNJ')} → persos</span><div class="npc-rd-dist-bar">${npcSegments}</div><div class="npc-rd-dist-keys">${npcKeys}</div>
+    <span class="npc-rd-dist-label">Persos → ${_esc(n.nom || 'PNJ')}</span><div class="npc-rd-dist-bar">${feelingSegments}</div><div class="npc-rd-dist-keys">${feelingKeys}</div>
+  </div>`;
+}
+
+function _renderNpcTypeChip(exception, { pick = false } = {}) {
+  if (!exception?.typeId) return '';
+  return `<span class="npc-rd-typechip${pick ? ' is-pick' : ''}" style="--tc:${_esc(_getAffiniteTypeColor(exception.typeId))}">${_esc(_getAffiniteTypeEmoji(exception.typeId))} ${_esc(_getAffiniteTypeLabel(exception.typeId, exception.typeLabel))}</span>`;
+}
+
+function _renderNpcCrossRelations(n, admin) {
+  const all = _npcCrossRows(n).map(row => !admin && row.exception?.secret
+    ? { ...row, exception: null, exLevel: null }
+    : row);
+  let rows = all.filter(row => {
+    if (_npcCrossFilter === 'exceptions') return !!row.exception;
+    if (_npcCrossFilter === 'feelings') return !!row.feeling;
+    if (_npcCrossFilter === 'notables') return !!row.exception || !!row.feeling;
+    return true;
+  });
+  const q = _norm(_npcCrossSearch);
+  if (q) rows = rows.filter(row => _norm([row.character.nom, row.character.ownerPseudo, row.feeling?.sentiment, row.exception?.typeLabel].join(' ')).includes(q));
+  const myCharacterIds = admin ? null : new Set(_npcMyCharacters().map(character => character.id));
+  rows.sort((a, b) => {
+    if (!admin) {
+      const ownOrder = Number(myCharacterIds.has(b.character.id)) - Number(myCharacterIds.has(a.character.id));
+      if (ownOrder) return ownOrder;
+    }
+    if (_npcCrossSort === 'player') return (a.character.ownerPseudo || '').localeCompare(b.character.ownerPseudo || '', 'fr');
+    if (_npcCrossSort === 'discord') {
+      const da = Math.abs((a.exLevel ?? _affiniteNiveau(n)) - (a.feelingLevel ?? _affiniteNiveau(n)));
+      const db = Math.abs((b.exLevel ?? _affiniteNiveau(n)) - (b.feelingLevel ?? _affiniteNiveau(n)));
+      if (db !== da) return db - da;
+    }
+    return (a.character.nom || '').localeCompare(b.character.nom || '', 'fr');
+  });
+  const quiet = all.length - rows.length;
+  const filterChoices = admin
+    ? [['notables', 'Notables'], ['exceptions', 'Exceptions'], ['feelings', 'Ressentis'], ['all', 'Tous']]
+    : [['notables', 'Avec un lien'], ['all', 'Tous']];
+  return `<section class="npc-rd-card npc-rd-cross" id="npc-rd-cross-relations" data-npc-id="${_esc(n.id)}">
+    <div class="npc-rd-cardhead"><div><h2>Regards croisés</h2><p>Ce que ${_esc(n.nom || 'ce PNJ')} pense de chaque personnage, et ce que chacun pense de lui.</p></div>${admin ? `<div class="npc-rd-card-actions"><button type="button" class="npc-rd-outline" data-action="openAffiniteTypesManager">${_npcUiIcon('tag')} Gérer les types</button><button type="button" class="npc-rd-outline" data-action="npcShowAllRelations">＋ Exception pour…</button></div>` : ''}</div>
+    ${_renderNpcDistributions(n, all)}
+    <div class="npc-rd-cross-tools"><label>${_npcUiIcon('search')}<input type="search" placeholder="Personnage ou joueur…" value="${_esc(_npcCrossSearch)}" data-input="npcCrossSearch"></label><div class="npc-rd-cross-filters">${filterChoices.map(([id, label]) => `<button type="button" class="${_npcCrossFilter === id ? 'is-on' : ''}" data-action="npcCrossFilter" data-filter="${id}">${label} <b>${id === 'notables' ? all.filter(r => r.exception || r.feeling).length : id === 'exceptions' ? all.filter(r => r.exception).length : id === 'feelings' ? all.filter(r => r.feeling).length : all.length}</b></button>`).join('')}</div><select data-change="npcCrossSort" aria-label="Trier les relations"><option value="name" ${_npcCrossSort === 'name' ? 'selected' : ''}>Nom</option><option value="player" ${_npcCrossSort === 'player' ? 'selected' : ''}>Joueur</option>${admin ? `<option value="discord" ${_npcCrossSort === 'discord' ? 'selected' : ''}>Désaccords d’abord</option>` : ''}</select></div>
+    <div class="npc-rd-cross-table"><div class="npc-rd-cross-head"><span>Personnage</span><span>${_esc(n.nom || 'PNJ')} → perso</span><span>Perso → ${_esc(n.nom || 'PNJ')}</span><span></span></div>${rows.map(row => _renderNpcCrossRow(n, row, admin)).join('') || '<p class="npc-rd-empty">Aucune relation dans ce filtre.</p>'}</div>
+    ${quiet > 0 && _npcCrossFilter === 'notables' && !_npcCrossSearch ? `<div class="npc-rd-quiet"><span class="npc-rd-avatar-stack">${all.filter(row => !row.exception && !row.feeling).slice(0, 5).map(row => { const src = _charPortraitSrc(row.character, _playerProfileForChar(row.character.id, row.character.nom)); return src ? `<img src="${_esc(src)}" alt="">` : `<i>${_esc((row.character.nom || '?')[0])}</i>`; }).join('')}</span><span><b>${quiet}</b> autres personnages suivent la posture du groupe et n’ont rien noté.</span><button type="button" data-action="npcShowAllRelations">Afficher tous</button></div>` : ''}
+  </section>`;
+}
+
+function _renderNpcLevelChip(level, { inherited = false, secret = false } = {}) {
+  if (level == null) return '<span class="npc-rd-none">—</span>';
+  return `<span class="npc-rd-levelchip${inherited ? ' is-inherited' : ''}" style="--lv:${AFFINITE[level].couleur}"><i></i>${AFFINITE[level].label}${inherited ? ' · groupe' : ''}${secret ? ' ▣' : ''}</span>`;
+}
+
+function _renderNpcCrossRow(n, row, admin) {
+  const { character: c, exception: e, feeling: f, exLevel, feelingLevel } = row;
+  const open = _npcCrossOpen === c.id;
+  const profile = _playerProfileForChar(c.id, c.nom);
+  const src = _charPortraitSrc(c, profile);
+  const exShown = exLevel == null ? _affiniteNiveau(n) : exLevel;
+  return `<div class="npc-rd-cross-row${open ? ' is-open' : ''}">
+    <button type="button" class="npc-rd-cross-summary${admin ? ' is-clickable' : ''}" data-action="npcCrossOpen" data-char-id="${_esc(c.id)}" aria-expanded="${open}">
+      <span class="npc-rd-person">${src ? `<img src="${_esc(src)}" alt="">` : `<i>${_esc((c.nom || '?')[0])}</i>`}<b>${_esc(c.nom || '?')}<small>${_esc(c.ownerPseudo || c.ownerName || '')}</small></b></span>
+      <span class="npc-rd-cross-cell">${_renderNpcLevelChip(exShown, { inherited: exLevel == null })}${_renderNpcTypeChip(e)}${e?.secret ? `<i class="npc-rd-secret" title="Exception cachée aux joueurs">${_npcUiIcon('lock')}</i>` : ''}${e?.notePublique ? `<em>${_esc(e.notePublique)}</em>` : ''}</span>
+      <span class="npc-rd-cross-cell">${_renderNpcLevelChip(feelingLevel)}${f?.sentiment ? `<span class="npc-rd-feeling-label">« ${_esc(f.sentiment)} »</span>` : ''}${f?.note ? `<em>${_esc(f.note)}</em>` : ''}</span>
+      <span class="npc-rd-cross-chevron">${admin ? _npcUiIcon('chev') : ''}</span>
+    </button>
+    ${open && admin ? _renderNpcCrossEditor(n, c, e, f, true) : ''}
+  </div>`;
+}
+
+function _renderNpcCrossEditor(n, c, e, f, admin) {
+  const exLevel = _npcExceptionLevel(n, e);
+  const feelingLevel = f?.sent ? NPC_SENT_TO_LEVEL[f.sent] ?? null : null;
+  const owner = c.ownerPseudo || c.ownerName || c.joueur || 'le joueur';
+  const exceptionScale = `<div class="npc-rd-inline-scale npc-rd-inline-scale--six">
+    <button type="button" class="is-inherit ${exLevel == null ? 'is-on' : ''}" style="--scale:${AFFINITE[_affiniteNiveau(n)].couleur}" data-action="npcSetExceptionLevel" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" data-value=""><b>Comme le groupe</b><small>${_esc(AFFINITE[_affiniteNiveau(n)].label)}</small></button>
+    ${AFFINITE.map((item, idx) => `<button type="button" class="${exLevel === idx ? 'is-on' : ''}" style="--scale:${item.couleur}" data-action="npcSetExceptionLevel" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" data-value="${idx}"><span><i></i>${_esc(item.label)}</span></button>`).join('')}
+  </div>`;
+  const feelingScale = `<div class="npc-rd-inline-scale npc-rd-inline-scale--six">
+    <button type="button" class="is-none ${feelingLevel == null ? 'is-on' : ''}" data-action="npcSetFeelingLevel" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" data-value="">Pas d’avis</button>
+    ${AFFINITE.map((item, idx) => `<button type="button" class="${feelingLevel === idx ? 'is-on' : ''}" style="--scale:${item.couleur}" data-action="npcSetFeelingLevel" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" data-value="${NPC_LEVEL_TO_SENT[idx]}"><span><i></i>${_esc(item.label)}</span></button>`).join('')}
+  </div>`;
+  const relationTypes = _affiniteTypeChoices();
+  return `<div class="npc-rd-cross-editor${admin ? '' : ' is-player'}">
+    ${admin ? `<div class="npc-rd-editor-col"><div class="npc-rd-editor-head"><h3>${_esc(n.nom || 'PNJ')} envers ${_esc(c.nom || 'ce personnage')}</h3>${e ? `<button type="button" class="npc-rd-danger-link" data-action="npcRemoveException" data-id="${_esc(e.id)}">Retirer l’exception</button>` : ''}</div>
+      ${exceptionScale}
+      <div class="npc-rd-editor-label">Nature du lien <span>· optionnel</span></div><div class="npc-rd-type-picker">${_affiniteTypeChoices().map(type => `<button type="button" class="npc-rd-typechip is-pick${e?.typeId === type.id ? ' is-on' : ''}" style="--tc:${_esc(type.couleur || TYPE_COLORS[0])}" data-action="npcSetExceptionType" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" data-value="${_esc(type.id)}">${_esc(type.emoji || '')} ${_esc(type.label)}</button>`).join('')}</div>
+      <label>Ce que les joueurs voient<input type="text" value="${_esc(e?.notePublique || '')}" data-change="npcSaveException" data-field="notePublique" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" placeholder="Ex. : lui doit 40 po depuis l’hiver."></label>
+      <label><span>${_npcUiIcon('lock')} Note MJ secrète</span><input class="is-secret" type="text" value="${_esc(e?.note || '')}" data-change="npcSaveException" data-field="note" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" placeholder="Ce que ${_esc(n.nom || 'ce PNJ')} cache…"></label>
+      <label class="npc-rd-check"><input type="checkbox" data-change="npcSaveException" data-field="secret" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" ${e?.secret ? 'checked' : ''}> Exception cachée aux joueurs</label>
+    </div>` : ''}
+    <div class="npc-rd-editor-col"><div class="npc-rd-editor-head"><h3>${_esc(c.nom || 'Personnage')} envers ${_esc(n.nom || 'ce PNJ')}</h3><small>rempli par ${_esc(owner)} · visible par tout le groupe</small></div>
+      ${feelingScale}
+      ${feelingLevel == null ? '<p class="npc-rd-hint">Commence par situer cette relation sur l’échelle. L’étiquette et la note suivent.</p>' : `<div class="npc-rd-editor-label">Étiquette <span>· type défini ou texte personnalisé</span></div><div class="npc-rd-type-picker">${relationTypes.map(type => `<button type="button" class="npc-rd-typechip is-pick${f?.sentiment === type.label ? ' is-on' : ''}" style="--tc:${_esc(type.couleur || TYPE_COLORS[0])}" data-action="npcSetFeelingSuggestion" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" data-value="${_esc(type.label)}">${_esc(type.emoji || '')} ${_esc(type.label)}</button>`).join('')}</div><label>Étiquette personnalisée<input type="text" value="${_esc(f?.sentiment || '')}" data-change="npcSaveFeeling" data-field="sentiment" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" placeholder="Mentor, rival, dette, client…"></label><label>Note<textarea rows="2" data-change="npcSaveFeeling" data-field="note" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" placeholder="Ce que ${_esc(c.nom || 'ce personnage')} en pense vraiment…">${_esc(f?.note || '')}</textarea></label>`}
+    </div>
+  </div>`;
+}
+
+function _renderNpcCombatRedesign(n) {
+  const { totals, bases, equipBonus } = _npcVitalTotals(n);
+  const weapon = _npcWeaponInfo(n);
+  const deck = getDeckUsage(_npcSpellList(n).map(s => typeof s?.actif === 'boolean' ? s : { ...s, actif: true }));
+  const initiative = _npcEffectiveMod(n, 'dexterite');
+  const statSpent = Object.values(n.statsLevelUps || {}).reduce((sum, value) => sum + (parseInt(value, 10) || 0), 0);
+  const statBudget = Math.max(0, (parseInt(n.niveau, 10) || 1) - 1);
+  const resource = (kind, label, current, max, field) => `<div class="npc-rd-current"><div><span>${label}</span><b>${current} / ${max}</b></div><div class="npc-rd-meter"><i style="width:${max ? Math.round(current / max * 100) : 0}%"></i></div><div><button type="button" data-action="npcAdjustCurrent" data-id="${_esc(n.id)}" data-field="${field}" data-delta="-1">−</button><button type="button" data-action="npcAdjustCurrent" data-id="${_esc(n.id)}" data-field="${field}" data-delta="1">＋</button><button type="button" data-action="npcResetCurrent" data-id="${_esc(n.id)}" data-field="${field}">↺</button></div></div>`;
+  const hp = Math.max(0, Math.min(totals.pv, Number.isFinite(Number(n.hp)) ? Number(n.hp) : totals.pv));
+  const pm = Math.max(0, Math.min(totals.pm, Number.isFinite(Number(n.pmCurrent)) ? Number(n.pmCurrent) : totals.pm));
+  return `<section class="npc-rd-combat-strip">${[
+      ['PV', totals.pv, `${bases.pv} base ${equipBonus.pv ? _signedNum(equipBonus.pv) + ' éq.' : ''}`],
+      ['PM', totals.pm, `${bases.pm} base ${equipBonus.pm ? _signedNum(equipBonus.pm) + ' éq.' : ''}`],
+      ['CA', totals.ca, `${bases.ca} base ${equipBonus.ca ? _signedNum(equipBonus.ca) + ' éq.' : ''}`],
+      ['Vitesse', `${totals.vitesse} m`, `${bases.vitesse} base`],
+      ['Initiative', _signedNum(initiative), 'DEX'], ['Toucher', _signedNum(weapon.touch), weapon.touchStatLabel],
+      ['Dégâts', weapon.damage, weapon.weapon?.nom || 'Sans arme'], ['Deck', `${deck.used}/${calcDeckMax(n)}`, 'sorts préparés'],
+    ].map(([label, value, sub]) => `<div><small>${label}</small><b>${value}</b><span>${_esc(sub)}</span></div>`).join('')}</section>
+    <section class="npc-rd-card"><div class="npc-rd-cardhead"><div><h2>Niveau & ressources</h2><p>${statBudget - statSpent >= 0 ? `${statBudget - statSpent} point${statBudget - statSpent > 1 ? 's' : ''} à répartir` : `${statSpent - statBudget} point${statSpent - statBudget > 1 ? 's' : ''} en trop`}</p></div><label class="npc-rd-level-input">Niveau <input class="npc-inline" type="number" min="1" max="99" value="${Math.max(1, parseInt(n.niveau, 10) || 1)}" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="niveau"></label></div>
+      <div class="npc-rd-base-res"><label>PV de base<input class="npc-inline" type="number" min="1" value="${_npcBaseVital(n, 'pv')}" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="pvBase"><small>max ${totals.pv}</small></label><label>PM de base<input class="npc-inline" type="number" min="0" value="${_npcBaseVital(n, 'pm')}" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="pmBase"><small>max ${totals.pm}</small></label></div>
+      <div class="npc-rd-current-grid">${resource('hp', 'PV actuels · VTT', hp, totals.pv, 'hp')}${resource('pm', 'PM actuels · VTT', pm, totals.pm, 'pmCurrent')}</div>
+    </section>
+    <section class="npc-rd-card"><div class="npc-rd-cardhead"><div><h2>Caractéristiques</h2><p>Base, progression de niveau et équipement.</p></div></div><div class="npc-rd-stats">${NPC_STATS.map(stat => {
+      const base = Number(_npcBaseStats(n)[stat.key]) || 10;
+      const lvl = Number(n.statsLevelUps?.[stat.key]) || 0;
+      const eq = computeEquipStatsBonus(n.equipement || {})[stat.key] || 0;
+      const total = _npcEffectiveStat(n, stat.key);
+      return `<div><span>${stat.short}</span><b>${total}</b><em>${_modStr(total)}</em><label>base <input class="npc-inline" type="number" min="1" max="30" value="${Math.max(1, base - lvl)}" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="statBase:${stat.key}"></label><small>niv. ${_signedNum(lvl)} · éq. ${_signedNum(eq)}</small><div><button type="button" data-action="npcAllocateStat" data-npc-id="${_esc(n.id)}" data-stat="${stat.key}" data-delta="-1" ${lvl <= 0 ? 'disabled' : ''}>−</button><button type="button" data-action="npcAllocateStat" data-npc-id="${_esc(n.id)}" data-stat="${stat.key}" data-delta="1" ${statSpent >= statBudget ? 'disabled' : ''}>＋</button></div></div>`;
+    }).join('')}</div></section>
+    <section class="npc-rd-card"><div class="npc-rd-cardhead"><div><h2>Équipement</h2><p>Les bonus sont intégrés aux valeurs calculées.</p></div></div>${_renderNpcEquip(n, _npcVitalTotals(n).equip, { dmg: weapon.damage, range: `${weapon.range}c` })}</section>`;
+}
+
+function _renderNpcSpellsRedesign(n) {
+  return `<section class="npc-rd-card npc-rd-spells"><div class="npc-rd-cardhead"><div><h2>Deck de sorts</h2><p>Même éditeur que les personnages. Seuls les sorts préparés sont utilisables dans le VTT.</p></div></div>${_renderSpellDeck(n, true)}</section>`;
+}
+
+function _renderNpcBastionPlayer(n) {
+  if (!isFeatureEnabled('bastion') || n.recrutable === false || _affiniteNiveau(n) < 3) return '';
+  const activities = (n.activites || []).map(_actLabel);
+  if (!activities.length && !n.passif && !n.salaireSuggere) return '';
+  const canRecruit = _affiniteNiveau(n) >= 4;
+  return `<section class="npc-rd-bastion is-readonly"><header class="npc-rd-bastion-head"><div><h2>${_npcUiIcon('bastion')} Bastion</h2><p>Profil de recrutement</p></div><span class="npc-rd-bastion-state${canRecruit ? ' is-on' : ''}">${canRecruit ? 'Recrutable' : 'Bientôt recrutable'}</span></header>${activities.length ? `<div class="npc-rd-bastion-activities">${activities.map(label => `<span class="is-on">${_esc(label)}</span>`).join('')}</div>` : ''}<div class="npc-rd-bastion-fields">${n.passif ? `<div><span>Passif d’employé</span><p>${_esc(n.passif)}</p></div>` : ''}${n.salaireSuggere ? `<div class="npc-rd-bastion-salary"><span>Salaire</span><b>${parseInt(n.salaireSuggere, 10) || 0} <small>or / sem.</small></b></div>` : ''}</div><footer>${canRecruit ? 'Ce PNJ peut rejoindre le Bastion.' : 'Recrutable une fois Allié.'}</footer></section>`;
+}
+
+function _renderNpcPlayerSheet(n) {
+  const myChars = _npcMyCharacters();
+  const myRows = _npcCrossRows(n).filter(row => myChars.some(c => c.id === row.character.id));
+  return `<section class="npc-rd-card npc-rd-known"><small>Ce que l’on sait de ${_esc(n.nom || 'ce PNJ')}</small><p>${_esc(n.description || 'Rien de particulier n’est encore connu.')}</p></section>
+    <section class="npc-rd-card"><div class="npc-rd-cardhead"><div><h2>Toi et ${_esc(n.nom || 'ce PNJ')}</h2><p>Ton ressenti est visible par tout le groupe et par le MJ.</p></div></div>${myRows.length ? myRows.map(row => `<div class="npc-rd-player-relation"><div class="npc-rd-player-relhead"><b>${_esc(row.character.nom || '?')}</b><span>${_renderNpcLevelChip(_npcExceptionLevel(n, row.exception, { player: true }) ?? _affiniteNiveau(n), { inherited: _npcExceptionLevel(n, row.exception, { player: true }) == null })}</span></div>${_renderNpcCrossEditor(n, row.character, row.exception, row.feeling, false)}</div>`).join('') : '<p class="npc-rd-empty">Aucun personnage lié à ce compte.</p>'}</section>
+    ${_renderNpcCrossRelations(n, false)}
+    ${_renderNpcBastionPlayer(n)}`;
+}
+
+function _renderFicheLegacyCurrent(n) {
   const af = afx(_affiniteNiveau(n));
   const adm = STATE.isAdmin;
   const level = Math.max(1, parseInt(n.niveau, 10) || 1);
@@ -1293,9 +1839,9 @@ function _renderFiche(n) {
   const _tico = (id) => `<span class="tab-ico" aria-hidden="true"><svg class="cs-tab-svg"><use href="./assets/img/icons.svg#icon-${id}"/></svg></span>`;
   const tabsBar = `
     <nav class="tabs-v3 npc-sheet-tabs" role="tablist" aria-label="Sections du PNJ">
-      <button type="button" class="tab-v3 ${tab === 'combat' ? 'active' : ''}" role="tab" aria-selected="${tab === 'combat'}" data-action="npcSetTab" data-tab="combat" data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, _npcPanel, 'combat'))}">
+      <button type="button" class="tab-v3 ${tab === 'combat' ? 'active' : ''}" role="tab" aria-selected="${tab === 'combat'}" data-action="npcSetTab" data-tab="combat" data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, 'combat'))}">
         ${_tico('sword')} Combat</button>
-      <button type="button" class="tab-v3 ${tab === 'sorts' ? 'active' : ''}" role="tab" aria-selected="${tab === 'sorts'}" data-action="npcSetTab" data-tab="sorts" data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, _npcPanel, 'sorts'))}">
+      <button type="button" class="tab-v3 ${tab === 'sorts' ? 'active' : ''}" role="tab" aria-selected="${tab === 'sorts'}" data-action="npcSetTab" data-tab="sorts" data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, 'sorts'))}">
         ${_tico('sparkles')} Sorts <span class="tab-badge">${deckActifs}/${deckMax}${deckFree ? ` +${deckFree}` : ''}</span></button>
     </nav>`;
   // Onglet Sorts actif → le PNJ devient l'hôte du moteur de sorts (édition +
@@ -1571,7 +2117,7 @@ function _renderNpcPanelTabs() {
     <nav class="tabs-v3 npc-tabs-v3" role="tablist" aria-label="Sections de la fiche PNJ">
       ${_npcPanelDefs().map(tab => `
         <button type="button" class="${_npcPanel === tab.id ? 'is-active' : ''}" data-action="npcSetPanel" data-panel="${tab.id}"
-          data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, tab.id, _npcSheetTab))}"
+          data-nav-page="npcs" data-nav-sub="${_esc(_npcRouteSub(_activeId, NPC_ROUTE_ALIASES[tab.id] || _npcSheetTab))}"
           role="tab" aria-selected="${_npcPanel === tab.id}">
           <span>${_esc(tab.label)}</span>
           <small>${_esc(tab.hint)}</small>
@@ -1595,9 +2141,8 @@ function _renderNpcEmptyPanel(text) {
 }
 
 function _npcSetPanel(panel, { syncRoute = true } = {}) {
-  _npcPanel = NPC_ROUTE_PANELS.includes(panel) && (panel !== 'tactique' || STATE.isAdmin)
-    ? panel
-    : 'dossier';
+  _npcPanel = 'fiche';
+  _npcSheetTab = NPC_ROUTE_ALIASES[panel] || (NPC_ROUTE_SHEET_TABS.includes(panel) ? panel : 'fiche');
   if (syncRoute) _syncNpcRoute();
   _refreshActivePanel();
 }
@@ -2187,11 +2732,19 @@ function _getFiltered() {
   // Visibilité joueurs : un PNJ avec embauchable === false est caché (toggle
   // « 🚫 Caché joueurs » de la fiche). Le MJ voit tout. (Filtrage UI ; la vraie
   // confidentialité passerait par les règles Firestore — cf. note.)
-  let base = STATE.isAdmin ? _npcs : _npcs.filter(n => n.embauchable !== false);
-  if (STATE.isAdmin && _filterHidden) base = base.filter(n => n.embauchable === false);
+  const playerView = _npcIsPlayerView();
+  let base = playerView ? _npcs.filter(n => n.embauchable !== false) : _npcs;
+  if (!playerView && _filterHidden) base = base.filter(n => n.embauchable === false);
+  if (!playerView && _filterIncomplete) base = base.filter(n => _npcMissing(n).length > 0);
+  if (playerView && _filterMine) {
+    const mine = new Set(_npcMyCharacters().map(c => c.id));
+    base = base.filter(n => _affiPerso.some(a => a.npcId === n.id && mine.has(a.charId) && !a.secret)
+      || _npcMyCharacters().some(c => _npcFeelingFor(n.id, c)));
+  }
   if (_filterStatus === 'mort')         base = base.filter(n => n.statut === 'mort');
   else if (_filterStatus === 'disparu') base = base.filter(n => n.statut === 'disparu');
   else if (_filterStatus === 'alive')   base = base.filter(n => n.statut !== 'mort' && n.statut !== 'disparu');
+  if (_activeOrgFilter) base = base.filter(n => (n.organisations || []).includes(_activeOrgFilter));
   return base.filter(n => _npcMatchesSearch(n, _filterSearch));
 }
 
@@ -2391,7 +2944,7 @@ function _renderSearchResults(entries, total) {
     `).join('')}`;
 }
 
-function _buildListHtml(filtered = _getFiltered()) {
+function _buildListHtmlLegacy(filtered = _getFiltered()) {
   // Drilldown d'une catégorie (vue Catégories, hors recherche) : sous-vue propre.
   if (_activeOrgFilter && _listView === 'cat' && !_filterSearch.trim()) {
     const selected = _groupNpcsByOrg(filtered).get(_activeOrgFilter) || [];
@@ -2413,6 +2966,65 @@ function _buildListHtml(filtered = _getFiltered()) {
   return controls + _renderOrgIndex(entries);
 }
 
+function _npcGroupEntries(list) {
+  const sorted = [...list].sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+  if (_listView === 'az') {
+    const groups = new Map();
+    sorted.forEach(n => {
+      const key = (n.nom || '?')[0].toUpperCase();
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(n);
+    });
+    return [...groups.entries()].map(([key, items]) => ({ key: `az:${key}`, label: key, icon: '', items }));
+  }
+  if (_listView === 'place') {
+    const groups = new Map();
+    sorted.forEach(n => {
+      const key = n.lieu || 'Sans lieu';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(n);
+    });
+    return [...groups.entries()].sort((a, b) => a[0] === 'Sans lieu' ? 1 : b[0] === 'Sans lieu' ? -1 : a[0].localeCompare(b[0], 'fr'))
+      .map(([key, items]) => ({ key: `place:${key}`, label: key, icon: key === 'Sans lieu' ? '⌖' : '⌖', items }));
+  }
+  return _visibleOrgEntries(_groupNpcsByOrg(sorted)).map(([key, items]) => ({
+    key: `org:${key}`, label: _orgLabel(key), icon: _orgIcon(key), org: key, items,
+  }));
+}
+
+function _buildListHtml(filtered = _getFiltered()) {
+  const playerView = _npcIsPlayerView();
+  const all = playerView ? _npcs.filter(n => n.embauchable !== false) : _npcs;
+  const myCharacterIds = new Set(_npcMyCharacters().map(c => c.id));
+  const linkedToMe = playerView ? all.filter(n => (
+    _affiPerso.some(a => a.npcId === n.id && myCharacterIds.has(a.charId) && !a.secret)
+    || _npcMyCharacters().some(c => _npcFeelingFor(n.id, c))
+  )).length : 0;
+  const count = status => status === 'alive'
+    ? all.filter(n => n.statut !== 'mort' && n.statut !== 'disparu').length
+    : all.filter(n => n.statut === status).length;
+  const chips = `<div class="npc-rd-statusfilters">
+    <button type="button" class="${!_filterStatus ? 'is-on' : ''}" data-action="npcSetStatusFilter" data-status="">Tous</button>
+    <button type="button" class="${_filterStatus === 'alive' ? 'is-on' : ''}" data-action="npcSetStatusFilter" data-status="alive">Vivants</button>
+    <button type="button" class="${_filterStatus === 'mort' ? 'is-on' : ''}" data-action="npcSetStatusFilter" data-status="mort">☠ ${count('mort')}</button>
+    <button type="button" class="${_filterStatus === 'disparu' ? 'is-on' : ''}" data-action="npcSetStatusFilter" data-status="disparu">? ${count('disparu')}</button>
+    ${playerView
+      ? `<button type="button" class="${_filterMine ? 'is-on' : ''}" data-action="npcToggleMine">♥ Liés à moi ${linkedToMe}</button>`
+      : `<button type="button" class="${_filterIncomplete ? 'is-on' : ''}" data-action="npcToggleIncomplete">À compléter ${all.filter(n => _npcMissing(n).length).length}</button><button type="button" class="${_filterHidden ? 'is-on' : ''}" data-action="npcToggleHiddenFilter">⊘ ${all.filter(n => n.embauchable === false).length}</button>`}
+  </div>`;
+  if (!filtered.length) {
+    return `${chips}<div class="npc-rd-noresult"><p>Aucun PNJ trouvé.</p>${STATE.isAdmin && _npcView === 'mj' && _filterSearch.trim() ? `<button type="button" data-action="npcCreateFromSearch">Créer « ${_esc(_filterSearch.trim())} »</button>` : ''}</div>`;
+  }
+  const groups = _npcGroupEntries(filtered);
+  return `${chips}<div class="npc-rd-groups">${groups.map(group => {
+    const closed = _npcCollapsedGroups.has(group.key);
+    return `<section class="npc-rd-group${closed ? ' is-closed' : ''}">
+      <div class="npc-rd-grouphead"><button type="button" data-action="npcToggleGroup" data-key="${_esc(group.key)}"><span>${closed ? '▸' : '▾'}</span>${group.icon ? `<i>${group.icon}</i>` : ''}<b>${_esc(group.label)}</b><small>${group.items.length}</small></button>${STATE.isAdmin && group.org && group.org !== NO_ORG_KEY ? `<button type="button" class="npc-rd-group-emoji" data-action="npcEditOrgIcon" data-org="${_esc(group.org)}" title="Changer l’emoji">✎</button>` : ''}</div>
+      ${closed ? '' : `<div>${group.items.map(_renderNavItem).join('')}</div>`}
+    </section>`;
+  }).join('')}</div>`;
+}
+
 function _npcSelectOrg(btn) {
   const key = btn?.dataset?.orgKey;
   if (key == null) return;
@@ -2426,8 +3038,7 @@ function _npcBackToOrgs() {
 }
 
 function _npcSetListView(btn) {
-  _listView = btn.dataset.view === 'az' ? 'az' : 'cat';
-  _activeOrgFilter = null;
+  _listView = ['org', 'place', 'az'].includes(btn.dataset.view) ? btn.dataset.view : 'org';
   _refreshList({ keepScroll: false });
 }
 function _npcSetStatusFilter(btn) {
@@ -2444,9 +3055,11 @@ async function _npcSetStatut(btn) {
   const id = btn.dataset.id; const statut = btn.dataset.statut || '';
   const n = _npcs.find(x => x.id === id); if (!n) return;
   n.statut = statut;
-  await trySave('npcs', id, { statut });
-  _refreshActivePanel();
-  _refreshList({ keepScroll: true });
+  if (await trySave('npcs', id, { statut })) {
+    _npcFlashSaved();
+    _refreshActivePanel();
+    _refreshList({ keepScroll: true });
+  }
 }
 
 // ── Émoji personnalisé par catégorie (organisation) ───────────────────────────
@@ -2479,6 +3092,7 @@ async function _saveOrgIcon(org, emoji) {
   try {
     await saveDoc('npc_affinites', ORG_ICONS_DOC_ID, { icons: _orgIcons });
     closeModal();
+    _npcFlashSaved();
     _refreshList({ keepScroll: true });
   } catch (e) { console.error('[org icon]', e); showNotif("Échec de l'enregistrement de l'emoji.", 'error'); }
 }
@@ -3692,6 +4306,8 @@ function _mjEditField(id, field) {
 export async function deleteNpc(id) {
   try {
     if (!await confirmModal('Supprimer ce PNJ et toutes ses affinités ?', { title: 'Confirmation de suppression' })) return false;
+    const snapshot = _npcs.find(n => n.id === id);
+    if (!snapshot) return false;
     await deleteFromCol('npcs', id);
     const toDelete = _affiPerso.filter(a => a.npcId === id);
     await Promise.all(toDelete.map(a => deleteFromCol('npc_affinites', a.id)));
@@ -3699,7 +4315,28 @@ export async function deleteNpc(id) {
     _affiPerso = _affiPerso.filter(a => a.npcId !== id);
     if (_activeId === id) _activeId = _npcs[0]?.id || null;
     _syncNpcRoute({ replace: true });
-    showNotif('PNJ supprimé.', 'success');
+    showNotif('PNJ supprimé.', 'success', {
+      duration: 7000,
+      action: {
+        label: '↶ Annuler',
+        onClick: async () => {
+          const npcData = { ...snapshot }; delete npcData.id;
+          await saveDoc('npcs', id, npcData);
+          await Promise.all(toDelete.map(async affinity => {
+            const affinityData = { ...affinity }; delete affinityData.id;
+            await saveDoc('npc_affinites', affinity.id, affinityData);
+          }));
+          if (!_npcs.some(n => n.id === snapshot.id)) _npcs.push(snapshot);
+          toDelete.forEach(affinity => {
+            if (!_affiPerso.some(item => item.id === affinity.id)) _affiPerso.push(affinity);
+          });
+          _activeId = id;
+          _syncNpcRoute({ replace: true });
+          _renderPage(document.getElementById('main-content'));
+          showNotif('Suppression annulée.', 'success');
+        },
+      },
+    });
     _renderPage(document.getElementById('main-content'));
     return true;
   } catch (e) { notifySaveError(e); return false; }
@@ -3771,116 +4408,100 @@ export async function saveAffiniteSeuils() {
 // Formulaire inline — pas de push modal enfant
 
 function _aftEmojiGrid(selectedEmoji) {
-  return EMOJI_PRESET.map(e => `
-    <button type="button" data-emoji="${e}" data-action="_aftSelectEmoji" data-val="${e}"
-      style="width:34px;height:34px;border-radius:8px;cursor:pointer;font-size:1.15rem;
-      transition:all .12s;background:${e === selectedEmoji ? 'rgba(255,255,255,.15)' : 'transparent'};
-      border:1px solid ${e === selectedEmoji ? 'var(--gold)' : 'transparent'};
-      transform:${e === selectedEmoji ? 'scale(1.15)' : 'scale(1)'}">${e}</button>`
-  ).join('');
+  return EMOJI_PRESET.map(emoji => `<button type="button" class="npc-rd-emoji-option${emoji === selectedEmoji ? ' is-on' : ''}" data-emoji="${emoji}" data-action="_aftSelectEmoji" data-val="${emoji}" aria-label="Choisir ${emoji}" aria-pressed="${emoji === selectedEmoji}">${emoji}</button>`).join('');
 }
 
 function _aftColorGrid(selectedColor) {
-  return TYPE_COLORS.map(hex => `
-    <button type="button" data-color="${hex}" data-action="_aftSelectColor" data-val="${hex}"
-      style="width:26px;height:26px;border-radius:7px;cursor:pointer;background:${hex};
-      transition:all .12s;
-      border:3px solid ${hex === selectedColor ? 'white' : 'transparent'};
-      box-shadow:${hex === selectedColor ? `0 0 0 2px ${hex}` : 'none'}"></button>`
-  ).join('');
+  return AFFINITE_TYPE_PALETTE.map(hex => `<button type="button" class="npc-rd-type-swatch${hex === selectedColor ? ' is-on' : ''}" style="--sw:${hex}" data-color="${hex}" data-action="_aftSelectColor" data-val="${hex}" aria-label="Couleur ${hex}" aria-pressed="${hex === selectedColor}"></button>`).join('');
+}
+
+function _aftNormalizeHex(raw = '') {
+  const value = String(raw).trim();
+  if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase();
+  if (/^#[0-9a-f]{3}$/i.test(value)) return `#${[...value.slice(1)].map(char => char + char).join('')}`.toLowerCase();
+  return '';
 }
 
 function _getAffiniteTypesManagerHtml() {
   const s     = _aftFormState || { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   const isEdit = !!s.editingId;
-
-  const typesList = _affiniteTypes.length
-    ? _affiniteTypes.map(t => {
-        const col = t.couleur || TYPE_COLORS[0];
-        const isEditing = s.editingId === t.id;
-        return `
-        <div style="display:flex;align-items:center;gap:.55rem;padding:.5rem .7rem;
-          background:${isEditing ? col + '22' : col + '11'};
-          border:1px solid ${isEditing ? col + '66' : col + '28'};border-radius:9px;
-          transition:all .15s">
-          <span style="font-size:1.2rem;flex-shrink:0">${t.emoji || '✨'}</span>
-          <span style="flex:1;font-size:.85rem;font-weight:700;color:${col}">${_esc(_displayText(t.label))}</span>
-          <div style="display:flex;gap:.25rem">
-            <button type="button" data-action="_aftEditType" data-id="${t.id}"
-              style="background:${isEditing ? col + '33' : 'none'};border:1px solid ${isEditing ? col : 'var(--border)'};
-              border-radius:7px;padding:.3rem .5rem;cursor:pointer;
-              color:${isEditing ? col : 'var(--text-dim)'};font-size:.72rem">✏️</button>
-            <button type="button" data-action="deleteAffiniteType" data-id="${t.id}"
-              style="background:none;border:1px solid rgba(255,107,107,.35);border-radius:7px;
-              padding:.3rem .5rem;cursor:pointer;color:#ff6b6b;font-size:.72rem">🗑️</button>
-          </div>
-        </div>`;
-      }).join('')
-    : `<div style="padding:.75rem;color:var(--text-dim);font-size:.84rem;text-align:center;
-        font-style:italic">Aucune affinité spécifique définie.</div>`;
-
-  return `
-  <div style="display:flex;flex-direction:column;gap:.85rem">
-
-    <!-- Liste existants -->
-    ${_affiniteTypes.length ? `
-    <div style="display:flex;flex-direction:column;gap:.35rem;
-      max-height:200px;overflow-y:auto;overflow-x:hidden;padding-right:.25rem">
-      ${typesList}
-    </div>
-    <div style="border-top:1px solid var(--border)"></div>` : typesList}
-
-    <!-- Formulaire inline -->
-    <div>
-      <div style="font-size:.72rem;font-weight:700;color:${isEdit ? 'var(--gold)' : 'var(--text-dim)'};
-        text-transform:uppercase;letter-spacing:1px;margin-bottom:.65rem">
-        ${isEdit ? `✏️ Modifier — ${_esc(_displayText(_affiniteTypes.find(t => t.id === s.editingId)?.label || ''))}` : '➕ Ajouter un type'}</div>
-
-      <!-- Emoji -->
-      <div style="margin-bottom:.55rem">
-        <div style="font-size:.64rem;color:var(--text-dim);text-transform:uppercase;
-          letter-spacing:.8px;margin-bottom:.3rem">Emoji</div>
-          <div id="aft-emoji-grid" style="display:flex;flex-wrap:wrap;gap:.25rem;
-            background:var(--bg-card);border:1px solid var(--border);
-            border-radius:10px;padding:.5rem;
-            max-height:132px;overflow-y:auto;overflow-x:hidden">
-            ${_aftEmojiGrid(s.emoji)}
-          </div>
-        <input type="hidden" id="aft-emoji-val" value="${s.emoji}">
-      </div>
-
-      <!-- Nom -->
-      <div style="margin-bottom:.55rem">
-        <div style="font-size:.64rem;color:var(--text-dim);text-transform:uppercase;
-          letter-spacing:.8px;margin-bottom:.3rem">Nom</div>
-        <input class="input-field" id="aft-label" value="${_esc(s.label)}"
-          placeholder="Ex: Confident, Rival, Chouchou…"
-          style="font-size:.85rem">
-      </div>
-
-      <!-- Couleur -->
-      <div style="margin-bottom:.7rem">
-        <div style="font-size:.64rem;color:var(--text-dim);text-transform:uppercase;
-          letter-spacing:.8px;margin-bottom:.3rem">Couleur</div>
-        <div id="aft-color-grid" style="display:flex;gap:.4rem;flex-wrap:wrap">
-          ${_aftColorGrid(s.couleur)}
-        </div>
-        <input type="hidden" id="aft-color"      value="${s.couleur}">
-        <input type="hidden" id="aft-editing-id" value="${s.editingId}">
-      </div>
-
-      <!-- Boutons -->
-      <div style="display:flex;gap:.4rem">
-        <button data-action="saveAffiniteType" class="btn btn-gold"
-          style="flex:1;font-size:.8rem">
-          ${isEdit ? '💾 Enregistrer' : '➕ Créer'}</button>
-        ${isEdit ? `
-        <button data-action="_aftCancelEdit"
-          class="btn btn-outline btn-sm" style="font-size:.78rem">Annuler</button>` : ''}
-      </div>
-    </div>
+  const types = _affiniteTypeChoices();
+  const typesList = types.map(type => {
+    const usage = _affiPerso.filter(link => link.typeId === type.id).length;
+    const builtin = type.id === DEFAULT_AFFINITE_TYPE.id;
+    return `<div class="npc-rd-type-row${s.editingId === type.id ? ' is-editing' : ''}${builtin ? ' is-builtin' : ''}" style="--tc:${_esc(type.couleur || TYPE_COLORS[0])}" data-type-id="${_esc(type.id)}" data-sortable="${!builtin}">
+      ${builtin ? '<span class="npc-rd-type-drag is-locked" title="Type système">••</span>' : '<span class="npc-rd-type-drag" title="Glisser pour réordonner" aria-label="Glisser pour réordonner">⠿</span>'}
+      <span class="npc-rd-typechip">${_esc(type.emoji || '✨')} ${_esc(_displayText(type.label))}</span><small>${usage} lien${usage > 1 ? 's' : ''}${builtin ? ' · par défaut' : ''}</small><span class="npc-rd-type-row-actions">${builtin ? '' : `<button type="button" data-action="_aftEditType" data-id="${_esc(type.id)}" title="Modifier ${_esc(type.label)}" aria-label="Modifier ${_esc(type.label)}">${_npcUiIcon('edit')}</button><button type="button" class="is-danger" data-action="deleteAffiniteType" data-id="${_esc(type.id)}" title="Supprimer ${_esc(type.label)}" aria-label="Supprimer ${_esc(type.label)}">${_npcUiIcon('trash')}</button>`}</span></div>`;
+  }).join('');
+  return `<div class="npc-rd-types-modal">
+    <p>La nature d’une exception : Mentor, Rival, Dette… Ces mêmes types sont proposés aux joueurs pour décrire leur ressenti, avec une étiquette libre possible.</p>
+    <div class="npc-rd-type-list">${typesList}</div>
+    <section class="npc-rd-type-form"><header><b>${isEdit ? 'Modifier le type' : 'Nouveau type'}</b>${isEdit ? `<span>${_esc(_displayText(_affiniteTypes.find(type => type.id === s.editingId)?.label || ''))}</span>` : ''}</header>
+      <div class="npc-rd-type-form-row"><div class="npc-rd-type-emoji"><label><span>Emoji</span><input id="aft-emoji-val" value="${_esc(s.emoji)}" maxlength="4" aria-label="Emoji du type"></label><details><summary>Choisir</summary><div id="aft-emoji-grid">${_aftEmojiGrid(s.emoji)}</div></details></div><label><span>Nom</span><input id="aft-label" value="${_esc(s.label)}" placeholder="Protecteur, Rival, Dette…" autocomplete="off"></label></div>
+      <div class="npc-rd-type-colors"><span>Couleur</span><span id="aft-color-grid">${_aftColorGrid(s.couleur)}</span><div class="npc-rd-custom-color"><label><span>Sélecteur</span><input type="color" id="aft-color-picker" value="${_esc(s.couleur)}" data-input="_aftColorPickerInput" aria-label="Choisir une couleur personnalisée"></label><label><span>Hexadécimal</span><input type="text" id="aft-color-hex" value="${_esc(s.couleur)}" maxlength="7" spellcheck="false" data-input="_aftColorHexInput" data-change="_aftColorHexCommit" placeholder="#4f8cff"></label></div></div>
+      <input type="hidden" id="aft-color" value="${_esc(s.couleur)}"><input type="hidden" id="aft-editing-id" value="${_esc(s.editingId)}">
+      <footer>${isEdit ? `<button type="button" class="npc-rd-type-cancel" data-action="_aftCancelEdit">Annuler</button>` : ''}<button type="button" class="npc-rd-type-save" data-action="saveAffiniteType">${isEdit ? 'Enregistrer' : 'Ajouter le type'}</button></footer>
+    </section>
   </div>`;
 }
+
+function _destroyAffiniteTypesSortable() {
+  try { _affiniteTypesSortable?.destroy?.(); } catch {}
+  _affiniteTypesSortable = null;
+}
+
+async function _persistAffiniteTypesOrder(list) {
+  if (!STATE.isAdmin || !list) return;
+  const ids = [...list.querySelectorAll('.npc-rd-type-row[data-sortable="true"][data-type-id]')]
+    .map(row => row.dataset.typeId)
+    .filter(Boolean);
+  const previousIds = _affiniteTypes.map(type => type.id);
+  if (ids.length !== previousIds.length || ids.every((id, index) => id === previousIds[index])) return;
+
+  const previous = _affiniteTypes.map(type => ({ ...type }));
+  const byId = new Map(previous.map(type => [type.id, type]));
+  const reordered = ids.map(id => byId.get(id)).filter(Boolean)
+    .map((type, index) => ({ ...type, order: (index + 1) * 10 }));
+  _affiniteTypes = reordered;
+  try {
+    await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, {
+      types: reordered,
+      defaultsVersion: AFFINITE_TYPES_DEFAULTS_VERSION,
+    });
+    showNotif('Ordre des types enregistré.', 'success');
+  } catch (error) {
+    _affiniteTypes = previous;
+    notifySaveError(error);
+  }
+  _refreshAffiniteTypesManager();
+  _refreshActivePanel();
+}
+
+function _mountAffiniteTypesSortable() {
+  _destroyAffiniteTypesSortable();
+  const list = document.querySelector('.npc-rd-types-modal .npc-rd-type-list');
+  if (!STATE.isAdmin || !list || list.querySelectorAll('[data-sortable="true"]').length < 2) return;
+  _affiniteTypesSortable = makeSortable(list, {
+    prefix: 'npc-rd-type',
+    draggable: '.npc-rd-type-row[data-sortable="true"]',
+    handle: '.npc-rd-type-drag:not(.is-locked)',
+    filter: 'button, input, select, textarea, .is-builtin',
+    animation: 120,
+    fallbackTolerance: 3,
+    onStart: () => list.classList.add('is-sorting'),
+    onEnd: () => {
+      list.classList.remove('is-sorting');
+      void _persistAffiniteTypesOrder(list);
+    },
+    onUnchoose: () => list.classList.remove('is-sorting'),
+  });
+}
+
+function _scheduleAffiniteTypesSortable() {
+  requestAnimationFrame(_mountAffiniteTypesSortable);
+}
+
+document.addEventListener('app:modal-closed', _destroyAffiniteTypesSortable);
 
 export async function deleteHistoriqueEntry(npcId, index) {
   const n = _npcs.find(x => x.id === npcId);
@@ -3981,16 +4602,15 @@ export async function saveHistoriqueEntry(npcId, index) {
 
 // Affinités spéciales
 export function openAffiniteTypesManager() {
-  // Initialise le formulaire à l'état "ajout"
   _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
-  pushModal('🎭 Affinités spécifiques', _getAffiniteTypesManagerHtml(), () => {
-    // À la fermeture, rafraîchir la fiche (les types/affinités ont pu changer).
-    if (_activeId) _refreshActivePanel();
-  });
+  openModal('Types de relation', _getAffiniteTypesManagerHtml());
+  _scheduleAffiniteTypesSortable();
 }
 
 function _refreshAffiniteTypesManager() {
-  updateModalContent('🎭 Affinités spécifiques', _getAffiniteTypesManagerHtml());
+  _destroyAffiniteTypesSortable();
+  updateModalContent('Types de relation', _getAffiniteTypesManagerHtml());
+  _scheduleAffiniteTypesSortable();
 }
 
 function _aftSelectEmoji(emoji) {
@@ -3999,21 +4619,41 @@ function _aftSelectEmoji(emoji) {
   if (_aftFormState) _aftFormState.emoji = emoji;
   document.querySelectorAll('#aft-emoji-grid button').forEach(btn => {
     const sel = btn.dataset.emoji === emoji;
-    btn.style.background  = sel ? 'rgba(255,255,255,.15)' : 'transparent';
-    btn.style.borderColor = sel ? 'var(--gold)' : 'transparent';
-    btn.style.transform   = sel ? 'scale(1.15)' : 'scale(1)';
+    btn.classList.toggle('is-on', sel);
+    btn.setAttribute('aria-pressed', String(sel));
   });
 }
 
-function _aftSelectColor(hex) {
+function _aftApplyColor(hex) {
+  const normalized = _aftNormalizeHex(hex);
+  if (!normalized) return false;
   const inp = document.getElementById('aft-color');
-  if (inp) inp.value = hex;
-  if (_aftFormState) _aftFormState.couleur = hex;
+  const picker = document.getElementById('aft-color-picker');
+  const text = document.getElementById('aft-color-hex');
+  if (inp) inp.value = normalized;
+  if (picker) picker.value = normalized;
+  if (text && document.activeElement !== text) text.value = normalized;
+  if (_aftFormState) _aftFormState.couleur = normalized;
   document.querySelectorAll('#aft-color-grid button').forEach(btn => {
-    const sel = btn.dataset.color === hex;
-    btn.style.borderColor = sel ? 'white' : 'transparent';
-    btn.style.boxShadow   = sel ? `0 0 0 2px ${hex}` : 'none';
+    const sel = btn.dataset.color?.toLowerCase() === normalized;
+    btn.classList.toggle('is-on', sel);
+    btn.setAttribute('aria-pressed', String(sel));
   });
+  return true;
+}
+
+function _aftSelectColor(hex) { _aftApplyColor(hex); }
+function _aftColorPickerInput(el) { _aftApplyColor(el?.value); }
+function _aftColorHexInput(el) { if (_aftNormalizeHex(el?.value)) _aftApplyColor(el.value); }
+function _aftColorHexCommit(el) {
+  const normalized = _aftNormalizeHex(el?.value);
+  if (!normalized) {
+    showNotif('Utilise une couleur hexadécimale comme #4f8cff.', 'error');
+    if (el) el.value = document.getElementById('aft-color')?.value || TYPE_COLORS[0];
+    return;
+  }
+  _aftApplyColor(normalized);
+  if (el) el.value = normalized;
 }
 
 function _aftEditType(typeId) {
@@ -4036,35 +4676,91 @@ function _aftCancelEdit() {
 export async function saveAffiniteType() {
   const label     = document.getElementById('aft-label')?.value?.trim();
   const emoji     = document.getElementById('aft-emoji-val')?.value || EMOJI_PRESET[0];
-  const couleur   = document.getElementById('aft-color')?.value     || TYPE_COLORS[0];
+  const couleur   = _aftNormalizeHex(document.getElementById('aft-color-hex')?.value || document.getElementById('aft-color')?.value) || '';
   const editingId = document.getElementById('aft-editing-id')?.value || '';
 
   if (!label) { showNotif('Donne un nom au type.', 'error'); return; }
-
+  if (!couleur) { showNotif('La couleur hexadécimale est invalide.', 'error'); return; }
+  if (_affiniteTypeChoices().some(type => type.id !== editingId && _norm(type.label) === _norm(label))) {
+    showNotif('Un type porte déjà ce nom.', 'error');
+    return;
+  }
+  const nextTypes = _affiniteTypes.map(type => ({ ...type }));
   if (editingId) {
-    const idx = _affiniteTypes.findIndex(t => t.id === editingId);
-    if (idx >= 0) _affiniteTypes[idx] = { ..._affiniteTypes[idx], label, emoji, couleur };
+    const idx = nextTypes.findIndex(t => t.id === editingId);
+    if (idx >= 0) nextTypes[idx] = { ...nextTypes[idx], label, emoji, couleur };
   } else {
     const id = `aft_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    _affiniteTypes.push({ id, label, emoji, couleur });
-    _affiniteTypes.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    const lastOrder = nextTypes.reduce((max, type) => Math.max(max, Number(type?.order) || 0), 0);
+    nextTypes.push({ id, label, emoji, couleur, order: lastOrder + 10 });
   }
-
-  await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, { types: _affiniteTypes });
+  const sortedTypes = _sortAffiniteTypes(nextTypes);
+  try {
+    await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, {
+      types: sortedTypes,
+      defaultsVersion: AFFINITE_TYPES_DEFAULTS_VERSION,
+    });
+  } catch (error) {
+    notifySaveError(error);
+    return;
+  }
+  _affiniteTypes = sortedTypes;
   _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   showNotif(editingId ? 'Type modifié !' : 'Type créé !', 'success');
   _refreshAffiniteTypesManager();
+  _refreshActivePanel();
 }
 
 export async function deleteAffiniteType(typeId) {
-  if (!await confirmModal('Supprimer ce type d\'affinité ?', {title: 'Confirmation de suppression'})) return;
-  _affiniteTypes = _affiniteTypes.filter(t => t.id !== typeId);
-  await saveDoc('npc_affinites', AFFINITE_TYPES_DOC_ID, { types: _affiniteTypes });
+  const type = _affiniteTypes.find(item => item.id === typeId);
+  if (!type) return;
+  const affected = _affiPerso.filter(link => link.typeId === typeId).map(link => ({ ...link }));
+  if (!await confirmModal(`Supprimer « ${type.label} » ?${affected.length ? ` Le type sera retiré de ${affected.length} lien${affected.length > 1 ? 's' : ''}.` : ''}`, { title: 'Supprimer le type de relation' })) return;
+  const previousTypes = _affiniteTypes.map(item => ({ ...item }));
+  const nextTypes = _affiniteTypes.filter(item => item.id !== typeId);
+  const updates = [
+    { col: 'npc_affinites', id: AFFINITE_TYPES_DOC_ID, data: {
+      types: nextTypes,
+      defaultsVersion: AFFINITE_TYPES_DEFAULTS_VERSION,
+    } },
+    ...affected.map(link => ({ col: 'npc_affinites', id: link.id, data: { typeId: '', typeLabel: '' } })),
+  ];
+  try {
+    await batchSaveInCol(updates);
+  } catch (error) {
+    notifySaveError(error);
+    return;
+  }
+  _affiniteTypes = nextTypes;
+  _affiPerso = _affiPerso.map(link => link.typeId === typeId ? { ...link, typeId: '', typeLabel: '' } : link);
   if (_aftFormState?.editingId === typeId) {
     _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
   }
-  showNotif('Type supprimé.', 'success');
+  showNotif(`Type « ${type.label} » supprimé.`, 'success', {
+    duration: 7000,
+    action: {
+      label: '↶ Annuler',
+      onClick: async () => {
+        try {
+          await batchSaveInCol([
+            { col: 'npc_affinites', id: AFFINITE_TYPES_DOC_ID, data: {
+              types: previousTypes,
+              defaultsVersion: AFFINITE_TYPES_DEFAULTS_VERSION,
+            } },
+            ...affected.map(link => { const { id, ...data } = link; return { col: 'npc_affinites', id, data }; }),
+          ]);
+          _affiniteTypes = previousTypes;
+          const restored = new Map(affected.map(link => [link.id, link]));
+          _affiPerso = _affiPerso.map(link => restored.get(link.id) || link);
+          _refreshAffiniteTypesManager();
+          _refreshActivePanel();
+          showNotif('Suppression annulée.', 'success');
+        } catch (error) { notifySaveError(error); }
+      },
+    },
+  });
   _refreshAffiniteTypesManager();
+  _refreshActivePanel();
 }
 
 // ══ Modal affinité individuelle (édition) ════════════════════════════════════
@@ -4117,6 +4813,7 @@ async function _npcInlineSave(el) {
 
   const saved = await trySave('npcs', id, patch);
   if (saved) {
+    _npcFlashSaved();
     _refreshActivePanel();
     if (['nom', 'role', 'lieu'].includes(field)) _refreshList({ keepScroll: true });
   }
@@ -4183,6 +4880,7 @@ async function _npcSetAffiniteNiveau(btn) {
   const affinite = { ...(n.affinite || {}), mode: 'groupe', niveau: k };
   n.affinite = affinite;
   if (await trySave('npcs', id, { affinite })) {
+    _npcFlashSaved();
     _refreshActivePanel();
     _refreshList({ keepScroll: true });
   }
@@ -4202,47 +4900,193 @@ function _npcEditLevel(btn) {
   inp?.focus(); inp?.select();
 }
 
-// Clic sur le portrait → choisir une image, compresser, enregistrer (base64).
-// Portrait PNJ : on passe par le cropper pan/zoom (comme les persos) pour
-// pouvoir cadrer l'image au lieu de la stocker brute.
+// Galerie de portraits PNJ. Les anciennes fiches ne possèdent que imageUrl /
+// imageFull : elles sont exposées comme une première entrée « legacy » puis
+// migrées naturellement lors du premier ajout ou de la première suppression.
+function _npcPortraitEntries(n = {}) {
+  const portraits = (Array.isArray(n.portraits) ? n.portraits : [])
+    .filter(item => item?.imageUrl)
+    .map((item, index) => ({
+      id: String(item.id || `portrait_${index + 1}`),
+      imageUrl: String(item.imageUrl || ''),
+      imageFull: String(item.imageFull || item.imageUrl || ''),
+    }));
+  if (n.imageUrl && !portraits.some(item => item.imageUrl === n.imageUrl)) {
+    portraits.unshift({ id: 'legacy', imageUrl: n.imageUrl, imageFull: n.imageFull || n.imageUrl });
+  }
+  return portraits.slice(0, NPC_MAX_PORTRAITS);
+}
+
+function _npcActivePortrait(n = {}) {
+  const portraits = _npcPortraitEntries(n);
+  return portraits.find(item => item.id === n.activePortraitId)
+    || portraits.find(item => item.imageUrl === n.imageUrl)
+    || portraits[0]
+    || null;
+}
+
+async function _npcCompactPortrait(portrait) {
+  let imageUrl = portrait.imageUrl || '';
+  let imageFull = portrait.imageFull || imageUrl;
+  if (imageUrl.startsWith('data:image/') && imageUrl.length > NPC_PORTRAIT_BYTES) {
+    imageUrl = await compressDataUrl(imageUrl, {
+      max: 320, quality: 0.78, maxBytes: NPC_PORTRAIT_BYTES, minSide: 220,
+    }) || imageUrl;
+  }
+  if (imageFull.startsWith('data:image/') && imageFull.length > NPC_PORTRAIT_FULL_BYTES) {
+    imageFull = await compressDataUrl(imageFull, {
+      max: 960, quality: 0.72, maxBytes: NPC_PORTRAIT_FULL_BYTES, minSide: 320,
+    }) || imageUrl;
+  }
+  if (imageFull.length > NPC_PORTRAIT_FULL_BYTES * 1.15) imageFull = imageUrl;
+  return { ...portrait, imageUrl, imageFull };
+}
+
+const _npcPortraitModalTitle = (n = {}) => `Portraits de ${n.nom || 'ce PNJ'}`;
+
+function _npcPortraitManagerHtml(n) {
+  const portraits = _npcPortraitEntries(n);
+  const active = _npcActivePortrait(n);
+  const cards = portraits.map((portrait, index) => {
+    const selected = portrait.id === active?.id;
+    return `<article class="npc-rd-portrait-card${selected ? ' is-active' : ''}">
+      <button type="button" class="npc-rd-portrait-choice" data-action="npcSelectPortrait" data-id="${_esc(n.id)}" data-portrait-id="${_esc(portrait.id)}" aria-pressed="${selected}" title="${selected ? 'Portrait actuellement utilisé' : 'Utiliser ce portrait'}">
+        <img src="${_esc(portrait.imageUrl)}" alt="Portrait ${index + 1} de ${_esc(n.nom || 'ce PNJ')}">
+        <span>${selected ? 'Actif · VTT' : `Portrait ${index + 1}`}</span>
+      </button>
+      <button type="button" class="npc-rd-portrait-remove" data-action="npcDeletePortrait" data-id="${_esc(n.id)}" data-portrait-id="${_esc(portrait.id)}" title="Supprimer ce portrait" aria-label="Supprimer le portrait ${index + 1}">${_npcUiIcon('trash')}</button>
+    </article>`;
+  }).join('');
+  const canAdd = portraits.length < NPC_MAX_PORTRAITS;
+  return `<div class="npc-rd-portrait-manager">
+    <p>Le portrait actif est utilisé sur la fiche, dans le chat et sur le token du VTT. Le changement est immédiat pour tous les joueurs.</p>
+    <div class="npc-rd-portrait-gallery">${cards || '<div class="npc-rd-portrait-empty">Aucun portrait enregistré.</div>'}
+      ${canAdd ? `<button type="button" class="npc-rd-portrait-add" data-action="npcAddPortrait" data-id="${_esc(n.id)}"><b>＋</b><span>Ajouter un portrait</span><small>${portraits.length}/${NPC_MAX_PORTRAITS}</small></button>` : ''}
+    </div>
+    ${canAdd ? '' : `<small class="npc-rd-portrait-limit">Limite de ${NPC_MAX_PORTRAITS} portraits atteinte. Supprime une image pour en ajouter une autre.</small>`}
+  </div>`;
+}
+
+function _npcRefreshPortraitManager(n) {
+  updateModalContent(_npcPortraitModalTitle(n), _npcPortraitManagerHtml(n), { icon: '◉', subtitle: 'Galerie et portrait actif' });
+}
+
+// Clic sur le bouton appareil photo → gestionnaire de galerie. L'ajout passe
+// ensuite par le cropper pan/zoom commun au reste de l'application.
 let _npcPhotoCrop = null;
 let _npcPhotoSrc = null; // image originale (avant cadrage) → stockée en imageFull
 function _npcSetPhoto(btn) {
   if (!STATE.isAdmin) return;
-  const id = btn.dataset.id;
-  pickImageFile({ onImage: ({ dataUrl }) => _npcShowCropModal(dataUrl, id) });
+  const n = _npcs.find(item => item.id === btn?.dataset?.id);
+  if (!n) return;
+  openModal(_npcPortraitModalTitle(n), _npcPortraitManagerHtml(n), { icon: '◉', subtitle: 'Galerie et portrait actif' });
+}
+
+function _npcAddPortrait(btn) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === btn?.dataset?.id);
+  if (!n) return;
+  if (_npcPortraitEntries(n).length >= NPC_MAX_PORTRAITS) {
+    showNotif(`Un PNJ peut conserver jusqu’à ${NPC_MAX_PORTRAITS} portraits.`, 'error');
+    return;
+  }
+  pickImageFile({ onImage: ({ dataUrl }) => _npcShowCropModal(dataUrl, n.id) });
 }
 
 function _npcShowCropModal(dataUrl, id) {
   _npcPhotoSrc = dataUrl;
-  openModal('📷 Cadrer le portrait', `
+  pushModal('Cadrer le portrait', `
     ${panZoomCropHTML({ idPrefix: 'npc-crop', viewSize: 300 })}
     <div style="display:flex;gap:.6rem;justify-content:flex-end;width:300px;margin:.8rem auto 0">
       <button class="btn btn-outline" id="npc-photo-cancel">Annuler</button>
-      <button class="btn btn-gold" id="npc-photo-save">✅ Enregistrer</button>
-    </div>`);
+      <button class="btn btn-gold" id="npc-photo-save">Ajouter le portrait</button>
+    </div>`, null, { icon: '◉', subtitle: 'Déplacer et zoomer dans le cadre', onDismiss: () => {
+      _npcPhotoCrop?.destroy?.(); _npcPhotoCrop = null; _npcPhotoSrc = null;
+    }});
   requestAnimationFrame(() => {
     _npcPhotoCrop?.destroy?.();
     _npcPhotoCrop = attachPanZoomCrop({ idPrefix: 'npc-crop', dataUrl, viewSize: 300, outputSize: 300 });
     document.getElementById('npc-photo-cancel')?.addEventListener('click', () => {
-      _npcPhotoCrop?.destroy?.(); _npcPhotoCrop = null; closeModal();
+      popModal();
     }, { once: true });
     document.getElementById('npc-photo-save')?.addEventListener('click', () => _npcSaveCroppedPhoto(id));
   });
 }
 
 async function _npcSaveCroppedPhoto(id) {
-  const dataUrl = _npcPhotoCrop?.getBase64();
-  if (!dataUrl) { showNotif('Erreur : cadrage non initialisé.', 'error'); return; }
-  // Image pleine (non cadrée) bornée → visible par les joueurs via le portrait.
-  const imageFull = _npcPhotoSrc ? await compressDataUrl(_npcPhotoSrc, { max: 1280, quality: 0.8 }) : '';
-  const n = _npcs.find(x => x.id === id); if (n) { n.imageUrl = dataUrl; n.imageFull = imageFull; }
-  if (await trySave('npcs', id, { imageUrl: dataUrl, imageFull })) {
+  const rawCrop = _npcPhotoCrop?.getBase64();
+  const n = _npcs.find(x => x.id === id);
+  if (!rawCrop || !n) { showNotif('Erreur : cadrage non initialisé.', 'error'); return; }
+
+  const imageUrl = await compressDataUrl(rawCrop, {
+    max: 320, quality: 0.78, maxBytes: NPC_PORTRAIT_BYTES, minSide: 220,
+  });
+  let imageFull = _npcPhotoSrc ? await compressDataUrl(_npcPhotoSrc, {
+    max: 960, quality: 0.72, maxBytes: NPC_PORTRAIT_FULL_BYTES, minSide: 320,
+  }) : '';
+  if (!imageUrl) { showNotif('Cette image ne peut pas être compressée.', 'error'); return; }
+  if (!imageFull || imageFull.length > NPC_PORTRAIT_FULL_BYTES * 1.15) imageFull = imageUrl;
+
+  const portraits = await Promise.all(_npcPortraitEntries(n).map(_npcCompactPortrait));
+  if (portraits.length >= NPC_MAX_PORTRAITS) {
+    showNotif(`La limite de ${NPC_MAX_PORTRAITS} portraits est atteinte.`, 'error');
+    return;
+  }
+  const portrait = {
+    id: `portrait_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    imageUrl,
+    imageFull,
+  };
+  const nextPortraits = [...portraits, portrait];
+  const patch = { portraits: nextPortraits, activePortraitId: portrait.id, imageUrl, imageFull };
+  if (await trySave('npcs', id, patch)) {
+    Object.assign(n, patch);
     _npcPhotoCrop?.destroy?.(); _npcPhotoCrop = null; _npcPhotoSrc = null;
-    closeModal();
-    showNotif('Portrait enregistré !', 'success');
+    popModal();
+    _npcRefreshPortraitManager(n);
+    showNotif('Portrait ajouté et sélectionné.', 'success');
     _refreshActivePanel(); _refreshList();
   }
+}
+
+async function _npcSelectPortrait(btn) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === btn?.dataset?.id);
+  const portrait = _npcPortraitEntries(n).find(item => item.id === btn?.dataset?.portraitId);
+  if (!n || !portrait || _npcActivePortrait(n)?.id === portrait.id) return;
+  const patch = {
+    activePortraitId: portrait.id,
+    imageUrl: portrait.imageUrl,
+    imageFull: portrait.imageFull || portrait.imageUrl,
+  };
+  if (!await trySave('npcs', n.id, patch)) return;
+  Object.assign(n, patch);
+  _npcRefreshPortraitManager(n);
+  _refreshActivePanel(); _refreshList();
+  showNotif('Portrait actif mis à jour sur la fiche et le VTT.', 'success');
+}
+
+async function _npcDeletePortrait(btn) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === btn?.dataset?.id);
+  if (!n) return;
+  const portraits = _npcPortraitEntries(n);
+  const removed = portraits.find(item => item.id === btn?.dataset?.portraitId);
+  if (!removed || !await confirmModal('Supprimer définitivement ce portrait ?', { title: 'Supprimer le portrait' })) return;
+  const nextPortraits = portraits.filter(item => item.id !== removed.id);
+  const current = _npcActivePortrait(n);
+  const nextActive = current?.id === removed.id ? (nextPortraits[0] || null) : current;
+  const patch = {
+    portraits: nextPortraits,
+    activePortraitId: nextActive?.id || '',
+    imageUrl: nextActive?.imageUrl || '',
+    imageFull: nextActive?.imageFull || nextActive?.imageUrl || '',
+  };
+  if (!await trySave('npcs', n.id, patch)) return;
+  Object.assign(n, patch);
+  _npcRefreshPortraitManager(n);
+  _refreshActivePanel(); _refreshList();
+  showNotif('Portrait supprimé.', 'success');
 }
 
 // Lightbox : affiche l'image pleine (non cadrée) du PNJ — accessible à TOUS
@@ -4292,8 +5136,11 @@ async function _npcToggleEmbauchable(btn) {
   const n = _npcs.find(x => x.id === id); if (!n) return;
   const current = n.embauchable !== false;   // défaut = visible (true)
   n.embauchable = !current;
-  await trySave('npcs', id, { embauchable: n.embauchable });
-  _refreshActivePanel();
+  if (await trySave('npcs', id, { embauchable: n.embauchable })) {
+    _npcFlashSaved();
+    _refreshActivePanel();
+    _refreshList({ keepScroll: true });
+  }
 }
 
 // Toggle : ce PNJ peut-il être recruté au Bastion ? (défaut = oui)
@@ -4358,8 +5205,13 @@ async function _npcAffiField(el) {
   } else {
     patch[field] = (el.value || '').trim();
   }
+  const previous = { ...a };
   Object.assign(a, patch);
-  await trySave('npc_affinites', a.id, patch);
+  _refreshNpcAffiUi({ summary: true, npcId: a.npcId, charId: a.charId });
+  if (!await trySave('npc_affinites', a.id, patch)) {
+    Object.assign(a, previous);
+    _refreshNpcAffiUi({ summary: true, npcId: a.npcId, charId: a.charId });
+  }
 }
 
 // Ajout inline d'une affinité spécifique (personnage + type) — sans modal.
@@ -4403,7 +5255,7 @@ async function _npcAddAffiPerso(btn) {
     const newId = await addToCol('npc_affinites', data);
     const entry = { id: newId || `afp_${Date.now()}`, ...data };
     if (!_affiPerso.find(x => x.id === entry.id)) _affiPerso.push(entry);
-    _refreshActivePanel();
+    _refreshNpcAffiUi({ list: true });
   } catch (e) { notifySaveError(e); }
 }
 
@@ -4419,7 +5271,7 @@ async function _npcCreateLink(npcId, charId, charNom, typeId) {
     const newId = await addToCol('npc_affinites', data);
     const entry = { id: newId || `afp_${Date.now()}`, ...data };
     if (!_affiPerso.find(x => x.id === entry.id)) _affiPerso.push(entry);
-    _refreshActivePanel();
+    _refreshNpcAffiUi({ list: true });
     return true;
   } catch (e) { notifySaveError(e); return false; }
 }
@@ -4573,6 +5425,9 @@ async function _npcCreate() {
       organisations: [],
       description: '',
       imageUrl: '',
+      imageFull: '',
+      portraits: [],
+      activePortraitId: '',
       embauchable: true,
       activites: [],
       niveau: 1,
@@ -4608,7 +5463,8 @@ function _refreshActivePanel() {
   if (ae && panel.contains(ae) && ae.classList?.contains('npc-inline')) return;
 
   const filtered = _getFiltered();
-  const active = _npcs.find(x => x.id === _activeId) || filtered[0] || null;
+  const selected = _npcs.find(x => x.id === _activeId) || null;
+  const active = (_npcIsPlayerView() && selected?.embauchable === false ? null : selected) || filtered[0] || null;
 
   if (!_npcs.find(x => x.id === _activeId)) {
     _activeId = active?.id || null;
@@ -4620,6 +5476,457 @@ function _refreshActivePanel() {
     active ? _renderFiche(active) : _renderEmpty(),
     { includeFocus: true, includeWindow: true }   // préserve aussi le scroll page (plus de saut à chaque interaction)
   );
+  requestAnimationFrame(_bindNpcStickyIdentity);
+}
+
+function _refreshNpcCrossRelationsSection(npcId = _activeId) {
+  const section = document.getElementById('npc-rd-cross-relations');
+  const npc = _npcs.find(item => item.id === npcId);
+  if (!section || !npc || section.dataset.npcId !== npc.id) return false;
+
+  const scratch = document.createElement('div');
+  scratch.innerHTML = _renderNpcCrossRelations(npc, STATE.isAdmin && !_npcIsPlayerView());
+  const next = scratch.firstElementChild;
+  if (!next) return false;
+  replaceHtmlPreservingView(section, next.innerHTML, { includeFocus: true, includeWindow: true });
+  return true;
+}
+
+function _refreshNpcCrossSummary(npcId, charId) {
+  const npc = _npcs.find(item => item.id === npcId);
+  const current = document.querySelector(`.npc-rd-cross-summary[data-char-id="${CSS.escape(charId || '')}"]`);
+  if (!npc || !current) return false;
+  const admin = STATE.isAdmin && !_npcIsPlayerView();
+  let row = _npcCrossRows(npc).find(item => item.character.id === charId);
+  if (!row) return false;
+  if (!admin && row.exception?.secret) row = { ...row, exception: null, exLevel: null };
+
+  const scratch = document.createElement('div');
+  scratch.innerHTML = _renderNpcCrossRow(npc, row, admin);
+  const next = scratch.querySelector('.npc-rd-cross-summary');
+  if (!next) return false;
+  // Le formulaire ouvert reste physiquement en place : un blur/change ne peut
+  // donc plus supprimer le bouton que l'utilisateur est justement en train de cliquer.
+  current.innerHTML = next.innerHTML;
+  return true;
+}
+
+function _refreshNpcAffiUi({ list = false, targeted = false, summary = false, npcId = '', charId = '' } = {}) {
+  const signature = _npcAffiUiSignature();
+  if (signature === _npcAffiRenderedSignature) return false;
+  _npcAffiRenderedSignature = signature;
+  if (list) _refreshList({ keepScroll: true });
+  if (summary && _refreshNpcCrossSummary(npcId, charId)) return true;
+  if (!targeted || !_refreshNpcCrossRelationsSection()) _refreshActivePanel();
+  return true;
+}
+
+function _npcSetView(btn) {
+  if (!STATE.isAdmin) return;
+  _npcView = btn?.dataset?.view === 'player' ? 'player' : 'mj';
+  if (_npcView === 'player' && !_npcPreviewUid) _npcPreviewUid = _npcPlayerChoices()[0]?.[0] || '';
+  _filterHidden = false;
+  _filterIncomplete = false;
+  _filterMine = false;
+  _renderPage(document.getElementById('main-content'));
+}
+
+function _npcSetPreviewPlayer(el) {
+  if (!STATE.isAdmin) return;
+  _npcPreviewUid = el?.value || '';
+  _filterMine = false;
+  _renderPage(document.getElementById('main-content'));
+}
+
+function _npcSetOrgFilter(el) {
+  _activeOrgFilter = el?.value || null;
+  _refreshList({ keepScroll: false });
+}
+
+function _npcSetGroupBy(el) {
+  _listView = ['org', 'place', 'az'].includes(el?.value) ? el.value : 'org';
+  _refreshList({ keepScroll: false });
+}
+
+function _npcToggleGroup(btn) {
+  const key = btn?.dataset?.key;
+  if (!key) return;
+  if (_npcCollapsedGroups.has(key)) _npcCollapsedGroups.delete(key);
+  else _npcCollapsedGroups.add(key);
+  lsJson.set('npc:collapsed-groups', [..._npcCollapsedGroups]);
+  _refreshList({ keepScroll: true });
+}
+
+function _npcToggleIncomplete() {
+  _filterIncomplete = !_filterIncomplete;
+  _refreshList({ keepScroll: false });
+}
+
+function _npcToggleMine() {
+  _filterMine = !_filterMine;
+  _refreshList({ keepScroll: false });
+}
+
+function _npcExpressToggle(force = null) {
+  if (!STATE.isAdmin || _npcView !== 'mj') return;
+  _npcExpressOpen = force == null ? !_npcExpressOpen : !!force;
+  _renderPage(document.getElementById('main-content'));
+  if (_npcExpressOpen) requestAnimationFrame(() => document.getElementById('npc-express-name')?.focus());
+}
+
+function _npcCreateFromSearch() {
+  _npcExpressName = _filterSearch.trim();
+  _filterSearch = '';
+  _npcExpressOpen = true;
+  _renderPage(document.getElementById('main-content'));
+  requestAnimationFrame(() => document.getElementById('npc-express-role')?.focus());
+}
+
+function _npcBasePayload({ nom = 'Nouveau PNJ', role = '', organisations = [] } = {}) {
+  return {
+    nom, role, lieu: '', organisations, description: '', noteMJ: '',
+    imageUrl: '', imageFull: '', portraits: [], activePortraitId: '', embauchable: true,
+    activites: [], niveau: 1, pvBase: NPC_BASE_VITALS.pv, pmBase: NPC_BASE_VITALS.pm,
+    hp: NPC_BASE_VITALS.pv, pmCurrent: NPC_BASE_VITALS.pm, stats: { ...NPC_BASE_STATS },
+    statsLevelUps: {}, equipement: {}, statsBonus: {}, actions: [], deck_sorts: [],
+    affinite: { mode: 'groupe', niveau: 2, valeur: 0, note: '', historique: [] },
+  };
+}
+
+async function _npcExpressCreate({ withoutRole = false } = {}) {
+  if (!STATE.isAdmin) return;
+  const nameInput = document.getElementById('npc-express-name');
+  const roleInput = document.getElementById('npc-express-role');
+  const nom = (nameInput?.value || _npcExpressName || '').trim();
+  const role = withoutRole ? '' : (roleInput?.value || '').trim();
+  if (!nom) { nameInput?.focus(); return; }
+  const data = _npcBasePayload({ nom, role, organisations: _activeOrgFilter ? [_activeOrgFilter] : [] });
+  try {
+    const id = await addToCol('npcs', data);
+    const entry = { id: id || `npc_${Date.now()}`, ...data, isNew: true };
+    _npcs.push(entry);
+    _activeId = entry.id;
+    _npcExpressName = '';
+    _filterSearch = '';
+    _syncNpcRoute();
+    _renderPage(document.getElementById('main-content'));
+    requestAnimationFrame(() => document.getElementById('npc-express-name')?.focus());
+    showNotif(`« ${nom} » créé.`, 'success');
+    _npcFlashSaved();
+  } catch (error) { notifySaveError(error); }
+}
+
+async function _npcSetAffiniteMode(btn) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === btn?.dataset?.id);
+  const mode = btn?.dataset?.mode === 'valeur' ? 'valeur' : 'groupe';
+  if (!n || _affiniteMode(n) === mode) return;
+  const currentLevel = _affiniteNiveau(n);
+  const thresholdKeys = ['hostile', 'mefiant', 'neutre', 'amical', 'allie'];
+  const affinite = {
+    ...(n.affinite || {}), mode, niveau: currentLevel,
+    ...(mode === 'valeur' ? { valeur: Number(_affiniteSeuils[thresholdKeys[currentLevel]]) || 0 } : {}),
+  };
+  n.affinite = affinite;
+  if (await trySave('npcs', n.id, { affinite })) { _npcFlashSaved(); _refreshActivePanel(); _refreshList(); }
+}
+
+function _npcEventDelta(btn) {
+  _histEditDelta = Number(btn?.dataset?.value) || 0;
+  document.querySelectorAll('.npc-rd-event-deltas button').forEach(el => el.classList.toggle('is-on', Number(el.dataset.value) === _histEditDelta));
+}
+
+async function _npcAddRelationEvent(btn) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === btn?.dataset?.id);
+  const text = document.getElementById('npc-rd-event-text')?.value.trim() || '';
+  if (!n || !text) return;
+  const before = _affiniteNiveau(n);
+  const history = [...(n.affinite?.historique || []), {
+    delta: _histEditDelta,
+    texte: text,
+    date: new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
+  }];
+  const affinite = { ...(n.affinite || {}), historique: history };
+  if (_affiniteMode(n) === 'valeur') {
+    affinite.valeur = (Number(affinite.valeur) || 0) + _histEditDelta;
+    affinite.niveau = _niveauFromValeur(affinite.valeur);
+  }
+  n.affinite = affinite;
+  if (await trySave('npcs', n.id, { affinite })) {
+    const after = _affiniteNiveau(n);
+    _npcFlashSaved();
+    _refreshActivePanel();
+    _refreshList();
+    showNotif(before !== after ? `${AFFINITE[before].label} → ${AFFINITE[after].label}` : 'Événement ajouté.', 'success');
+  }
+}
+
+function _npcToggleRelationHistory(btn) {
+  const id = btn?.dataset?.id;
+  if (!id) return;
+  _npcExpandedHistories.has(id) ? _npcExpandedHistories.delete(id) : _npcExpandedHistories.add(id);
+  _refreshActivePanel();
+}
+
+async function _npcDeleteRelationEvent(btn) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === btn?.dataset?.id);
+  const index = parseInt(btn?.dataset?.index, 10);
+  const beforeAffinite = n ? { ...(n.affinite || {}), historique: [...(n.affinite?.historique || [])] } : null;
+  const previous = beforeAffinite?.historique || [];
+  if (!n || !Number.isInteger(index) || index < 0 || index >= previous.length) return;
+  const removed = previous[index];
+  const historique = previous.filter((_, itemIndex) => itemIndex !== index);
+  const base = { ...beforeAffinite, historique };
+  const affinite = _withValeurDelta(n, base, -(Number(removed?.delta) || 0));
+  n.affinite = affinite;
+  if (!await trySave('npcs', n.id, { affinite })) {
+    n.affinite = beforeAffinite;
+    return;
+  }
+  _npcFlashSaved();
+  _refreshActivePanel();
+  showNotif('Événement supprimé.', 'success', {
+    duration: 7000,
+    action: {
+      label: '↶ Annuler',
+      onClick: async () => {
+        const restored = { ...beforeAffinite, historique: previous };
+        if (await trySave('npcs', n.id, { affinite: restored })) {
+          n.affinite = restored;
+          _npcFlashSaved();
+          _refreshActivePanel();
+        }
+      },
+    },
+  });
+}
+
+function _npcGoPosture() {
+  if (_npcIsPlayerView()) return;
+  if (_npcSheetTab !== 'fiche') {
+    _npcSheetTab = 'fiche';
+    _syncNpcRoute();
+    _refreshActivePanel();
+  }
+  requestAnimationFrame(() => document.getElementById('npc-rd-posture')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+}
+
+function _npcGoMissing(btn) {
+  const target = btn?.dataset?.target || '';
+  if (target === 'Combat') return _npcSetSheetTab('combat');
+  document.getElementById(target === 'Description' ? 'npc-rd-description' : 'npc-rd-places')?.focus();
+}
+
+function _npcCrossFilterSet(btn) {
+  _npcCrossFilter = btn?.dataset?.filter || 'notables';
+  _npcCrossOpen = '';
+  _refreshActivePanel();
+}
+
+let _npcCrossSearchTimer = null;
+function _npcCrossSearchInput(el) {
+  _npcCrossSearch = el?.value || '';
+  clearTimeout(_npcCrossSearchTimer);
+  _npcCrossSearchTimer = setTimeout(() => _refreshActivePanel(), 120);
+}
+
+function _npcCrossSortSet(el) { _npcCrossSort = el?.value || 'name'; _refreshActivePanel(); }
+function _npcCrossOpenRow(btn) {
+  if (!STATE.isAdmin || _npcIsPlayerView()) return;
+  _npcCrossOpen = _npcCrossOpen === btn?.dataset?.charId ? '' : btn?.dataset?.charId || '';
+  _refreshActivePanel();
+}
+function _npcShowAllRelations() { _npcCrossFilter = 'all'; _npcCrossOpen = ''; _refreshActivePanel(); }
+
+function _npcSetExceptionLevel(btn) {
+  return _npcSaveException({
+    dataset: { npcId: btn?.dataset?.npcId, charId: btn?.dataset?.charId, field: 'niveau' },
+    value: btn?.dataset?.value || '',
+  });
+}
+
+function _npcSetExceptionType(btn) {
+  const current = _npcExceptionFor(btn?.dataset?.npcId, btn?.dataset?.charId)?.typeId || '';
+  const value = current === (btn?.dataset?.value || '') ? '' : (btn?.dataset?.value || '');
+  return _npcSaveException({
+    dataset: { npcId: btn?.dataset?.npcId, charId: btn?.dataset?.charId, field: 'typeId' },
+    value,
+  });
+}
+
+function _npcSetFeelingLevel(btn) {
+  return _npcSaveFeeling({
+    dataset: { npcId: btn?.dataset?.npcId, charId: btn?.dataset?.charId, field: 'sent' },
+    value: btn?.dataset?.value || '',
+  });
+}
+
+function _npcSetFeelingSuggestion(btn) {
+  const current = _npcFeelingFor(btn?.dataset?.npcId, _npcLinkCharacter(btn?.dataset?.charId))?.sentiment || '';
+  const value = current === (btn?.dataset?.value || '') ? '' : (btn?.dataset?.value || '');
+  return _npcSaveFeeling({
+    dataset: { npcId: btn?.dataset?.npcId, charId: btn?.dataset?.charId, field: 'sentiment' },
+    value,
+  });
+}
+
+async function _npcSaveException(el) {
+  if (!STATE.isAdmin) return;
+  const npcId = el?.dataset?.npcId, charId = el?.dataset?.charId, field = el?.dataset?.field;
+  const character = _npcLinkCharacter(charId);
+  if (!npcId || !character || !field) return;
+  const choiceAction = !el?.tagName;
+  let entry = _npcExceptionFor(npcId, charId);
+  const value = field === 'secret' ? !!el.checked
+    : field === 'niveau' ? (el.value === '' ? null : Math.max(0, Math.min(4, parseInt(el.value, 10))))
+      : (el.value || '').trim();
+  const patch = { [field]: value };
+  if (field === 'typeId') patch.typeLabel = _getAffiniteType(value)?.label || '';
+  const hasData = candidate => candidate && (
+    _npcExceptionLevel(npcId, candidate) != null
+    || !!candidate.typeId
+    || !!String(candidate.notePublique || '').trim()
+    || !!String(candidate.note || '').trim()
+  );
+  const candidate = {
+    ...(entry || { niveau: null, secret: false, typeId: null, typeLabel: '', notePublique: '', note: '' }),
+    ...patch,
+  };
+  if (!hasData(candidate)) {
+    if (entry) {
+      await deleteFromCol('npc_affinites', entry.id);
+      _affiPerso = _affiPerso.filter(item => item.id !== entry.id);
+      _npcFlashSaved();
+      _refreshNpcAffiUi({ list: true });
+    }
+    return;
+  }
+  if (!entry) {
+    const data = { npcId, charId, charNom: character.nom || '', charPhoto: _charPortraitSrc(character), niveau: null, secret: false, typeId: null, typeLabel: '', notePublique: '', note: '', ...patch };
+    try {
+      const id = await addToCol('npc_affinites', data);
+      entry = { id: id || `aff_${Date.now()}`, ...data };
+      if (!_affiPerso.some(item => item.id === entry.id)) _affiPerso.push(entry);
+    } catch (error) { notifySaveError(error); return; }
+    // La création change aussi les compteurs de la fiche : rendu complet une
+    // seule fois, sauf si le snapshot local Firestore l'a déjà fait.
+    _refreshNpcAffiUi({ list: true });
+  } else {
+    const previous = { ...entry };
+    Object.assign(entry, patch);
+    // Un bouton doit refléter immédiatement sa sélection. La sortie d'un champ
+    // ne touche en revanche qu'au résumé afin de laisser le clic suivant aboutir.
+    _refreshNpcAffiUi({
+      targeted: choiceAction,
+      summary: !choiceAction,
+      npcId,
+      charId,
+    });
+    if (!await trySave('npc_affinites', entry.id, patch)) {
+      Object.assign(entry, previous);
+      _refreshNpcAffiUi({
+        targeted: choiceAction,
+        summary: !choiceAction,
+        npcId,
+        charId,
+      });
+      return;
+    }
+  }
+  _npcFlashSaved();
+}
+
+async function _npcRemoveException(btn) {
+  const id = btn?.dataset?.id;
+  if (!id) return;
+  await deleteAffinitePerso(id);
+  _npcCrossOpen = '';
+}
+
+async function _npcSaveFeeling(el) {
+  const npcId = el?.dataset?.npcId, charId = el?.dataset?.charId, field = el?.dataset?.field;
+  const character = _npcLinkCharacter(charId);
+  const n = _npcs.find(item => item.id === npcId);
+  if (!character || !n || !field) return;
+  if (!STATE.isAdmin && _npcCharacterOwnerUid(character) !== STATE.user?.uid) return;
+  const choiceAction = !el?.tagName;
+  const previousRelations = Array.isArray(character.relations) ? character.relations : [];
+  const relations = previousRelations.slice();
+  const index = relations.findIndex(r => r?.npcId === npcId);
+  const previous = index >= 0 ? relations[index] : null;
+  const value = (el.value || '').trim();
+  const next = {
+    ...(previous || {}), npcId, nom: n.nom || 'PNJ', img: n.imageUrl || '',
+    sent: previous?.sent || '', sentiment: previous?.sentiment || '', note: previous?.note || '',
+    [field]: value,
+  };
+  if (!next.sent && !next.sentiment && !next.note && !next.role) {
+    if (index >= 0) relations.splice(index, 1);
+  } else if (index >= 0) relations[index] = next;
+  else relations.push(next);
+  character.relations = relations;
+  if (choiceAction) {
+    if (!_refreshNpcCrossRelationsSection(npcId)) _refreshActivePanel();
+  } else if (!_refreshNpcCrossSummary(npcId, charId)) {
+    _refreshActivePanel();
+  }
+  if (!await trySave('characters', charId, { relations })) {
+    character.relations = previousRelations;
+    if (choiceAction) {
+      if (!_refreshNpcCrossRelationsSection(npcId)) _refreshActivePanel();
+    } else if (!_refreshNpcCrossSummary(npcId, charId)) {
+      _refreshActivePanel();
+    }
+    return;
+  }
+  _npcFlashSaved();
+  if (_filterMine) _refreshList({ keepScroll: true });
+}
+
+async function _npcAddOrg(el) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === el?.dataset?.id);
+  const value = (el?.value || '').trim();
+  if (!n || !value) return;
+  const organisations = [...new Set([...(n.organisations || []), value])];
+  n.organisations = organisations;
+  if (await trySave('npcs', n.id, { organisations })) { _npcFlashSaved(); _refreshActivePanel(); _refreshList(); }
+}
+
+async function _npcRemoveOrg(btn) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === btn?.dataset?.id);
+  if (!n) return;
+  const organisations = (n.organisations || []).filter(org => org !== btn.dataset.org);
+  n.organisations = organisations;
+  if (await trySave('npcs', n.id, { organisations })) { _npcFlashSaved(); _refreshActivePanel(); _refreshList(); }
+}
+
+async function _npcAdjustCurrent(btn) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === btn?.dataset?.id);
+  const field = btn?.dataset?.field;
+  const delta = parseInt(btn?.dataset?.delta, 10) || 0;
+  if (!n || !['hp', 'pmCurrent'].includes(field) || !delta) return;
+  const totals = _npcVitalTotals(n).totals;
+  const max = field === 'hp' ? totals.pv : totals.pm;
+  const current = Number.isFinite(Number(n[field])) ? Number(n[field]) : max;
+  const value = Math.max(0, Math.min(max, current + delta));
+  n[field] = value;
+  if (await trySave('npcs', n.id, { [field]: value })) { _npcFlashSaved(); _refreshActivePanel(); }
+}
+
+async function _npcResetCurrent(btn) {
+  if (!STATE.isAdmin) return;
+  const n = _npcs.find(item => item.id === btn?.dataset?.id);
+  const field = btn?.dataset?.field;
+  if (!n || !['hp', 'pmCurrent'].includes(field)) return;
+  const totals = _npcVitalTotals(n).totals;
+  const value = field === 'hp' ? totals.pv : totals.pm;
+  n[field] = value;
+  if (await trySave('npcs', n.id, { [field]: value })) { _npcFlashSaved(); _refreshActivePanel(); }
 }
 
 
@@ -4642,22 +5949,109 @@ PAGES.npcs = renderNpcs;
 // Retour/Avance entre deux PNJ ou deux panneaux : on réutilise les données déjà
 // en mémoire et les abonnements existants, sans remonter la page ni relire Firestore.
 document.addEventListener('app:route-sub-changed', event => {
-  if (event.detail?.page !== 'npcs' || !document.querySelector('.npc-page')) return;
+  if (event.detail?.page !== 'npcs' || !document.querySelector('.npc-rd-page')) return;
   if (!_applyNpcRoute(event.detail.sub)) return;
   event.preventDefault();
   _refreshList({ keepScroll: true });
   _refreshActivePanel();
 });
 
+document.addEventListener('keydown', event => {
+  if (!document.querySelector('.npc-rd-page')) return;
+  const target = event.target;
+  const typing = target?.matches?.('input, textarea, select, [contenteditable="true"]');
+  if (target?.id === 'npc-express-name' && event.key === 'Enter') {
+    event.preventDefault();
+    if (event.shiftKey) _npcExpressCreate({ withoutRole: true });
+    else document.getElementById('npc-express-role')?.focus();
+    return;
+  }
+  if (target?.id === 'npc-express-role' && event.key === 'Enter') {
+    event.preventDefault();
+    _npcExpressCreate();
+    return;
+  }
+  if (target?.id === 'npc-rd-event-text' && event.key === 'Enter') {
+    event.preventDefault();
+    _npcAddRelationEvent({ dataset: { id: target.dataset.npcId } });
+    return;
+  }
+  if (event.key === 'Escape' && _npcExpressOpen) {
+    event.preventDefault();
+    _npcExpressOpen = false;
+    _npcExpressName = '';
+    _renderPage(document.getElementById('main-content'));
+    return;
+  }
+  if (!typing && event.key === '/') {
+    event.preventDefault();
+    document.getElementById('npc-search')?.focus();
+    return;
+  }
+  if (!typing && event.key.toLowerCase() === 'n' && STATE.isAdmin && _npcView === 'mj') {
+    event.preventDefault();
+    _npcExpressToggle(true);
+    return;
+  }
+  if (!typing && /^[1-3]$/.test(event.key) && STATE.isAdmin && _npcView === 'mj') {
+    event.preventDefault();
+    _npcSetSheetTab(NPC_ROUTE_SHEET_TABS[Number(event.key) - 1]);
+    return;
+  }
+  if ((!typing || target?.id === 'npc-search') && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+    const list = [...new Map(_getFiltered().map(n => [n.id, n])).values()];
+    if (!list.length) return;
+    event.preventDefault();
+    const index = Math.max(0, list.findIndex(n => n.id === _activeId));
+    const next = event.key === 'ArrowDown' ? Math.min(list.length - 1, index + 1) : Math.max(0, index - 1);
+    selectNpc(list[next].id);
+    requestAnimationFrame(() => document.querySelector(`.npc-rd-row[data-id="${CSS.escape(list[next].id)}"]`)?.scrollIntoView({ block: 'nearest' }));
+  }
+});
+
 
 registerActions({
   _npcSearch:                (el) => _npcSearch(el.value),
+  npcSetView:                (btn) => _npcSetView(btn),
+  npcSetPreviewPlayer:       (el) => _npcSetPreviewPlayer(el),
+  npcSetOrgFilter:           (el) => _npcSetOrgFilter(el),
+  npcSetGroupBy:             (el) => _npcSetGroupBy(el),
+  npcToggleGroup:            (btn) => _npcToggleGroup(btn),
+  npcToggleIncomplete:       () => _npcToggleIncomplete(),
+  npcToggleMine:             () => _npcToggleMine(),
+  npcExpressToggle:          () => _npcExpressToggle(),
+  npcExpressName:            (el) => { _npcExpressName = el.value; },
+  npcExpressCreate:          () => _npcExpressCreate(),
+  npcCreateFromSearch:       () => _npcCreateFromSearch(),
   npcInlineSave:             (el) => _npcInlineSave(el),
   npcPreviewDerived:         (el) => _npcPreviewDerived(el),
   npcAllocateStat:           (btn) => _npcAllocateStat(btn),
   npcAdjustVital:            (btn) => _npcAdjustVital(btn),
   npcEditLevel:              (btn) => _npcEditLevel(btn),
   npcSetAffiniteNiveau:      (btn) => _npcSetAffiniteNiveau(btn),
+  npcSetAffiniteMode:        (btn) => _npcSetAffiniteMode(btn),
+  npcEventDelta:             (btn) => _npcEventDelta(btn),
+  npcAddRelationEvent:       (btn) => _npcAddRelationEvent(btn),
+  npcToggleRelationHistory:  (btn) => _npcToggleRelationHistory(btn),
+  npcDeleteRelationEvent:    (btn) => _npcDeleteRelationEvent(btn),
+  npcGoPosture:              () => _npcGoPosture(),
+  npcGoMissing:              (btn) => _npcGoMissing(btn),
+  npcCrossFilter:            (btn) => _npcCrossFilterSet(btn),
+  npcCrossSearch:            (el) => _npcCrossSearchInput(el),
+  npcCrossSort:              (el) => _npcCrossSortSet(el),
+  npcCrossOpen:              (btn) => _npcCrossOpenRow(btn),
+  npcShowAllRelations:       () => _npcShowAllRelations(),
+  npcSetExceptionLevel:      (btn) => _npcSetExceptionLevel(btn),
+  npcSetExceptionType:       (btn) => _npcSetExceptionType(btn),
+  npcSetFeelingLevel:        (btn) => _npcSetFeelingLevel(btn),
+  npcSetFeelingSuggestion:   (btn) => _npcSetFeelingSuggestion(btn),
+  npcSaveException:          (el) => _npcSaveException(el),
+  npcRemoveException:        (btn) => _npcRemoveException(btn),
+  npcSaveFeeling:            (el) => _npcSaveFeeling(el),
+  npcAddOrg:                 (el) => _npcAddOrg(el),
+  npcRemoveOrg:              (btn) => _npcRemoveOrg(btn),
+  npcAdjustCurrent:          (btn) => _npcAdjustCurrent(btn),
+  npcResetCurrent:           (btn) => _npcResetCurrent(btn),
   npcRelSelect:              (btn) => { const id = btn?.dataset?.affId || null; _npcRelSel = (id && _npcRelSel !== id) ? id : null; _refreshActivePanel(); },
   npcCharPickFilter:         (el)  => { const q = (el.value || '').trim().toLowerCase(); el.closest('.npc-charpick-panel')?.querySelectorAll('.npc-charpick-opt').forEach(o => { o.style.display = o.textContent.toLowerCase().includes(q) ? '' : 'none'; }); },
   npcOpenLinkModal:          (btn) => _npcOpenLinkModal(btn),
@@ -4691,6 +6085,9 @@ registerActions({
   npcDeleteAction:           (btn) => _npcDeleteAction(btn),
   npcSetPanel:               (btn) => _npcSetPanel(btn?.dataset?.panel),
   npcSetPhoto:               (btn) => _npcSetPhoto(btn),
+  npcAddPortrait:            (btn) => _npcAddPortrait(btn),
+  npcSelectPortrait:         (btn) => _npcSelectPortrait(btn),
+  npcDeletePortrait:         (btn) => _npcDeletePortrait(btn),
   npcViewPhoto:              (btn) => _npcViewPhoto(btn),
   npcSetStatut:              (btn) => _npcSetStatut(btn),
   npcSetListView:            (btn) => _npcSetListView(btn),
@@ -4728,6 +6125,9 @@ registerActions({
   _aftEditType:            (btn) => _aftEditType(btn.dataset.id),
   _aftSelectEmoji:         (btn) => _aftSelectEmoji(btn.dataset.val),
   _aftSelectColor:         (btn) => _aftSelectColor(btn.dataset.val),
+  _aftColorPickerInput:    (el) => _aftColorPickerInput(el),
+  _aftColorHexInput:       (el) => _aftColorHexInput(el),
+  _aftColorHexCommit:      (el) => _aftColorHexCommit(el),
   _selectHistEditDelta:    (btn) => _selectHistEditDelta(Number(btn.dataset.val)),
   _openMjStatsView:        ()   => _openMjStatsView(),
   _npcSelectOrg:           (btn) => _npcSelectOrg(btn),

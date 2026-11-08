@@ -498,6 +498,7 @@ function _syncCharNotes(c) {
 }
 
 const _RELATION_PALETTE = {
+  '':       ['rgba(138,155,180,.06)','rgba(138,155,180,.16)','#8a9bb4'],
   lien:     ['rgba(157,111,255,.14)','rgba(157,111,255,.4)','#c8aaff'],
   allie:    ['rgba(34,195,142,.14)','rgba(34,195,142,.4)','#5dd5a8'],
   neutre:   ['rgba(244,196,48,.14)','rgba(244,196,48,.4)','#f4c430'],
@@ -513,7 +514,7 @@ function renderCharRelations(c, canEdit) {
   }
   return `<div class="rel-grid">
     ${rels.map((r, i) => {
-      const sent = _RELATION_PALETTE[r.sent] || _RELATION_PALETTE.neutre;
+      const sent = _RELATION_PALETTE[r.sent ?? ''] || _RELATION_PALETTE[''];
       const ini = (r.ini || r.nom || '?')[0]?.toUpperCase() || '?';
       return `<div class="rel-card" style="--rel-c:${sent[2]};--rel-bg:${sent[0]};--rel-bd:${sent[1]}">
         ${r.img
@@ -522,7 +523,7 @@ function renderCharRelations(c, canEdit) {
         <div class="rel-body">
           <div class="rel-name-row">
             <span class="rel-name">${_esc(r.nom || 'Sans nom')}</span>
-            <span class="rel-sentiment">${_esc(r.sentiment || r.sent || 'neutre')}</span>
+            ${r.sentiment || r.sent ? `<span class="rel-sentiment">${_esc(r.sentiment || r.sent)}</span>` : ''}
           </div>
           ${r.role ? `<span class="rel-role">${_esc(r.role)}</span>` : ''}
           ${r.note ? `<div class="rel-note">${_esc(r.note)}</div>` : ''}
@@ -537,13 +538,14 @@ function renderCharRelations(c, canEdit) {
 }
 
 const _REL_SENTS = [
-  { k:'lien',     lbl:'💜 Lien' },
-  { k:'allie',    lbl:'💚 Allié' },
-  { k:'neutre',   lbl:'💛 Neutre' },
-  { k:'mefiance', lbl:'🧡 Méfiance' },
-  { k:'ennemi',   lbl:'❤️ Ennemi' },
+  { k:'',         lbl:'Pas d’avis' },
+  { k:'ennemi',   lbl:'Hostile' },
+  { k:'mefiance', lbl:'Méfiant' },
+  { k:'neutre',   lbl:'Neutre' },
+  { k:'allie',    lbl:'Amical' },
+  { k:'lien',     lbl:'Allié' },
 ];
-const _REL_DEFAULT_LBL = { lien:'Lien', allie:'Allié', neutre:'Neutre', mefiance:'Méfiance', ennemi:'Ennemi' };
+const _REL_DEFAULT_LBL = { lien:'Allié', allie:'Amical', neutre:'Neutre', mefiance:'Méfiant', ennemi:'Hostile', '':'' };
 
 let _relNpcsCache = []; // PNJ chargés pour le sélecteur de relation (modale)
 async function _openRelationModal(charId, idx) {
@@ -551,7 +553,7 @@ async function _openRelationModal(charId, idx) {
   const isEdit = Number.isInteger(idx) && idx >= 0;
   const r = isEdit ? (c.relations || [])[idx] : null;
   if (isEdit && !r) return;
-  const curSent = r?.sent || 'neutre';
+  const curSent = r?.sent ?? 'neutre';
   // PNJ liables : tous pour le MJ, seulement les non cachés (embauchable !== false)
   // pour un joueur qui édite la fiche.
   _relNpcsCache = (await loadCollection('npcs').catch(() => []))
@@ -637,12 +639,12 @@ async function _csV3SaveRelation(charId, idx) {
   const c = getCharacterById(charId); if (!c) return;
   const nom = document.getElementById('rel-nom')?.value.trim();
   if (!nom) { showNotif('Indique au moins un nom.', 'error'); return; }
-  const sent = document.getElementById('rel-sent')?.value || 'neutre';
+  const sent = document.getElementById('rel-sent')?.value ?? 'neutre';
   const rel = {
     nom,
     role:      document.getElementById('rel-role')?.value.trim() || '',
     sent,
-    sentiment: document.getElementById('rel-sentiment')?.value.trim() || (_REL_DEFAULT_LBL[sent] || sent),
+    sentiment: document.getElementById('rel-sentiment')?.value.trim() || (_REL_DEFAULT_LBL[sent] || ''),
     note:      document.getElementById('rel-note')?.value.trim() || '',
     npcId:     document.getElementById('rel-npcid')?.value || '',
     img:       document.getElementById('rel-img')?.value || '',

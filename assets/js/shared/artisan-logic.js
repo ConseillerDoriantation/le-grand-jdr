@@ -93,16 +93,24 @@ export function ringTracks(item = {}, settings = {}) {
   return statTracks;
 }
 
-function statUse(item = {}) {
-  const values = Object.values(item?.upgrades?.statBonus || {}).map(n);
-  return getItemFragmentCategory(item) === 'Amulette'
-    ? values.filter(Boolean).length
-    : values.reduce((sum, value) => sum + value, 0);
-}
-
 function compatibleFragments(char = {}, item = {}) {
   const category = getItemFragmentCategory(item);
   return Object.values(char?.traitFragments?.[category] || {}).reduce((sum, value) => sum + n(value), 0);
+}
+
+/**
+ * Nombre de points de caractéristiques déjà consommés par l'objet.
+ * Les bonus présents à l'acquisition font partie de son potentiel, au même
+ * titre que les points ajoutés ensuite par l'Artisan.
+ *
+ * Les anneaux restent à part : chacun de leurs bonus possède sa propre piste
+ * de renforcement et n'utilise donc pas ce budget commun.
+ */
+export function statPointUse(item = {}) {
+  if (getItemFragmentCategory(item) === 'Anneau') return 0;
+  const base = ITEM_STAT_META.reduce((sum, meta) => sum + n(getItemBaseStatBonus(item, meta.full)), 0);
+  const upgrades = Object.values(item?.upgrades?.statBonus || {}).reduce((sum, value) => sum + n(value), 0);
+  return base + upgrades;
 }
 
 export function possibleActions(char = {}, item = {}, settings = {}) {
@@ -115,7 +123,7 @@ export function possibleActions(char = {}, item = {}, settings = {}) {
   const fragments = Number.isFinite(Number(settings.fragmentCount)) ? n(settings.fragmentCount) : compatibleFragments(char, item);
   const category = getItemFragmentCategory(item);
   const statCap = statCapAt(item, item.rarete, s);
-  const usedStats = statUse(item);
+  const usedStats = statPointUse(item);
   const tracks = ringTracks(item, s);
   const statCost = category === 'Anneau'
     ? n(s.ring?.[Math.min(statCap, 1)])
@@ -143,7 +151,7 @@ export function isMaxed(char = {}, item = {}, settings = {}) {
   const category = getItemFragmentCategory(item);
   const statsFull = category === 'Anneau'
     ? ringTracks(item, settings).every(track => track.level >= track.cap)
-    : statUse(item) >= statCapAt(item, item.rarete, settings);
+    : statPointUse(item) >= statCapAt(item, item.rarete, settings);
   return traitsFull && statsFull && firstGainRarity(item, settings) == null
     && !actions.addTrait && !actions.replaceTrait && !actions.stat && !actions.reforge;
 }

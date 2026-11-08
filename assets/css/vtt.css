@@ -13045,6 +13045,35 @@ button.vtt-ms-fact:last-child:hover { border-right-color: transparent; }
 .vtt-ms-chip.trait { color:var(--arcane,#9d6fff); background:color-mix(in srgb,var(--arcane,#9d6fff) 14%,transparent); }
 .vtt-ms-it-acts { display:flex; gap:1px; opacity:0; transition:opacity .12s; align-self:center; }
 .vtt-mini-panel .vtt-ms-it:hover .vtt-ms-it-acts, .vtt-ms-it-acts:focus-within { opacity:1; }
+
+.vtt-recycle-choice {
+  width:min(320px, 100%);
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+  text-align:left;
+}
+.vtt-recycle-choice > b { color:var(--text); font-size:13px; text-align:center; }
+.vtt-recycle-choice > small { margin-bottom:3px; color:var(--text-dim); font-size:11px; line-height:1.4; text-align:center; }
+.vtt-recycle-choice label {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  min-height:38px;
+  padding:7px 10px;
+  border:1px solid var(--border);
+  border-radius:9px;
+  background:var(--bg-elevated);
+  color:var(--text-soft);
+  cursor:pointer;
+}
+.vtt-recycle-choice label:has(input:checked) {
+  border-color:var(--arcane);
+  background:color-mix(in srgb,var(--arcane) 12%,var(--bg-elevated));
+  color:var(--text);
+}
+.vtt-recycle-choice input { width:15px; height:15px; accent-color:var(--arcane); }
+.vtt-recycle-choice span { font-size:12px; font-weight:600; }
 .vtt-ms-it-btn { width:26px; height:26px; border-radius:7px; display:grid; place-items:center; color:var(--text-muted); background:none; border:0; cursor:pointer; }
 .vtt-ms-it-btn:hover { background:var(--bg-card2,var(--bg-panel)); color:var(--text); }
 .vtt-ms-it-btn.danger:hover { color:var(--crimson,#ff5a7e); background:color-mix(in srgb,var(--crimson,#ff5a7e) 12%,transparent); }

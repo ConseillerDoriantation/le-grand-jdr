@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   traitCapAt, statCapAt, unlockRarity, firstGainRarity,
-  ringTracks, possibleActions, isMaxed, dismantlePreview,
+  ringTracks, statPointUse, possibleActions, isMaxed, dismantlePreview,
 } from '../assets/js/shared/artisan-logic.js';
 import { craftCategoryForItem } from '../assets/js/shared/craft-engine.js';
 
@@ -50,6 +50,21 @@ test('actions possibles respectent fragments, or, mode MJ et gain de reforge', (
   assert.equal(rich.stat, true);
   assert.equal(rich.reforge, true);
   assert.equal(possibleActions(char, item, { upgrade: settings, gold: 0, freeMode: true }).stat, true);
+});
+
+test('les statistiques natives consomment déjà le potentiel de l objet', () => {
+  const char = { traitFragments: {} };
+  const oneNativePoint = { ...sword(3), for: 1 };
+  const fullAtAcquisition = { ...sword(3), for: 1, dex: 1 };
+  const mixed = { ...sword(3), for: 1, upgrades: { statBonus: { dex: 1 } } };
+
+  assert.equal(statPointUse(oneNativePoint), 1);
+  assert.equal(possibleActions(char, oneNativePoint, { upgrade: settings, gold: 9999 }).stat, true);
+  assert.equal(statPointUse(fullAtAcquisition), 2);
+  assert.equal(possibleActions(char, fullAtAcquisition, { upgrade: settings, gold: 9999, freeMode: true }).stat, false);
+  assert.equal(statPointUse(mixed), 2);
+  assert.equal(possibleActions(char, mixed, { upgrade: settings, gold: 9999 }).stat, false);
+  assert.equal(statPointUse({ slotBijou: 'Anneau', for: 2 }), 0, 'les anneaux gardent leurs pistes indépendantes');
 });
 
 test('isMaxed tient compte du prochain gain de rareté', () => {
