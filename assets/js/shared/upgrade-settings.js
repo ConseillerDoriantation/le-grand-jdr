@@ -44,7 +44,7 @@ export const DEFAULT_UPGRADE_SETTINGS = {
     deconstructCost: 0,        // PO pour détruire un item et récupérer son trait
     addTraitFromFragment: 100, // PO pour poser un fragment sur slot vide
     overwriteTrait: 200,       // PO pour écraser un trait existant
-    extractAllTraits: false,   // true = détruire récupère tous les traits, false = seulement le 1er
+    extractAllTraits: false,   // true = tous les traits, false = un trait recyclable choisi par le joueur
   },
   weapon: {
     '1H': { 1: 150, 2: 300 },                    // 1ᵉʳ, 2ᵉ point de stat
@@ -285,7 +285,7 @@ function _renderUpgradeSettingsModal() {
         <label class="sh-admin-row-checkbox" style="margin-top:8px;padding:6px 0">
           <input type="checkbox" ${s.trait.extractAllTraits ? 'checked' : ''}
             data-change="_upgCheck" data-field="trait.extractAllTraits">
-          <span>Récupérer <b>tous</b> les traits à la destruction <small style="color:var(--text-dim)">(sinon seul le 1ᵉʳ)</small></span>
+          <span>Récupérer <b>tous</b> les traits à la destruction <small style="color:var(--text-dim)">(sinon un trait au choix)</small></span>
         </label>
       </div>
 

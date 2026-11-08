@@ -91,9 +91,10 @@ test('la Trame encode aussi l’acte actif dans sa sous-route', async () => {
   assert.match(story, /data-acte="\$\{_esc\(acte\)\}"[\s\S]*data-nav-sub=/);
 });
 
-test('PNJ restaure la fiche, son panneau et son onglet sans recréer les abonnements', async () => {
+test('PNJ restaure la fiche et son onglet sans recréer les abonnements', async () => {
   const npcs = await read('assets/js/features/npcs.js');
-  assert.match(npcs, /_npcRouteSub\(id = _activeId, panel = _npcPanel, sheetTab = _npcSheetTab\)/);
+  assert.match(npcs, /_npcRouteSub\(id = _activeId, sheetTab = _npcSheetTab\)/);
+  assert.match(npcs, /NPC_ROUTE_SHEET_TABS = \['fiche', 'combat', 'sorts'\]/);
   assert.match(npcs, /_applyNpcRoute\(event\.detail\.sub\)[\s\S]*event\.preventDefault\(\)[\s\S]*_refreshActivePanel\(\)/);
   assert.match(npcs, /data-nav-page="npcs" data-nav-sub=/);
   assert.match(npcs, /selectNpc\(id, \{ syncRoute = true, replace = false \} = \{\}\)/);

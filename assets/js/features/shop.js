@@ -54,7 +54,7 @@ import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { shopAffinityScore, shopCartTotals, shopItemBuyState, shopUpgradeGain } from '../shared/shop-cart.js';
 import { atelierApplyBuild, atelierCompactSlots, atelierGainScore, atelierNetCost } from '../shared/shop-atelier.js';
 import { damageProfileToRelations, parseShopItemQuickEntry, relationsToDamageProfile } from '../shared/shop-item-editor.js';
-import { cleanNonRecyclableTraits, nonRecyclableTraitNames } from '../shared/trait-recycling.js';
+import { cleanNonRecyclableTraits, nonRecyclableTraitNames, isTraitRecyclable } from '../shared/trait-recycling.js';
 import { getRouteSub, setRouteSub } from '../shared/route.js';
 import {
   equipmentSlotAcceptsItem, getEquipmentItemOptions, getEquipmentSlot,
@@ -1541,6 +1541,25 @@ function _getItemTraits(item) {
   return [];
 }
 
+function _traitPurchaseStatus(item, trait) {
+  const recyclable = isTraitRecyclable(Array.isArray(item?.traits) ? item : { ...item, traits: _getItemTraits(item) }, trait);
+  return {
+    recyclable,
+    label: recyclable ? 'Recyclable' : 'Non recyclable',
+    explanation: recyclable
+      ? 'Ce trait pourra être récupéré en démontant l’objet.'
+      : 'Ce trait est lié à l’objet et sera perdu au démontage.',
+  };
+}
+
+function _traitPurchasePill(item, trait, { detail = false } = {}) {
+  const status = _traitPurchaseStatus(item, trait);
+  return `<span class="shc-trait ${status.recyclable ? 'is-recyclable' : 'is-bound'}${detail ? ' is-detail' : ''}"
+    title="${_esc(`${status.label} — ${status.explanation}`)}" aria-label="${_esc(`${trait}, ${status.label}`)}">
+    <i class="shc-trait-mark" aria-hidden="true"></i><span class="shc-trait-name">${_esc(trait)}</span>${detail ? `<small>${status.label}</small>` : ''}
+  </span>`;
+}
+
 // Contexte commun à tous les articles d'un rendu (calculé une seule fois).
 function _cardCtx() {
   return { ..._shopSmartCtx(), favs: _getFavs() };
@@ -1707,8 +1726,8 @@ function _renderCard(item, ctx, { showCat = false, sortable = false } = {}) {
 
   const tags = [
     ..._getStatBonusEntries(item).map(b => `<span class="shc-bonus" style="--stat:${b.color}">${_esc(b.short)} ${b.val > 0 ? '+' : ''}${b.val}</span>`),
-    ...traits.slice(0, 2).map(t => `<span class="shc-trait" title="${_esc(t)}">${_esc(t)}</span>`),
-    traits.length > 2 ? `<span class="shc-trait is-more" title="${_esc(traits.slice(2).join(' · '))}">+${traits.length - 2}</span>` : '',
+    ...traits.slice(0, 2).map(t => _traitPurchasePill(item, t)),
+    traits.length > 2 ? `<span class="shc-trait is-more" title="${_esc(traits.slice(2).map(trait => `${trait} (${_traitPurchaseStatus(item, trait).label})`).join(' · '))}">+${traits.length - 2}</span>` : '',
   ].join('');
 
   return `
@@ -2043,7 +2062,8 @@ function _renderDetailPanelHtml() {
     <div class="shc-detail-body">
       <div><h2>${_esc(item.nom || 'Article')}</h2><p class="shc-detail-type">${typeLine}</p></div>
       <div class="shc-detail-facts">${facts.map(fact => `<div><small>${_esc(fact.lbl)}</small><b${fact.color ? ` style="color:${fact.color}"` : ''}>${_esc(fact.val)}</b></div>`).join('')}</div>
-      ${bonuses.length || traits.length ? `<div class="shc-detail-pills">${bonuses.map(b => `<span class="shc-bonus" style="--stat:${b.color}">${b.short} ${b.val > 0 ? '+' : ''}${b.val}</span>`).join('')}${traits.map(t => `<span class="shc-trait">${_esc(t)}</span>`).join('')}</div>` : ''}
+      ${bonuses.length ? `<div class="shc-detail-pills">${bonuses.map(b => `<span class="shc-bonus" style="--stat:${b.color}">${b.short} ${b.val > 0 ? '+' : ''}${b.val}</span>`).join('')}</div>` : ''}
+      ${traits.length ? `<section class="shc-detail-traits"><div class="shc-detail-traits-head"><b>Traits</b><span class="shc-trait-legend"><i class="is-recyclable"></i> Recyclable <i class="is-bound"></i> Non recyclable</span></div><div class="shc-detail-pills">${traits.map(trait => _traitPurchasePill(item, trait, { detail: true })).join('')}</div><p>Un trait recyclable peut devenir un fragment au démontage. Un trait non recyclable reste lié à cet objet et sera perdu.</p></section>` : ''}
       ${desc ? `<p class="shc-detail-desc">${_esc(desc)}</p>` : ''}
       ${compareHtml}
     </div>

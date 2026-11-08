@@ -238,7 +238,7 @@ function renderReforger() {
 
 function renderDemonter() {
   const result = currentResult();
-  return block('Démonter', 'Démontage, recyclage et extraction des traits forment désormais une seule action.', `<div class="acfg-lines"><div><span>Coût du démontage</span>${field('dis.cost', draft.dis.cost, { step: 10, unit: 'PO' })}</div></div>${range('dis.pct', draft.dis.pct, 'Matériaux récupérés')}<div class="acfg-line-control"><span>Traits récupérés</span>${segmented('dis.all', [[false, 'Le 1er seulement'], [true, 'Tous']], draft.dis.all)}</div>${example(disSay(result))}`)
+  return block('Démonter', 'Démontage, recyclage et extraction des traits forment désormais une seule action.', `<div class="acfg-lines"><div><span>Coût du démontage</span>${field('dis.cost', draft.dis.cost, { step: 10, unit: 'PO' })}</div></div>${range('dis.pct', draft.dis.pct, 'Matériaux récupérés')}<div class="acfg-line-control"><span>Traits récupérés</span>${segmented('dis.all', [[false, '1 au choix'], [true, 'Tous']], draft.dis.all)}</div>${example(disSay(result))}`)
     + block('Revendre', 'Le changement vaut pour les ventes suivantes et utilise les tarifs actuels.', `${range('resale.pct', draft.resale.pct, 'Reprise des améliorations')}${example(resSay(result))}`);
 }
 

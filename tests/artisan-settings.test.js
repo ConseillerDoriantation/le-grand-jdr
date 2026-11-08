@@ -110,7 +110,10 @@ test('artisanat : le démontage réel partage matériaux, coût et règle des tr
   const vtt = source('../assets/js/features/vtt/vtt-mini-fiche.js');
   assert.match(artisan, /craftRecycleQty\(requirement\.quantite, craftCfg\)/);
   assert.match(artisan, /inv\.concat\(returned\)/);
+  assert.match(artisan, /op\.trait \? \[op\.trait\] : \[\]/);
   assert.match(vtt, /upgradeCfg\.trait\?\.deconstructCost/);
-  assert.match(vtt, /upgradeCfg\.trait\?\.extractAllTraits \? itemTraits : itemTraits\.slice\(0, 1\)/);
+  assert.match(vtt, /Quel trait veux-tu récupérer/);
+  assert.match(vtt, /traits = \[itemTraits\[selectedIndex\]\]/);
+  assert.doesNotMatch(vtt, /const traits = upgradeCfg\.trait\?\.extractAllTraits \? itemTraits : itemTraits\.slice\(0, 1\)/);
   assert.match(vtt, /compte: c\.compte/);
 });

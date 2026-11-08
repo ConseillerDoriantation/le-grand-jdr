@@ -32,6 +32,16 @@ test('la fiche article est un panneau latéral et propose la reprise', () => {
   assert.match(css, /\.shc-detail-pills \.shc-trait\s*\{[^}]*height:\s*auto[^}]*white-space:\s*normal[^}]*overflow-wrap:\s*anywhere/s);
 });
 
+test('les traits annoncent clairement leur recyclage avant achat', () => {
+  assert.match(shop, /isTraitRecyclable/);
+  assert.match(shop, /function _traitPurchasePill/);
+  assert.match(shop, /Recyclable[\s\S]*Non recyclable/);
+  assert.match(shop, /Un trait recyclable peut devenir un fragment au démontage/);
+  assert.match(css, /\.shc-trait\.is-recyclable\s*\{/);
+  assert.match(css, /\.shc-trait\.is-bound\s*\{/);
+  assert.match(css, /\.shc-detail-traits\s*\{/);
+});
+
 test('les onglets utilisent des icônes SVG et le portefeuille affiche le solde projeté', () => {
   assert.match(shop, /_shopIcon\('bag'\)\} Boutique/);
   assert.match(shop, /_shopIcon\('wand'\)\} Atelier/);

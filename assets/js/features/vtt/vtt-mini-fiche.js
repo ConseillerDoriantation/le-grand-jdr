@@ -12,7 +12,7 @@ import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc, _norm, loadingHtml } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
-import { openModal, closeModalDirect } from '../../shared/modal.js';
+import { openModal, closeModalDirect, confirmModal } from '../../shared/modal.js';
 import { getArmorSetData, syncEquipmentAfterInventoryMutation, _getTraits } from '../../shared/equipment-utils.js';
 import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode, isLightSpell, lightSpellRadius } from '../../shared/spell-runes.js';
 import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
@@ -814,7 +814,24 @@ async function _vttMsRecycle(charId, uid, invIndex) {
              : sig.kind === 'bijou'  ? (item.slotBijou  || '')
              : 'arme';
   const itemTraits = recyclableTraits(item, _getTraits(item).filter(Boolean).map(String));
-  const traits = upgradeCfg.trait?.extractAllTraits ? itemTraits : itemTraits.slice(0, 1);
+  let traits = upgradeCfg.trait?.extractAllTraits ? itemTraits : itemTraits.slice(0, 1);
+  if (!upgradeCfg.trait?.extractAllTraits && itemTraits.length > 1) {
+    let selectedIndex = -1;
+    const choicePromise = confirmModal(
+      `<div class="vtt-recycle-choice"><b>Quel trait veux-tu récupérer ?</b><small>Un seul deviendra un fragment. Les autres seront perdus avec l’objet.</small>${itemTraits.map((trait, index) => `<label><input type="radio" name="vtt-recycle-trait" data-trait-index="${index}"><span>◆ ${_esc(trait)}</span></label>`).join('')}</div>`,
+      { title: 'Choisir le trait à recycler', confirmLabel: 'Démonter avec ce trait', cancelLabel: 'Annuler', danger: true, icon: '♻️' },
+    );
+    const confirmButton = document.getElementById('cm-confirm');
+    if (confirmButton) confirmButton.disabled = true;
+    document.querySelectorAll('input[name="vtt-recycle-trait"]').forEach(input => {
+      input.addEventListener('change', () => {
+        selectedIndex = Number(input.dataset.traitIndex);
+        if (confirmButton) confirmButton.disabled = false;
+      });
+    });
+    if (!await choicePromise || selectedIndex < 0) return;
+    traits = [itemTraits[selectedIndex]];
+  }
   const gainFrags = !!(slot && traits.length);
 
   if (!returnedLog.length && !gainFrags) {

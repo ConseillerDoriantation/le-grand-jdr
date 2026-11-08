@@ -12563,6 +12563,9 @@ function _entityTokenVisualKey(entity) {
   return JSON.stringify({
     nom:entity.nom, photoURL:entity.photoURL, photo:entity.photo,
     avatar:entity.avatar, imageUrl:entity.imageUrl,
+    // Le portrait actif suffit à invalider le visuel. On ne sérialise surtout
+    // pas toute la galerie (images base64 lourdes) à chaque snapshot.
+    activePortraitId:entity.activePortraitId,
     hp:entity.hp, pv:entity.pv, pvBase:entity.pvBase,
     pm:entity.pm, pmCurrent:entity.pmCurrent, pmBase:entity.pmBase,
     niveau:entity.niveau, stats:entity.stats, statsBonus:entity.statsBonus,
