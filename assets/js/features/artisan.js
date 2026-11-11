@@ -1576,13 +1576,14 @@ function _renderRemovableStats(item, invIndex) {
   const added = _getUpgradedStatEntries(item);
   if (!added.length) return '';
   return `<div class="art-removable" style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border-md)">
-    <small class="art-muted" style="display:block;margin-bottom:6px">Points placés à l'Artisan — retirables (or remboursé ; les stats d'origine restent) :</small>
+    <small class="art-muted" style="display:block;margin-bottom:6px">Points placés à l'Artisan — retirables (l'or dépensé n'est pas rendu ; les stats d'origine restent) :</small>
     <div style="display:flex;flex-wrap:wrap;gap:6px">${added.map(e =>
       `<button type="button" class="btn btn-outline btn-sm" data-action="_artisanRemoveStatPoint" data-i="${invIndex}" data-stat="${_esc(e.meta.full)}" title="Retirer 1 point de ${_esc(e.meta.label)}">↩ ${_esc(e.meta.short)} −1 <span class="art-muted">(${e.val})</span></button>`).join('')}</div>
   </div>`;
 }
 
-// — Action : retirer un point de stat PLACÉ (jamais les natives). Rembourse l'or.
+// — Action : retirer un point de stat PLACÉ (jamais les natives). L'or dépensé
+// n'est PAS rendu (sinon le joueur ajuste ses stats sans conséquence).
 async function _artisanRemoveStatPoint(invIndex, statFullKey) {
   const c = _getActiveArtisanChar();
   if (!c) return;
@@ -1592,17 +1593,16 @@ async function _artisanRemoveStatPoint(invIndex, statFullKey) {
   if (!meta) return;
   if (getItemUpgradeStatBonus(item, meta.full) <= 0) { showNotif('Aucun point placé à retirer sur cette stat.', 'error'); return; }
 
-  // Dernière amélioration de stat de l'historique pour cette stat → remboursement + cohérence.
+  // Dernière amélioration de stat de l'historique pour cette stat → cohérence de l'historique.
   const hist = Array.isArray(item.upgrades?.history) ? [...item.upgrades.history] : [];
   const STAT_OPS = new Set(['weapon_add_point', 'armor_add_point', 'ring_upgrade_stat', 'amulet_add_stat']);
   let histIdx = -1;
   for (let i = hist.length - 1; i >= 0; i--) {
     if (STAT_OPS.has(hist[i]?.op) && hist[i]?.stat === meta.full) { histIdx = i; break; }
   }
-  const refund = histIdx >= 0 ? (parseInt(hist[histIdx].cost) || 0) : 0;
 
   if (!await confirmModal(
-    `Retirer 1 point de « ${_esc(meta.label)} » placé à l'Artisan ?<br>${refund > 0 ? `<span style="color:var(--gold)">${refund} PO remboursés.</span>` : 'Aucun or à rembourser.'}<br><small style="color:var(--text-dim)">Les stats d'origine de l'objet ne sont pas touchées.</small>`,
+    `Retirer 1 point de « ${_esc(meta.label)} » placé à l'Artisan ?<br><span style="color:var(--text-dim)">L'or dépensé n'est pas rendu.</span><br><small style="color:var(--text-dim)">Les stats d'origine de l'objet ne sont pas touchées.</small>`,
     { title: '↩ Retirer un point', confirmLabel: 'Retirer', danger: false, icon: '↩' })) return;
 
   const inv = [...c.inventaire];
@@ -1617,11 +1617,9 @@ async function _artisanRemoveStatPoint(invIndex, statFullKey) {
   inv[invIndex] = newItem;
   c.inventaire = inv;
 
-  if (refund > 0) _refundGold(c, refund, `Artisan : retrait +1 ${meta.short} sur ${item.nom || 'objet'}`);
-
   await _persistChar(c);
   STORE.flash = invIndex;
-  showNotif(`Point de ${meta.label} retiré${refund > 0 ? ` · ${refund} PO remboursés` : ''}.`, 'success');
+  showNotif(`Point de ${meta.label} retiré.`, 'success');
 }
 
 // — Action : améliorer une seule des stats proposées par l'anneau

@@ -15,15 +15,16 @@ test('armure : cap par stat (anti-dump) côté config + enforcement', () => {
   assert.match(artisan, /getItemUpgradeStatBonus\(item, meta\.full\) >= perStatMax/); // choix désactivé
 });
 
-test('retirer un point : ne touche que les points placés, rembourse l’or', () => {
+test('retirer un point : ne touche que les points placés, sans rembourser l’or', () => {
   // Liste des points AJOUTÉS (upgrades.statBonus) — jamais les natives/de base.
   assert.match(artisan, /function _renderRemovableStats\(item, invIndex\)/);
   assert.match(artisan, /const added = _getUpgradedStatEntries\(item\)/);
-  // Handler : lit le bonus d'upgrade, décrémente statBonus, rembourse via _refundGold.
+  // Handler : lit le bonus d'upgrade, décrémente statBonus.
   assert.match(artisan, /async function _artisanRemoveStatPoint\(invIndex, statFullKey\)/);
   assert.match(artisan, /getItemUpgradeStatBonus\(item, meta\.full\) <= 0/);
   assert.match(artisan, /if \(v > 0\) sb\[meta\.store\] = v; else delete sb\[meta\.store\]/);
-  assert.match(artisan, /_refundGold\(c, refund,/);
+  // L'or dépensé n'est PAS rendu lors d'un retrait (pas de _refundGold dans ce handler).
+  assert.doesNotMatch(artisan, /async function _artisanRemoveStatPoint[\s\S]*?_refundGold\(/);
   assert.match(artisan, /_artisanRemoveStatPoint: \(btn\) =>/); // action enregistrée
   // Présent dans les 4 sections de stats (arme/armure/anneau/amulette) + la définition.
   const count = (artisan.match(/_renderRemovableStats\(item, invIndex\)/g) || []).length;
