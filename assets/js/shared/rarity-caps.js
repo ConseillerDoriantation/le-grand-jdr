@@ -14,6 +14,14 @@ export const DEFAULT_RARITY_CAPS = {
   stats:  { 1: 0, 2: 2, 3: 3, 4: 4, 5: 4 }, // points de stats max par rareté
 };
 
+// Plafonds PROPRES à l'anneau (profondeur, pas largeur) : il n'améliore que ses
+// stats natives, avec un budget de points par rareté distinct du général, et un
+// quota de traits plus serré. Table par aventure (upgrade_settings.rarityCaps.ring).
+export const DEFAULT_RING_CAPS = {
+  traits: { 1: 1, 2: 1, 3: 1, 4: 2, 5: 3 }, // slots de traits max par rareté
+  stats:  { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }, // points de stats (sur ses stats natives)
+};
+
 // Plafond lu dans une table { rareté: plafond }. Rareté hors table → valeur définie
 // la plus proche en dessous ; en dessous de la plus petite clé → la plus petite.
 export function rarityCapFromTable(table, rarete) {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   traitCapAt, statCapAt, unlockRarity, firstGainRarity,
-  ringTracks, statPointUse, possibleActions, isMaxed, dismantlePreview,
+  ringStatTargets, statPointUse, possibleActions, isMaxed, dismantlePreview,
 } from '../assets/js/shared/artisan-logic.js';
 import { craftCategoryForItem } from '../assets/js/shared/craft-engine.js';
 
@@ -19,7 +19,10 @@ const settings = {
   ...DEFAULT_UPGRADE_SETTINGS,
   caps: { ...DEFAULT_UPGRADE_SETTINGS.caps, weapon1H: 2, weapon2H: 4, amulet: 3, ring: 1,
     traitsPerItem: { ...DEFAULT_UPGRADE_SETTINGS.caps.traitsPerItem, arme: 4 } },
-  rarityCaps: { traits: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 } },
+  rarityCaps: {
+    traits: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 },
+    ring: { traits: { 1: 1, 2: 1, 3: 1, 4: 2, 5: 3 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 } },
+  },
 };
 const sword = rarete => ({ template: 'arme', format: 'Arme 1M CaC Phy.', rarete, traits: ['Tranchant'] });
 
@@ -34,11 +37,17 @@ test('firstGainRarity ignore les raretés qui ne donnent aucun budget', () => {
   assert.equal(firstGainRarity(sword(4), settings), null);
 });
 
-test('anneau : pistes indépendantes, effet seulement avec bonus dérivé positif', () => {
+test('anneau : budget de points par rareté, limité à ses stats natives', () => {
   const base = { slotBijou: 'Anneau', rarete: 1, for: 1, dex: 2 };
-  assert.deepEqual(ringTracks(base, settings).map(track => track.id), ['force', 'dexterite']);
-  assert.deepEqual(ringTracks({ ...base, pvMaxBonus: 2 }, settings).map(track => track.id), ['force', 'dexterite', 'effect']);
-  assert.equal(statCapAt(base, 1, settings), 1, 'le cap des pistes d’anneau ne dépend pas de la rareté');
+  // Seules les stats natives sont des cibles (profondeur, pas de nouvelle stat).
+  assert.deepEqual(ringStatTargets(base).map(t => t.id), ['force', 'dexterite']);
+  assert.deepEqual(ringStatTargets({ slotBijou: 'Anneau', rarete: 1 }), [], 'pas de stat native → aucune cible');
+  // Budget de points ET quota de traits PROPRES à l'anneau, croissants par rareté.
+  assert.equal(statCapAt(base, 1, settings), 1);
+  assert.equal(statCapAt(base, 3, settings), 3);
+  assert.equal(statCapAt(base, 5, settings), 5);
+  assert.equal(traitCapAt(base, 3, settings), 1, 'l’anneau garde 1 trait à 3★ (table propre)');
+  assert.equal(traitCapAt(base, 5, settings), 3);
 });
 
 test('actions possibles respectent fragments, or, mode MJ et gain de reforge', () => {
@@ -64,7 +73,7 @@ test('les statistiques natives consomment déjà le potentiel de l objet', () =>
   assert.equal(possibleActions(char, fullAtAcquisition, { upgrade: settings, gold: 9999, freeMode: true }).stat, false);
   assert.equal(statPointUse(mixed), 2);
   assert.equal(possibleActions(char, mixed, { upgrade: settings, gold: 9999 }).stat, false);
-  assert.equal(statPointUse({ slotBijou: 'Anneau', for: 2 }), 0, 'les anneaux gardent leurs pistes indépendantes');
+  assert.equal(statPointUse({ slotBijou: 'Anneau', for: 2 }), 2, 'l’anneau compte ses stats natives dans le budget');
 });
 
 test('isMaxed tient compte du prochain gain de rareté', () => {

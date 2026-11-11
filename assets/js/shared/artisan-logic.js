@@ -3,7 +3,7 @@
 
 import { weaponHands } from './weapon-family.js';
 import { ITEM_STAT_META, getItemBaseStatBonus } from './char-stats.js';
-import { DEFAULT_RARITY_CAPS, rarityCapFromTable } from './rarity-caps.js';
+import { DEFAULT_RARITY_CAPS, DEFAULT_RING_CAPS, rarityCapFromTable } from './rarity-caps.js';
 import { getItemFragmentCategory } from './upgrade-value.js';
 import { craftCategoryForItem, craftRecycleQty, craftRecipeMaterialsFromConfig } from './craft-engine.js';
 import { recyclableTraits, nonRecyclableTraitNames } from './trait-recycling.js';
@@ -14,6 +14,12 @@ const upgradeOf = settings => settings?.upgrade || settings || {};
 const rarityCap = (kind, rarete, settings) => rarityCapFromTable(
   settings?.rarityCaps?.[kind] || DEFAULT_RARITY_CAPS[kind], rarete,
 );
+// Plafonds propres à l'anneau (profondeur sur ses stats natives, traits plus serrés).
+const ringCap = (kind, rarete, settings) => rarityCapFromTable(
+  settings?.rarityCaps?.ring?.[kind] || DEFAULT_RING_CAPS[kind], rarete,
+);
+// Stats réellement portées par l'objet (celles qu'un anneau peut approfondir).
+const nativeStats = item => ITEM_STAT_META.filter(meta => getItemBaseStatBonus(item, meta.full) !== 0);
 
 export function effectiveTraits(item = {}) {
   const removed = new Set(list(item?.upgrades?.removedBaseTraits));
@@ -24,6 +30,8 @@ export function getItemTraitsSlotCount(item = {}, settings = {}) {
   const s = upgradeOf(settings);
   const category = getItemFragmentCategory(item);
   if (!category) return 0;
+  // L'anneau a son propre quota de traits par rareté (indépendant du plafond général).
+  if (category === 'Anneau') return ringCap('traits', item.rarete, s);
   return Math.min(n(s.caps?.traitsPerItem?.[category]), rarityCap('traits', item.rarete, s));
 }
 
@@ -34,9 +42,8 @@ export function traitCapAt(item = {}, rarete = item?.rarete, settings = {}) {
 export function statCapAt(item = {}, rarete = item?.rarete, settings = {}) {
   const s = upgradeOf(settings);
   const category = getItemFragmentCategory(item);
-  // Les pistes d'un anneau sont indépendantes et ne sont volontairement pas
-  // bornées par la rareté. Seuls ses traits utilisent le budget de rareté.
-  if (category === 'Anneau') return n(s.caps?.ring);
+  // L'anneau approfondit SES stats natives avec un budget de points par rareté.
+  if (category === 'Anneau') return ringCap('stats', rarete, s);
   const familyCap = category === 'Amulette'
     ? n(s.caps?.amulet)
     : category === 'arme'
@@ -69,28 +76,15 @@ export function firstGainRarity(item = {}, settings = {}) {
   return null;
 }
 
-export function ringTracks(item = {}, settings = {}) {
+// Stats natives d'un anneau, exposées pour l'UI (chaque stat = cible d'approfondissement).
+// L'effet éventuel reste figé (identité) : il n'est plus amélioré à l'Artisan.
+export function ringStatTargets(item = {}) {
   if (getItemFragmentCategory(item) !== 'Anneau') return [];
-  const cap = statCapAt(item, item.rarete, settings);
-  const statTracks = ITEM_STAT_META
-    .map(meta => ({
-      id: meta.full,
-      store: meta.store,
-      label: meta.label,
-      short: meta.short,
-      base: getItemBaseStatBonus(item, meta.full),
-      level: n(item?.upgrades?.statBonus?.[meta.store]),
-      cap,
-      kind: 'stat',
-    }))
-    .filter(track => track.base !== 0);
-  const derived = ['pvMaxBonus', 'pmMaxBonus', 'vitesseBonus', 'initiativeBonus']
-    .reduce((sum, key) => sum + Math.max(0, Number(item?.[key]) || 0), 0);
-  if (derived > 0) statTracks.push({
-    id: 'effect', label: 'Effet', short: 'Effet', base: derived,
-    level: n(item?.upgrades?.effectBonus), cap, kind: 'effect',
-  });
-  return statTracks;
+  return nativeStats(item).map(meta => ({
+    id: meta.full, store: meta.store, label: meta.label, short: meta.short,
+    base: getItemBaseStatBonus(item, meta.full),
+    level: n(item?.upgrades?.statBonus?.[meta.store]),
+  }));
 }
 
 function compatibleFragments(char = {}, item = {}) {
@@ -103,11 +97,10 @@ function compatibleFragments(char = {}, item = {}) {
  * Les bonus présents à l'acquisition font partie de son potentiel, au même
  * titre que les points ajoutés ensuite par l'Artisan.
  *
- * Les anneaux restent à part : chacun de leurs bonus possède sa propre piste
- * de renforcement et n'utilise donc pas ce budget commun.
+ * L'anneau utilise désormais ce même budget, restreint à ses stats natives
+ * (profondeur), et plafonné par rareté comme une arme.
  */
 export function statPointUse(item = {}) {
-  if (getItemFragmentCategory(item) === 'Anneau') return 0;
   const base = ITEM_STAT_META.reduce((sum, meta) => sum + n(getItemBaseStatBonus(item, meta.full)), 0);
   const upgrades = Object.values(item?.upgrades?.statBonus || {}).reduce((sum, value) => sum + n(value), 0);
   return base + upgrades;
@@ -124,20 +117,20 @@ export function possibleActions(char = {}, item = {}, settings = {}) {
   const category = getItemFragmentCategory(item);
   const statCap = statCapAt(item, item.rarete, s);
   const usedStats = statPointUse(item);
-  const tracks = ringTracks(item, s);
   const statCost = category === 'Anneau'
-    ? n(s.ring?.[Math.min(statCap, 1)])
+    ? n(s.ring?.[usedStats + 1])
     : category === 'Amulette'
       ? n(s.amulet?.[usedStats + 1])
       : n(s.weapon?.[weaponHands(item) === 2 ? '2H' : '1H']?.[usedStats + 1]);
-  const canImproveRing = tracks.some(track => track.level < track.cap);
+  // L'anneau ne peut approfondir que s'il porte au moins une stat native.
+  const hasStatTarget = category === 'Anneau' ? nativeStats(item).length > 0 : true;
   const reforgeEval = settings.reforgeEval || settings.reforge || null;
   const hasGain = firstGainRarity(item, s) != null;
   const dismantle = traits.length > 0 || !!craftCategoryForItem(item);
   const result = {
     addTrait: traitCap > traits.length && fragments > 0 && affordable(s.trait?.addTraitFromFragment),
     replaceTrait: recyclableTraits(item, traits).length > 0 && fragments > 0 && affordable(s.trait?.overwriteTrait),
-    stat: statCap > 0 && (category === 'Anneau' ? canImproveRing : usedStats < statCap) && affordable(statCost),
+    stat: statCap > 0 && usedStats < statCap && hasStatTarget && affordable(statCost),
     reforge: hasGain && !!(free || reforgeEval?.ok),
     dismantle,
   };
@@ -149,9 +142,10 @@ export function isMaxed(char = {}, item = {}, settings = {}) {
   const actions = possibleActions(char, item, settings);
   const traitsFull = effectiveTraits(item).length >= traitCapAt(item, item.rarete, settings);
   const category = getItemFragmentCategory(item);
-  const statsFull = category === 'Anneau'
-    ? ringTracks(item, settings).every(track => track.level >= track.cap)
-    : statPointUse(item) >= statCapAt(item, item.rarete, settings);
+  // L'anneau sans stat native n'a pas de budget à remplir → considéré « plein ».
+  const noRingTarget = category === 'Anneau' && nativeStats(item).length === 0;
+  const statsFull = noRingTarget
+    || statPointUse(item) >= statCapAt(item, item.rarete, settings);
   return traitsFull && statsFull && firstGainRarity(item, settings) == null
     && !actions.addTrait && !actions.replaceTrait && !actions.stat && !actions.reforge;
 }

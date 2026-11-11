@@ -13,7 +13,7 @@ import { registerActions } from '../core/actions.js';
 import { showNotif } from './notifications.js';
 import { _esc } from './html.js';
 import { getRarities, loadRarities } from './rarity.js';
-import { DEFAULT_RARITY_CAPS, rarityCapFromTable } from './rarity-caps.js';
+import { DEFAULT_RARITY_CAPS, DEFAULT_RING_CAPS, rarityCapFromTable } from './rarity-caps.js';
 import { DEFAULT_REFORGE, mergeReforge } from './reforge.js';
 import { upgradeResaleBonus } from './upgrade-value.js';
 
@@ -51,13 +51,13 @@ export const DEFAULT_UPGRADE_SETTINGS = {
     '2H': { 1: 250, 2: 500, 3: 800, 4: 1200 },   // 1ᵉʳ, 2ᵉ, 3ᵉ, 4ᵉ point
   },
   amulet: { 1: 200, 2: 400, 3: 800 },            // 1ʳᵉ, 2ᵉ, 3ᵉ stat distincte
-  ring:   { 1: 250 },                            // 1 palier max par stat proposée + effet, améliorés séparément
+  ring:   { 1: 250, 2: 450, 3: 700, 4: 1000, 5: 1400 }, // coût par point de profondeur (sur ses stats natives)
   caps: {
     weapon1H: 2,
     weapon2H: 4,
     amulet:   3,
-    ring:     1,
     // Slots de traits par catégorie d'item — clés alignées sur FRAGMENT_CATEGORIES (artisan.js)
+    // (l'anneau utilise rarityCaps.ring, pas traitsPerItem.Anneau)
     traitsPerItem: {
       arme:            2,
       'Tête':          1,
@@ -72,7 +72,7 @@ export const DEFAULT_UPGRADE_SETTINGS = {
   // DUR : le plafond effectif d'un objet = min(plafond catégorie ci-dessus,
   // plafond rareté ici). Une 1★ ne peut donc jamais égaler une 5★ — on ne fait
   // que remplir le budget de sa rareté, défini par le MJ. 0/rareté non définie = commun (1).
-  rarityCaps: DEFAULT_RARITY_CAPS, // table pure dans rarity-caps.js (testable)
+  rarityCaps: { ...DEFAULT_RARITY_CAPS, ring: DEFAULT_RING_CAPS }, // tables pures dans rarity-caps.js
   // Reforge (monter la rareté) — gatée Bastion. Logique pure dans reforge.js.
   // Améliorer stats/traits reste libre ; seule la reforge dépend d'une salle.
   reforge: DEFAULT_REFORGE,
@@ -103,13 +103,15 @@ function _mergeDefaults(stored = {}) {
     caps: {
       ...d.caps,
       ...(stored.caps || {}),
-      // ring ne peut jamais dépasser 1 (chaque stat proposée + l'effet ont leur propre upgrade)
-      ring: Math.min(stored.caps?.ring ?? d.caps.ring, 1),
       traitsPerItem: { ...d.caps.traitsPerItem, ...(stored.caps?.traitsPerItem || {}) },
     },
     rarityCaps: {
       traits: { ...d.rarityCaps.traits, ...(stored.rarityCaps?.traits || {}) },
       stats:  { ...d.rarityCaps.stats,  ...(stored.rarityCaps?.stats  || {}) },
+      ring: {
+        traits: { ...d.rarityCaps.ring.traits, ...(stored.rarityCaps?.ring?.traits || {}) },
+        stats:  { ...d.rarityCaps.ring.stats,  ...(stored.rarityCaps?.ring?.stats  || {}) },
+      },
     },
     reforge: mergeReforge(stored.reforge),
     refundUpgradeRatio: stored.refundUpgradeRatio ?? d.refundUpgradeRatio,
@@ -233,6 +235,18 @@ function _renderUpgradeSettingsModal() {
       <span class="sh-admin-row-unit">stats</span>
     </div>`;
 
+  // Row "plafond anneau par rareté" : traits + points de profondeur (stats natives).
+  const ringRarityRow = (r) => `
+    <div class="sh-admin-row-line">
+      <span class="sh-admin-row-lbl">${'★'.repeat(r.value)} ${_esc(r.name)}</span>
+      <input type="number" class="sh-admin-row-input small" value="${s.rarityCaps?.ring?.traits?.[r.value] ?? 0}" min="0" step="1"
+        data-input="_upgField" data-field="rarityCaps.ring.traits.${r.value}">
+      <span class="sh-admin-row-unit">traits</span>
+      <input type="number" class="sh-admin-row-input small" value="${s.rarityCaps?.ring?.stats?.[r.value] ?? 0}" min="0" step="1"
+        data-input="_upgField" data-field="rarityCaps.ring.stats.${r.value}">
+      <span class="sh-admin-row-unit">pts stat</span>
+    </div>`;
+
   // Reforge : discipline → salle du Bastion (sélecteur).
   const discRow = (disc, label) => {
     const sel = s.reforge?.disciplineRoom?.[disc] || '';
@@ -319,8 +333,12 @@ function _renderUpgradeSettingsModal() {
       <!-- ── Anneaux ───────────────────────────────────────── -->
       <div class="sh-admin-section">
         <div class="sh-admin-section-title">💍 Anneaux</div>
-        <p class="sh-admin-section-hint">Chaque stat proposée par l'anneau et son effet s'améliorent séparément, +1 max chacun.</p>
-        ${tierRow("Coût d'amélioration (+1)", s.ring[1], 'ring.1')}
+        <p class="sh-admin-section-hint">L'anneau approfondit uniquement les stats qu'il porte déjà (profondeur). Coût par point de profondeur ; le nombre de points est plafonné par la rareté (ci-dessous).</p>
+        ${tierRow('1ᵉʳ point', s.ring[1], 'ring.1')}
+        ${tierRow('2ᵉ point',  s.ring[2], 'ring.2')}
+        ${tierRow('3ᵉ point',  s.ring[3], 'ring.3')}
+        ${tierRow('4ᵉ point',  s.ring[4], 'ring.4')}
+        ${tierRow('5ᵉ point',  s.ring[5], 'ring.5')}
       </div>
 
       <!-- ── Plafonds ──────────────────────────────────────── -->
@@ -329,7 +347,6 @@ function _renderUpgradeSettingsModal() {
         ${capRow('Points stats max — Arme 1M', s.caps.weapon1H, 'caps.weapon1H')}
         ${capRow('Points stats max — Arme 2M', s.caps.weapon2H, 'caps.weapon2H')}
         ${capRow('Stats max — Amulette',       s.caps.amulet,   'caps.amulet')}
-        ${capRow('Paliers max — Anneau',       s.caps.ring,     'caps.ring')}
 
         <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border-md)">
           <p class="sh-admin-section-hint" style="margin-bottom:6px">Slots de traits par catégorie d'item :</p>
@@ -350,6 +367,10 @@ function _renderUpgradeSettingsModal() {
         ${rarities.length
           ? rarities.map(rarityRow).join('')
           : '<p class="sh-admin-section-hint">Aucune rareté définie — configure-les d’abord dans l’admin des raretés.</p>'}
+        ${rarities.length ? `<div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border-md)">
+          <p class="sh-admin-section-hint" style="margin-bottom:6px">💍 Anneau — plafonds propres (il n'améliore que ses stats natives, en profondeur) :</p>
+          ${rarities.map(ringRarityRow).join('')}
+        </div>` : ''}
       </div>
 
       <!-- ── Reforge (monter la rareté, gatée Bastion — Option A) ── -->
