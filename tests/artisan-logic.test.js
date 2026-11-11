@@ -17,7 +17,7 @@ const DEFAULT_UPGRADE_SETTINGS = {
 };
 const settings = {
   ...DEFAULT_UPGRADE_SETTINGS,
-  caps: { ...DEFAULT_UPGRADE_SETTINGS.caps, weapon1H: 2, weapon2H: 4, amulet: 3, ring: 1,
+  caps: { ...DEFAULT_UPGRADE_SETTINGS.caps, weapon1H: 2, weapon2H: 4, weaponTraits1H: 2, weaponTraits2H: 3, amulet: 3, ring: 1,
     traitsPerItem: { ...DEFAULT_UPGRADE_SETTINGS.caps.traitsPerItem, arme: 4 } },
   armor: { 1: 150, 2: 300, 3: 500 },
   rarityCaps: {
@@ -31,7 +31,17 @@ const sword = rarete => ({ template: 'arme', format: 'Arme 1M CaC Phy.', rarete,
 test('plafonds = minimum famille / rareté et rareté de déblocage', () => {
   assert.equal(traitCapAt(sword(2), 2, settings), 2);
   assert.equal(statCapAt(sword(5), 5, settings), 2, 'une arme 1M reste bornée par sa famille');
-  assert.equal(unlockRarity(sword(1), 'traits', 3, settings), 3);
+  // Le 3ᵉ trait n'existe que pour une 2M (1M plafonne à 2) et se débloque en 3★.
+  const twoHand = { template: 'arme', mains: '2 mains', rarete: 1, traits: [] };
+  assert.equal(unlockRarity(twoHand, 'traits', 3, settings), 3);
+  assert.equal(unlockRarity(sword(1), 'traits', 3, settings), null, 'une 1M n’atteint jamais 3 traits');
+});
+
+test('arme : plafond de traits selon le maniement (1M = 2, 2M = 3 au sommet)', () => {
+  const oneHand = { template: 'arme', format: 'Arme 1M CaC Phy.', rarete: 5, traits: [] };
+  const twoHand = { template: 'arme', mains: '2 mains', rarete: 5, traits: [] };
+  assert.equal(traitCapAt(oneHand, 5, settings), 2, 'une arme 1 main plafonne à 2 traits');
+  assert.equal(traitCapAt(twoHand, 5, settings), 3, 'une arme 2 mains atteint 3 traits');
 });
 
 test('firstGainRarity ignore les raretés qui ne donnent aucun budget', () => {

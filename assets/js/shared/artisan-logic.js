@@ -39,6 +39,12 @@ export function getItemTraitsSlotCount(item = {}, settings = {}) {
   // Anneau et armure ont leur propre quota de traits par rareté (une seule table chacun).
   if (category === 'Anneau') return ringCap('traits', item.rarete, s);
   if (isArmor(item)) return armorCap('traits', item.rarete, s);
+  // Arme : plafond de traits distinct selon le maniement (1M < 2M), × la rareté.
+  if (category === 'arme') {
+    const whCap = weaponHands(item) === 2 ? s.caps?.weaponTraits2H : s.caps?.weaponTraits1H;
+    const cap = whCap != null ? n(whCap) : n(s.caps?.traitsPerItem?.arme); // repli ancienne config
+    return Math.min(cap, rarityCap('traits', item.rarete, s));
+  }
   return Math.min(n(s.caps?.traitsPerItem?.[category]), rarityCap('traits', item.rarete, s));
 }
 

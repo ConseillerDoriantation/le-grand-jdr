@@ -56,6 +56,8 @@ export const DEFAULT_UPGRADE_SETTINGS = {
   caps: {
     weapon1H: 2,
     weapon2H: 4,
+    weaponTraits1H: 2, // traits max d'une arme 1 main (bornés aussi par la rareté)
+    weaponTraits2H: 3, // traits max d'une arme 2 mains
     amulet:   3,
     // Slots de traits par catégorie d'item — clés alignées sur FRAGMENT_CATEGORIES (artisan.js)
     // (l'anneau utilise rarityCaps.ring, pas traitsPerItem.Anneau)
@@ -379,7 +381,8 @@ function _renderUpgradeSettingsModal() {
 
         <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border-md)">
           <p class="sh-admin-section-hint" style="margin-bottom:6px">Slots de traits par catégorie d'item (anneau et armures suivent leur propre table par rareté ci-dessous) :</p>
-          ${capRow('⚔️ Arme (toutes confondues)', s.caps.traitsPerItem.arme,            'caps.traitsPerItem.arme')}
+          ${capRow('⚔️ Arme 1 main',              s.caps.weaponTraits1H,                 'caps.weaponTraits1H')}
+          ${capRow('⚔️ Arme 2 mains',             s.caps.weaponTraits2H,                 'caps.weaponTraits2H')}
           ${capRow('📿 Amulette',                 s.caps.traitsPerItem['Amulette'],      'caps.traitsPerItem.Amulette')}
           ${capRow('🔮 Objet magique',            s.caps.traitsPerItem['Objet magique'], 'caps.traitsPerItem.Objet magique')}
         </div>
