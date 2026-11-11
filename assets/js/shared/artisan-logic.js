@@ -3,7 +3,7 @@
 
 import { weaponHands } from './weapon-family.js';
 import { ITEM_STAT_META, getItemBaseStatBonus } from './char-stats.js';
-import { DEFAULT_RARITY_CAPS, DEFAULT_RING_CAPS, rarityCapFromTable } from './rarity-caps.js';
+import { DEFAULT_RARITY_CAPS, DEFAULT_RING_CAPS, DEFAULT_ARMOR_CAPS, rarityCapFromTable } from './rarity-caps.js';
 import { getItemFragmentCategory } from './upgrade-value.js';
 import { craftCategoryForItem, craftRecycleQty, craftRecipeMaterialsFromConfig } from './craft-engine.js';
 import { recyclableTraits, nonRecyclableTraitNames } from './trait-recycling.js';
@@ -18,6 +18,12 @@ const rarityCap = (kind, rarete, settings) => rarityCapFromTable(
 const ringCap = (kind, rarete, settings) => rarityCapFromTable(
   settings?.rarityCaps?.ring?.[kind] || DEFAULT_RING_CAPS[kind], rarete,
 );
+// Plafonds propres à l'armure (une seule table, aucun slot en dur).
+const armorCap = (kind, rarete, settings) => rarityCapFromTable(
+  settings?.rarityCaps?.armor?.[kind] || DEFAULT_ARMOR_CAPS[kind], rarete,
+);
+// « Est-ce une armure ? » — par template (robuste aux slots personnalisés du MJ).
+const isArmor = item => (item?.template || '').toLowerCase() === 'armure' || !!item?.slotArmure;
 // Stats réellement portées par l'objet (celles qu'un anneau peut approfondir).
 const nativeStats = item => ITEM_STAT_META.filter(meta => getItemBaseStatBonus(item, meta.full) !== 0);
 
@@ -30,8 +36,9 @@ export function getItemTraitsSlotCount(item = {}, settings = {}) {
   const s = upgradeOf(settings);
   const category = getItemFragmentCategory(item);
   if (!category) return 0;
-  // L'anneau a son propre quota de traits par rareté (indépendant du plafond général).
+  // Anneau et armure ont leur propre quota de traits par rareté (une seule table chacun).
   if (category === 'Anneau') return ringCap('traits', item.rarete, s);
+  if (isArmor(item)) return armorCap('traits', item.rarete, s);
   return Math.min(n(s.caps?.traitsPerItem?.[category]), rarityCap('traits', item.rarete, s));
 }
 
@@ -44,6 +51,8 @@ export function statCapAt(item = {}, rarete = item?.rarete, settings = {}) {
   const category = getItemFragmentCategory(item);
   // L'anneau approfondit SES stats natives avec un budget de points par rareté.
   if (category === 'Anneau') return ringCap('stats', rarete, s);
+  // L'armure : une seule table par rareté (le MJ choisit ses slots, pas de cap par slot).
+  if (isArmor(item)) return armorCap('stats', rarete, s);
   const familyCap = category === 'Amulette'
     ? n(s.caps?.amulet)
     : category === 'arme'
@@ -119,9 +128,11 @@ export function possibleActions(char = {}, item = {}, settings = {}) {
   const usedStats = statPointUse(item);
   const statCost = category === 'Anneau'
     ? n(s.ring?.[usedStats + 1])
-    : category === 'Amulette'
-      ? n(s.amulet?.[usedStats + 1])
-      : n(s.weapon?.[weaponHands(item) === 2 ? '2H' : '1H']?.[usedStats + 1]);
+    : isArmor(item)
+      ? n(s.armor?.[usedStats + 1])
+      : category === 'Amulette'
+        ? n(s.amulet?.[usedStats + 1])
+        : n(s.weapon?.[weaponHands(item) === 2 ? '2H' : '1H']?.[usedStats + 1]);
   // L'anneau ne peut approfondir que s'il porte au moins une stat native.
   const hasStatTarget = category === 'Anneau' ? nativeStats(item).length > 0 : true;
   const reforgeEval = settings.reforgeEval || settings.reforge || null;

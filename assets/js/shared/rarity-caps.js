@@ -22,6 +22,14 @@ export const DEFAULT_RING_CAPS = {
   stats:  { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }, // points de stats (sur ses stats natives)
 };
 
+// Plafonds PROPRES à l'armure (toutes pièces confondues, aucun slot en dur) :
+// une pièce donne 1 stat + 1 trait à la base, puis scale par rareté. Le MJ reste
+// libre du nombre de slots et des stats de base qu'il pose à la création.
+export const DEFAULT_ARMOR_CAPS = {
+  traits: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 }, // slots de traits max par rareté
+  stats:  { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 }, // points de stats max par rareté
+};
+
 // Plafond lu dans une table { rareté: plafond }. Rareté hors table → valeur définie
 // la plus proche en dessous ; en dessous de la plus petite clé → la plus petite.
 export function rarityCapFromTable(table, rarete) {

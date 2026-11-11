@@ -19,9 +19,11 @@ const settings = {
   ...DEFAULT_UPGRADE_SETTINGS,
   caps: { ...DEFAULT_UPGRADE_SETTINGS.caps, weapon1H: 2, weapon2H: 4, amulet: 3, ring: 1,
     traitsPerItem: { ...DEFAULT_UPGRADE_SETTINGS.caps.traitsPerItem, arme: 4 } },
+  armor: { 1: 150, 2: 300, 3: 500 },
   rarityCaps: {
     traits: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 },
     ring: { traits: { 1: 1, 2: 1, 3: 1, 4: 2, 5: 3 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 } },
+    armor: { traits: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 }, stats: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 } },
   },
 };
 const sword = rarete => ({ template: 'arme', format: 'Arme 1M CaC Phy.', rarete, traits: ['Tranchant'] });
@@ -48,6 +50,20 @@ test('anneau : budget de points par rareté, limité à ses stats natives', () =
   assert.equal(statCapAt(base, 5, settings), 5);
   assert.equal(traitCapAt(base, 3, settings), 1, 'l’anneau garde 1 trait à 3★ (table propre)');
   assert.equal(traitCapAt(base, 5, settings), 3);
+});
+
+test('armure : une seule table par rareté, détectée par template (pas par slot)', () => {
+  const armor = (r, slot = 'Torse') => ({ template: 'armure', slotArmure: slot, rarete: r, traits: [] });
+  // Stats ET traits scalent par la table armure (1★ 1/1 → 5★ 3/3).
+  assert.equal(statCapAt(armor(1), 1, settings), 1);
+  assert.equal(statCapAt(armor(5), 5, settings), 3);
+  assert.equal(traitCapAt(armor(1), 1, settings), 1);
+  assert.equal(traitCapAt(armor(5), 5, settings), 3);
+  // Même table quel que soit le slot (Tête, Torse, Pieds…).
+  assert.equal(statCapAt(armor(3, 'Tête'), 3, settings), statCapAt(armor(3, 'Pieds'), 3, settings));
+  // Stat engine actif : une armure peut recevoir des points (comme l'arme).
+  const rich = possibleActions({ traitFragments: {} }, armor(5), { upgrade: settings, gold: 9999 });
+  assert.equal(rich.stat, true);
 });
 
 test('actions possibles respectent fragments, or, mode MJ et gain de reforge', () => {

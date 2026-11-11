@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { DEFAULT_RARITY_CAPS, DEFAULT_RING_CAPS, rarityCapFromTable } from '../assets/js/shared/rarity-caps.js';
+import { DEFAULT_RARITY_CAPS, DEFAULT_RING_CAPS, DEFAULT_ARMOR_CAPS, rarityCapFromTable } from '../assets/js/shared/rarity-caps.js';
 
 const root = new URL('../', import.meta.url);
 const artisan = readFileSync(new URL('assets/js/features/artisan.js', root), 'utf8');
@@ -57,12 +57,16 @@ test('artisan applique le plafond de rareté en min(catégorie, rareté) partout
 });
 
 test('upgrade-settings expose rarityCaps et la section admin par rareté', () => {
-  assert.match(upg, /rarityCaps: \{ \.\.\.DEFAULT_RARITY_CAPS, ring: DEFAULT_RING_CAPS \}/);
+  assert.match(upg, /rarityCaps: \{ \.\.\.DEFAULT_RARITY_CAPS, ring: DEFAULT_RING_CAPS, armor: DEFAULT_ARMOR_CAPS \}/);
   assert.match(upg, /rarityCaps:\s*\{[\s\S]*?traits:\s*\{[\s\S]*?stats:\s*\{/); // merge défensif
   // Plafonds propres à l'anneau (profondeur sur ses stats natives).
   assert.deepEqual(DEFAULT_RING_CAPS.traits, { 1: 1, 2: 1, 3: 1, 4: 2, 5: 3 });
   assert.deepEqual(DEFAULT_RING_CAPS.stats, { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 });
+  // Plafonds propres à l'armure (1 stat + 1 trait à la base, scale par rareté).
+  assert.deepEqual(DEFAULT_ARMOR_CAPS.traits, { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 });
+  assert.deepEqual(DEFAULT_ARMOR_CAPS.stats, { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 });
   assert.match(upg, /rarityCaps\.ring\.traits\./); // ligne admin anneau par rareté
+  assert.match(upg, /rarityCaps\.armor\.traits\./); // ligne admin armure par rareté
   assert.match(upg, /data-field="rarityCaps\.traits\./);
   assert.match(upg, /data-field="rarityCaps\.stats\./);
   assert.match(upg, /Plafonds par rareté/);
