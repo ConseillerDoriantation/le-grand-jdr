@@ -59,6 +59,7 @@ export const DEFAULT_UPGRADE_SETTINGS = {
     weaponTraits1H: 2, // traits max d'une arme 1 main (bornés aussi par la rareté)
     weaponTraits2H: 3, // traits max d'une arme 2 mains
     amulet:   3,
+    armorStatMax: 3,   // points d'Artisan max sur UNE même stat d'une pièce d'armure (anti-dump)
     // Slots de traits par catégorie d'item — clés alignées sur FRAGMENT_CATEGORIES (artisan.js)
     // (l'anneau utilise rarityCaps.ring, pas traitsPerItem.Anneau)
     traitsPerItem: {
@@ -378,6 +379,7 @@ function _renderUpgradeSettingsModal() {
         ${capRow('Points stats max — Arme 1M', s.caps.weapon1H, 'caps.weapon1H')}
         ${capRow('Points stats max — Arme 2M', s.caps.weapon2H, 'caps.weapon2H')}
         ${capRow('Stats max — Amulette',       s.caps.amulet,   'caps.amulet')}
+        ${capRow('Max sur une même stat — Armure', s.caps.armorStatMax, 'caps.armorStatMax')}
 
         <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border-md)">
           <p class="sh-admin-section-hint" style="margin-bottom:6px">Slots de traits par catégorie d'item (anneau et armures suivent leur propre table par rareté ci-dessous) :</p>

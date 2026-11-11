@@ -1508,7 +1508,7 @@ function _renderRingStats(item, invIndex, c) {
   const empty = native.length === 0
     ? '<p class="art-section-empty">Cet anneau ne porte aucune statistique à approfondir — il s’améliore par son trait.</p>'
     : `<p class="art-section-hint"><span>i</span>Les ${cap} point${cap > 1 ? 's' : ''} autorisé${cap > 1 ? 's' : ''} en ${_esc(RARETE_NAMES[item.rarete] || 'cette rareté')} sont placés.${nextUnlock ? ` Reforge en ${_esc(RARETE_NAMES[nextUnlock] || nextUnlock)} pour un point supplémentaire.` : ''}</p>`;
-  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>L’anneau approfondit uniquement les caractéristiques qu’il porte déjà.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, s.ring || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Tu peux cumuler plusieurs points sur une même caractéristique de l’anneau.</small><div class="art-stat-choices">${choices}</div></div>` : empty}${_renderOperationPanel(item, invIndex, c, 'Anneau', 'stat')}</div></section>`;
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>L’anneau approfondit uniquement les caractéristiques qu’il porte déjà.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, s.ring || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Tu peux cumuler plusieurs points sur une même caractéristique de l’anneau.</small><div class="art-stat-choices">${choices}</div></div>` : empty}${_renderRemovableStats(item, invIndex)}${_renderOperationPanel(item, invIndex, c, 'Anneau', 'stat')}</div></section>`;
 }
 
 function _renderAmuletStats(item, invIndex, c) {
@@ -1528,7 +1528,7 @@ function _renderAmuletStats(item, invIndex, c) {
   const familyCap = statCapAt(item, 5, s);
   const choices = ITEM_STAT_META.map(meta => _statChoice(meta, item, invIndex, 'amulet', cost, usedSet.has(meta.full))).join('');
   const available = Math.max(0, cap - usedPoints);
-  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Une caractéristique différente à chaque amélioration.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, usedPoints, cap, familyCap, s.amulet || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Les caractéristiques déjà présentes ou améliorées sont indisponibles.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>${usedPoints >= cap ? `Les ${cap} points autorisés à cette rareté sont déjà présents sur l’objet.` : 'Toutes les caractéristiques ont déjà été améliorées.'}</p>`}${_renderOperationPanel(item, invIndex, c, 'Amulette', 'stat')}</div></section>`;
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Une caractéristique différente à chaque amélioration.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, usedPoints, cap, familyCap, s.amulet || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Les caractéristiques déjà présentes ou améliorées sont indisponibles.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>${usedPoints >= cap ? `Les ${cap} points autorisés à cette rareté sont déjà présents sur l’objet.` : 'Toutes les caractéristiques ont déjà été améliorées.'}</p>`}${_renderRemovableStats(item, invIndex)}${_renderOperationPanel(item, invIndex, c, 'Amulette', 'stat')}</div></section>`;
 }
 
 function _renderWeaponStats(item, invIndex, c) {
@@ -1545,7 +1545,7 @@ function _renderWeaponStats(item, invIndex, c) {
   const choices = ITEM_STAT_META.map(meta => _statChoice(meta, item, invIndex, 'weapon', cost)).join('');
   const nextUnlock = unlockRarity(item, 'stats', cap + 1, s);
   const available = Math.max(0, cap - total);
-  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Choisis où placer chaque point accordé à cette arme.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, tariff)}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Tu peux cumuler plusieurs points sur la même caractéristique.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>Les ${cap} points autorisés en ${_esc(RARETE_NAMES[item.rarete] || 'cette rareté')} sont placés.${nextUnlock ? ` Reforge en ${_esc(RARETE_NAMES[nextUnlock] || nextUnlock)} pour un point supplémentaire.` : ''}</p>`}${_renderOperationPanel(item, invIndex, c, 'arme', 'stat')}</div></section>`;
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Choisis où placer chaque point accordé à cette arme.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, tariff)}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Tu peux cumuler plusieurs points sur la même caractéristique.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>Les ${cap} points autorisés en ${_esc(RARETE_NAMES[item.rarete] || 'cette rareté')} sont placés.${nextUnlock ? ` Reforge en ${_esc(RARETE_NAMES[nextUnlock] || nextUnlock)} pour un point supplémentaire.` : ''}</p>`}${_renderRemovableStats(item, invIndex)}${_renderOperationPanel(item, invIndex, c, 'arme', 'stat')}</div></section>`;
 }
 
 // ══════════════════════════════════════════════
@@ -1562,10 +1562,66 @@ function _renderArmorStats(item, invIndex, c) {
   const canAdd = total < cap;
 
   const familyCap = statCapAt(item, 5, s);
-  const choices = ITEM_STAT_META.map(meta => _statChoice(meta, item, invIndex, 'armor', cost)).join('');
+  // Anti-dump : pas plus de `armorStatMax` points d'Artisan sur une même stat.
+  const perStatMax = Math.max(1, parseInt(s.caps?.armorStatMax) || 3);
+  const choices = ITEM_STAT_META.map(meta => _statChoice(meta, item, invIndex, 'armor', cost, getItemUpgradeStatBonus(item, meta.full) >= perStatMax)).join('');
   const nextUnlock = unlockRarity(item, 'stats', cap + 1, s);
   const available = Math.max(0, cap - total);
-  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Choisis où placer chaque point accordé à cette armure.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, tariff)}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Tu peux cumuler plusieurs points sur la même caractéristique.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>Les ${cap} point${cap > 1 ? 's' : ''} autorisé${cap > 1 ? 's' : ''} en ${_esc(RARETE_NAMES[item.rarete] || 'cette rareté')} sont placés.${nextUnlock ? ` Reforge en ${_esc(RARETE_NAMES[nextUnlock] || nextUnlock)} pour un point supplémentaire.` : ''}</p>`}${_renderOperationPanel(item, invIndex, c, getItemFragmentCategory(item), 'stat')}</div></section>`;
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Choisis où placer chaque point accordé à cette armure.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, tariff)}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Cumul possible, mais ${perStatMax} point${perStatMax > 1 ? 's' : ''} max sur une même caractéristique.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>Les ${cap} point${cap > 1 ? 's' : ''} autorisé${cap > 1 ? 's' : ''} en ${_esc(RARETE_NAMES[item.rarete] || 'cette rareté')} sont placés.${nextUnlock ? ` Reforge en ${_esc(RARETE_NAMES[nextUnlock] || nextUnlock)} pour un point supplémentaire.` : ''}</p>`}${_renderRemovableStats(item, invIndex)}${_renderOperationPanel(item, invIndex, c, getItemFragmentCategory(item), 'stat')}</div></section>`;
+}
+
+// Liste des points de stats AJOUTÉS à l'Artisan, chacun retirable (jamais les
+// stats d'origine de l'objet : elles ne sont pas dans upgrades.statBonus).
+function _renderRemovableStats(item, invIndex) {
+  const added = _getUpgradedStatEntries(item);
+  if (!added.length) return '';
+  return `<div class="art-removable" style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--border-md)">
+    <small class="art-muted" style="display:block;margin-bottom:6px">Points placés à l'Artisan — retirables (or remboursé ; les stats d'origine restent) :</small>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${added.map(e =>
+      `<button type="button" class="btn btn-outline btn-sm" data-action="_artisanRemoveStatPoint" data-i="${invIndex}" data-stat="${_esc(e.meta.full)}" title="Retirer 1 point de ${_esc(e.meta.label)}">↩ ${_esc(e.meta.short)} −1 <span class="art-muted">(${e.val})</span></button>`).join('')}</div>
+  </div>`;
+}
+
+// — Action : retirer un point de stat PLACÉ (jamais les natives). Rembourse l'or.
+async function _artisanRemoveStatPoint(invIndex, statFullKey) {
+  const c = _getActiveArtisanChar();
+  if (!c) return;
+  const item = (c.inventaire || [])[invIndex];
+  if (!item) return;
+  const meta = ITEM_STAT_BY_FULL[statFullKey];
+  if (!meta) return;
+  if (getItemUpgradeStatBonus(item, meta.full) <= 0) { showNotif('Aucun point placé à retirer sur cette stat.', 'error'); return; }
+
+  // Dernière amélioration de stat de l'historique pour cette stat → remboursement + cohérence.
+  const hist = Array.isArray(item.upgrades?.history) ? [...item.upgrades.history] : [];
+  const STAT_OPS = new Set(['weapon_add_point', 'armor_add_point', 'ring_upgrade_stat', 'amulet_add_stat']);
+  let histIdx = -1;
+  for (let i = hist.length - 1; i >= 0; i--) {
+    if (STAT_OPS.has(hist[i]?.op) && hist[i]?.stat === meta.full) { histIdx = i; break; }
+  }
+  const refund = histIdx >= 0 ? (parseInt(hist[histIdx].cost) || 0) : 0;
+
+  if (!await confirmModal(
+    `Retirer 1 point de « ${_esc(meta.label)} » placé à l'Artisan ?<br>${refund > 0 ? `<span style="color:var(--gold)">${refund} PO remboursés.</span>` : 'Aucun or à rembourser.'}<br><small style="color:var(--text-dim)">Les stats d'origine de l'objet ne sont pas touchées.</small>`,
+    { title: '↩ Retirer un point', confirmLabel: 'Retirer', danger: false, icon: '↩' })) return;
+
+  const inv = [...c.inventaire];
+  const newItem = { ...item };
+  const up = { ...(newItem.upgrades || {}) };
+  const sb = { ...(up.statBonus || {}) };
+  const v = (parseInt(sb[meta.store]) || 0) - 1;
+  if (v > 0) sb[meta.store] = v; else delete sb[meta.store];
+  up.statBonus = sb;
+  if (histIdx >= 0) { hist.splice(histIdx, 1); up.history = hist; }
+  newItem.upgrades = up;
+  inv[invIndex] = newItem;
+  c.inventaire = inv;
+
+  if (refund > 0) _refundGold(c, refund, `Artisan : retrait +1 ${meta.short} sur ${item.nom || 'objet'}`);
+
+  await _persistChar(c);
+  STORE.flash = invIndex;
+  showNotif(`Point de ${meta.label} retiré${refund > 0 ? ` · ${refund} PO remboursés` : ''}.`, 'success');
 }
 
 // — Action : améliorer une seule des stats proposées par l'anneau
@@ -1721,6 +1777,10 @@ async function _artisanArmorAddPoint(invIndex, statFullKey) {
   const total = statPointUse(item);
   if (total >= cap) { showNotif(`Plafond atteint (${cap} point${cap > 1 ? 's' : ''}).`, 'error'); return; }
 
+  const perStatMax = Math.max(1, parseInt(s.caps?.armorStatMax) || 3);
+  const curStat = getItemUpgradeStatBonus(item, meta.full);
+  if (curStat >= perStatMax) { showNotif(`${perStatMax} point${perStatMax > 1 ? 's' : ''} max sur ${meta.label} pour une armure.`, 'error'); return; }
+
   const slotN = total + 1;
   const cost = s.armor?.[slotN] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
@@ -1728,7 +1788,6 @@ async function _artisanArmorAddPoint(invIndex, statFullKey) {
   const inv = [...c.inventaire];
   const newItem = { ...item };
   const up = newItem.upgrades || {};
-  const curStat = parseInt(up.statBonus?.[meta.store]) || 0;
   newItem.upgrades = {
     ...up,
     statBonus: { ...(up.statBonus || {}), [meta.store]: curStat + 1 },
@@ -1769,6 +1828,7 @@ registerActions({
   _artisanOverwriteStart: (btn) => _artisanOverwriteStart(Number(btn.dataset.i), btn.dataset.trait),
   _artisanOverwriteConfirm: (btn) => _artisanOverwriteConfirm(Number(btn.dataset.i), btn.dataset.old, btn.dataset.frag),
   _artisanAmuletAddStat: (btn) => _artisanAmuletAddStat(Number(btn.dataset.i), btn.dataset.stat),
+  _artisanRemoveStatPoint: (btn) => _artisanRemoveStatPoint(Number(btn.dataset.i), btn.dataset.stat),
   _artisanWeaponAddPoint: (btn) => _artisanWeaponAddPoint(Number(btn.dataset.i), btn.dataset.stat),
   _artisanReforge: (btn) => _artisanReforge(Number(btn.dataset.i)),
   _artisanCloseModal: () => closeModalDirect(),
