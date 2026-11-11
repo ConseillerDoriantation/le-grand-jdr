@@ -52,7 +52,7 @@ export const DEFAULT_UPGRADE_SETTINGS = {
   },
   amulet: { 1: 200, 2: 400, 3: 800 },            // 1ʳᵉ, 2ᵉ, 3ᵉ stat distincte
   ring:   { 1: 250, 2: 450, 3: 700, 4: 1000, 5: 1400 }, // coût par point de profondeur (sur ses stats natives)
-  armor:  { 1: 150, 2: 300, 3: 500 },            // coût par point de stat d'armure
+  armor:  { 1: 150, 2: 300, 3: 500, 4: 700, 5: 900 }, // coût par point de stat d'armure
   caps: {
     weapon1H: 2,
     weapon2H: 4,
@@ -366,6 +366,8 @@ function _renderUpgradeSettingsModal() {
         ${tierRow('1ᵉʳ point', s.armor[1], 'armor.1')}
         ${tierRow('2ᵉ point',  s.armor[2], 'armor.2')}
         ${tierRow('3ᵉ point',  s.armor[3], 'armor.3')}
+        ${tierRow('4ᵉ point',  s.armor[4], 'armor.4')}
+        ${tierRow('5ᵉ point',  s.armor[5], 'armor.5')}
       </div>
 
       <!-- ── Plafonds ──────────────────────────────────────── -->

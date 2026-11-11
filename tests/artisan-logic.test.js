@@ -23,7 +23,7 @@ const settings = {
   rarityCaps: {
     traits: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 },
     ring: { traits: { 1: 1, 2: 1, 3: 1, 4: 2, 5: 3 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 } },
-    armor: { traits: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 }, stats: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 } },
+    armor: { traits: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 } },
   },
 };
 const sword = rarete => ({ template: 'arme', format: 'Arme 1M CaC Phy.', rarete, traits: ['Tranchant'] });
@@ -56,7 +56,7 @@ test('armure : une seule table par rareté, détectée par template (pas par slo
   const armor = (r, slot = 'Torse') => ({ template: 'armure', slotArmure: slot, rarete: r, traits: [] });
   // Stats ET traits scalent par la table armure (1★ 1/1 → 5★ 3/3).
   assert.equal(statCapAt(armor(1), 1, settings), 1);
-  assert.equal(statCapAt(armor(5), 5, settings), 3);
+  assert.equal(statCapAt(armor(5), 5, settings), 5); // +1 point par niveau de rareté
   assert.equal(traitCapAt(armor(1), 1, settings), 1);
   assert.equal(traitCapAt(armor(5), 5, settings), 3);
   // Même table quel que soit le slot (Tête, Torse, Pieds…).

@@ -27,7 +27,7 @@ export const DEFAULT_RING_CAPS = {
 // libre du nombre de slots et des stats de base qu'il pose à la création.
 export const DEFAULT_ARMOR_CAPS = {
   traits: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 }, // slots de traits max par rareté
-  stats:  { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 }, // points de stats max par rareté
+  stats:  { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 }, // +1 point de stat par niveau de rareté
 };
 
 // Plafond lu dans une table { rareté: plafond }. Rareté hors table → valeur définie

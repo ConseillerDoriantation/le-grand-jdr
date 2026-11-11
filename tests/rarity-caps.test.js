@@ -64,7 +64,7 @@ test('upgrade-settings expose rarityCaps et la section admin par rareté', () =>
   assert.deepEqual(DEFAULT_RING_CAPS.stats, { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 });
   // Plafonds propres à l'armure (1 stat + 1 trait à la base, scale par rareté).
   assert.deepEqual(DEFAULT_ARMOR_CAPS.traits, { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 });
-  assert.deepEqual(DEFAULT_ARMOR_CAPS.stats, { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 });
+  assert.deepEqual(DEFAULT_ARMOR_CAPS.stats, { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 });
   assert.match(upg, /rarityCaps\.ring\.traits\./); // ligne admin anneau par rareté
   assert.match(upg, /rarityCaps\.armor\.traits\./); // ligne admin armure par rareté
   assert.match(upg, /data-field="rarityCaps\.traits\./);
