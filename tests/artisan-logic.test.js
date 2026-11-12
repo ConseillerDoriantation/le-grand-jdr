@@ -85,10 +85,12 @@ test('armure/accessoire : forgeable quel que soit le nom du slot (config par dé
   const customArmor = { template: 'armure', slotArmure: 'Jambières', rarete: 3, traits: [] };
   assert.equal(statCapAt(customArmor, 3, settings), 3);
   assert.equal(traitCapAt(customArmor, 3, settings), 2);
-  // Accessoire à slot perso (hors Anneau/Amulette) : pas de moteur de stats,
-  // mais quota de traits repli sur « Objet magique ».
+  // Accessoire à slot perso (hors Anneau) : moteur AMULETTE (stats distinctes),
+  // plafond caps.amulet ; quota de traits repli sur « Objet magique ».
   const harmon = { slotBijou: 'Objet harmonisé', rarete: 5, traits: [] };
-  assert.equal(statCapAt(harmon, 5, settings), 0, 'accessoire générique : pas de points de stats');
+  // min(caps.amulet=3, rarityCap stats@5=4) = 3.
+  assert.equal(statCapAt(harmon, 5, settings), 3, 'accessoire générique : moteur amulette');
+  assert.equal(possibleActions({ traitFragments: {} }, harmon, { upgrade: settings, gold: 9999 }).stat, true, 'peut recevoir des stats distinctes');
   // min(traitsPerItem['Objet magique']=1, rarityCap traits@5=4) = 1.
   assert.equal(traitCapAt(harmon, 5, settings), 1, 'repli quota « Objet magique »');
 });

@@ -39,7 +39,7 @@ import { evaluateReforge, scaleMaterials } from '../shared/reforge.js';
 import { getRarities, loadRarities, RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import { getDocData, loadCollection } from '../data/firestore.js';
 import { getInventoryItemImage, shopItemToInvEntry } from '../shared/inventory-utils.js';
-import { isArmorItem } from '../shared/item-facts.js';
+import { isArmorItem, isJewelItem } from '../shared/item-facts.js';
 import { isTraitRecyclable, recyclableTraits, nonRecyclableTraitNames } from '../shared/trait-recycling.js';
 import {
   getItemTraitsSlotCount as getItemTraitsSlotCountPure, traitCapAt, statCapAt, unlockRarity, firstGainRarity,
@@ -1432,11 +1432,13 @@ function _artisanScrollSection(id) {
 }
 
 // Section « Stats » de l'établi — dispatch inline selon la catégorie.
+// Anneau = profondeur ; tout autre accessoire = moteur amulette (stats distinctes).
+// Ordre : arme avant armure (un bouclier porteur de CA reste une arme).
 function _renderStatsSection(item, invIndex, c, cat) {
   if (cat === 'Anneau')   return _renderRingStats(item, invIndex, c);
-  if (cat === 'Amulette') return _renderAmuletStats(item, invIndex, c);
   if (cat === 'arme')     return _renderWeaponStats(item, invIndex, c);
   if (_isArmorItem(item)) return _renderArmorStats(item, invIndex, c);
+  if (isJewelItem(item))  return _renderAmuletStats(item, invIndex, c);
   return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Les améliorations chiffrées disponibles pour cette pièce.</p></span><em class="art-section-state is-muted">Non applicable</em></header><div class="art-operation-body"><p class="art-section-empty">Cette pièce s’améliore uniquement par ses traits.</p></div></section>`;
 }
 
@@ -1540,7 +1542,7 @@ function _renderAmuletStats(item, invIndex, c) {
   const familyCap = statCapAt(item, 5, s);
   const choices = ITEM_STAT_META.map(meta => _statChoice(meta, item, invIndex, 'amulet', cost, usedSet.has(meta.full))).join('');
   const available = Math.max(0, cap - usedPoints);
-  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Une caractéristique différente à chaque amélioration.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, usedPoints, cap, familyCap, s.amulet || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Les caractéristiques déjà présentes ou améliorées sont indisponibles.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>${usedPoints >= cap ? `Les ${cap} points autorisés à cette rareté sont déjà présents sur l’objet.` : 'Toutes les caractéristiques ont déjà été améliorées.'}</p>`}${_renderRemovableStats(item, invIndex)}${_renderOperationPanel(item, invIndex, c, 'Amulette', 'stat')}</div></section>`;
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Une caractéristique différente à chaque amélioration.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, usedPoints, cap, familyCap, s.amulet || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Les caractéristiques déjà présentes ou améliorées sont indisponibles.</small><div class="art-stat-choices">${choices}</div></div>` : `<p class="art-section-hint"><span>i</span>${usedPoints >= cap ? `Les ${cap} points autorisés à cette rareté sont déjà présents sur l’objet.` : 'Toutes les caractéristiques ont déjà été améliorées.'}</p>`}${_renderRemovableStats(item, invIndex)}${_renderOperationPanel(item, invIndex, c, getItemFragmentCategory(item), 'stat')}</div></section>`;
 }
 
 function _renderWeaponStats(item, invIndex, c) {
@@ -1699,7 +1701,7 @@ async function _artisanAmuletAddStat(invIndex, statFullKey) {
     ..._getBaseStatEntries(item).filter(entry => entry.base > 0).map(entry => entry.meta.full),
     ...used.map(entry => entry.meta.full),
   ]);
-  if (usedPoints >= cap) { showNotif(`Plafond amulette atteint (${cap}).`, 'error'); return; }
+  if (usedPoints >= cap) { showNotif(`Plafond de stats atteint (${cap}).`, 'error'); return; }
   if (usedSet.has(meta.full)) {
     showNotif(`Stat ${meta.label} déjà présente sur l’objet.`, 'error'); return;
   }
@@ -1719,11 +1721,11 @@ async function _artisanAmuletAddStat(invIndex, statFullKey) {
   inv[invIndex] = newItem;
   c.inventaire = inv;
 
-  if (cost > 0) _logExpense(c, `Artisan : amulette ${item.nom || ''} +1 ${meta.short}`, cost);
+  if (cost > 0) _logExpense(c, `Artisan : ${item.nom || 'accessoire'} +1 ${meta.short}`, cost);
 
   await _persistChar(c);
   STORE.flash = invIndex;
-  showNotif(`+1 ${meta.label} ajouté à l'amulette.`, 'success');
+  showNotif(`+1 ${meta.label} ajouté à « ${item.nom || 'accessoire'} ».`, 'success');
 }
 
 // ══════════════════════════════════════════════

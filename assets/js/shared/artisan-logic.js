@@ -5,7 +5,7 @@ import { weaponHands } from './weapon-family.js';
 import { ITEM_STAT_META, getItemBaseStatBonus } from './char-stats.js';
 import { DEFAULT_RARITY_CAPS, DEFAULT_RING_CAPS, DEFAULT_ARMOR_CAPS, rarityCapFromTable } from './rarity-caps.js';
 import { getItemFragmentCategory } from './upgrade-value.js';
-import { isArmorItem } from './item-facts.js';
+import { isArmorItem, isJewelItem } from './item-facts.js';
 import { craftCategoryForItem, craftRecycleQty, craftRecipeMaterialsFromConfig } from './craft-engine.js';
 import { recyclableTraits, nonRecyclableTraitNames } from './trait-recycling.js';
 
@@ -68,7 +68,9 @@ export function statCapAt(item = {}, rarete = item?.rarete, settings = {}) {
   if (category === 'Anneau') return ringCap('stats', rarete, s);
   // L'armure : une seule table par rareté (le MJ choisit ses slots, pas de cap par slot).
   if (isArmor(item)) return armorCap('stats', rarete, s);
-  const familyCap = category === 'Amulette'
+  // Tout accessoire NON-anneau (Amulette, Objet magique/harmonisé, Dos, Ceinture,
+  // slot perso) = moteur amulette : stats distinctes, plafond `caps.amulet`.
+  const familyCap = isJewelItem(item)
     ? n(s.caps?.amulet)
     : category === 'arme'
       ? n(weaponHands(item) === 2 ? s.caps?.weapon2H : s.caps?.weapon1H)
@@ -145,7 +147,7 @@ export function possibleActions(char = {}, item = {}, settings = {}) {
     ? n(s.ring?.[usedStats + 1])
     : isArmor(item)
       ? n(s.armor?.[usedStats + 1])
-      : category === 'Amulette'
+      : isJewelItem(item)
         ? n(s.amulet?.[usedStats + 1])
         : n(s.weapon?.[weaponHands(item) === 2 ? '2H' : '1H']?.[usedStats + 1]);
   // L'anneau ne peut approfondir que s'il porte au moins une stat native.

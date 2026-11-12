@@ -12,8 +12,10 @@ test('sac de fragments : agnostique au nom de slot (clés réelles, pas la liste
   // …et une catégorie inconnue (slot par défaut/perso) garde son nom + glyphe générique.
   assert.match(artisan, /const _catMeta = id => FRAGMENT_CAT_BY_ID\[id\] \|\| \{ id, label: id, icon: '◆' \}/);
   // La détection d'armure/arme passe par les classificateurs canoniques (item-facts).
-  assert.match(artisan, /import \{ isArmorItem \} from '\.\.\/shared\/item-facts\.js'/);
+  assert.match(artisan, /import \{ isArmorItem, isJewelItem \} from '\.\.\/shared\/item-facts\.js'/);
   assert.match(artisan, /return isArmorItem\(item\) && !item\.slotBijou/);
+  // Tout accessoire non-anneau = moteur amulette (stats distinctes).
+  assert.match(artisan, /if \(isJewelItem\(item\)\)  return _renderAmuletStats/);
 });
 
 test('armure : cap par stat (anti-dump) côté config + enforcement', () => {

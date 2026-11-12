@@ -12,7 +12,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { weaponHands } from './weapon-family.js';
-import { isWeaponItem, isArmorItem } from './item-facts.js';
+import { isWeaponItem, isArmorItem, isJewelItem } from './item-facts.js';
 
 // Catégories de fragments : un fragment ne se pose que sur un objet de la même
 // catégorie (toutes les armes partagent 'arme', peu importe le format). La
@@ -69,20 +69,21 @@ export function upgradeTariffValue(item = {}, settings = {}) {
   if (!up) return 0;
   const s = settings || {};
   const levels = Object.values(up.statBonus || {}).map(_level).filter(Boolean);
+  const cat = getItemFragmentCategory(item);
   const isArmorLike = (item.template || '').toLowerCase() === 'armure' || !!item.slotArmure;
   let total = 0;
-  switch (getItemFragmentCategory(item)) {
-    case 'Anneau':   // chaque stat proposée et l'effet ont leurs propres paliers
-      total = levels.reduce((sum, level) => sum + _tiers(s.ring, level), 0) + _tiers(s.ring, _level(up.effectBonus));
-      break;
-    case 'Amulette': // la n-ième stat distincte coûte le n-ième palier
-      total = _tiers(s.amulet, levels.length);
-      break;
-    case 'arme':     // le n-ième point coûte le n-ième palier (grille 1M ou 2M)
-      total = _tiers(s.weapon?.[weaponHands(item) === 2 ? '2H' : '1H'], levels.reduce((sum, level) => sum + level, 0));
-      break;
-    default:         // armure : budget de points (grille unique s.armor)
-      if (isArmorLike) total = _tiers(s.armor, levels.reduce((sum, level) => sum + level, 0));
+  if (cat === 'Anneau') {
+    // Anneau : chaque stat approfondie et l'effet ont leurs propres paliers.
+    total = levels.reduce((sum, level) => sum + _tiers(s.ring, level), 0) + _tiers(s.ring, _level(up.effectBonus));
+  } else if (isJewelItem(item)) {
+    // Tout autre accessoire = moteur amulette : la n-ième stat distincte = n-ième palier.
+    total = _tiers(s.amulet, levels.length);
+  } else if (cat === 'arme') {
+    // Arme : le n-ième point coûte le n-ième palier (grille 1M ou 2M).
+    total = _tiers(s.weapon?.[weaponHands(item) === 2 ? '2H' : '1H'], levels.reduce((sum, level) => sum + level, 0));
+  } else if (isArmorLike) {
+    // Armure : budget de points (grille unique s.armor).
+    total = _tiers(s.armor, levels.reduce((sum, level) => sum + level, 0));
   }
   // Traits : un trait de base remplacé = un écrasement, les autres traits posés = des ajouts.
   const added = _list(up.addedTraits).length;
