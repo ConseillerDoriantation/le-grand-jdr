@@ -86,7 +86,13 @@ test('catégorie : armes par template/format, bijoux et armures par emplacement'
   assert.equal(getItemFragmentCategory({ format: 'Bouclier' }), 'arme');
   assert.equal(getItemFragmentCategory({ slotBijou: 'Anneau' }), 'Anneau');
   assert.equal(getItemFragmentCategory({ slotArmure: 'Tête' }), 'Tête');
+  // Slots personnalisés / config par défaut : forgeables, catégorie = nom du slot.
+  assert.equal(getItemFragmentCategory({ slotArmure: 'Armure' }), 'Armure');
+  assert.equal(getItemFragmentCategory({ template: 'armure' }), 'armure', 'armure sans slot → repli sûr');
+  assert.equal(getItemFragmentCategory({ slotBijou: 'Objet harmonisé' }), 'Objet harmonisé');
+  // Garde anti-pollution : une clé dangereuse en slot de bijou n'est jamais une catégorie.
   assert.equal(getItemFragmentCategory({ slotBijou: 'constructor' }), null);
+  assert.equal(getItemFragmentCategory({ slotArmure: '__proto__' }), 'armure', 'clé dangereuse → repli armure, jamais la clé brute');
   assert.equal(getItemFragmentCategory({ nom: 'Potion' }), null);
 });
 

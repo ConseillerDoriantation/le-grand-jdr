@@ -45,7 +45,12 @@ export function getItemTraitsSlotCount(item = {}, settings = {}) {
     const cap = whCap != null ? n(whCap) : n(s.caps?.traitsPerItem?.arme); // repli ancienne config
     return Math.min(cap, rarityCap('traits', item.rarete, s));
   }
-  return Math.min(n(s.caps?.traitsPerItem?.[category]), rarityCap('traits', item.rarete, s));
+  // Amulette ou accessoire : quota par catégorie ; un slot d'accessoire personnalisé
+  // (hors Amulette) retombe sur le quota « Objet magique ».
+  const perItem = s.caps?.traitsPerItem || {};
+  const own = perItem[category];
+  const cap = own != null ? n(own) : (item.slotBijou ? n(perItem['Objet magique']) : n(own));
+  return Math.min(cap, rarityCap('traits', item.rarete, s));
 }
 
 export function traitCapAt(item = {}, rarete = item?.rarete, settings = {}) {

@@ -26,9 +26,17 @@ export const FRAGMENT_CATEGORIES = [
   { id: 'Objet magique', label: 'Objet magique', icon: '🔮' },
 ];
 
-const FRAGMENT_CAT_IDS = new Set(FRAGMENT_CATEGORIES.map(c => c.id));
+// Clés interdites comme catégorie (indexation d'objet → pollution de prototype).
+const _UNSAFE_CAT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const _safeSlot = value => {
+  const slot = String(value ?? '').trim();
+  return slot && !_UNSAFE_CAT_KEYS.has(slot) ? slot : null;
+};
 
-// Catégorie de fragment d'un objet d'inventaire.
+// Catégorie de fragment d'un objet d'inventaire = clé de son sac de fragments
+// (partagée avec le craft du VTT). La catégorie EST le nom du slot : l'armure et
+// les accessoires sont forgeables quel que soit le slot choisi par le MJ (slots
+// personnalisables), pas seulement sur une liste figée Tête/Torse/Pieds.
 // Renvoie null si l'objet n'est pas améliorable (ex : potion, objet libre).
 export function getItemFragmentCategory(item = {}) {
   if (!item) return null;
@@ -36,8 +44,10 @@ export function getItemFragmentCategory(item = {}) {
   if (tpl === 'arme' || /arme|bouclier|baguette|main libre/i.test(item.format || '')) {
     return 'arme';
   }
-  if (item.slotArmure && FRAGMENT_CAT_IDS.has(item.slotArmure)) return item.slotArmure;
-  if (item.slotBijou && FRAGMENT_CAT_IDS.has(item.slotBijou)) return item.slotBijou;
+  // Armure : toujours forgeable (repli 'armure' si le slot est vide ou non sûr).
+  if (tpl === 'armure' || item.slotArmure) return _safeSlot(item.slotArmure) || 'armure';
+  // Accessoires : le slot sert de catégorie (Anneau/Amulette gardent leur moteur).
+  if (item.slotBijou) return _safeSlot(item.slotBijou);
   return null;
 }
 
@@ -57,6 +67,7 @@ export function upgradeTariffValue(item = {}, settings = {}) {
   if (!up) return 0;
   const s = settings || {};
   const levels = Object.values(up.statBonus || {}).map(_level).filter(Boolean);
+  const isArmorLike = (item.template || '').toLowerCase() === 'armure' || !!item.slotArmure;
   let total = 0;
   switch (getItemFragmentCategory(item)) {
     case 'Anneau':   // chaque stat proposée et l'effet ont leurs propres paliers
@@ -68,6 +79,8 @@ export function upgradeTariffValue(item = {}, settings = {}) {
     case 'arme':     // le n-ième point coûte le n-ième palier (grille 1M ou 2M)
       total = _tiers(s.weapon?.[weaponHands(item) === 2 ? '2H' : '1H'], levels.reduce((sum, level) => sum + level, 0));
       break;
+    default:         // armure : budget de points (grille unique s.armor)
+      if (isArmorLike) total = _tiers(s.armor, levels.reduce((sum, level) => sum + level, 0));
   }
   // Traits : un trait de base remplacé = un écrasement, les autres traits posés = des ajouts.
   const added = _list(up.addedTraits).length;

@@ -76,6 +76,23 @@ test('armure : une seule table par rareté, détectée par template (pas par slo
   assert.equal(rich.stat, true);
 });
 
+test('armure/accessoire : forgeable quel que soit le nom du slot (config par défaut, slots perso)', () => {
+  // Config par défaut : slot 'Armure' (hors Tête/Torse/Pieds) → stats ET traits.
+  const defaultArmor = { template: 'armure', slotArmure: 'Armure', rarete: 5, traits: [] };
+  assert.equal(statCapAt(defaultArmor, 5, settings), 5, 'armure par défaut reçoit le budget de stats');
+  assert.equal(traitCapAt(defaultArmor, 5, settings), 3, 'armure par défaut reçoit ses traits');
+  // Slot d'armure totalement personnalisé → même moteur unifié.
+  const customArmor = { template: 'armure', slotArmure: 'Jambières', rarete: 3, traits: [] };
+  assert.equal(statCapAt(customArmor, 3, settings), 3);
+  assert.equal(traitCapAt(customArmor, 3, settings), 2);
+  // Accessoire à slot perso (hors Anneau/Amulette) : pas de moteur de stats,
+  // mais quota de traits repli sur « Objet magique ».
+  const harmon = { slotBijou: 'Objet harmonisé', rarete: 5, traits: [] };
+  assert.equal(statCapAt(harmon, 5, settings), 0, 'accessoire générique : pas de points de stats');
+  // min(traitsPerItem['Objet magique']=1, rarityCap traits@5=4) = 1.
+  assert.equal(traitCapAt(harmon, 5, settings), 1, 'repli quota « Objet magique »');
+});
+
 test('actions possibles respectent fragments, or, mode MJ et gain de reforge', () => {
   const char = { traitFragments: { arme: { Froid: 1 } } };
   const item = sword(1);

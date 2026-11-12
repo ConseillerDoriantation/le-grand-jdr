@@ -60,10 +60,14 @@ const ARTISAN_STAT_COLORS = {
   intelligence: '#9d6fff', sagesse: '#f4c430', charisme: '#ff78c8',
 };
 
-function _artisanFamily(category) {
+function _artisanFamily(category, item = null) {
   if (category === 'arme') return 'weapons';
-  if (['Tête', 'Torse', 'Pieds'].includes(category)) return 'armor';
-  if (['Amulette', 'Anneau'].includes(category)) return 'jewelry';
+  // Classer par l'objet quand on l'a (robuste aux slots personnalisés du MJ).
+  if (item && _isArmorItem(item)) return 'armor';
+  if (category === 'Amulette' || category === 'Anneau') return 'jewelry';
+  if (item?.slotBijou) return 'magic';
+  // Repli sans objet : noms de slots connus.
+  if (['Tête', 'Torse', 'Pieds', 'Armure', 'armure'].includes(category)) return 'armor';
   if (category === 'Objet magique') return 'magic';
   return 'all';
 }
@@ -354,8 +358,8 @@ function _getEligibleItems(c) {
 
 function _renderItemFilters(c) {
   const eligible = _getEligibleItems(c);
-  const counts = eligible.reduce((acc, { cat }) => {
-    const family = _artisanFamily(cat);
+  const counts = eligible.reduce((acc, { cat, it }) => {
+    const family = _artisanFamily(cat, it);
     acc[family] = (acc[family] || 0) + 1;
     return acc;
   }, {});
@@ -455,7 +459,7 @@ function _renderItemList(c) {
   const allEligible = _getEligibleItems(c);
   const q = _norm(STORE.itemSearch);
   const eligible = allEligible.filter(({ it, cat }) => {
-    if (STORE.itemCategory !== 'all' && _artisanFamily(cat) !== STORE.itemCategory) return false;
+    if (STORE.itemCategory !== 'all' && _artisanFamily(cat, it) !== STORE.itemCategory) return false;
     if (!q) return true;
     const meta = FRAGMENT_CAT_BY_ID[cat];
     const haystack = [
@@ -1340,7 +1344,7 @@ function _artisanSelectCompatible(category) {
   const compatible = candidates.find(entry => _getTraits(entry.it).length < getItemTraitsSlotCount(entry.it)) || candidates[0];
   if (!compatible) { showNotif('Aucune pièce compatible dans cet inventaire.', 'info'); return; }
   STORE.activeItemIndex = compatible.idx;
-  STORE.itemCategory = _artisanFamily(category);
+  STORE.itemCategory = _artisanFamily(category, compatible.it);
   STORE.operation = null;
   _renderArtisanModal();
 }
