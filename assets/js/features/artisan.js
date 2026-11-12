@@ -39,6 +39,7 @@ import { evaluateReforge, scaleMaterials } from '../shared/reforge.js';
 import { getRarities, loadRarities, RARETE_NAMES, _rareteColor } from '../shared/rarity.js';
 import { getDocData, loadCollection } from '../data/firestore.js';
 import { getInventoryItemImage, shopItemToInvEntry } from '../shared/inventory-utils.js';
+import { isArmorItem } from '../shared/item-facts.js';
 import { isTraitRecyclable, recyclableTraits, nonRecyclableTraitNames } from '../shared/trait-recycling.js';
 import {
   getItemTraitsSlotCount as getItemTraitsSlotCountPure, traitCapAt, statCapAt, unlockRarity, firstGainRarity,
@@ -382,9 +383,14 @@ function _renderFragmentBag(c, { page = false } = {}) {
   const bag = getCharacterFragments(c);
   const selected = (c?.inventaire || [])[STORE.activeItemIndex];
   const selectedCategory = selected ? getItemFragmentCategory(selected) : null;
-  const fragmentEntries = FRAGMENT_CATEGORIES.flatMap(category => Object.entries(bag[category.id] || {})
+  // Le sac est construit sur les clés RÉELLEMENT présentes (slots par défaut ou
+  // personnalisés compris), pas sur une liste figée : une catégorie inconnue
+  // garde son nom comme libellé et un glyphe générique.
+  const _catMeta = id => FRAGMENT_CAT_BY_ID[id] || { id, label: id, icon: '◆' };
+  const fragmentEntries = Object.entries(bag).flatMap(([catId, traits]) => Object.entries(traits || {})
     .filter(([, qty]) => (parseInt(qty, 10) || 0) > 0)
-    .map(([name, qty]) => ({ category, name, qty: parseInt(qty, 10) || 0 })));
+    .map(([name, qty]) => ({ category: _catMeta(catId), name, qty: parseInt(qty, 10) || 0 })))
+    .sort((a, b) => a.category.label.localeCompare(b.category.label, 'fr') || a.name.localeCompare(b.name, 'fr'));
   const totalCount = fragmentEntries.reduce((sum, entry) => sum + entry.qty, 0);
   const fragmentRow = entry => {
     const mine = selectedCategory === entry.category.id;
@@ -1434,9 +1440,11 @@ function _renderStatsSection(item, invIndex, c, cat) {
   return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>Les améliorations chiffrées disponibles pour cette pièce.</p></span><em class="art-section-state is-muted">Non applicable</em></header><div class="art-operation-body"><p class="art-section-empty">Cette pièce s’améliore uniquement par ses traits.</p></div></section>`;
 }
 
-// « Est-ce une armure ? » — par template (robuste aux slots personnalisés du MJ).
+// « Est-ce une armure ? » — classificateur canonique (item-facts), robuste aux
+// slots personnalisés et à `ca`/`typeArmure`. On exclut les bijoux (un accessoire
+// porteur de CA reste un bijou). Aligné sur artisan-logic.isArmor.
 function _isArmorItem(item = {}) {
-  return (item.template || '').toLowerCase() === 'armure' || !!item.slotArmure;
+  return isArmorItem(item) && !item.slotBijou && (item.template || '').toLowerCase() !== 'bijou';
 }
 
 // ── Helpers communs ──────────────────────────────────────────────────

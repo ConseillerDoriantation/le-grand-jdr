@@ -5,6 +5,7 @@ import { weaponHands } from './weapon-family.js';
 import { ITEM_STAT_META, getItemBaseStatBonus } from './char-stats.js';
 import { DEFAULT_RARITY_CAPS, DEFAULT_RING_CAPS, DEFAULT_ARMOR_CAPS, rarityCapFromTable } from './rarity-caps.js';
 import { getItemFragmentCategory } from './upgrade-value.js';
+import { isArmorItem } from './item-facts.js';
 import { craftCategoryForItem, craftRecycleQty, craftRecipeMaterialsFromConfig } from './craft-engine.js';
 import { recyclableTraits, nonRecyclableTraitNames } from './trait-recycling.js';
 
@@ -22,8 +23,11 @@ const ringCap = (kind, rarete, settings) => rarityCapFromTable(
 const armorCap = (kind, rarete, settings) => rarityCapFromTable(
   settings?.rarityCaps?.armor?.[kind] || DEFAULT_ARMOR_CAPS[kind], rarete,
 );
-// « Est-ce une armure ? » — par template (robuste aux slots personnalisés du MJ).
-const isArmor = item => (item?.template || '').toLowerCase() === 'armure' || !!item?.slotArmure;
+// « Est-ce une armure ? » — classificateur canonique (item-facts), robuste aux
+// slots personnalisés et aux objets définis par `ca`/`typeArmure`. On exclut les
+// bijoux : un accessoire porteur de CA reste un bijou, pas une armure.
+const isArmor = item => isArmorItem(item) && !item?.slotBijou
+  && (item?.template || '').toLowerCase() !== 'bijou';
 // Stats réellement portées par l'objet (celles qu'un anneau peut approfondir).
 const nativeStats = item => ITEM_STAT_META.filter(meta => getItemBaseStatBonus(item, meta.full) !== 0);
 

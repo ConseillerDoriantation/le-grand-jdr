@@ -12,6 +12,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { weaponHands } from './weapon-family.js';
+import { isWeaponItem, isArmorItem } from './item-facts.js';
 
 // Catégories de fragments : un fragment ne se pose que sur un objet de la même
 // catégorie (toutes les armes partagent 'arme', peu importe le format). La
@@ -37,17 +38,18 @@ const _safeSlot = value => {
 // (partagée avec le craft du VTT). La catégorie EST le nom du slot : l'armure et
 // les accessoires sont forgeables quel que soit le slot choisi par le MJ (slots
 // personnalisables), pas seulement sur une liste figée Tête/Torse/Pieds.
+// Détection de nature = classificateurs canoniques `item-facts.js` (source unique,
+// robustes aux objets définis par `degats`/`ca`/`typeArmure`/`template`).
 // Renvoie null si l'objet n'est pas améliorable (ex : potion, objet libre).
 export function getItemFragmentCategory(item = {}) {
   if (!item) return null;
-  const tpl = (item.template || '').toLowerCase();
-  if (tpl === 'arme' || /arme|bouclier|baguette|main libre/i.test(item.format || '')) {
-    return 'arme';
-  }
-  // Armure : toujours forgeable (repli 'armure' si le slot est vide ou non sûr).
-  if (tpl === 'armure' || item.slotArmure) return _safeSlot(item.slotArmure) || 'armure';
-  // Accessoires : le slot sert de catégorie (Anneau/Amulette gardent leur moteur).
-  if (item.slotBijou) return _safeSlot(item.slotBijou);
+  const tpl = String(item.template || '').toLowerCase();
+  // 1. Armes & boucliers d'abord (un bouclier peut porter une CA sans être une armure).
+  if (isWeaponItem(item) || /arme|bouclier|baguette|main libre/i.test(item.format || '')) return 'arme';
+  // 2. Bijoux explicites avant l'armure (un bijou pourrait théoriquement porter une CA).
+  if (tpl === 'bijou' || item.slotBijou) return _safeSlot(item.slotBijou) || 'Objet magique';
+  // 3. Armures (template, slot, type d'armure ou CA) — repli 'armure' si slot vide/non sûr.
+  if (isArmorItem(item)) return _safeSlot(item.slotArmure) || 'armure';
   return null;
 }
 

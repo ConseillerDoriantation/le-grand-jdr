@@ -6,6 +6,16 @@ const root = new URL('../', import.meta.url);
 const artisan = readFileSync(new URL('assets/js/features/artisan.js', root), 'utf8');
 const upg = readFileSync(new URL('assets/js/shared/upgrade-settings.js', root), 'utf8');
 
+test('sac de fragments : agnostique au nom de slot (clés réelles, pas la liste figée)', () => {
+  // Le bag itère sur les catégories RÉELLEMENT présentes dans c.traitFragments…
+  assert.match(artisan, /const fragmentEntries = Object\.entries\(bag\)\.flatMap/);
+  // …et une catégorie inconnue (slot par défaut/perso) garde son nom + glyphe générique.
+  assert.match(artisan, /const _catMeta = id => FRAGMENT_CAT_BY_ID\[id\] \|\| \{ id, label: id, icon: '◆' \}/);
+  // La détection d'armure/arme passe par les classificateurs canoniques (item-facts).
+  assert.match(artisan, /import \{ isArmorItem \} from '\.\.\/shared\/item-facts\.js'/);
+  assert.match(artisan, /return isArmorItem\(item\) && !item\.slotBijou/);
+});
+
 test('armure : cap par stat (anti-dump) côté config + enforcement', () => {
   assert.match(upg, /armorStatMax: 3/);                       // défaut
   assert.match(upg, /'caps\.armorStatMax'/);                   // admin éditable (champ passé à capRow)

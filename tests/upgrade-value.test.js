@@ -90,9 +90,14 @@ test('catégorie : armes par template/format, bijoux et armures par emplacement'
   assert.equal(getItemFragmentCategory({ slotArmure: 'Armure' }), 'Armure');
   assert.equal(getItemFragmentCategory({ template: 'armure' }), 'armure', 'armure sans slot → repli sûr');
   assert.equal(getItemFragmentCategory({ slotBijou: 'Objet harmonisé' }), 'Objet harmonisé');
-  // Garde anti-pollution : une clé dangereuse en slot de bijou n'est jamais une catégorie.
-  assert.equal(getItemFragmentCategory({ slotBijou: 'constructor' }), null);
-  assert.equal(getItemFragmentCategory({ slotArmure: '__proto__' }), 'armure', 'clé dangereuse → repli armure, jamais la clé brute');
+  // Garde anti-pollution : une clé dangereuse retombe sur une clé SÛRE, jamais la clé brute.
+  assert.equal(getItemFragmentCategory({ slotBijou: 'constructor' }), 'Objet magique', 'bijou à clé dangereuse → repli sûr, jamais la clé brute');
+  assert.equal(getItemFragmentCategory({ slotArmure: '__proto__' }), 'armure', 'armure à clé dangereuse → repli armure, jamais la clé brute');
+  // Objets définis par leurs seules données (sans template ni slot) : forgeables.
+  assert.equal(getItemFragmentCategory({ degats: '1d8' }), 'arme', 'arme définie par degats');
+  assert.equal(getItemFragmentCategory({ ca: 2 }), 'armure', 'armure définie par CA');
+  assert.equal(getItemFragmentCategory({ typeArmure: 'Légère' }), 'armure', 'armure définie par typeArmure');
+  assert.equal(getItemFragmentCategory({ template: 'bijou' }), 'Objet magique', 'bijou sans slot → accessoire générique');
   assert.equal(getItemFragmentCategory({ nom: 'Potion' }), null);
 });
 
