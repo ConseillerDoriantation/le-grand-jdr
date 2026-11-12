@@ -93,6 +93,15 @@ test('rareté en losange (partagé Inventaire) et traits via les helpers', () =>
   assert.match(combat, /RARETE_NAMES/);
 });
 
+test('les bonus des équipements portés reprennent les tags colorés de l’inventaire', () => {
+  assert.match(combat, /const bonusTags = badges/);
+  assert.match(combat, /class="iv-chip \$\{esc\(b\.cls\)\}"/);
+  assert.match(combat, /bonusTags\(_itemBonusBadges\(live\)\)/);
+  assert.match(combat, /bonusTags\(bonus\)/);
+  assert.match(css, /\.cs-v3 \.fs-bonus-tags \{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap/);
+  assert.match(css, /\.cs-v3 \.fs-bonus-tags \.iv-chip \{[^}]*border-radius:\s*999px[^}]*font-weight:\s*700/);
+});
+
 test('les en-têtes de section portent l’action MJ alignée à droite (.fs-add)', () => {
   assert.match(css, /\.cs-v3 \.fs-h \.fs-add\s*\{[^}]*margin:\s*0 0 0 auto/);
   // Les actions MJ « Gérer / Ajouter » sont des .fs-add.
