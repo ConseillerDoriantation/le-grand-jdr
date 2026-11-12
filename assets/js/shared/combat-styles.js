@@ -1,5 +1,7 @@
 import { getPrimaryWeaponSlotId, getSecondaryWeaponSlotId } from './equipment-slots.js';
-import { weaponFamilyLabels, weaponHands } from './weapon-family.js';
+import { weaponFamilyLabels, weaponHands, weaponRangeKind } from './weapon-family.js';
+
+const RANGE_KINDS = new Set(['cac', 'distance']);
 
 const OPPORTUNITY_MODES = new Set(['inherit', 'allow', 'forbid']);
 const CONTACT_MODES = new Set(['none', 'advantage', 'disadvantage']);
@@ -57,6 +59,8 @@ export function normalizeCombatStyle(style = {}) {
 
   return {
     ...style,
+    // Allonge exigée pour l'arme principale (dérivée de sa portée) ; '' = indifférent.
+    condRange: RANGE_KINDS.has(style.condRange) ? style.condRange : '',
     rules: {
       ...rawRules,
       opportunityAttack,
@@ -113,9 +117,11 @@ export function detectCombatStyle(character, styles = [], formats = []) {
       || (mainLabels.length > 0 && weaponHands(main) === requiredHands);
     const matchesSubtype = subtypeConditions.length === 0
       || subtypeConditions.some(value => secondarySubtype.includes(value));
+    // Allonge : la portée de l'arme principale (CaC ≤ 2, Distance > 2).
+    const matchesRange = !style.condRange || weaponRangeKind(main) === style.condRange;
     if (matchesHand(style.condPrincipale || [], mainLabels)
       && matchesHand(style.condSecondaire || [], secondaryLabels)
-      && matchesHands && matchesSubtype) return style;
+      && matchesHands && matchesSubtype && matchesRange) return style;
   }
   return null;
 }
@@ -141,6 +147,7 @@ export function explainCombatStyle(style, mainWeapon, secondaryWeapon, formats =
   const subtypeConditions = (s.condSousTypeS || []).map(v => String(v).toLowerCase());
   if (!_matchesHand(s.condPrincipale || [], mainLabels)) return 'main principale';
   if ((requiredHands === 1 || requiredHands === 2) && !(mainLabels.length > 0 && weaponHands(main) === requiredHands)) return 'maniement';
+  if (s.condRange && weaponRangeKind(main) !== s.condRange) return 'allonge';
   if (!_matchesHand(s.condSecondaire || [], secondaryLabels)) return 'main secondaire';
   if (subtypeConditions.length && !subtypeConditions.some(v => secondarySubtype.includes(v))) return 'sous-type secondaire';
   return null;
@@ -151,7 +158,7 @@ function _isCatchAll(style) {
   const s = normalizeCombatStyle(style);
   return !(s.condPrincipale || []).length && !(s.condSecondaire || []).length
     && !(parseInt(s.condMains, 10) === 1 || parseInt(s.condMains, 10) === 2)
-    && !(s.condSousTypeS || []).length;
+    && !(s.condSousTypeS || []).length && !s.condRange;
 }
 
 /**
@@ -162,7 +169,7 @@ function _isCatchAll(style) {
 export function combatStyleCoverage(styles = [], formats = []) {
   const list = (Array.isArray(formats) ? formats : []).filter(f => f && f.label);
   const slots = [null, ...list]; // null = main vide
-  const toWeapon = f => f ? { format: f.label, mains: f.defaults?.mains || '' } : null;
+  const toWeapon = f => f ? { format: f.label, mains: f.defaults?.mains || '', portee: f.defaults?.portee || '' } : null;
   const is2h = w => !!w && weaponHands(w) === 2;
   const wins = {}, matches = {}, capturedBy = {};
   (styles || []).forEach(s => { wins[s.id] = 0; matches[s.id] = 0; capturedBy[s.id] = {}; });
