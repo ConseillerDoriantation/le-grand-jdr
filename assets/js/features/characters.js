@@ -9,6 +9,10 @@ import { charSession } from '../shared/char-session.js';
 import { characterPortraitContent } from '../shared/portraits.js';
 import { openImageLightbox } from '../shared/image-lightbox.js';
 import { characterOriginalPhotoFor } from '../shared/character-media.js';
+import {
+  loadCharacterPortraits, getCachedCharacterPortraits, removeCharacterPortrait,
+  reorderCharacterPortraits, CHARACTER_PORTRAITS_MAX,
+} from '../shared/character-portraits.js';
 import { avatarSrcOf } from '../shared/avatar.js';
 import {
   applyActiveBuild, buildProjectionPatch, createBuild, deleteBuild,
@@ -926,6 +930,7 @@ function _identityPopoverHtml(c, canEdit, { xpCur, xpPalier, xpPct }) {
   const ui = _identityStateFor(c);
   if (!ui.popover) return '';
   if (ui.popover === 'builds') return canEdit ? _buildBuildManagerHtml(c) : '';
+  if (ui.popover === 'portraits') return canEdit ? _buildPortraitGalleryHtml(c) : '';
   if (ui.popover === 'status') {
     if (!canEdit) return '';
     const current = _characterLifeStatus(c);
@@ -1018,7 +1023,7 @@ function _buildSidebarHtml(c, canEdit, { pvCur, pvMax, pvPct, hpBarCls, pmCur, p
       <div class="ids-portrait${ready ? ' is-ready' : ''}${lifeStatus === 'dead' ? ' is-dead' : ''}">
         <svg viewBox="0 0 144 144" aria-label="${xpPct}% d'expérience"><circle class="ids-ring-bg" cx="72" cy="72" r="65"></circle><circle class="ids-ring" cx="72" cy="72" r="65" pathLength="100" stroke-dasharray="${xpPct} ${Math.max(0, 100 - xpPct)}"></circle></svg>
         ${canEdit
-          ? `<button type="button" class="ids-portrait-in is-clickable" data-action="open-character-photo" data-charid="${c.id}" data-character-photo-drop="${c.id}" title="Cliquer ou déposer une image" aria-label="Changer le portrait de ${_esc(c.nom || 'ce personnage')}">${characterPortraitContent(c, { fallbackTag: 'span' })}<span class="ids-portrait-hover">${c.photo ? 'Changer' : 'Ajouter'} la photo</span></button>`
+          ? `<button type="button" class="ids-portrait-in is-clickable" data-action="toggleIdentityPopover" data-popover="portraits" data-id="${c.id}" data-character-photo-drop="${c.id}" title="Galerie de portraits — cliquer ou déposer une image" aria-label="Galerie de portraits de ${_esc(c.nom || 'ce personnage')}">${characterPortraitContent(c, { fallbackTag: 'span' })}<span class="ids-portrait-hover">${c.photo ? '🖼️ Portraits' : '＋ Ajouter'}</span></button>`
           : `<div class="ids-portrait-in">${characterPortraitContent(c, { fallbackTag: 'span' })}</div>`}
         ${canEdit ? `<button class="ids-portrait-edit ids-aura-button" style="--dot-c:${_auraHex(c)}" data-action="toggleIdentityPopover" data-popover="aura" data-id="${c.id}" title="Aura du personnage" aria-label="Modifier l'aura"></button>` : ''}
       </div>
@@ -1092,6 +1097,51 @@ function _buildBuildManagerHtml(c) {
     </div>
     <button class="ids-build-create" data-action="createCharacterBuild" data-id="${c.id}"><b>+</b><span>Nouveau build<small>Copie la configuration actuelle</small></span></button>
   </section>`;
+}
+
+function _buildPortraitGalleryHtml(c) {
+  const portraits = getCachedCharacterPortraits(c.id); // null = pas encore chargé
+  const current = c.photo || '';
+  const atMax = (portraits?.length || 0) >= CHARACTER_PORTRAITS_MAX;
+  const body = portraits == null
+    ? '<p class="ids-gal-loading">Chargement des portraits…</p>'
+    : portraits.length
+      ? `<div class="ids-gal-grid" id="ids-gal-grid-${_esc(c.id)}">${portraits.map(p => {
+          const isCur = p.photo === current;
+          return `<figure class="ids-gal-item${isCur ? ' is-current' : ''}" data-portrait-id="${_esc(p.id)}">
+            <button type="button" class="ids-gal-pick" data-action="setCharacterPortrait" data-id="${c.id}" data-portrait-id="${_esc(p.id)}" title="${isCur ? 'Portrait affiché' : 'Équiper ce portrait'}" aria-label="${isCur ? 'Portrait affiché' : 'Équiper ce portrait'}">
+              <img src="${_esc(p.photo)}" alt="" loading="lazy" decoding="async">
+              ${isCur ? '<figcaption>Affiché</figcaption>' : ''}
+            </button>
+            <span class="ids-gal-handle" title="Glisser pour réordonner" aria-hidden="true">⠿</span>
+            <button class="ids-gal-del" data-action="removeCharacterPortrait" data-id="${c.id}" data-portrait-id="${_esc(p.id)}" title="Retirer ce portrait" aria-label="Retirer ce portrait">×</button>
+          </figure>`;
+        }).join('')}</div>`
+      : '<p class="ids-gal-empty">Aucun portrait pour l’instant. Ajoute-en un : clique sur une vignette pour l’équiper, et retrouve-les dans les avatars de ton compte.</p>';
+  return `<section class="ids-pop ids-pop-portraits" role="dialog" aria-label="Galerie de portraits">
+    <header><div><b>Portraits</b><small>${portraits == null ? '…' : `${portraits.length}/${CHARACTER_PORTRAITS_MAX}`}</small></div><button data-action="closeIdentityPopover" aria-label="Fermer">×</button></header>
+    ${portraits?.length ? '<p class="ids-gal-hint">Clique = portrait affiché · glisse ⠿ = réordonner · aussi dispo dans les avatars du compte.</p>' : ''}
+    ${body}
+    <button class="ids-gal-add" data-action="open-character-photo" data-charid="${c.id}"${atMax ? ' disabled title="Galerie pleine : retire un portrait"' : ''}><b>+</b><span>Ajouter un portrait<small>Upload → cadrage</small></span></button>
+  </section>`;
+}
+
+let _portraitGallerySortable = null;
+function _initPortraitGallerySortable(c) {
+  const host = document.getElementById(`ids-gal-grid-${c.id}`);
+  if (!host) return;
+  try { _portraitGallerySortable?.destroy(); } catch {}
+  _portraitGallerySortable = makeSortable(host, {
+    prefix: 'char-portrait',
+    draggable: '.ids-gal-item',
+    handle: '.ids-gal-handle',
+    fallbackOnBody: false,
+    onEnd: async () => {
+      const ids = [...host.querySelectorAll('.ids-gal-item')].map(el => el.dataset.portraitId).filter(Boolean);
+      try { await reorderCharacterPortraits(c.id, ids); }
+      catch (error) { notifySaveError(error); }
+    },
+  });
 }
 
 function _buildMainColHtml(canEdit, { tilesHtml, tabsHtml, lvlPointsRemaining, v3Tab }) {
@@ -1196,11 +1246,11 @@ function _removeIdentityPopover() {
   document.getElementById('identity-popover-layer')?.remove();
 }
 
-function _toggleIdentityPopover(btn) {
-  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
-  if (!c) return;
+// (Re)dessine le popover d'identité actuellement ouvert pour `c`, positionné sous
+// son ancre. Séparé de _toggleIdentityPopover pour pouvoir rafraîchir le contenu
+// après un chargement asynchrone (galerie de portraits) sans re-basculer l'état.
+function _paintIdentityPopover(c, btn = null) {
   const ui = _identityStateFor(c);
-  ui.popover = ui.popover === btn.dataset.popover ? null : btn.dataset.popover;
   const side = document.getElementById('cs-sidebar');
   _removeIdentityPopover();
   if (!ui.popover || !side) return;
@@ -1219,20 +1269,31 @@ function _toggleIdentityPopover(btn) {
   requestAnimationFrame(() => {
     const popover = layer.querySelector('.ids-pop');
     if (!popover) return;
-    const anchor = ui.popover === 'aura'
-      ? side.querySelector('.ids-aura-button') || btn
-      : ui.popover === 'status'
-        ? side.querySelector('.ids-life') || btn
-      : ui.popover === 'builds'
-        ? side.querySelector('.ids-build') || btn
-        : btn;
+    const anchorSel = { aura: '.ids-aura-button', status: '.ids-life', builds: '.ids-build', portraits: '.ids-portrait' }[ui.popover];
+    const anchor = (anchorSel && side.querySelector(anchorSel)) || btn || side.querySelector('.ids-portrait');
+    if (!anchor) return;
     const rect = anchor.getBoundingClientRect();
     const halfWidth = popover.offsetWidth / 2;
     const left = Math.max(halfWidth + 12, Math.min(window.innerWidth - halfWidth - 12, rect.left + rect.width / 2 + 10));
     popover.style.left = `${Math.round(left)}px`;
     popover.style.top = `${Math.round(rect.bottom + 8)}px`;
     if (ui.popover === 'xp') layer.querySelector(`#xp-add-input-${CSS.escape(c.id)}`)?.focus({ preventScroll: true });
+    if (ui.popover === 'portraits') _initPortraitGallerySortable(c);
   });
+}
+
+function _toggleIdentityPopover(btn) {
+  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
+  if (!c) return;
+  const ui = _identityStateFor(c);
+  ui.popover = ui.popover === btn.dataset.popover ? null : btn.dataset.popover;
+  _paintIdentityPopover(c, btn);
+  // La galerie vit dans un document à part : charge-la à la volée puis redessine.
+  if (ui.popover === 'portraits' && getCachedCharacterPortraits(c.id) == null) {
+    loadCharacterPortraits(c.id)
+      .then(() => { if (_identityStateFor(c).popover === 'portraits') _paintIdentityPopover(c, btn); })
+      .catch(() => {});
+  }
 }
 
 async function _openCharacterPortraitViewer(btn) {
@@ -1243,6 +1304,38 @@ async function _openCharacterPortraitViewer(btn) {
     src,
     alt: `Portrait complet de ${c.nom || 'ce personnage'}`,
   });
+}
+
+// ── Galerie de portraits (popover) ───────────────────────────────────────────
+const _galleryPortrait = (c, portraitId) => (getCachedCharacterPortraits(c?.id) || []).find(p => p.id === portraitId);
+
+async function _setCharacterPortrait(btn) {
+  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
+  if (!c || !canControlCharacter(c)) return;
+  const p = _galleryPortrait(c, btn.dataset.portraitId);
+  if (!p || p.photo === c.photo) return;
+  const prev = { photo: c.photo, photoOriginal: c.photoOriginal, photoZoom: c.photoZoom, photoX: c.photoX, photoY: c.photoY };
+  c.photo = p.photo; c.photoOriginal = null; c.photoZoom = 1; c.photoX = 0; c.photoY = 0;
+  try {
+    await saveBuildPatch(c.id, c, { photo: p.photo, photoOriginal: null, photoZoom: 1, photoX: 0, photoY: 0 });
+    _rerenderIdentity(c);
+    _paintIdentityPopover(c);
+    showNotif('Portrait affiché mis à jour.', 'success');
+  } catch (error) {
+    Object.assign(c, prev);
+    notifySaveError(error);
+  }
+}
+
+async function _removeCharacterPortrait(btn) {
+  const c = getCharacterById(btn.dataset.id) || charSession.getCurrentChar();
+  if (!c || !canControlCharacter(c)) return;
+  try {
+    await removeCharacterPortrait(c.id, btn.dataset.portraitId);
+    _paintIdentityPopover(c);
+  } catch (error) {
+    notifySaveError(error);
+  }
 }
 
 function _identityFieldSaved(input) {
@@ -2246,6 +2339,8 @@ registerActions({
 
   // Actions identité
   openCharacterPortraitViewer: (btn) => _openCharacterPortraitViewer(btn),
+  setCharacterPortrait:    (btn)    => _setCharacterPortrait(btn),
+  removeCharacterPortrait: (btn)    => _removeCharacterPortrait(btn),
   toggleIdentityPopover:   (btn)    => _toggleIdentityPopover(btn),
   closeIdentityPopover:    ()       => _closeIdentityPopover(),
   identityInlineCommit:    (el)     => _identityInlineCommit(el),

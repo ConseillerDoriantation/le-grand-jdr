@@ -6,6 +6,7 @@ import { compressDataUrl, pickImageFile } from '../shared/image-upload.js';
 import { panZoomCropHTML, attachPanZoomCrop } from '../shared/image-crop.js';
 import { getActiveBuild, saveBuildPatch } from '../shared/character-builds.js';
 import { saveCharacterOriginalPhoto } from '../shared/character-media.js';
+import { addCharacterPortrait } from '../shared/character-portraits.js';
 
 import { getCharacterById } from '../shared/character-state.js';
 // ══════════════════════════════════════════════════════════════════════════════
@@ -117,6 +118,10 @@ async function saveCroppedCharacterPhoto(charId) {
   try {
     await saveCharacterOriginalPhoto(charId, activeBuildId, photoOriginal);
     await saveBuildPatch(charId, c, { photo: dataUrl, photoOriginal: null, photoZoom: 1, photoX: 0, photoY: 0 });
+    // Chaque portrait enregistré alimente la galerie du personnage (réutilisable
+    // comme avatar de compte). Non bloquant : une règle characterPortraits non
+    // déployée ne doit pas empêcher de changer le portrait affiché.
+    addCharacterPortrait(charId, dataUrl).catch((err) => console.warn('[character photo] galerie non mise à jour', err?.code || err));
     _destroyCharacterPhotoCrop();
     closeModal();
     showNotif('Photo enregistrée !', 'success');
