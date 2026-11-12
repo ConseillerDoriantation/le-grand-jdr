@@ -1513,16 +1513,19 @@ function _renderRingStats(item, invIndex, c) {
   const total = statPointUse(item);
   const cost = total < cap ? (s.ring?.[total + 1] || 0) : 0;
   const native = _getBaseStatEntries(item).map(entry => entry.meta);
-  const canAdd = total < cap && native.length > 0;
+  // Anti-dump : profondeur max ajoutée sur UNE même stat native (comme l'armure).
+  const perStatMax = Math.max(1, parseInt(s.caps?.ringStatMax) || 3);
+  const anyRoom = native.some(meta => getItemUpgradeStatBonus(item, meta.full) < perStatMax);
+  const canAdd = total < cap && native.length > 0 && anyRoom;
 
   const familyCap = statCapAt(item, 5, s);
-  const choices = native.map(meta => _statChoice(meta, item, invIndex, 'ring', cost)).join('');
+  const choices = native.map(meta => _statChoice(meta, item, invIndex, 'ring', cost, getItemUpgradeStatBonus(item, meta.full) >= perStatMax)).join('');
   const nextUnlock = unlockRarity(item, 'stats', cap + 1, s);
   const available = Math.max(0, cap - total);
   const empty = native.length === 0
     ? '<p class="art-section-empty">Cet anneau ne porte aucune statistique à approfondir — il s’améliore par son trait.</p>'
     : `<p class="art-section-hint"><span>i</span>Les ${cap} point${cap > 1 ? 's' : ''} autorisé${cap > 1 ? 's' : ''} en ${_esc(RARETE_NAMES[item.rarete] || 'cette rareté')} sont placés.${nextUnlock ? ` Reforge en ${_esc(RARETE_NAMES[nextUnlock] || nextUnlock)} pour un point supplémentaire.` : ''}</p>`;
-  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>L’anneau approfondit uniquement les caractéristiques qu’il porte déjà.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, s.ring || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Tu peux cumuler plusieurs points sur une même caractéristique de l’anneau.</small><div class="art-stat-choices">${choices}</div></div>` : empty}${_renderRemovableStats(item, invIndex)}${_renderOperationPanel(item, invIndex, c, 'Anneau', 'stat')}</div></section>`;
+  return `<section class="art-panel art-operation"><header class="art-operation-head"><span class="art-operation-icon is-stat">●</span><span><h3>Points de stats</h3><p>L’anneau approfondit uniquement les caractéristiques qu’il porte déjà.</p></span><em class="art-section-state ${canAdd ? 'is-open' : 'is-complete'}">${canAdd ? `${available} disponible${available > 1 ? 's' : ''}` : 'Complet'}</em></header><div class="art-operation-body">${_renderStatTrack(item, total, cap, familyCap, s.ring || {})}${canAdd ? `<div class="art-choice-block"><b>Sur quelle caractéristique ?</b><small>Cumul possible, mais ${perStatMax} point${perStatMax > 1 ? 's' : ''} max sur une même caractéristique de l’anneau.</small><div class="art-stat-choices">${choices}</div></div>` : empty}${_renderRemovableStats(item, invIndex)}${_renderOperationPanel(item, invIndex, c, 'Anneau', 'stat')}</div></section>`;
 }
 
 function _renderAmuletStats(item, invIndex, c) {
@@ -1656,6 +1659,11 @@ async function _artisanRingAddPoint(invIndex, statFullKey) {
   const total = statPointUse(item);
   if (total >= cap) { showNotif(`Plafond atteint (${cap} point${cap > 1 ? 's' : ''}).`, 'error'); return; }
 
+  // Anti-dump : profondeur max ajoutée sur cette stat native (comme l'armure).
+  const perStatMax = Math.max(1, parseInt(s.caps?.ringStatMax) || 3);
+  const curStat = parseInt(item.upgrades?.statBonus?.[meta.store]) || 0;
+  if (curStat >= perStatMax) { showNotif(`${perStatMax} point${perStatMax > 1 ? 's' : ''} max sur une même stat.`, 'error'); return; }
+
   const slotN = total + 1;
   const cost = s.ring?.[slotN] || 0;
   if (!_canAfford(c, cost)) { showNotif(`Or insuffisant (${cost} PO requis).`, 'error'); return; }
@@ -1663,7 +1671,6 @@ async function _artisanRingAddPoint(invIndex, statFullKey) {
   const inv = [...c.inventaire];
   const newItem = { ...item };
   const up = newItem.upgrades || {};
-  const curStat = parseInt(up.statBonus?.[meta.store]) || 0;
   newItem.upgrades = {
     ...up,
     statBonus: { ...(up.statBonus || {}), [meta.store]: curStat + 1 },

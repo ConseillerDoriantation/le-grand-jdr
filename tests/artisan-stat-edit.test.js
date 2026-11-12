@@ -18,11 +18,14 @@ test('sac de fragments : agnostique au nom de slot (clés réelles, pas la liste
   assert.match(artisan, /if \(isJewelItem\(item\)\)  return _renderAmuletStats/);
 });
 
-test('armure : cap par stat (anti-dump) côté config + enforcement', () => {
-  assert.match(upg, /armorStatMax: 3/);                       // défaut
+test('armure & anneau : cap par stat (anti-dump) côté config + enforcement', () => {
+  assert.match(upg, /armorStatMax: 3/);                       // défaut armure
+  assert.match(upg, /ringStatMax:  3/);                        // défaut anneau
   assert.match(upg, /'caps\.armorStatMax'/);                   // admin éditable (champ passé à capRow)
-  // Blocage à l'ajout + désactivation du choix dans le rendu.
+  assert.match(upg, /'caps\.ringStatMax'/);                    // admin éditable
+  // Blocage à l'ajout + désactivation du choix dans le rendu (armure ET anneau).
   assert.match(artisan, /const perStatMax = Math\.max\(1, parseInt\(s\.caps\?\.armorStatMax\) \|\| 3\)/);
+  assert.match(artisan, /const perStatMax = Math\.max\(1, parseInt\(s\.caps\?\.ringStatMax\) \|\| 3\)/);
   assert.match(artisan, /if \(curStat >= perStatMax\)/);       // handler bloque
   assert.match(artisan, /getItemUpgradeStatBonus\(item, meta\.full\) >= perStatMax/); // choix désactivé
 });
