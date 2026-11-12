@@ -22154,6 +22154,37 @@ body .modal:has(.inv-history-modal-shell) {
   border-color: var(--surface-1);
   box-shadow: 0 0 0 2px var(--dot-c);
 }
+/* Popover galerie de portraits. */
+.cs-v3 .ids-pop-portraits { width: 290px; padding: 10px; }
+.cs-v3 .ids-pop-portraits header > div { display: flex; align-items: baseline; gap: 7px; }
+.cs-v3 .ids-pop-portraits header small { color: var(--text-dim); font-size: .58rem; font-weight: 600; }
+.cs-v3 .ids-gal-hint { margin: 0 3px 8px; color: var(--text-dim); font-size: .56rem; line-height: 1.5; }
+.cs-v3 .ids-gal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.cs-v3 .ids-gal-item { position: relative; margin: 0; aspect-ratio: 1; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-sunken); }
+.cs-v3 .ids-gal-item.is-current { border-color: var(--aura); box-shadow: 0 0 0 1px var(--aura); }
+.cs-v3 .ids-gal-item.char-portrait-sortable-ghost { opacity: .35; }
+.cs-v3 .ids-gal-item.char-portrait-sortable-chosen { box-shadow: 0 0 0 2px var(--aura); }
+/* Vignette = bouton plein cadre : clic → portrait affiché. */
+.cs-v3 .ids-gal-pick { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
+.cs-v3 .ids-gal-pick img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.cs-v3 .ids-gal-item:not(.is-current) .ids-gal-pick:hover img { filter: brightness(1.08); }
+.cs-v3 .ids-gal-item figcaption { position: absolute; left: 0; bottom: 0; width: 100%; padding: 2px 0; background: var(--aura); color: #fff; font-size: .5rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; text-align: center; }
+/* Poignée de réordonnancement (haut-gauche) + suppression (haut-droite). */
+.cs-v3 .ids-gal-handle { position: absolute; left: 3px; top: 3px; z-index: 2; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; background: rgba(0,0,0,.5); color: #fff; font-size: .72rem; line-height: 1; cursor: grab; opacity: 0; transition: opacity .15s ease; }
+.cs-v3 .ids-gal-del { position: absolute; right: 3px; top: 3px; z-index: 2; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px; background: rgba(0,0,0,.5); color: #fff; font-size: .82rem; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .15s ease; }
+.cs-v3 .ids-gal-item:hover .ids-gal-handle,
+.cs-v3 .ids-gal-item:hover .ids-gal-del,
+.cs-v3 .ids-gal-item:focus-within .ids-gal-handle,
+.cs-v3 .ids-gal-item:focus-within .ids-gal-del { opacity: 1; }
+.cs-v3 .ids-gal-del:hover { background: rgba(255,90,126,.82); }
+.cs-v3 .ids-gal-empty,
+.cs-v3 .ids-gal-loading { margin: 4px 3px 8px; color: var(--text-dim); font-size: .64rem; line-height: 1.5; }
+.cs-v3 .ids-gal-add { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 40px; margin-top: 8px; padding: 6px 9px; border: 1px dashed var(--border-md); border-radius: 8px; background: transparent; color: var(--text-soft); cursor: pointer; text-align: left; }
+.cs-v3 .ids-gal-add:hover:not(:disabled) { border-color: var(--aura); background: color-mix(in srgb,var(--aura) 7%,transparent); }
+.cs-v3 .ids-gal-add:disabled { opacity: .5; cursor: default; }
+.cs-v3 .ids-gal-add > b { display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 24px; border-radius: 6px; background: color-mix(in srgb,var(--aura) 14%,transparent); color: var(--aura); font-size: .9rem; }
+.cs-v3 .ids-gal-add > span { display: flex; flex-direction: column; gap: 1px; font-size: .7rem; font-weight: 700; }
+.cs-v3 .ids-gal-add small { color: var(--text-dim); font-size: .56rem; font-weight: 500; }
 .cs-v3 .ids-level {
   position: relative;
   left: auto;

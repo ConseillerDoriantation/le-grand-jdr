@@ -59,6 +59,18 @@ export function weaponHandsLabel(weapon = {}) {
   return weaponHands(weapon) === 2 ? '2 mains' : '1 main';
 }
 
+/** Allonge/portée d'attaque : CaC (portée ≤ 2) ou Distance (portée > 2).
+ * On lit le PREMIER nombre de `portee` (« 1 », « 2 », « 18/54 », « 1,5 m »…).
+ * Pas de portée renseignée → CaC (mêlée) par défaut. */
+export function weaponRangeKind(weapon = {}) {
+  const raw = String(weapon?.portee ?? '').replace(',', '.');
+  const m = raw.match(/\d+(?:\.\d+)?/);
+  const n = m ? parseFloat(m[0]) : NaN;
+  return Number.isFinite(n) && n > 2 ? 'distance' : 'cac';
+}
+
+export const weaponRangeLabel = weapon => weaponRangeKind(weapon) === 'distance' ? 'À distance' : 'Corps à corps';
+
 /**
  * Types d'arme à créer d'après les armes existantes (types saisis absents de la
  * liste). Magique si la majorité des armes de ce type avaient un format magique.

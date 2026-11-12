@@ -8,8 +8,30 @@ import {
   resolveWeaponFamily,
   weaponFamilyLabels,
   weaponHands,
+  weaponRangeKind,
 } from '../assets/js/shared/weapon-family.js';
 import { detectCombatStyle } from '../assets/js/shared/combat-styles.js';
+
+test('weaponRangeKind : portée ≤ 2 = corps à corps, > 2 = à distance', () => {
+  assert.equal(weaponRangeKind({ portee: '1' }), 'cac');
+  assert.equal(weaponRangeKind({ portee: '2' }), 'cac');
+  assert.equal(weaponRangeKind({ portee: 2 }), 'cac');
+  assert.equal(weaponRangeKind({ portee: '3' }), 'distance');
+  assert.equal(weaponRangeKind({ portee: '18/54' }), 'distance', 'premier nombre de la portée');
+  assert.equal(weaponRangeKind({ portee: '1,5 m' }), 'cac', 'décimale + unité tolérées');
+  assert.equal(weaponRangeKind({}), 'cac', 'sans portée = mêlée par défaut');
+});
+
+test('detectCombatStyle : la condition d’allonge filtre par la portée de l’arme principale', () => {
+  const equip = (portee) => ({ equipement: { 'Main principale': { nom: 'Bâton', format: 'Bâton de mage', mains: '2 mains', portee } } });
+  const cacMag = { id: 'cacmag', label: 'CaC Magique', condPrincipale: ['*'], condSecondaire: [], condRange: 'cac' };
+  const distMag = { id: 'distmag', label: 'Distance Magique', condPrincipale: ['*'], condSecondaire: [], condRange: 'distance' };
+  const styles = [cacMag, distMag];
+  // Bâton à distance (portée 18/54) → Distance Magique, pas CaC.
+  assert.equal(detectCombatStyle(equip('18/54'), styles)?.id, 'distmag');
+  // Même bâton mais portée 2 → CaC Magique.
+  assert.equal(detectCombatStyle(equip('2'), styles)?.id, 'cacmag');
+});
 
 const families = [
   { id: 'epee', label: 'Épée', techniques: [{ label: 'Frappe maîtrisée' }] },

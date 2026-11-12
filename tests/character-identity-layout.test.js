@@ -25,10 +25,12 @@ test('le bloc identité utilise le portrait rond, l’anneau XP et les surfaces 
   assert.match(identityCss, /\.cs-v3 input\.ids-name \{[^}]*font: 600 1\.24rem/s);
 });
 
-test('le portrait ouvre directement le sélecteur et accepte le glisser-déposer', () => {
-  assert.match(sidebar, /data-action="open-character-photo"/);
+test('le portrait ouvre la galerie de portraits et accepte le glisser-déposer', () => {
+  assert.match(sidebar, /data-popover="portraits"/);
   assert.match(sidebar, /data-character-photo-drop="\$\{c\.id\}"/);
   assert.match(sidebar, /class="ids-portrait-hover"/);
+  // L'ajout d'un portrait (upload → crop) se fait désormais depuis la galerie.
+  assert.match(source, /data-action="open-character-photo"/);
   assert.match(photoSource, /function openDroppedCharacterPhoto/);
   assert.match(photoSource, /data-character-photo-drop/);
   assert.match(photoSource, /reader\.readAsDataURL\(file\)/);
@@ -37,6 +39,17 @@ test('le portrait ouvre directement le sélecteur et accepte le glisser-déposer
   assert.match(photoSource, /maxBytes: CROPPED_PHOTO_BUDGET/);
   assert.match(photoSource, /saveCharacterOriginalPhoto\(charId, activeBuildId, photoOriginal\)/);
   assert.match(photoSource, /photoOriginal: null/);
+});
+
+test('galerie de portraits : clic équipe, poignée réordonne, un seul bouton supprime', () => {
+  const gal = source.slice(source.indexOf('function _buildPortraitGalleryHtml'), source.indexOf('let _portraitGallerySortable'));
+  assert.match(gal, /class="ids-gal-pick" data-action="setCharacterPortrait"/);
+  assert.match(gal, /class="ids-gal-handle"/);
+  assert.match(gal, /class="ids-gal-del" data-action="removeCharacterPortrait"/);
+  assert.doesNotMatch(gal, /useCharacterPortraitAsAvatar|data-action="useCharacter/);
+  // Réordonnancement par glisser-déposer via makeSortable (poignée dédiée).
+  assert.match(source, /makeSortable\(host, \{[\s\S]*?handle: '\.ids-gal-handle'/);
+  assert.match(source, /reorderCharacterPortraits\(c\.id, ids\)/);
 });
 
 test('la pastille Aura ouvre la palette et permet de retirer la photo', () => {
@@ -100,14 +113,18 @@ test('la colonne ne bouge pas avec le scroll et tous les calculs utilisent le d�
 });
 
 test('ouvrir les popovers ne reconstruit ni ne redimensionne la fiche', () => {
-  const toggle = source.slice(source.indexOf('function _toggleIdentityPopover'), source.indexOf('async function _openCharacterPortraitViewer'));
+  // Le rendu du popover est factorisé dans _paintIdentityPopover (réutilisé pour
+  // rafraîchir la galerie après chargement async) ; _toggleIdentityPopover ne fait
+  // que basculer l'état puis déléguer. On couvre les deux.
+  const toggle = source.slice(source.indexOf('function _paintIdentityPopover'), source.indexOf('async function _openCharacterPortraitViewer'));
   assert.match(toggle, /layer\.id = 'identity-popover-layer'/);
   assert.match(toggle, /document\.body\.appendChild\(layer\)/);
   assert.doesNotMatch(toggle, /side\.insertAdjacentHTML|side\.appendChild/);
   assert.doesNotMatch(sidebar, /_identityPopoverHtml/);
   assert.doesNotMatch(toggle, /_rerenderIdentity|renderCharSheet/);
-  assert.match(toggle, /side\.querySelector\('\.ids-aura-button'\)/);
-  assert.match(toggle, /ui\.popover === 'builds'[\s\S]*?side\.querySelector\('\.ids-build'\) \|\| btn[\s\S]*?: btn;/);
+  assert.match(toggle, /aura: '\.ids-aura-button'/);
+  assert.match(toggle, /builds: '\.ids-build'/);
+  assert.match(toggle, /portraits: '\.ids-portrait'/);
   assert.doesNotMatch(toggle, /side\.querySelector\('\.ids-hero'\)/);
   assert.match(toggle, /popover\.style\.top = `\$\{Math\.round\(rect\.bottom \+ 8\)\}px`/);
   assert.match(toggle, /focus\(\{ preventScroll: true \}\)/);

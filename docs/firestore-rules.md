@@ -883,6 +883,21 @@ match /adventures/{adventureId} {
     allow delete: if inAdventure(adventureId) &&
       canControlAdventureCharacter(adventureId, resource.data.charId);
   }
+  // Galerie de portraits d'un personnage (document séparé, id = charId) : plusieurs
+  // portraits réutilisables comme portrait affiché ET comme avatar de compte.
+  // Stockée hors de `characters` pour rester sous la limite de 1 Mio. Mêmes droits
+  // que characterMedia : contrôle du perso lié requis pour écrire.
+  match /characterPortraits/{charId} {
+    allow read: if inAdventure(adventureId);
+    allow create: if inAdventure(adventureId) &&
+      request.resource.data.get('charId', '') != '' &&
+      canControlAdventureCharacter(adventureId, request.resource.data.charId);
+    allow update: if inAdventure(adventureId) &&
+      request.resource.data.get('charId', '') == resource.data.get('charId', '') &&
+      canControlAdventureCharacter(adventureId, resource.data.charId);
+    allow delete: if inAdventure(adventureId) &&
+      canControlAdventureCharacter(adventureId, resource.data.charId);
+  }
   // Quêtes : lecture tous, création/suppression MJ, mise à jour participants par les joueurs
   match /quests/{id} {
     allow read:           if inAdventure(adventureId);

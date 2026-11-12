@@ -24,6 +24,8 @@ import { listGithubFolder, GH_IMAGE_EXTS, prettyNameFromFile, fileKey } from '..
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { refreshSidebarProfile }  from '../core/layout.js';
 import { avatarSrcOf, resolveAvatarUrl } from '../shared/avatar.js';
+import { loadCharacterPortraits, getCachedCharacterPortraits } from '../shared/character-portraits.js';
+import { persistAccountAvatar } from '../shared/account-avatar.js';
 import { STATE, setAdventure, setProfile }     from '../core/state.js';
 import PAGES                     from './pages.js';
 import { registerActions }        from '../core/actions.js';
@@ -333,6 +335,23 @@ async function _loadIconCatalog(force = false) {
 // Portrait d'un personnage (mêmes champs que _live côté VTT).
 const _charPortrait = (c) => c?.photoURL || c?.photo || c?.avatar || c?.imageUrl || '';
 
+// Portrait affiché + tous les portraits de la galerie du personnage, dédoublonnés.
+function _charPortraitChoices(c) {
+  const urls = [];
+  const active = _charPortrait(c);
+  if (active) urls.push(active);
+  for (const p of (getCachedCharacterPortraits(c.id) || [])) {
+    if (p.photo && !urls.includes(p.photo)) urls.push(p.photo);
+  }
+  return urls.map(url => ({ url, label: c.nom || 'Personnage' }));
+}
+
+// Personnages qui ont au moins une image (portrait affiché ou galerie chargée).
+function _avatarChars() {
+  return (_accountUi.characterGroups || []).flatMap(group => group.characters)
+    .filter(c => _charPortrait(c) || (getCachedCharacterPortraits(c.id) || []).length);
+}
+
 async function openAvatarPicker() {
   const uid = STATE.user?.uid || auth.currentUser?.uid;
   if (!uid) return;
@@ -342,7 +361,10 @@ async function openAvatarPicker() {
   ]);
   _accountUi.characterGroups = groups;
   _accountUi.avatarChoice = STATE.profile?.avatarIcon || '';
-  const chars = groups.flatMap(group => group.characters).filter(_charPortrait);
+  // Précharge la galerie de chaque personnage (lecture ponctuelle, puis cache) afin
+  // d'exposer tous les portraits, pas seulement celui affiché.
+  await Promise.all(groups.flatMap(group => group.characters).map(c => loadCharacterPortraits(c.id).catch(() => [])));
+  const chars = _avatarChars();
   _accountUi.avatarTab = catalog.some(icon => icon.url === _accountUi.avatarChoice) ? 'app' : 'characters';
   _renderAvatarPicker(chars, catalog);
 }
@@ -350,8 +372,9 @@ async function openAvatarPicker() {
 function _renderAvatarPicker(chars = [], catalog = []) {
   document.querySelector('.ac-avatar-overlay')?.remove();
   const selected = _accountUi.avatarChoice || '';
+  const charChoices = chars.flatMap(_charPortraitChoices);
   const choices = _accountUi.avatarTab === 'characters'
-    ? [{ url: '', label: 'Par défaut', fallback: true }, ...chars.map(c => ({ url: _charPortrait(c), label: c.nom || 'Personnage' }))]
+    ? [{ url: '', label: 'Par défaut', fallback: true }, ...charChoices]
     : catalog.map(icon => ({ url: icon.url, label: icon.label || 'Avatar' }));
   const selectedChoice = [...choices, ...catalog.map(icon => ({ url: icon.url, label: icon.label }))].find(choice => choice.url === selected);
   const fallback = (STATE.profile?.pseudo || 'A').trim().slice(0, 1).toUpperCase();
@@ -359,20 +382,18 @@ function _renderAvatarPicker(chars = [], catalog = []) {
   const overlay = document.createElement('div');
   overlay.className = 'ac-avatar-overlay';
   overlay.dataset.action = 'closeAvatarPicker';
-  overlay.innerHTML = `<div class="ac-avatar-modal" role="dialog" aria-modal="true" aria-labelledby="account-avatar-title"><header><div class="ac-avatar-preview">${preview}</div><div><span class="ac-kicker">Avatar du compte</span><h3 id="account-avatar-title">Choisir un avatar</h3></div><button class="ac-modal-close" data-action="closeAvatarPicker" aria-label="Fermer">×</button></header><div class="ac-avatar-body"><div class="ac-avatar-tabs"><button class="${_accountUi.avatarTab === 'characters' ? 'active' : ''}" data-action="setAvatarTab" data-tab="characters">Mes personnages <i>${chars.length}</i></button><button class="${_accountUi.avatarTab === 'app' ? 'active' : ''}" data-action="setAvatarTab" data-tab="app">Avatars de l'app <i>${catalog.length}</i></button></div><div class="ac-avatar-grid">${choices.length ? choices.map(choice => `<button class="ac-avatar-option ${choice.url === selected ? 'active' : ''}" data-action="selectAccountAvatar" data-url="${_esc(choice.url)}"><span>${choice.fallback ? _esc(fallback) : `<img src="${_esc(resolveAvatarUrl(choice.url))}" alt="" loading="lazy">`}</span><small>${_esc(choice.label)}</small></button>`).join('') : '<p class="ac-avatar-empty">Aucun avatar dans cette sélection.</p>'}</div>${_accountUi.avatarTab === 'characters' ? '<p class="ac-note">Portraits de tes personnages, toutes aventures confondues.</p>' : ''}</div><footer>${STATE.isSuperAdmin ? '<button class="ac-btn ghost" data-action="openAvatarManagerFromPicker">Gérer le catalogue</button>' : ''}<span></span><button class="ac-btn ghost" data-action="closeAvatarPicker">Annuler</button><button class="ac-btn primary" data-action="applyAccountAvatar" ${selected === (STATE.profile?.avatarIcon || '') ? 'disabled' : ''}>Utiliser cet avatar</button></footer><span class="ac-avatar-selected" hidden>${_esc(selectedChoice?.label || 'Par défaut')}</span></div>`;
+  overlay.innerHTML = `<div class="ac-avatar-modal" role="dialog" aria-modal="true" aria-labelledby="account-avatar-title"><header><div class="ac-avatar-preview">${preview}</div><div><span class="ac-kicker">Avatar du compte</span><h3 id="account-avatar-title">Choisir un avatar</h3></div><button class="ac-modal-close" data-action="closeAvatarPicker" aria-label="Fermer">×</button></header><div class="ac-avatar-body"><div class="ac-avatar-tabs"><button class="${_accountUi.avatarTab === 'characters' ? 'active' : ''}" data-action="setAvatarTab" data-tab="characters">Mes personnages <i>${charChoices.length}</i></button><button class="${_accountUi.avatarTab === 'app' ? 'active' : ''}" data-action="setAvatarTab" data-tab="app">Avatars de l'app <i>${catalog.length}</i></button></div><div class="ac-avatar-grid">${choices.length ? choices.map(choice => `<button class="ac-avatar-option ${choice.url === selected ? 'active' : ''}" data-action="selectAccountAvatar" data-url="${_esc(choice.url)}"><span>${choice.fallback ? _esc(fallback) : `<img src="${_esc(resolveAvatarUrl(choice.url))}" alt="" loading="lazy">`}</span><small>${_esc(choice.label)}</small></button>`).join('') : '<p class="ac-avatar-empty">Aucun avatar dans cette sélection.</p>'}</div>${_accountUi.avatarTab === 'characters' ? '<p class="ac-note">Portraits de tes personnages, toutes aventures confondues.</p>' : ''}</div><footer>${STATE.isSuperAdmin ? '<button class="ac-btn ghost" data-action="openAvatarManagerFromPicker">Gérer le catalogue</button>' : ''}<span></span><button class="ac-btn ghost" data-action="closeAvatarPicker">Annuler</button><button class="ac-btn primary" data-action="applyAccountAvatar" ${selected === (STATE.profile?.avatarIcon || '') ? 'disabled' : ''}>Utiliser cet avatar</button></footer><span class="ac-avatar-selected" hidden>${_esc(selectedChoice?.label || 'Par défaut')}</span></div>`;
   document.body.appendChild(overlay);
 }
 
 function setAvatarTab(tab) {
   _accountUi.avatarTab = tab === 'app' ? 'app' : 'characters';
-  const chars = (_accountUi.characterGroups || []).flatMap(group => group.characters).filter(_charPortrait);
-  _renderAvatarPicker(chars, _iconCatalog || []);
+  _renderAvatarPicker(_avatarChars(), _iconCatalog || []);
 }
 
 function selectAccountAvatar(url) {
   _accountUi.avatarChoice = url || '';
-  const chars = (_accountUi.characterGroups || []).flatMap(group => group.characters).filter(_charPortrait);
-  _renderAvatarPicker(chars, _iconCatalog || []);
+  _renderAvatarPicker(_avatarChars(), _iconCatalog || []);
 }
 
 function closeAvatarPicker(button, event) {
@@ -381,29 +402,13 @@ function closeAvatarPicker(button, event) {
 }
 
 async function chooseAvatar(url = _accountUi.avatarChoice || '') {
-  const user = auth.currentUser;
-  if (!user) return;
-  try {
-    await updateInCol('users', user.uid, { avatarIcon: url || '' });
-    setProfile({ ...(STATE.profile || {}), avatarIcon: url || '' });
-    // Propage l'avatar dans le profil dénormalisé (memberProfiles) de chaque aventure
-    // du joueur → visible par les autres (chat, pickers) sans lecture de users/{uid}.
-    // Autorisé par la règle isMemberProfileSelfUpdate (on ne touche que sa propre entrée).
-    for (const a of (STATE.adventures || [])) {
-      const inAdv = a?.accessList?.includes(user.uid) || a?.admins?.includes(user.uid);
-      if (!a?.id || !inAdv) continue;
-      updateInCol('adventures', a.id, { [`memberProfiles.${user.uid}.avatarIcon`]: url || '' })
-        .then(() => { if (a.memberProfiles?.[user.uid]) a.memberProfiles[user.uid].avatarIcon = url || ''; })
-        .catch(() => {});
-    }
+  const uid = auth.currentUser?.uid || STATE.user?.uid;
+  if (!uid) return;
+  // Écriture + propagation memberProfiles + notif + rafraîchissement sidebar
+  // mutualisés dans shared/account-avatar.js (réutilisés par la galerie de la fiche).
+  if (await persistAccountAvatar(url, uid)) {
     closeAvatarPicker();
-    showNotif(url ? 'Avatar mis à jour !' : 'Avatar réinitialisé.', 'success');
     await renderAccount();
-    refreshSidebarProfile();
-  } catch (err) {
-    console.error('[account] chooseAvatar:', err);
-    // Cause probable : règle isUserSelfUpdate n'autorise pas encore `avatarIcon`.
-    showNotif("Impossible d'enregistrer l'avatar (règles Firestore à mettre à jour ?).", 'error');
   }
 }
 

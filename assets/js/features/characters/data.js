@@ -130,7 +130,7 @@ function _csCondLabel(arr) {
   if (!a.length) return 'indifférent';
   return a.map(v => v === '' ? '∅' : v === '*' ? 'toute arme' : v).join(' / ');
 }
-function _csRowSub(s) { return `${_csCondLabel(s.condPrincipale)} + ${_csCondLabel(s.condSecondaire)}${s.condMains === '1' ? ' · 1 main' : s.condMains === '2' ? ' · 2 mains' : ''}`; }
+function _csRowSub(s) { return `${_csCondLabel(s.condPrincipale)} + ${_csCondLabel(s.condSecondaire)}${s.condMains === '1' ? ' · 1 main' : s.condMains === '2' ? ' · 2 mains' : ''}${s.condRange === 'cac' ? ' · corps à corps' : s.condRange === 'distance' ? ' · à distance' : ''}`; }
 
 // ══ Rendu ══
 function _csListHtml() {
@@ -175,6 +175,7 @@ function _csHandCard(s, which, title) {
   h += _csLegacyOf(arr).map(v => `<button type="button" class="cs-pill legacy on" data-cs-cond="${which}:${_esc(v)}" title="Ancien format — clic pour retirer">${_esc(v)} ✕</button>`).join('');
   h += `</div>`;
   if (which === 'condPrincipale') h += `<div class="cs-maniement"><span class="wf-lbl">Maniement</span><div class="wf-seg">${[['', 'Indifférent'], ['1', '1 main'], ['2', '2 mains']].map(([v, l]) => `<button type="button" class="${(s.condMains || '') === v ? 'on' : ''}" data-cs-mains="${v}">${l}</button>`).join('')}</div></div>`;
+  if (which === 'condPrincipale') h += `<div class="cs-maniement"><span class="wf-lbl">Allonge <small style="font-weight:400;opacity:.7">(d'après la portée)</small></span><div class="wf-seg">${[['', 'Indifférent'], ['cac', '⚔️ Corps à corps'], ['distance', '🏹 À distance']].map(([v, l]) => `<button type="button" class="${(s.condRange || '') === v ? 'on' : ''}" data-cs-range="${v}">${l}</button>`).join('')}</div></div>`;
   h += `</div>`;
   return h;
 }
@@ -335,7 +336,7 @@ function _csMount() {
   document.addEventListener('click', ev => {
     if (!document.querySelector('.cs')) return;
     if (_csEmoji && !ev.target.closest('.cs-emoji-wrap')) { _csEmoji = false; _csRenderMain(); }
-    const t = ev.target.closest('[data-cs-sel],[data-cs-add],[data-cs-mv],[data-cs-dup],[data-cs-del],[data-cs-delok],[data-cs-color],[data-cs-cond],[data-cs-mains],[data-cs-rule],[data-cs-step],[data-cs-emoji],[data-cs-pick],[data-cs-convert],[data-cs-hoist],[data-cs-tolast],[data-cs-autoorder],[data-cs-benchhands],[data-cs-cell],[data-cs-loadchar],[data-cs-undo],[data-cs-revert],[data-cs-save],[data-cs-saveclose],[data-cs-close],[data-cs-keep],[data-cs-discard]');
+    const t = ev.target.closest('[data-cs-sel],[data-cs-add],[data-cs-mv],[data-cs-dup],[data-cs-del],[data-cs-delok],[data-cs-color],[data-cs-cond],[data-cs-mains],[data-cs-range],[data-cs-rule],[data-cs-step],[data-cs-emoji],[data-cs-pick],[data-cs-convert],[data-cs-hoist],[data-cs-tolast],[data-cs-autoorder],[data-cs-benchhands],[data-cs-cell],[data-cs-loadchar],[data-cs-undo],[data-cs-revert],[data-cs-save],[data-cs-saveclose],[data-cs-close],[data-cs-keep],[data-cs-discard]');
     if (!t) return;
     const d = t.dataset, s = _csCur();
     if (d.csSel != null) { _csSelId = d.csSel; _csEmoji = false; return _csRender(); }
@@ -354,6 +355,7 @@ function _csMount() {
     if (d.csLoadchar != null) { const c = _csChars.find(x => (x.id || '') === d.csLoadchar); if (c) { const lbl = w => (w?.nom || w?.format) ? (resolveWeaponFamily(_weaponFormats || [], w)?.label || w.format || w.sousType || '') : ''; _csBench = { main: lbl(c.equipement?.[getPrimaryWeaponSlotId()]), sec: lbl(c.equipement?.[getSecondaryWeaponSlotId()]), hands: '' }; const st = detectCombatStyle(c, _csDraft); if (st) _csSelId = st.id; } return _csRender(); }
     if (d.csCond) { _csPush(); const [which, val] = d.csCond.split(':'); if (s) _csToggleCond(s, which, val); return _csRender(); }
     if (d.csMains != null) { _csPush(); if (s) s.condMains = d.csMains; return _csRender(); }
+    if (d.csRange != null) { _csPush(); if (s) s.condRange = d.csRange; return _csRender(); }
     if (d.csRule) { _csPush(); const [k, v] = d.csRule.split(':'); if (s) { s.rules = s.rules || {}; s.rules[k] = v; } return _csRender(); }
     if (d.csStep) { _csPush(); const f = d.csStep; if (s) { s.rules = s.rules || {}; let v = (parseInt(s.rules[f], 10) || 0) + (+d.dir); s.rules[f] = Math.max(+d.min, Math.min(+d.max, v)); } return _csRender(); }
     if ('csEmoji' in d) { _csEmoji = !_csEmoji; return _csRenderMain(); }
