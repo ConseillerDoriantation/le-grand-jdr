@@ -1693,6 +1693,9 @@ function renderCharCombatV3(c, canEdit) {
   const fsName = (name, lvl) => `<div class="fs-name${notable(lvl) ? ' r' : ''}"${notable(lvl) ? ` style="--rc:${_rareteColor(RARETE_NAMES[lvl])}"` : ''}>${gem(lvl)}${esc(name)}</div>`;
   const candName = (name, lvl) => `<b${notable(lvl) ? ` style="--rc:${_rareteColor(RARETE_NAMES[lvl])};color:var(--rc)"` : ''}>${gem(lvl)}${esc(name)}</b>`;
   const equipBtn = (index, slot, label = 'Équiper') => canEdit ? `<button type="button" class="cs-grim-btn cbx-sm" data-action="equipInventoryItem" data-index="${index}" data-slot="${esc(slot)}" data-render-tab="combat">${label}</button>` : '';
+  // Même langage visuel que l'inventaire : chaque bonus garde sa couleur métier
+  // et devient une pill lisible au lieu d'être noyé dans le sous-texte gris.
+  const bonusTags = badges => badges.length ? `<div class="fs-bonus-tags">${badges.map(b => `<span class="iv-chip ${esc(b.cls)}">${esc(b.lbl)}</span>`).join('')}</div>` : '';
 
   // ── Armes en main ───────────────────────────────────────────────────────────
   function wRow(slotDef) {
@@ -1714,7 +1717,7 @@ function renderCharCombatV3(c, canEdit) {
     const vals = dmg
       ? `<div class="fs-v"><small>Toucher</small><b>${esc((hit?.roll || '').replace('1d20', '').trim() || '+0')}</b></div><div class="fs-v"><small>Dégâts</small><b>${esc(dmg.roll)}</b></div>`
       : `<div class="fs-v"><small>Soutien</small><b>—</b></div>`;
-    const row = `<button type="button" class="fs-row${isOpen ? ' is-open' : ''}" data-action="cbOpen" data-k="${key}">${c1}<span class="fs-c2">${fsName(item.nom, rare.level)}<div class="fs-sub">${sub}</div>${traitsBlock(live)}</span><span class="fs-c3">${vals}</span></button>`;
+    const row = `<button type="button" class="fs-row${isOpen ? ' is-open' : ''}" data-action="cbOpen" data-k="${key}">${c1}<span class="fs-c2">${fsName(item.nom, rare.level)}<div class="fs-sub">${sub}</div>${bonusTags(_itemBonusBadges(live))}${traitsBlock(live)}</span><span class="fs-c3">${vals}</span></button>`;
     return row + (isOpen ? wDetail(slot) : '');
   }
   function wDetail(slot) {
@@ -1732,8 +1735,8 @@ function renderCharCombatV3(c, canEdit) {
         ['Si la CA résiste', miss.label],
       ])}${ctx.isMagic ? `<p class="fs-note">Arme magique : élément par défaut ${esc(damageTypes.find(x => x.id === (c.favoriteElement || ctx.damageTypeId))?.label || t?.label || '—')}, éléments au choix au VTT.</p>` : ''}</div>`);
     } else if (item?.nom) blocks.push(`<div class="fs-xb"><div class="fs-xh">Effet</div><p class="fs-note">${esc(item.particularite || getItemEffectText(item) || 'Objet de soutien.')}</p></div>`);
-    const bonus = _itemBonusBadges(item).map(b => b.lbl);
-    if (bonus.length) blocks.push(`<div class="fs-xb"><div class="fs-xh">Bonus de l'arme</div><ul class="fs-list fs-gain">${bonus.map(b => `<li><i>+</i>${esc(b)}</li>`).join('')}</ul></div>`);
+    const bonus = _itemBonusBadges(item);
+    if (bonus.length) blocks.push(`<div class="fs-xb"><div class="fs-xh">Bonus de l'arme</div>${bonusTags(bonus)}</div>`);
     blocks.push(`<div class="fs-xb"><div class="fs-xh">${item?.nom ? 'Remplacer par' : 'Équiper'}</div>${candHtml}${item?.nom && canEdit ? `<div class="fs-xact" style="margin-top:8px"><button type="button" class="cs-grim-btn cbx-sm" data-action="clearEquipSlot" data-slot="${esc(slot)}" data-render-tab="combat">Ranger dans l'inventaire</button></div>` : ''}</div>`);
     return `<div class="fs-x"><div class="fs-xcols">${blocks.join('')}</div></div>`;
   }
@@ -1770,9 +1773,8 @@ function renderCharCombatV3(c, canEdit) {
     const rare = rarityOf(slot, item);
     const ca = (parseInt(item.ca) || 0) + (parseInt(item.caBonus) || 0);
     const mat = item.typeArmure ? `<span class="fs-mat" style="--mc:${esc(getArmorTypeMeta(item.typeArmure)?.color || '#7a8fa8')}"><i></i>${esc(item.typeArmure)}${tracked.has(slot) ? ' · ensemble' : ''}</span>` : '';
-    const bonus = _itemBonusBadges(item).map(b => b.lbl);
-    const sub = [mat, bonus.length ? bonus.map(esc).join(' · ') : ''].filter(Boolean).join(' · ');
-    const row = `<button type="button" class="fs-row${isOpen ? ' is-open' : ''}" data-action="cbOpen" data-k="${key}">${c1}<span class="fs-c2">${fsName(item.nom, rare.level)}${sub ? `<div class="fs-sub">${sub}</div>` : ''}${traitsBlock(item)}</span><span class="fs-c3">${ca ? `<div class="fs-v"><small>CA</small><b>+${ca}</b></div>` : ''}</span></button>`;
+    const bonus = _itemBonusBadges(item);
+    const row = `<button type="button" class="fs-row${isOpen ? ' is-open' : ''}" data-action="cbOpen" data-k="${key}">${c1}<span class="fs-c2">${fsName(item.nom, rare.level)}${mat ? `<div class="fs-sub">${mat}</div>` : ''}${bonusTags(bonus)}${traitsBlock(item)}</span><span class="fs-c3">${ca ? `<div class="fs-v"><small>CA</small><b>+${ca}</b></div>` : ''}</span></button>`;
     return row + (isOpen ? aDetail(slot) : '');
   }
   function aDetail(slot) {

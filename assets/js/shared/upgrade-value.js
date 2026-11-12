@@ -12,6 +12,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { weaponHands } from './weapon-family.js';
+import { isWeaponItem, isArmorItem, isJewelItem } from './item-facts.js';
 
 // Catégories de fragments : un fragment ne se pose que sur un objet de la même
 // catégorie (toutes les armes partagent 'arme', peu importe le format). La
@@ -26,18 +27,29 @@ export const FRAGMENT_CATEGORIES = [
   { id: 'Objet magique', label: 'Objet magique', icon: '🔮' },
 ];
 
-const FRAGMENT_CAT_IDS = new Set(FRAGMENT_CATEGORIES.map(c => c.id));
+// Clés interdites comme catégorie (indexation d'objet → pollution de prototype).
+const _UNSAFE_CAT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const _safeSlot = value => {
+  const slot = String(value ?? '').trim();
+  return slot && !_UNSAFE_CAT_KEYS.has(slot) ? slot : null;
+};
 
-// Catégorie de fragment d'un objet d'inventaire.
+// Catégorie de fragment d'un objet d'inventaire = clé de son sac de fragments
+// (partagée avec le craft du VTT). La catégorie EST le nom du slot : l'armure et
+// les accessoires sont forgeables quel que soit le slot choisi par le MJ (slots
+// personnalisables), pas seulement sur une liste figée Tête/Torse/Pieds.
+// Détection de nature = classificateurs canoniques `item-facts.js` (source unique,
+// robustes aux objets définis par `degats`/`ca`/`typeArmure`/`template`).
 // Renvoie null si l'objet n'est pas améliorable (ex : potion, objet libre).
 export function getItemFragmentCategory(item = {}) {
   if (!item) return null;
-  const tpl = (item.template || '').toLowerCase();
-  if (tpl === 'arme' || /arme|bouclier|baguette|main libre/i.test(item.format || '')) {
-    return 'arme';
-  }
-  if (item.slotArmure && FRAGMENT_CAT_IDS.has(item.slotArmure)) return item.slotArmure;
-  if (item.slotBijou && FRAGMENT_CAT_IDS.has(item.slotBijou)) return item.slotBijou;
+  const tpl = String(item.template || '').toLowerCase();
+  // 1. Armes & boucliers d'abord (un bouclier peut porter une CA sans être une armure).
+  if (isWeaponItem(item) || /arme|bouclier|baguette|main libre/i.test(item.format || '')) return 'arme';
+  // 2. Bijoux explicites avant l'armure (un bijou pourrait théoriquement porter une CA).
+  if (tpl === 'bijou' || item.slotBijou) return _safeSlot(item.slotBijou) || 'Objet magique';
+  // 3. Armures (template, slot, type d'armure ou CA) — repli 'armure' si slot vide/non sûr.
+  if (isArmorItem(item)) return _safeSlot(item.slotArmure) || 'armure';
   return null;
 }
 
@@ -57,17 +69,21 @@ export function upgradeTariffValue(item = {}, settings = {}) {
   if (!up) return 0;
   const s = settings || {};
   const levels = Object.values(up.statBonus || {}).map(_level).filter(Boolean);
+  const cat = getItemFragmentCategory(item);
+  const isArmorLike = (item.template || '').toLowerCase() === 'armure' || !!item.slotArmure;
   let total = 0;
-  switch (getItemFragmentCategory(item)) {
-    case 'Anneau':   // chaque stat proposée et l'effet ont leurs propres paliers
-      total = levels.reduce((sum, level) => sum + _tiers(s.ring, level), 0) + _tiers(s.ring, _level(up.effectBonus));
-      break;
-    case 'Amulette': // la n-ième stat distincte coûte le n-ième palier
-      total = _tiers(s.amulet, levels.length);
-      break;
-    case 'arme':     // le n-ième point coûte le n-ième palier (grille 1M ou 2M)
-      total = _tiers(s.weapon?.[weaponHands(item) === 2 ? '2H' : '1H'], levels.reduce((sum, level) => sum + level, 0));
-      break;
+  if (cat === 'Anneau') {
+    // Anneau : chaque stat approfondie et l'effet ont leurs propres paliers.
+    total = levels.reduce((sum, level) => sum + _tiers(s.ring, level), 0) + _tiers(s.ring, _level(up.effectBonus));
+  } else if (isJewelItem(item)) {
+    // Tout autre accessoire = moteur amulette : la n-ième stat distincte = n-ième palier.
+    total = _tiers(s.amulet, levels.length);
+  } else if (cat === 'arme') {
+    // Arme : le n-ième point coûte le n-ième palier (grille 1M ou 2M).
+    total = _tiers(s.weapon?.[weaponHands(item) === 2 ? '2H' : '1H'], levels.reduce((sum, level) => sum + level, 0));
+  } else if (isArmorLike) {
+    // Armure : budget de points (grille unique s.armor).
+    total = _tiers(s.armor, levels.reduce((sum, level) => sum + level, 0));
   }
   // Traits : un trait de base remplacé = un écrasement, les autres traits posés = des ajouts.
   const added = _list(up.addedTraits).length;

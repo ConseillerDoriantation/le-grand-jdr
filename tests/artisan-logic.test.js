@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   traitCapAt, statCapAt, unlockRarity, firstGainRarity,
-  ringTracks, statPointUse, possibleActions, isMaxed, dismantlePreview,
+  ringStatTargets, statPointUse, possibleActions, isMaxed, dismantlePreview,
 } from '../assets/js/shared/artisan-logic.js';
 import { craftCategoryForItem } from '../assets/js/shared/craft-engine.js';
 
@@ -17,16 +17,31 @@ const DEFAULT_UPGRADE_SETTINGS = {
 };
 const settings = {
   ...DEFAULT_UPGRADE_SETTINGS,
-  caps: { ...DEFAULT_UPGRADE_SETTINGS.caps, weapon1H: 2, weapon2H: 4, amulet: 3, ring: 1,
+  caps: { ...DEFAULT_UPGRADE_SETTINGS.caps, weapon1H: 2, weapon2H: 4, weaponTraits1H: 2, weaponTraits2H: 3, amulet: 3, ring: 1,
     traitsPerItem: { ...DEFAULT_UPGRADE_SETTINGS.caps.traitsPerItem, arme: 4 } },
-  rarityCaps: { traits: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 } },
+  armor: { 1: 150, 2: 300, 3: 500 },
+  rarityCaps: {
+    traits: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 4 },
+    ring: { traits: { 1: 1, 2: 1, 3: 1, 4: 2, 5: 3 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 } },
+    armor: { traits: { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3 }, stats: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 } },
+  },
 };
 const sword = rarete => ({ template: 'arme', format: 'Arme 1M CaC Phy.', rarete, traits: ['Tranchant'] });
 
 test('plafonds = minimum famille / rareté et rareté de déblocage', () => {
   assert.equal(traitCapAt(sword(2), 2, settings), 2);
   assert.equal(statCapAt(sword(5), 5, settings), 2, 'une arme 1M reste bornée par sa famille');
-  assert.equal(unlockRarity(sword(1), 'traits', 3, settings), 3);
+  // Le 3ᵉ trait n'existe que pour une 2M (1M plafonne à 2) et se débloque en 3★.
+  const twoHand = { template: 'arme', mains: '2 mains', rarete: 1, traits: [] };
+  assert.equal(unlockRarity(twoHand, 'traits', 3, settings), 3);
+  assert.equal(unlockRarity(sword(1), 'traits', 3, settings), null, 'une 1M n’atteint jamais 3 traits');
+});
+
+test('arme : plafond de traits selon le maniement (1M = 2, 2M = 3 au sommet)', () => {
+  const oneHand = { template: 'arme', format: 'Arme 1M CaC Phy.', rarete: 5, traits: [] };
+  const twoHand = { template: 'arme', mains: '2 mains', rarete: 5, traits: [] };
+  assert.equal(traitCapAt(oneHand, 5, settings), 2, 'une arme 1 main plafonne à 2 traits');
+  assert.equal(traitCapAt(twoHand, 5, settings), 3, 'une arme 2 mains atteint 3 traits');
 });
 
 test('firstGainRarity ignore les raretés qui ne donnent aucun budget', () => {
@@ -34,11 +49,50 @@ test('firstGainRarity ignore les raretés qui ne donnent aucun budget', () => {
   assert.equal(firstGainRarity(sword(4), settings), null);
 });
 
-test('anneau : pistes indépendantes, effet seulement avec bonus dérivé positif', () => {
+test('anneau : budget de points par rareté, limité à ses stats natives', () => {
   const base = { slotBijou: 'Anneau', rarete: 1, for: 1, dex: 2 };
-  assert.deepEqual(ringTracks(base, settings).map(track => track.id), ['force', 'dexterite']);
-  assert.deepEqual(ringTracks({ ...base, pvMaxBonus: 2 }, settings).map(track => track.id), ['force', 'dexterite', 'effect']);
-  assert.equal(statCapAt(base, 1, settings), 1, 'le cap des pistes d’anneau ne dépend pas de la rareté');
+  // Seules les stats natives sont des cibles (profondeur, pas de nouvelle stat).
+  assert.deepEqual(ringStatTargets(base).map(t => t.id), ['force', 'dexterite']);
+  assert.deepEqual(ringStatTargets({ slotBijou: 'Anneau', rarete: 1 }), [], 'pas de stat native → aucune cible');
+  // Budget de points ET quota de traits PROPRES à l'anneau, croissants par rareté.
+  assert.equal(statCapAt(base, 1, settings), 1);
+  assert.equal(statCapAt(base, 3, settings), 3);
+  assert.equal(statCapAt(base, 5, settings), 5);
+  assert.equal(traitCapAt(base, 3, settings), 1, 'l’anneau garde 1 trait à 3★ (table propre)');
+  assert.equal(traitCapAt(base, 5, settings), 3);
+});
+
+test('armure : une seule table par rareté, détectée par template (pas par slot)', () => {
+  const armor = (r, slot = 'Torse') => ({ template: 'armure', slotArmure: slot, rarete: r, traits: [] });
+  // Stats ET traits scalent par la table armure (1★ 1/1 → 5★ 3/3).
+  assert.equal(statCapAt(armor(1), 1, settings), 1);
+  assert.equal(statCapAt(armor(5), 5, settings), 5); // +1 point par niveau de rareté
+  assert.equal(traitCapAt(armor(1), 1, settings), 1);
+  assert.equal(traitCapAt(armor(5), 5, settings), 3);
+  // Même table quel que soit le slot (Tête, Torse, Pieds…).
+  assert.equal(statCapAt(armor(3, 'Tête'), 3, settings), statCapAt(armor(3, 'Pieds'), 3, settings));
+  // Stat engine actif : une armure peut recevoir des points (comme l'arme).
+  const rich = possibleActions({ traitFragments: {} }, armor(5), { upgrade: settings, gold: 9999 });
+  assert.equal(rich.stat, true);
+});
+
+test('armure/accessoire : forgeable quel que soit le nom du slot (config par défaut, slots perso)', () => {
+  // Config par défaut : slot 'Armure' (hors Tête/Torse/Pieds) → stats ET traits.
+  const defaultArmor = { template: 'armure', slotArmure: 'Armure', rarete: 5, traits: [] };
+  assert.equal(statCapAt(defaultArmor, 5, settings), 5, 'armure par défaut reçoit le budget de stats');
+  assert.equal(traitCapAt(defaultArmor, 5, settings), 3, 'armure par défaut reçoit ses traits');
+  // Slot d'armure totalement personnalisé → même moteur unifié.
+  const customArmor = { template: 'armure', slotArmure: 'Jambières', rarete: 3, traits: [] };
+  assert.equal(statCapAt(customArmor, 3, settings), 3);
+  assert.equal(traitCapAt(customArmor, 3, settings), 2);
+  // Accessoire à slot perso (hors Anneau) : moteur AMULETTE (stats distinctes),
+  // plafond caps.amulet ; quota de traits repli sur « Objet magique ».
+  const harmon = { slotBijou: 'Objet harmonisé', rarete: 5, traits: [] };
+  // min(caps.amulet=3, rarityCap stats@5=4) = 3.
+  assert.equal(statCapAt(harmon, 5, settings), 3, 'accessoire générique : moteur amulette');
+  assert.equal(possibleActions({ traitFragments: {} }, harmon, { upgrade: settings, gold: 9999 }).stat, true, 'peut recevoir des stats distinctes');
+  // min(traitsPerItem['Objet magique']=1, rarityCap traits@5=4) = 1.
+  assert.equal(traitCapAt(harmon, 5, settings), 1, 'repli quota « Objet magique »');
 });
 
 test('actions possibles respectent fragments, or, mode MJ et gain de reforge', () => {
@@ -64,7 +118,7 @@ test('les statistiques natives consomment déjà le potentiel de l objet', () =>
   assert.equal(possibleActions(char, fullAtAcquisition, { upgrade: settings, gold: 9999, freeMode: true }).stat, false);
   assert.equal(statPointUse(mixed), 2);
   assert.equal(possibleActions(char, mixed, { upgrade: settings, gold: 9999 }).stat, false);
-  assert.equal(statPointUse({ slotBijou: 'Anneau', for: 2 }), 0, 'les anneaux gardent leurs pistes indépendantes');
+  assert.equal(statPointUse({ slotBijou: 'Anneau', for: 2 }), 2, 'l’anneau compte ses stats natives dans le budget');
 });
 
 test('isMaxed tient compte du prochain gain de rareté', () => {
