@@ -23537,7 +23537,9 @@ button.cs-grim-tg:hover { background:var(--surface-3); color:var(--text); }
 .cs-grim-mj .cs-grim-h { color:var(--arcane-light); }
 .cs-grim-mj-row { display:flex; flex-wrap:wrap; gap:6px; }
 .cs-grim-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
-.cs-grim-more { position:relative; }
+/* ⋯ toujours en bout de ligne : son menu s'ouvre vers la gauche (right:0) et la
+   fiche rogne ce qui dépasse (overflow-y:auto) — calé à droite, il tient dedans. */
+.cs-grim-more { position:relative; margin-left:auto; }
 .cs-grim-more > summary { list-style:none; }
 .cs-grim-more > summary::-webkit-details-marker { display:none; }
 .cs-grim-more-menu { position:absolute; right:0; bottom:calc(100% + 6px); z-index:5; display:flex; flex-direction:column; min-width:170px; padding:6px; border-radius:12px; background:var(--surface-3); border:1px solid var(--border-strong); box-shadow:var(--elev-3); }
