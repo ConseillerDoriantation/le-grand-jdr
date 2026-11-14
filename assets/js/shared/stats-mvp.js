@@ -34,7 +34,7 @@ const CONTRIBUTIONS = Object.freeze({
   avoided:      { label: 'Attaques évitées',                 coef: 12, icon: '🛡️' },
   held:         { label: 'Ciblages tenus',                   coef: 3, icon: '🧱' },
   damageTaken:  { label: 'Dégâts encaissés',                 coef: 0.12, icon: '🩸' },
-  skillRolls:   { label: 'Jets de compétence',                 coef: 5, icon: '🎲' },
+  skillRolls:   { label: 'Jets de compétence (hors échec critique)', coef: 5, icon: '🎲' },
 });
 
 // Source unique pour l'explication affichée aux joueurs. Les composants et
@@ -55,8 +55,8 @@ export const MVP_AXIS_GUIDE = Object.freeze({
     contributions: [CONTRIBUTIONS.avoided, CONTRIBUTIONS.held, CONTRIBUTIONS.damageTaken],
   },
   skill: {
-    summary: 'Mesure les jets de compétence enregistrés pendant la partie.',
-    note: 'Le jeu de rôle sans jet n’est pas noté automatiquement.',
+    summary: 'Mesure les jets de compétence réussis pendant la partie.',
+    note: 'Les échecs critiques ne rapportent rien, et le jeu de rôle sans jet n’est pas noté automatiquement : lancer plus de dés ne suffit pas.',
     contributions: [CONTRIBUTIONS.skillRolls],
   },
 });
@@ -125,7 +125,9 @@ export function buildMvpRawProfile(row = {}) {
   const attacksAvoided = Math.min(attacksTaken, num(combat.attacksAvoided));
   const attacksHeld = Math.max(0, attacksTaken - attacksAvoided);
   const damageTaken = num(combat.dmgTaken);
-  const skillRolls = num(row.sRolls);
+  // Les échecs critiques de compétence ne comptent pas : on ne récompense pas le
+  // volume de jets (ni les ratés), seulement les jets qui ne sont pas des fumbles.
+  const skillRolls = Math.max(0, num(row.sRolls) - num(row.sFumbles));
 
   const axis = (key, parts, evidence) => ({
     key,
@@ -321,16 +323,19 @@ export function scoreMvpCampaign(sessionRows = [], references = DEFAULT_REFERENC
  * résultats affichés. Les scores absolus resteraient identiques avec un autre
  * groupe, mais conserver cette séparation évite aussi tout futur effet de filtre.
  */
-export function scoreMvpView({ rows = [], sessionRows = [], visibleIds = null, autoCalibrate = false } = {}) {
+export function scoreMvpView({ rows = [], sessionRows = [], visibleIds = null, autoCalibrate = false, calibrationRows = null } = {}) {
   const useCampaign = sessionRows.length > 0;
-  // Calibrage optionnel : échelle commune dérivée de tout le périmètre calculé
-  // (avant tout filtre `visibleIds`, donc masquer un perso ne la déplace pas).
+  // Calibrage optionnel : échelle commune. Le périmètre de calibrage DOIT rester
+  // stable quel que soit le filtre affiché (groupe/joueurs) — sinon le repère
+  // bouge et un même perso n'a pas le même score en vue globale vs un seul groupe.
+  // `calibrationRows` fournit ce périmètre stable (ex. toute la mission, tous
+  // groupes confondus) ; à défaut on retombe sur le périmètre calculé.
   let references = DEFAULT_REFERENCES;
   if (autoCalibrate) {
-    const calibrationRows = useCampaign
-      ? sessionRows.flatMap(session => session.rows || [])
-      : rows;
-    references = calibrateReferences(calibrationRows);
+    const calRows = (calibrationRows && calibrationRows.length)
+      ? calibrationRows
+      : (useCampaign ? sessionRows.flatMap(session => session.rows || []) : rows);
+    references = calibrateReferences(calRows);
   }
   const scores = useCampaign ? scoreMvpCampaign(sessionRows, references) : scoreMvpSession(rows, references);
   if (!visibleIds?.size) return scores;

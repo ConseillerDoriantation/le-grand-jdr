@@ -103,7 +103,9 @@ test('une affinité locale ne provoque pas un second rendu au retour Firestore',
   assert.match(source, /function _refreshNpcAffiUi[\s\S]*signature === _npcAffiRenderedSignature[\s\S]*return false/);
   assert.match(source, /function _refreshNpcCrossRelationsSection[\s\S]*replaceHtmlPreservingView\(section/);
   assert.match(source, /function _refreshNpcCrossSummary[\s\S]*current\.innerHTML = next\.innerHTML/);
+  assert.match(source, /function _refreshNpcFeelingEditors[\s\S]*data-npc-id[\s\S]*replaceHtmlPreservingView\(editor/);
   assert.match(source, /Object\.assign\(entry, patch\);[\s\S]*summary: !choiceAction[\s\S]*trySave\('npc_affinites'/);
+  assert.match(source, /character\.relations = relations;[\s\S]*_refreshNpcFeelingEditors\(npcId, charId\)[\s\S]*trySave\('characters'/);
   assert.match(source, /async function _npcCreateLink[\s\S]*_refreshNpcAffiUi\(\{ list: true \}\)/);
 });
 

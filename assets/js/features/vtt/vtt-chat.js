@@ -511,6 +511,10 @@ export function _renderChatLogImpl(msgs) {
     }
     return `<span class="vtt-log-dice-expr">d20${_rollChips([kept ?? '?'])}</span>`;
   };
+  const _naturalD20 = value => {
+    if (value == null || !Number.isFinite(Number(value))) return '';
+    return `<span class="vtt-log-nat">d20 naturel <strong>${Math.trunc(Number(value))}</strong></span>`;
+  };
 
   const _techniques = message => Array.isArray(message?.techniques) && message.techniques.length
     ? message.techniques
@@ -641,11 +645,12 @@ export function _renderChatLogImpl(msgs) {
     if (isHeal) {
       const amount = Math.max(0, Number(m.dmgTotal) || 0);
       const resource = m.isMana ? 'PM' : 'PV';
+      const natural = _naturalD20(m.hitD20);
       bodyHtml = `<div class="vtt-log-resolution">
         <span class="vtt-log-die"><b>${isFumble ? '—' : `+${amount}`}</b></span>
         <div class="vtt-log-verdict">
           <strong>${isFumble ? 'RATÉ' : (isCrit ? 'SOIN CRITIQUE' : (m.isMana ? 'MANA' : 'SOIN'))}</strong>
-          <span>${isFumble ? `${m.pmCost || 0} PM consommés` : `<b>+${amount} ${resource}</b> restaurés`}</span>
+          <span>${isFumble ? `${m.pmCost || 0} PM consommés` : `<b>+${amount} ${resource}</b> restaurés`}${natural}</span>
         </div>
       </div>`;
     } else {
@@ -916,17 +921,20 @@ export function _renderChatLogImpl(msgs) {
     // Le soin affiche le montant produit ; l'offensif conserve le jet commun.
     const hasSplash = !!m.targets?.some(r => r.techniqueSplash);
     const healTotal = m.healTotal ?? m.targets?.[0]?.dmgTotal ?? 0;
+    const natural = _naturalD20(m.hitD20);
     const body = isHeal
       ? `<div class="vtt-log-body">
           <span class="vtt-log-icon">${m.isMana ? '💙' : '💚'}</span>
           <strong class="vtt-log-result" style="font-size:1.15rem">+${healTotal}</strong>
           <span class="vtt-log-vs">${m.isMana ? 'PM par cible' : 'PV par cible'} · ${(m.targets || []).length} cibles</span>
+          ${natural}
           ${isCrit ? `<span class="vtt-log-result-sub" style="color:#f59e0b">critique</span>` : ''}
         </div>`
       : `<div class="vtt-log-body">
           <span class="vtt-log-icon">🎯</span>
           <strong class="vtt-log-result" style="font-size:1.15rem">${m.hitTotal}</strong>
           <span class="vtt-log-vs">${hasSplash ? 'jet commun · CA individuelles' : 'contre les CA'}</span>
+          ${natural}
         </div>`;
 
     // Liste des cibles avec leur résolution individuelle
@@ -998,14 +1006,22 @@ export function _renderChatLogImpl(msgs) {
   const renderCast = (m, i, ts) => {
     const pmBadge = m.pmCost > 0
       ? `<span class="vtt-log-badge vtt-log-badge--pm">−${m.pmCost} PM</span>` : '';
+    const natural = _naturalD20(m.castD20);
+    const effect = String(m.castEffect || 'Sort activé').replace(/^🎲\s*\d+(?:\s*💥\s*RC)?\s*·\s*/u, '');
+    const rollBadge = m.castIsFumble
+      ? `<span class="vtt-log-badge vtt-log-badge--fumble">💀 ÉCHEC CRITIQUE</span>`
+      : m.castIsCrit
+        ? `<span class="vtt-log-badge vtt-log-badge--crit">💥 CRITIQUE</span>`
+        : '';
     const head = _header({
       srcImg: _sourceImage(m), srcName: m.casterName || m.authorName || '?',
       tgtName: m.targetName, label: m.optLabel,
-      badges: _simulatedBadge(m) + pmBadge, ts, sourceArgs: _sourceArgs(m, 'sorts'), targetArgs: _targetArgs(m, 'combat'),
+      badges: _simulatedBadge(m) + pmBadge + rollBadge, ts, sourceArgs: _sourceArgs(m, 'sorts'), targetArgs: _targetArgs(m, 'combat'),
     });
     const body = `<div class="vtt-log-body">
       <span class="vtt-log-icon">${m.castEC ? '💔' : '✨'}</span>
-      <span class="vtt-log-text">${_esc(m.castEffect || 'Sort activé')}</span>
+      ${natural}
+      <span class="vtt-log-text">${_esc(effect)}</span>
     </div>`;
     const undo = _undoBtn(m);
     const footer = undo
