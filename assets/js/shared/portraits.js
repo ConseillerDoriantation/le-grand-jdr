@@ -15,15 +15,23 @@ export function characterPhotoPosition(c = {}) {
   return `${50 + (Number(c?.photoX) || 0) * 50}% ${50 + (Number(c?.photoY) || 0) * 50}%`;
 }
 
+// `photo` est le portrait actif de la fiche personnage. Les champs suivants
+// ne sont que des replis d'anciens schémas : ils ne doivent jamais masquer un
+// portrait nouvellement choisi, notamment dans le VTT.
+export function characterPortraitSrc(c = {}) {
+  return c?.photo || c?.photoURL || c?.avatar || c?.imageUrl || c?.portraitUrl || '';
+}
+
 export function characterPortraitContent(c = {}, opts = {}) {
   const {
     imgClass = '', imgStyle = 'width:100%;height:100%;object-fit:cover',
     fallbackTag = 'span', fallbackClass = '', fallbackStyle = '',
     fallbackText = null, escapePhoto = true,
   } = opts;
-  if (c?.photo) {
+  const photo = characterPortraitSrc(c);
+  if (photo) {
     const cls = imgClass ? ` class="${_esc(imgClass)}"` : '';
-    const src = escapePhoto ? _esc(c.photo) : c.photo;
+    const src = escapePhoto ? _esc(photo) : photo;
     // loading lazy + decoding async : les portraits (souvent lourds en base64) ne
     // bloquent pas le rendu/scroll → moins de « gel » à l'arrivée des données.
     return `<img src="${src}"${cls} alt="${_esc(c.nom || c.name || c.pseudo || 'Portrait')}" loading="lazy" decoding="async" style="${imgStyle};object-position:${characterPhotoPosition(c)}">`;

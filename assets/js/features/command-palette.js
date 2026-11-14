@@ -161,9 +161,9 @@ async function _loadEntries({ deep = true } = {}) {
   const achFiltered = STATE.isAdmin
     ? mergeById(achievements, achievementSecrets)
     : achievements.filter(a => !a.secret);
-  const collectionFiltered = STATE.isAdmin
+  const collectionFiltered = (STATE.isAdmin
     ? mergeById(collection, collectionSecrets)
-    : collection;
+    : collection).filter(item => !['shelf-settings', 'fragment-source'].includes(item.kind));
 
   // Cohérence avec la boutique : articles des catégories masquées cachés aux non-MJ.
   const hiddenCatIds = STATE.isAdmin

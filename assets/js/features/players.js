@@ -142,6 +142,7 @@ const STORE = {
   story:         [],     // missions / événements de trame (pour top compagnons)
   quests:        [],     // quêtes-groupes (missionId + participants) → partenaires d'aventure
   relMode:       'characters',
+  relSource:     'shared', // 'shared' = aventures partagées (dérivé) | 'declared' = liens déclarés sur les fiches
   relMin:        1,
   relSelectedId: '',
   relTableId:    null,
@@ -784,6 +785,47 @@ export function _relationGraph(items = [], mode = 'characters', groupLists = _al
   };
 }
 
+// Couleurs/labels des sentiments des liens déclarés (alignés sur l'éditeur de la fiche).
+const _REL_SENT_COLOR = { '': 'rgba(200,212,232,.55)', lien: '#c8aaff', allie: '#5dd5a8', neutre: '#f4c430', ennemi: '#ff8ca7', mefiance: '#ffb070' };
+const _REL_SENT_LBL = { lien: 'Allié', allie: 'Amical', neutre: 'Neutre', ennemi: 'Hostile', mefiance: 'Méfiant', '': '' };
+
+// Graphe des LIENS DÉCLARÉS : arêtes construites depuis les relations saisies sur
+// les fiches (champ `relations` avec `charId`), pas depuis les aventures partagées.
+// Même forme {a,b,n} que _relationGraph → réutilise layout/tablées/SVG tels quels.
+// `n` = nombre de directions déclarées (1 = à sens unique, 2 = réciproque).
+export function _declaredRelationGraph(items = []) {
+  const graph = _relationGraph(items, 'characters', []); // noeuds persos, 0 arête dérivée
+  graph.nodes.forEach(node => { node.deg = 0; node.w = 0; node.adv = 0; });
+  const byPair = new Map();
+  graph.nodes.forEach(node => {
+    const rels = node.item?.char?.relations;
+    if (!Array.isArray(rels)) return;
+    for (const r of rels) {
+      const target = r?.charId;
+      if (!target || target === node.id || !graph.nodeById.has(target)) continue;
+      const a = node.id < target ? node.id : target;
+      const b = node.id < target ? target : node.id;
+      const key = `${a}\u0000${b}`;
+      const rec = byPair.get(key) || { a, b, dirs: {} };
+      rec.dirs[`${node.id}>${target}`] = { sent: r.sent || '', role: (r.role || '').trim(), sentiment: (r.sentiment || '').trim() };
+      byPair.set(key, rec);
+    }
+  });
+  const edges = [...byPair.values()].map(rec => {
+    const rep = rec.dirs[`${rec.a}>${rec.b}`] || rec.dirs[`${rec.b}>${rec.a}`] || { sent: '', role: '', sentiment: '' };
+    return { a: rec.a, b: rec.b, n: Object.keys(rec.dirs).length, sent: rep.sent, role: rep.role, sentiment: rep.sentiment, dirs: rec.dirs };
+  }).sort((x, y) => x.a.localeCompare(y.a) || x.b.localeCompare(y.b));
+  edges.forEach(edge => {
+    const a = graph.nodeById.get(edge.a), b = graph.nodeById.get(edge.b);
+    if (!a || !b) return;
+    a.deg += 1; b.deg += 1; a.w += edge.n; b.w += edge.n; a.adv += 1; b.adv += 1;
+  });
+  graph.edges = edges;
+  graph.declared = true;
+  graph.total = graph.nodes.length * (graph.nodes.length - 1) / 2;
+  return graph;
+}
+
 export function _detectTables(graph) {
   const nodes = graph?.nodes || [];
   const index = new Map(nodes.map((node, i) => [node.id, i]));
@@ -935,7 +977,9 @@ function _relationLayout(graph) {
 }
 
 function _prepareRelationGraph(items) {
-  const graph = _relationGraph(items, STORE.relMode, _allGroupMemberLists());
+  const graph = STORE.relSource === 'declared'
+    ? _declaredRelationGraph(items)
+    : _relationGraph(items, STORE.relMode, _allGroupMemberLists());
   graph.tables = _detectTables(graph);
   const tableByNode = new Map();
   graph.tables.forEach(table => table.memberIds.forEach(id => tableByNode.set(id, table.id)));
@@ -1841,13 +1885,24 @@ function _relationAvatar(node, className = '') {
 function _relationSvg(graph) {
   const viewport = _relationViewport();
   const edges = graph.edges.filter(edge => edge.n >= STORE.relMin).sort((a, b) => a.n - b.n);
+  const declared = !!graph.declared;
   const edgeHtml = edges.map(edge => {
     const a = graph.nodeById.get(edge.a), b = graph.nodeById.get(edge.b);
     const pa = graph.layout.get(edge.a), pb = graph.layout.get(edge.b);
     if (!a || !b || !pa || !pb) return '';
     const sameTable = a.tableId >= 0 && a.tableId === b.tableId;
-    const color = sameTable ? _relationTableColor(graph, a) : 'rgba(200,212,232,.55)';
     const midX = (pa.x + pb.x) / 2, midY = (pa.y + pb.y) / 2;
+    if (declared) {
+      // Couleur = sentiment, trait plein = réciproque (n=2), pointillé = à sens unique.
+      const color = _REL_SENT_COLOR[edge.sent] || _REL_SENT_COLOR[''];
+      const label = edge.role || _REL_SENT_LBL[edge.sent] || '';
+      const halfW = label ? label.length * 2.9 + 7 : 0;
+      return `<g class="pp-rel-edge" data-a="${_esc(edge.a)}" data-b="${_esc(edge.b)}" data-n="${edge.n}">
+      <line x1="${pa.x.toFixed(1)}" y1="${pa.y.toFixed(1)}" x2="${pb.x.toFixed(1)}" y2="${pb.y.toFixed(1)}" stroke="${color}" stroke-width="2.4" vector-effect="non-scaling-stroke" ${edge.n >= 2 ? '' : 'stroke-dasharray="5 3"'}></line>
+      ${label ? `<g class="pp-rel-edge-label" transform="translate(${midX.toFixed(1)},${midY.toFixed(1)})"><g class="pp-rel-edge-label-visual"><rect x="${(-halfW).toFixed(1)}" y="-8" width="${(halfW * 2).toFixed(1)}" height="16" rx="8"></rect><text x="0" y="0" dy=".35em" style="font-size:9px">${_esc(label)}</text></g></g>` : ''}
+    </g>`;
+    }
+    const color = sameTable ? _relationTableColor(graph, a) : 'rgba(200,212,232,.55)';
     return `<g class="pp-rel-edge" data-a="${_esc(edge.a)}" data-b="${_esc(edge.b)}" data-n="${edge.n}">
       <line x1="${pa.x.toFixed(1)}" y1="${pa.y.toFixed(1)}" x2="${pb.x.toFixed(1)}" y2="${pb.y.toFixed(1)}" stroke="${color}" stroke-width="${(.8 + edge.n * 1.1).toFixed(1)}" vector-effect="non-scaling-stroke" ${sameTable ? '' : 'stroke-dasharray="4 4"'}></line>
       <g class="pp-rel-edge-label" transform="translate(${midX.toFixed(1)},${midY.toFixed(1)})"><g class="pp-rel-edge-label-visual"><rect x="-11" y="-9" width="22" height="18" rx="9"></rect><text x="0" y="0" dy=".35em">${edge.n}</text></g></g>
@@ -1876,6 +1931,7 @@ function _relationSvg(graph) {
 }
 
 function _renderRelationSide(graph) {
+  const DECL = !!graph.declared;
   const selected = graph.nodeById.get(STORE.relSelectedId);
   if (selected) {
     const partners = _relationPartners(graph, selected.id);
@@ -1885,10 +1941,10 @@ function _renderRelationSide(graph) {
     const otherTables = selected.bridge?.tableIds.map(id => graph.tables[id]).filter(Boolean) || [];
     const maxCount = Math.max(1, ...partners.map(partner => partner.count));
     return `<div class="pp-rel-side-head"><button type="button" class="pp-rel-close" data-pp-action="relationClear" aria-label="Fermer">${_ppIcon('x')}</button>${_relationAvatar(selected, 'is-large')}<div><h2>${_esc(selected.label)}</h2><small>${_esc(selected.sub || (STORE.relMode === 'players' ? 'Joueur' : 'Personnage'))}</small></div></div>
-      <div class="pp-rel-kpis"><span><b>${selected.adv}</b> aventures</span><span><b>${partners.length}</b> partenaires</span><span><b>${never.length}</b> jamais croisés</span></div>
+      <div class="pp-rel-kpis"><span><b>${selected.adv}</b> ${DECL ? 'liens' : 'aventures'}</span><span><b>${partners.length}</b> ${DECL ? 'liés' : 'partenaires'}</span><span><b>${never.length}</b> ${DECL ? 'sans lien' : 'jamais croisés'}</span></div>
       ${table ? `<div class="pp-rel-table-banner" style="--rel-color:${table.color}"><b>Autour de ${_esc(graph.nodeById.get(table.coreId)?.label || selected.label)}</b>${otherTables.length ? `<span>${_ppIcon('relations')} fait le pont avec ${otherTables.map(other => `<button type="button" data-pp-action="relationTable" data-table="${other.id}">Autour de ${_esc(graph.nodeById.get(other.coreId)?.label || '')}</button>`).join(', ')}</span>` : ''}</div>` : ''}
-      <h3>Joue le plus avec</h3>
-      <div class="pp-rel-partners">${partners.map(partner => `<button type="button" class="${partner.count < STORE.relMin ? 'is-weak' : ''}" data-pp-action="relationSelect" data-id="${_esc(partner.node.id)}">${_relationAvatar(partner.node, 'is-small')}<span><b>${_esc(partner.node.label)}</b><small>${_esc(partner.node.sub)}</small></span><em><i><span style="width:${partner.count / maxCount * 100}%"></span></i>${partner.count}</em></button>`).join('') || '<p class="pp-rel-muted">Aucune aventure partagée.</p>'}</div>
+      <h3>${DECL ? 'Liens déclarés' : 'Joue le plus avec'}</h3>
+      <div class="pp-rel-partners">${partners.map(partner => `<button type="button" class="${partner.count < STORE.relMin ? 'is-weak' : ''}" data-pp-action="relationSelect" data-id="${_esc(partner.node.id)}">${_relationAvatar(partner.node, 'is-small')}<span><b>${_esc(partner.node.label)}</b><small>${_esc(partner.node.sub)}</small></span><em><i><span style="width:${partner.count / maxCount * 100}%"></span></i>${partner.count}</em></button>`).join('') || `<p class="pp-rel-muted">${DECL ? 'Aucun lien déclaré.' : 'Aucune aventure partagée.'}</p>`}</div>
       ${never.length ? `<button type="button" class="pp-rel-never-toggle" data-pp-action="relationNever">${STORE.relShowNever ? 'Masquer' : 'Voir'} les ${never.length} jamais croisés</button>${STORE.relShowNever ? `<div class="pp-rel-chips">${never.map(node => `<button type="button" data-pp-action="relationSelect" data-id="${_esc(node.id)}">${_esc(node.label)}</button>`).join('')}</div>` : ''}` : ''}
       <button type="button" class="pp-rel-open" data-pp-action="relationOpen">Ouvrir la fiche ${_ppIcon('arrowRight')}</button>`;
   }
@@ -1896,15 +1952,17 @@ function _renderRelationSide(graph) {
   const links = graph.edges.filter(edge => edge.n >= STORE.relMin).length;
   const duos = [...graph.edges].sort((a, b) => b.n - a.n || a.a.localeCompare(b.a)).slice(0, 6);
   const bridges = graph.nodes.filter(node => node.bridge).sort((a, b) => b.bridge.count - a.bridge.count || b.w - a.w).slice(0, 4);
-  return `<p class="pp-rel-lead"><b>${links}</b> liens sur ${graph.total} paires possibles. ${STORE.relMode === 'players' ? 'Les joueurs' : 'Les personnages'} se regroupent naturellement en tablées : chaque couleur en est une.</p>
+  return `<p class="pp-rel-lead">${DECL
+      ? `<b>${links}</b> lien${links > 1 ? 's' : ''} déclaré${links > 1 ? 's' : ''}. Trait plein = réciproque, pointillé = à sens unique ; la couleur donne le sentiment.`
+      : `<b>${links}</b> liens sur ${graph.total} paires possibles. ${STORE.relMode === 'players' ? 'Les joueurs' : 'Les personnages'} se regroupent naturellement en tablées : chaque couleur en est une.`}</p>
     <h3>Tablées</h3>
     <div class="pp-rel-tables">${graph.tables.map(table => {
       const core = graph.nodeById.get(table.coreId);
       const members = table.memberIds.map(id => graph.nodeById.get(id)).filter(Boolean);
       return `<button type="button" class="${STORE.relTableId === table.id ? 'is-active' : ''}" data-pp-action="relationTable" data-table="${table.id}" style="--rel-color:${table.color}"><i></i><span><b>Autour de ${_esc(core?.label || '')}</b><small>${members.length} ${STORE.relMode === 'players' ? 'joueurs' : 'personnages'} · ${table.internal} participations communes</small></span><em>${members.slice(0, 5).map(node => `<i>${_esc(_initials(node.label))}</i>`).join('')}${members.length > 5 ? `<i>+${members.length - 5}</i>` : ''}</em></button>`;
     }).join('') || '<p class="pp-rel-muted">Pas encore assez de liens pour former une tablée.</p>'}</div>
-    <h3>Duos les plus soudés</h3>
-    <div class="pp-rel-duos">${duos.map(edge => `<button type="button" data-pp-action="relationSelect" data-id="${_esc(edge.a)}"><span>${_esc(graph.nodeById.get(edge.a)?.label || '')}</span><i></i><span>${_esc(graph.nodeById.get(edge.b)?.label || '')}</span><em>${edge.n} aventure${edge.n > 1 ? 's' : ''}</em></button>`).join('') || '<p class="pp-rel-muted">Aucun duo pour le moment.</p>'}</div>
+    <h3>${DECL ? 'Liens marquants' : 'Duos les plus soudés'}</h3>
+    <div class="pp-rel-duos">${duos.map(edge => `<button type="button" data-pp-action="relationSelect" data-id="${_esc(edge.a)}"><span>${_esc(graph.nodeById.get(edge.a)?.label || '')}</span><i></i><span>${_esc(graph.nodeById.get(edge.b)?.label || '')}</span><em>${DECL ? _esc((edge.role || _REL_SENT_LBL[edge.sent] || 'Lien') + (edge.n >= 2 ? ' · réciproque' : '')) : `${edge.n} aventure${edge.n > 1 ? 's' : ''}`}</em></button>`).join('') || `<p class="pp-rel-muted">${DECL ? 'Aucun lien déclaré pour le moment.' : 'Aucun duo pour le moment.'}</p>`}</div>
     ${bridges.length ? `<h3>${_ppIcon('relations')} Ponts entre tablées</h3><div class="pp-rel-chips">${bridges.map(node => `<button type="button" data-pp-action="relationSelect" data-id="${_esc(node.id)}"><i></i>${_esc(node.label)}</button>`).join('')}</div><p class="pp-rel-muted">Ces ${STORE.relMode === 'players' ? 'joueurs' : 'personnages'} ont partagé des aventures avec plusieurs tablées.</p>` : ''}`;
 }
 
@@ -1916,11 +1974,16 @@ function _renderRelationsScreen(items) {
   return `<div class="pp-relations-screen">
     <main class="pp-relations-main">
       <div class="pp-relations-bar">
-        <div class="pp-relations-segment" role="group" aria-label="Type de réseau"><button type="button" class="${STORE.relMode === 'characters' ? 'is-active' : ''}" data-pp-action="relationMode" data-mode="characters">Personnages</button><button type="button" class="${STORE.relMode === 'players' ? 'is-active' : ''}" data-pp-action="relationMode" data-mode="players">Joueurs</button></div>
-        <label class="pp-relations-search">${_ppIcon('search')}<input type="search" placeholder="Trouver un ${STORE.relMode === 'players' ? 'joueur' : 'personnage'}…" value="${_esc(STORE.relQuery)}" autocomplete="off" data-pp-action="relationSearch" data-pp-on="input"></label>
-        <label class="pp-relations-min"><span>Liens d’au moins</span><input type="range" min="1" max="4" step="1" value="${STORE.relMin}" data-pp-action="relationMin" data-pp-on="input"><output>${STORE.relMin} aventure${STORE.relMin > 1 ? 's' : ''}</output></label>
+        <div class="pp-relations-segment" role="group" aria-label="Source des liens"><button type="button" class="${STORE.relSource === 'shared' ? 'is-active' : ''}" data-pp-action="relationSource" data-source="shared" title="Liens déduits des aventures jouées ensemble">Aventures partagées</button><button type="button" class="${STORE.relSource === 'declared' ? 'is-active' : ''}" data-pp-action="relationSource" data-source="declared" title="Liens saisis sur les fiches (onglet Relations)">Liens déclarés</button></div>
+        ${STORE.relSource === 'declared' ? '' : `<div class="pp-relations-segment" role="group" aria-label="Type de réseau"><button type="button" class="${STORE.relMode === 'characters' ? 'is-active' : ''}" data-pp-action="relationMode" data-mode="characters">Personnages</button><button type="button" class="${STORE.relMode === 'players' ? 'is-active' : ''}" data-pp-action="relationMode" data-mode="players">Joueurs</button></div>`}
+        <label class="pp-relations-search">${_ppIcon('search')}<input type="search" placeholder="Trouver un ${STORE.relSource === 'declared' || STORE.relMode !== 'players' ? 'personnage' : 'joueur'}…" value="${_esc(STORE.relQuery)}" autocomplete="off" data-pp-action="relationSearch" data-pp-on="input"></label>
+        ${STORE.relSource === 'declared'
+          ? `<label class="pp-relations-min"><span>Afficher</span><input type="range" min="1" max="2" step="1" value="${Math.min(STORE.relMin, 2)}" data-pp-action="relationMin" data-pp-on="input"><output>${STORE.relMin >= 2 ? 'réciproques' : 'tous'}</output></label>`
+          : `<label class="pp-relations-min"><span>Liens d’au moins</span><input type="range" min="1" max="4" step="1" value="${STORE.relMin}" data-pp-action="relationMin" data-pp-on="input"><output>${STORE.relMin} aventure${STORE.relMin > 1 ? 's' : ''}</output></label>`}
       </div>
-      <div class="pp-relations-stage" data-pp-action="relationClear">${graph.nodes.length ? _relationSvg(graph) : '<div class="pp-roster-empty">Aucun personnage à afficher.</div>'}<div class="pp-relations-zoom" aria-label="Navigation dans le réseau"><button type="button" data-pp-action="relationZoom" data-factor="1.25" aria-label="Dézoomer">−</button><button type="button" data-pp-action="relationResetView" aria-label="Recentrer le réseau" title="Recentrer">${_ppIcon('reset')}</button><button type="button" data-pp-action="relationZoom" data-factor="0.8" aria-label="Zoomer">+</button></div><div class="pp-relations-legend"><span><i class="is-solid"></i>même tablée</span><span><i class="is-dashed"></i>entre tablées</span><span><i class="is-weight"></i>épaisseur = aventures partagées</span><span><i class="is-bridge"></i>pont</span>${STORE.relMode === 'characters' ? '<span><i class="is-secondary"></i>perso secondaire</span>' : ''}</div><div class="pp-rel-tooltip" role="tooltip"></div></div>
+      <div class="pp-relations-stage" data-pp-action="relationClear">${graph.nodes.length ? _relationSvg(graph) : '<div class="pp-roster-empty">Aucun personnage à afficher.</div>'}<div class="pp-relations-zoom" aria-label="Navigation dans le réseau"><button type="button" data-pp-action="relationZoom" data-factor="1.25" aria-label="Dézoomer">−</button><button type="button" data-pp-action="relationResetView" aria-label="Recentrer le réseau" title="Recentrer">${_ppIcon('reset')}</button><button type="button" data-pp-action="relationZoom" data-factor="0.8" aria-label="Zoomer">+</button></div><div class="pp-relations-legend">${STORE.relSource === 'declared'
+      ? `<span><i class="is-solid"></i>réciproque</span><span><i class="is-dashed"></i>à sens unique</span><span><i class="is-weight" style="background:#5dd5a8"></i>vert = amical</span><span><i class="is-weight" style="background:#ff8ca7"></i>rouge = hostile</span>`
+      : `<span><i class="is-solid"></i>même tablée</span><span><i class="is-dashed"></i>entre tablées</span><span><i class="is-weight"></i>épaisseur = aventures partagées</span><span><i class="is-bridge"></i>pont</span>${STORE.relMode === 'characters' ? '<span><i class="is-secondary"></i>perso secondaire</span>' : ''}`}</div><div class="pp-rel-tooltip" role="tooltip"></div></div>
     </main>
     <aside class="pp-relations-side">${_renderRelationSide(graph)}</aside>
   </div>`;
@@ -2356,6 +2419,18 @@ Object.assign(ppHandlers, {
     const mode = el.dataset.mode === 'players' ? 'players' : 'characters';
     if (mode === STORE.relMode) return;
     STORE.relMode = mode;
+    STORE.relSelectedId = '';
+    STORE.relTableId = null;
+    STORE.relQuery = '';
+    STORE.relShowNever = false;
+    _refreshRelationView();
+  },
+  relationSource: (el) => {
+    const source = el.dataset.source === 'declared' ? 'declared' : 'shared';
+    if (source === STORE.relSource) return;
+    STORE.relSource = source;
+    if (source === 'declared') STORE.relMode = 'characters'; // liens déclarés = niveau personnage
+    STORE.relMin = 1;
     STORE.relSelectedId = '';
     STORE.relTableId = null;
     STORE.relQuery = '';

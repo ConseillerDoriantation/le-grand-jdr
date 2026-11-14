@@ -192,7 +192,7 @@ import {
   _renderCombatTracker, _renderCombatTrackerSoon, _vttCombatTab, _vttTrackerFocus, _vttToggleOrderPanel,
 } from './vtt-combat-tracker.js';
 import {
-  _startPresence, _resetPresence, _renderSessionBtn, _vttToggleSessionLive,
+  _startPresence, _resetPresence, _renderSessionBtn, _renderPresenceCol, _vttToggleSessionLive,
   _vttKickPresence,
 } from './vtt-presence.js';
 import {
@@ -12786,7 +12786,14 @@ function _initListeners() {
         _patchShape(id); if (VS.selected === id) _renderInspectorSoon();
       }
     }
-    if (changed.size) _renderTraySoon();
+    if (changed.size) {
+      // Tous les visuels VTT suivent le portrait actif de la fiche au même
+      // snapshot, sans recopier l'image dans chaque document token.
+      _renderTraySoon();
+      _renderCombatTrackerSoon();
+      _renderPresenceCol();
+      _renderShortRest();
+    }
     _markCharsReady();
     if (!STATE.isAdmin && !VS.selected) _renderInspectorSoon();
     void _syncOwnedCharacterDelegations();

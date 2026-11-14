@@ -12,6 +12,7 @@ const displayPreferences = read('../assets/js/shared/display-preferences.js');
 const commandPalette = read('../assets/js/features/command-palette.js');
 const achievements = read('../assets/js/features/achievements.js');
 const collection = read('../assets/js/features/collection.js');
+const collectionRuntime = read('../assets/js/features/collection/runtime.js');
 const shop = read('../assets/js/features/shop.js');
 const shopCss = read('../assets/css/shop.css');
 const recentNavigation = read('../assets/js/shared/recent-navigation.js');
@@ -63,8 +64,9 @@ test('les préférences de lisibilité sont locales et accessibles par Ctrl K', 
 test('les suppressions de collection et hauts-faits peuvent être annulées', () => {
   assert.match(achievements, /Haut-Fait supprimé\.[\s\S]*label: '↶ Annuler'/);
   assert.match(achievements, /await saveDoc\(col, id, data\)/);
-  assert.match(collection, /Carte supprimée\.[\s\S]*label: '↶ Annuler'/);
-  assert.match(collection, /await _persistCard\(id, full\)/);
+  assert.match(collectionRuntime, /function delItems\([\s\S]*?act\(\(\) =>/);
+  assert.match(collectionRuntime, /toast\(msg, before \? \(\) => \{ restore\(before\)/);
+  assert.match(collectionRuntime, /saved\(\); toast\('Annulé\.'/);
 });
 
 test('la boutique permet des actions groupées sans lecture Firestore supplémentaire', () => {

@@ -210,6 +210,9 @@
 .npc-rd-event-deltas button.is-neg { color: #ff8ca7; }
 .npc-rd-event-deltas button.is-pos { color: #5fe5b1; }
 .npc-rd-event-deltas button.is-on { background: #172438; box-shadow: inset 0 0 0 1px rgba(143, 172, 216, .08); }
+.npc-rd-event-delta-custom { position: relative; }
+.npc-rd-event-delta-custom::after { content: ''; position: absolute; right: 5px; bottom: 4px; width: 4px; height: 4px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; opacity: .55; }
+.npc-rd-event-deltas .npc-rd-event-delta-inline { width: 40px; min-width: 40px; height: 28px; flex: 0 0 40px; border: 1px solid rgba(79, 140, 255, .58); border-radius: 999px; outline: 0; color: #eef4ff; background: #172438; padding: 0 5px; font-size: .68rem; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 3px rgba(79, 140, 255, .1); }
 .npc-rd-event-form input { min-width: 200px; height: 34px; flex: 1 1 220px; border: 1px solid var(--rd-line); border-radius: 9px; outline: 0; color: #dce5f1; background: #09131f; padding: 0 11px; font-size: .7rem; }
 .npc-rd-event-form input:focus { border-color: rgba(79, 140, 255, .55); box-shadow: 0 0 0 3px rgba(79, 140, 255, .09); }
 .npc-rd-event-add { height: 32px; border: 1px solid var(--rd-line); border-radius: 9px; color: #c7d3e5; background: #132033; padding: 0 13px; font-size: .68rem; font-weight: 700; cursor: pointer; }
@@ -217,10 +220,20 @@
 .npc-rd-event-list { display: flex; flex-direction: column; margin-top: 9px; }
 .npc-rd-event-list > div { min-height: 36px; display: grid; grid-template-columns: 48px minmax(0, 1fr) auto 28px; align-items: center; gap: 10px; border-bottom: 1px solid var(--rd-line); color: #a9b7ca; padding: 5px 4px; font-size: .7rem; }
 .npc-rd-event-list > div:last-child { border-bottom: 0; }
+.npc-rd-event-edit { border: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; transition: color .14s, background .14s; }
+.npc-rd-event-edit:focus-visible { outline: 1px solid rgba(79, 140, 255, .65); outline-offset: 2px; }
 .npc-rd-delta { justify-self: start; min-width: 38px; border-radius: 999px; color: #8495ad; background: #172438; padding: 2px 7px; font-size: .66rem; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
 .npc-rd-delta.is-neg { color: #ff8ca7; background: rgba(255, 90, 126, .14); }
 .npc-rd-delta.is-pos { color: #5fe5b1; background: rgba(34, 195, 142, .14); }
+.npc-rd-event-text { min-width: 0; overflow: hidden; color: #a9b7ca; padding: 5px 4px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.npc-rd-event-date { border-radius: 6px; padding: 5px 6px; }
+.npc-rd-event-edit:hover { color: #fff; background: rgba(79, 140, 255, .08); }
 .npc-rd-event-list time { color: #586b85; font-size: .61rem; white-space: nowrap; }
+.npc-rd-event-date:hover time { color: #91b8ff; }
+.npc-rd-event-inline-input { width: 100%; min-width: 0; height: 28px; box-sizing: border-box; border: 1px solid rgba(79, 140, 255, .58); border-radius: 7px; outline: 0; color: #eef4ff; background: #101d2d; padding: 0 7px; font: inherit; box-shadow: 0 0 0 3px rgba(79, 140, 255, .09); }
+.npc-rd-event-inline-input--delta { width: 46px; justify-self: start; color: #dbe7f8; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums; }
+.npc-rd-event-inline-input--date { width: 96px; color: #91b8ff; font-size: .61rem; }
+.npc-rd-event-inline-input.is-saving { opacity: .65; }
 .npc-rd-event-delete, .npc-rd-history-more { border: 0; color: #71839d; background: transparent; cursor: pointer; }
 .npc-rd-event-delete { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; opacity: 0; transition: color .15s, background .15s, opacity .15s; }
 .npc-rd-event-delete .npc-rd-icon { width: 14px; height: 14px; }

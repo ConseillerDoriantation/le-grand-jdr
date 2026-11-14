@@ -15,10 +15,19 @@ import {
   equipmentSlotAcceptsItem, getEquipmentSlot, getPrimaryWeaponSlotId, getSecondaryWeaponSlotId,
 } from '../../shared/equipment-slots.js';
 import { weaponHands } from '../../shared/weapon-family.js';
+import { captureInventoryViewState, rerenderInventoryView } from './inventory.js';
 
 let _equipCompatibles = [];
 let _equipSelectedMeta = {};
-function _renderEquipmentChar(c, tab = 'combat') {
+function _isInventoryTab(tab) {
+  return tab === 'inv' || tab === 'inventaire';
+}
+
+function _renderEquipmentChar(c, tab = 'combat', inventoryView = null) {
+  if (_isInventoryTab(tab)) {
+    rerenderInventoryView({ viewState: inventoryView });
+    return;
+  }
   charSession.renderSheet(c, tab);
 }
 
@@ -40,6 +49,7 @@ export async function equipInventoryItem(invIndex, requestedSlot = '', {
 } = {}) {
   const c = STATE.activeChar;
   if (!c) return false;
+  const inventoryView = _isInventoryTab(renderTab) ? captureInventoryViewState() : null;
 
   if (requestedSlot === getSecondaryWeaponSlotId()
     && weaponHands(c.equipement?.[getPrimaryWeaponSlotId()]) === 2) {
@@ -81,7 +91,7 @@ export async function equipInventoryItem(invIndex, requestedSlot = '', {
     showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
     return false;
   }
-  _renderEquipmentChar(c, renderTab);
+  _renderEquipmentChar(c, renderTab, inventoryView);
   return true;
 }
 
@@ -307,6 +317,7 @@ export async function saveEquipSlot(slot) {
 // ══════════════════════════════════════════════
 export async function clearEquipSlot(slot, { renderTab = 'combat' } = {}) {
   const c = STATE.activeChar; if(!c) return;
+  const inventoryView = _isInventoryTab(renderTab) ? captureInventoryViewState() : null;
   const equip = c.equipement||{};
   delete equip[slot];
   c.equipement = equip;
@@ -319,7 +330,7 @@ export async function clearEquipSlot(slot, { renderTab = 'combat' } = {}) {
   } catch (e) {
     showNotif(e?.message || 'Erreur de sauvegarde.', 'error');
   }
-  _renderEquipmentChar(c, renderTab);
+  _renderEquipmentChar(c, renderTab, inventoryView);
 }
 
 registerActions({

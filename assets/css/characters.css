@@ -9120,6 +9120,9 @@ body .modal:has(.cs-build-modal) {
 .rel-sent-btn--neutre.is-active   { background: rgba(244,196,48,.16);  border-color: rgba(244,196,48,.5);  color: #f4c430; }
 .rel-sent-btn--mefiance.is-active { background: rgba(255,149,68,.16);  border-color: rgba(255,149,68,.5);  color: #ffb070; }
 .rel-sent-btn--ennemi.is-active   { background: rgba(255,90,126,.16);  border-color: rgba(255,90,126,.5);  color: #ff8ca7; }
+/* Segment « type de cible » de la modale relation (une seule cible active). */
+.rel-target-btn.is-active { background: rgba(79,140,255,.16); border-color: rgba(79,140,255,.5); color: var(--text); }
+.rel-target-pane { margin-top: .45rem; }
 
 .cs-v3 .rel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
 .cs-v3 .rel-card {

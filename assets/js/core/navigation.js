@@ -112,6 +112,7 @@ async function _ensurePageDocumentStores(page) {
 // Les autres features chargent uniquement leurs feuilles dédiées.
 const FEATURE_CSS = {
   dashboard:  ['quests.css', 'bastion.css', 'dashboard.css'],
+  collection: ['collection.css'],
   // shop.css : les modales admin rendues depuis la fiche perso (types de dégâts,
   // formats d'arme, styles de combat, matrices de sorts) réutilisent les styles
   // partagés `.sh-admin-*` / `.sh-dmg-*` définis dans shop.css → sinon, ouvertes
@@ -134,7 +135,6 @@ const FEATURE_CSS = {
   // et réutilisé par ces pages → sinon leur modale s'affiche sans style.
   world:      ['histoire.css'],
   diapo:      ['diapo.css'],
-  collection: ['histoire.css'],
   players:    ['histoire.css', 'players.css'],
   // agenda.css : le bandeau du Bastion est construit avec les classes partagées
   // `.ag-top`/`.ag-scope`/`.ag-menu`/`.ag-tabs` (entièrement scopées `.ag-*`) →

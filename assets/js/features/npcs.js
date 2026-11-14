@@ -613,36 +613,29 @@ function _npcHighlight(text = '') {
   return safe.replace(new RegExp(`(${escaped})`, 'ig'), '<mark>$1</mark>');
 }
 
-// ── Delta picker (partagé entre modal événement et édition d'historique) ─────
-const _DELTA_PRESETS = [-2, -1, 0, 1, 2];
-const _deltaActiveBg = (v) => v < 0 ? 'rgba(255,107,107,.18)' : v > 0 ? 'rgba(34,195,142,.18)' : 'rgba(255,255,255,.1)';
-const _deltaBorderColor = (v) => v < 0 ? 'rgba(255,107,107,.3)' : v > 0 ? 'rgba(34,195,142,.3)' : 'var(--border)';
-const _deltaTextColor = (v) => v < 0 ? '#ff6b6b' : v > 0 ? '#22c38e' : 'var(--text-dim)';
+// ── Montant des événements de relation ──────────────────────────────────────
+const _FIXED_EVENT_DELTAS = [-2, -1, 1, 2];
+const _formatRelationDelta = value => Number(value) > 0 ? `+${Number(value)}` : String(Number(value) || 0);
 
-// Rend les boutons -2/-1/0/+1/+2. `current` = preset déjà actif (ou null).
-// `actionName` = nom de l'action data-action à déclencher avec data-val="${v}".
-function _deltaPresetsHtml(idPrefix, current, actionName, { size = 32 } = {}) {
-  return _DELTA_PRESETS.map(v => {
-    const active = v === current;
-    return `<button type="button" id="${idPrefix}-${v}"
-      data-action="${actionName}" data-val="${v}"
-      style="width:${size}px;height:${size}px;border-radius:8px;cursor:pointer;font-size:.8rem;
-      font-weight:700;transition:all .12s;
-      border:${active ? '2px' : '1px'} solid ${_deltaBorderColor(v)};
-      background:${active ? _deltaActiveBg(v) : 'var(--bg-elevated)'};
-      color:${_deltaTextColor(v)}">${v > 0 ? '+' + v : v}</button>`;
-  }).join('');
+function _relationDeltaButtonsHtml() {
+  const customActive = !_FIXED_EVENT_DELTAS.includes(_histEditDelta);
+  const customValue = customActive ? _histEditDelta : 0;
+  const fixedButton = value => `<button type="button" class="${_histEditDelta === value ? 'is-on ' : ''}${value > 0 ? 'is-pos' : 'is-neg'}" data-action="npcEventDelta" data-value="${value}">${_formatRelationDelta(value)}</button>`;
+  return `${fixedButton(-2)}${fixedButton(-1)}<button type="button" class="npc-rd-event-delta-custom${customActive ? ' is-on' : ''}${customValue > 0 ? ' is-pos' : customValue < 0 ? ' is-neg' : ''}" data-action="npcEventDeltaCustom" data-custom-delta title="Définir un montant libre" aria-label="Définir un montant libre de points">${_formatRelationDelta(customValue)}</button>${fixedButton(1)}${fixedButton(2)}`;
 }
 
-// Met à jour visuellement le preset actif après changement.
-function _highlightDeltaPreset(idPrefix, v) {
-  _DELTA_PRESETS.forEach(d => {
-    const btn = document.getElementById(`${idPrefix}-${d}`);
-    if (!btn) return;
-    const active = d === v;
-    btn.style.background  = active ? _deltaActiveBg(d) : 'var(--bg-elevated)';
-    btn.style.borderWidth = active ? '2px' : '1px';
+function _syncRelationDeltaButtons() {
+  document.querySelectorAll('.npc-rd-event-deltas [data-value]').forEach(button => {
+    button.classList.toggle('is-on', Number(button.dataset.value) === _histEditDelta);
   });
+  const custom = document.querySelector('.npc-rd-event-deltas [data-custom-delta]');
+  if (!custom) return;
+  const customActive = !_FIXED_EVENT_DELTAS.includes(_histEditDelta);
+  const customValue = customActive ? _histEditDelta : 0;
+  custom.textContent = _formatRelationDelta(customValue);
+  custom.classList.toggle('is-on', customActive);
+  custom.classList.toggle('is-neg', customValue < 0);
+  custom.classList.toggle('is-pos', customValue > 0);
 }
 
 // Persiste { affinite } sur un PNJ + met à jour le cache local + UI.
@@ -1541,8 +1534,12 @@ function _renderNpcPosture(n) {
     <div class="npc-rd-posture-summary">${_renderNpcLevelChip(level)}<span>${af.desc}</span>${_affiniteMode(n) === 'valeur' ? `<span class="npc-rd-posture-value">valeur <b>${currentValue >= 0 ? '+' : ''}${currentValue}</b> · prochain palier : ${nextThresholdText}</span>` : ''}<small>${_npcUiIcon('users')} vaut pour <b>${inherited}</b> perso${inherited > 1 ? 's' : ''} sur ${_npcLinkableCharacters().length}${exceptionCount ? ` · ${exceptionCount} exception${exceptionCount > 1 ? 's' : ''}` : ''}</small></div>
     <textarea class="npc-inline npc-rd-posture-note" data-change="npcInlineSave" data-npc-id="${_esc(n.id)}" data-field="affinite.note" placeholder="Note de posture…">${_esc(aff.note || '')}</textarea>
     <div class="npc-rd-journal"><div class="npc-rd-journal-title"><b>${_npcUiIcon('clock')} Journal de la relation</b><span>${_affiniteMode(n) === 'valeur' ? 'Chaque événement déplace la valeur.' : 'En réglage direct, le journal garde la trace sans déplacer la posture.'}</span></div>
-      <div class="npc-rd-event-form"><div class="npc-rd-event-deltas" role="group" aria-label="Variation">${[-2, -1, 0, 1, 2].map(v => `<button type="button" class="${_histEditDelta === v ? 'is-on ' : ''}${v > 0 ? 'is-pos' : v < 0 ? 'is-neg' : ''}" data-action="npcEventDelta" data-value="${v}">${v > 0 ? `+${v}` : v || '±0'}</button>`).join('')}</div><input id="npc-rd-event-text" type="text" data-npc-id="${_esc(n.id)}" placeholder="Ce qui vient de se passer…" autocomplete="off"><button type="button" class="npc-rd-event-add" data-action="npcAddRelationEvent" data-id="${_esc(n.id)}">Ajouter</button></div>
-      <div class="npc-rd-event-list">${history.length ? history.map(entry => { const delta = Number(entry.delta) || 0; return `<div><b class="npc-rd-delta${delta < 0 ? ' is-neg' : delta > 0 ? ' is-pos' : ''}">${delta > 0 ? `+${delta}` : delta || '±0'}</b><span>${_esc(entry.texte || entry.text || '')}</span><time>${_esc(entry.date || '')}</time><button type="button" class="npc-rd-event-delete" data-action="npcDeleteRelationEvent" data-id="${_esc(n.id)}" data-index="${entry._index}" title="Supprimer cet événement" aria-label="Supprimer cet événement">${_npcUiIcon('trash')}</button></div>`; }).join('') : '<p class="npc-rd-event-empty">Aucun événement pour l’instant.</p>'}</div>
+      <div class="npc-rd-event-form">
+        <div class="npc-rd-event-deltas" role="group" aria-label="Raccourcis de variation">${_relationDeltaButtonsHtml()}</div>
+        <input id="npc-rd-event-text" type="text" data-npc-id="${_esc(n.id)}" placeholder="Ce qui vient de se passer…" autocomplete="off">
+        <button type="button" class="npc-rd-event-add" data-action="npcAddRelationEvent" data-id="${_esc(n.id)}">Ajouter</button>
+      </div>
+      <div class="npc-rd-event-list">${history.length ? history.map(entry => { const delta = Number(entry.delta) || 0; const edit = `data-action="editHistoriqueEntry" data-npc-id="${_esc(n.id)}" data-idx="${entry._index}"`; return `<div><button type="button" class="npc-rd-event-edit npc-rd-delta${delta < 0 ? ' is-neg' : delta > 0 ? ' is-pos' : ''}" ${edit} data-focus="delta" title="Modifier les points">${_formatRelationDelta(delta)}</button><button type="button" class="npc-rd-event-edit npc-rd-event-text" ${edit} data-focus="text" title="Modifier l’événement">${_esc(entry.texte || entry.text || '')}</button><button type="button" class="npc-rd-event-edit npc-rd-event-date" ${edit} data-focus="date" title="Modifier la date"><time>${_esc(entry.date || '')}</time></button><button type="button" class="npc-rd-event-delete" data-action="npcDeleteRelationEvent" data-id="${_esc(n.id)}" data-index="${entry._index}" title="Supprimer cet événement" aria-label="Supprimer cet événement">${_npcUiIcon('trash')}</button></div>`; }).join('') : '<p class="npc-rd-event-empty">Aucun événement pour l’instant.</p>'}</div>
       ${fullHistory.length > 4 ? `<button type="button" class="npc-rd-history-more" data-action="npcToggleRelationHistory" data-id="${_esc(n.id)}">${_npcExpandedHistories.has(n.id) ? 'Réduire' : `Tout afficher · ${fullHistory.length}`}</button>` : ''}
     </div>
   </section>`;
@@ -4519,85 +4516,130 @@ export async function deleteHistoriqueEntry(npcId, index) {
 }
 
 // Modifier / Supprimer les entrées des historiques des NPCS
-export function editHistoriqueEntry(npcId, index) {
+async function _saveHistoriqueEntryField(npcId, index, field, rawValue) {
   const n = _npcs.find(x => x.id === npcId);
-  if (!n || !STATE.isAdmin) return;
-
-  const historique = n.affinite?.historique || [];
-  const entry = historique[index];
-  if (!entry) return;
-
-  openModal(`✏️ Modifier l'événement — ${_esc(n.nom)}`, `
-    <div class="form-group">
-      <label>Texte</label>
-      <textarea class="input-field" id="hist-edit-text" rows="3"
-        placeholder="Décris l’événement...">${_esc(entry.texte || '')}</textarea>
-    </div>
-
-    <div class="form-group">
-      <label>Impact</label>
-      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-        <div style="display:flex;gap:.35rem">
-          ${_deltaPresetsHtml('hist-edit-delta', entry.delta || 0, '_selectHistEditDelta', { size: 36 })}
-        </div>
-        <input type="number" id="hist-edit-delta-custom"
-          value="${_DELTA_PRESETS.includes(entry.delta || 0) ? '' : (entry.delta || 0)}"
-          placeholder="±N"
-          data-input="_setHistEditDeltaFromInput"
-          style="width:64px;text-align:center;font-weight:700;padding:.4rem;
-          background:var(--bg-elevated);border:1px solid var(--border);
-          border-radius:8px;color:var(--text);font-size:.8rem">
-      </div>
-    </div>
-
-    <div style="display:flex;gap:.5rem;margin-top:.75rem">
-      <button class="btn btn-gold" style="flex:1"
-        data-action="saveHistoriqueEntry" data-npc-id="${npcId}" data-idx="${index}">Enregistrer</button>
-      <button class="btn btn-outline btn-sm" data-action="close-modal">Annuler</button>
-    </div>
-  `);
-
-  _histEditDelta = entry.delta || 0;
-}
-
-function _selectHistEditDelta(v) {
-  _histEditDelta = v;
-  _highlightDeltaPreset('hist-edit-delta', v);
-  const inp = document.getElementById('hist-edit-delta-custom');
-  if (inp) inp.value = '';
-}
-
-function _setHistEditDeltaFromInput(raw) {
-  const v = parseInt(raw, 10);
-  _histEditDelta = Number.isFinite(v) ? v : 0;
-  _highlightDeltaPreset('hist-edit-delta', _histEditDelta);
-}
-
-export async function saveHistoriqueEntry(npcId, index) {
-  const n = _npcs.find(x => x.id === npcId);
-  if (!n || !STATE.isAdmin) return;
-
-  const texte = document.getElementById('hist-edit-text')?.value?.trim() || '';
-  if (!texte) {
-    showNotif('Le texte de l’événement est requis.', 'error');
-    return;
-  }
+  if (!n || !STATE.isAdmin) return false;
 
   const historique = [...(n.affinite?.historique || [])];
-  if (!historique[index]) return;
+  if (!historique[index]) return false;
 
-  const oldDelta = historique[index].delta || 0;
-  const newDelta = _histEditDelta || 0;
-
-  historique[index] = {
-    ...historique[index],
-    texte,
-    delta: newDelta,
-  };
+  const oldDelta = Number(historique[index].delta) || 0;
+  const next = { ...historique[index] };
+  if (field === 'delta') {
+    const delta = Number(String(rawValue).trim().replace(',', '.'));
+    if (!Number.isFinite(delta)) {
+      showNotif('Indique un montant de points valide.', 'error');
+      return false;
+    }
+    next.delta = delta;
+  } else if (field === 'date') {
+    next.date = String(rawValue).trim();
+  } else {
+    const texte = String(rawValue).trim();
+    if (!texte) {
+      showNotif('Le texte de l’événement est requis.', 'error');
+      return false;
+    }
+    next.texte = texte;
+  }
+  historique[index] = next;
 
   // En mode valeur, on rejoue la différence de delta sur la valeur cumulée.
-  const affinite = _withValeurDelta(n, { ...(n.affinite || {}), historique }, newDelta - oldDelta);
-  await _persistAffinite(npcId, affinite, 'Événement modifié.');
+  const newDelta = Number(next.delta) || 0;
+  const previousAffinite = n.affinite || {};
+  const affinite = _withValeurDelta(n, { ...previousAffinite, historique }, newDelta - oldDelta);
+
+  // Mise à jour locale immédiate : un second champ peut être édité sans attendre
+  // le réseau. L'écriture Firestore ne part qu'une fois, au blur / Entrée.
+  n.affinite = affinite;
+  const saved = await trySave('npcs', npcId, { affinite });
+  if (!saved) {
+    if (n.affinite === affinite) n.affinite = previousAffinite;
+    return false;
+  }
+  _npcFlashSaved();
+  return true;
+}
+
+function _restoreHistoriqueFieldButton(button, input, field, value) {
+  if (field === 'delta') {
+    const delta = Number(value) || 0;
+    button.textContent = _formatRelationDelta(delta);
+    button.classList.toggle('is-neg', delta < 0);
+    button.classList.toggle('is-pos', delta > 0);
+  } else if (field === 'date') {
+    const time = document.createElement('time');
+    time.textContent = String(value).trim();
+    button.replaceChildren(time);
+  } else {
+    button.textContent = String(value).trim();
+  }
+  if (input.isConnected) input.replaceWith(button);
+}
+
+// Édition directe dans la ligne : aucun dialogue et aucune écriture par frappe.
+export function editHistoriqueEntry(button, npcId, index, field = 'text') {
+  const n = _npcs.find(x => x.id === npcId);
+  if (!button || !n || !STATE.isAdmin) return;
+
+  const entry = n.affinite?.historique?.[index];
+  if (!entry) return;
+
+  const safeField = ['delta', 'date', 'text'].includes(field) ? field : 'text';
+  const initial = safeField === 'delta'
+    ? String(Number(entry.delta) || 0)
+    : String(safeField === 'date' ? entry.date || '' : entry.texte || entry.text || '');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = initial;
+  input.className = `npc-inline npc-rd-event-inline-input npc-rd-event-inline-input--${safeField}`;
+  input.dataset.npcId = npcId;
+  input.dataset.index = String(index);
+  input.dataset.field = safeField;
+  input.setAttribute('aria-label', safeField === 'delta' ? 'Points' : safeField === 'date' ? 'Date' : 'Nom de l’événement');
+  if (safeField === 'delta') input.inputMode = 'decimal';
+
+  let finished = false;
+  const cancel = () => {
+    if (finished) return;
+    finished = true;
+    if (input.isConnected) input.replaceWith(button);
+  };
+  const commit = async () => {
+    if (finished) return;
+    const value = input.value;
+    if (value === initial) {
+      cancel();
+      return;
+    }
+    finished = true;
+    input.disabled = true;
+    input.classList.add('is-saving');
+    const saved = await _saveHistoriqueEntryField(npcId, index, safeField, value);
+    if (saved) {
+      _restoreHistoriqueFieldButton(button, input, safeField, value);
+      return;
+    }
+    finished = false;
+    input.disabled = false;
+    input.classList.remove('is-saving');
+    input.focus({ preventScroll: true });
+    input.select();
+  };
+
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancel();
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      input.blur();
+    }
+  });
+  input.addEventListener('blur', () => { void commit(); });
+  button.replaceWith(input);
+  input.focus({ preventScroll: true });
+  input.select();
 }
 
 // Affinités spéciales
@@ -5633,7 +5675,54 @@ async function _npcSetAffiniteMode(btn) {
 
 function _npcEventDelta(btn) {
   _histEditDelta = Number(btn?.dataset?.value) || 0;
-  document.querySelectorAll('.npc-rd-event-deltas button').forEach(el => el.classList.toggle('is-on', Number(el.dataset.value) === _histEditDelta));
+  _syncRelationDeltaButtons();
+}
+
+function _npcEventDeltaCustom(button) {
+  if (!button || button.parentElement?.querySelector('.npc-rd-event-delta-inline')) return;
+  const previous = _histEditDelta;
+  const current = _FIXED_EVENT_DELTAS.includes(previous) ? 0 : previous;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.value = String(current);
+  input.className = 'npc-inline npc-rd-event-delta-inline';
+  input.setAttribute('aria-label', 'Montant libre de points');
+
+  let finished = false;
+  const restore = value => {
+    if (finished) return;
+    finished = true;
+    if (Number.isFinite(value)) _histEditDelta = value;
+    if (input.isConnected) input.replaceWith(button);
+    _syncRelationDeltaButtons();
+  };
+  const commit = () => {
+    const value = Number(input.value.trim().replace(',', '.'));
+    if (!Number.isFinite(value)) {
+      showNotif('Indique un montant de points valide.', 'error');
+      requestAnimationFrame(() => {
+        input.focus({ preventScroll: true });
+        input.select();
+      });
+      return;
+    }
+    restore(value);
+  };
+
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      restore(previous);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      commit();
+    }
+  });
+  input.addEventListener('blur', commit);
+  button.replaceWith(input);
+  input.focus({ preventScroll: true });
+  input.select();
 }
 
 async function _npcAddRelationEvent(btn) {
@@ -5641,15 +5730,21 @@ async function _npcAddRelationEvent(btn) {
   const n = _npcs.find(item => item.id === btn?.dataset?.id);
   const text = document.getElementById('npc-rd-event-text')?.value.trim() || '';
   if (!n || !text) return;
+  const delta = Number(_histEditDelta);
+  if (!Number.isFinite(delta)) {
+    showNotif('Indique un montant de points valide.', 'error');
+    return;
+  }
+  _histEditDelta = delta;
   const before = _affiniteNiveau(n);
   const history = [...(n.affinite?.historique || []), {
-    delta: _histEditDelta,
+    delta,
     texte: text,
     date: new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }),
   }];
   const affinite = { ...(n.affinite || {}), historique: history };
   if (_affiniteMode(n) === 'valeur') {
-    affinite.valeur = (Number(affinite.valeur) || 0) + _histEditDelta;
+    affinite.valeur = (Number(affinite.valeur) || 0) + delta;
     affinite.niveau = _niveauFromValeur(affinite.valeur);
   }
   n.affinite = affinite;
@@ -6031,6 +6126,7 @@ registerActions({
   npcSetAffiniteNiveau:      (btn) => _npcSetAffiniteNiveau(btn),
   npcSetAffiniteMode:        (btn) => _npcSetAffiniteMode(btn),
   npcEventDelta:             (btn) => _npcEventDelta(btn),
+  npcEventDeltaCustom:       (btn) => _npcEventDeltaCustom(btn),
   npcAddRelationEvent:       (btn) => _npcAddRelationEvent(btn),
   npcToggleRelationHistory:  (btn) => _npcToggleRelationHistory(btn),
   npcDeleteRelationEvent:    (btn) => _npcDeleteRelationEvent(btn),
@@ -6107,7 +6203,6 @@ registerActions({
   npcCharPickSelect:         (btn) => _npcCharPickSelect(btn),
   npcCreate:                 () => _npcCreate(),
   _mjStatsFilter:            (el) => _mjStatsFilter(el.value),
-  _setHistEditDeltaFromInput:(el) => _setHistEditDeltaFromInput(el.value),
   deleteNpc:               (btn) => deleteNpc(btn.dataset.id),
   _deleteNpcThenClose:     (btn) => deleteNpc(btn.dataset.id).then(ok => { if (ok) closeModal(); }),
   selectNpc:               (btn) => selectNpc(btn.dataset.id),
@@ -6116,9 +6211,8 @@ registerActions({
   saveAffiniteSeuils:      ()   => saveAffiniteSeuils(),
   resetAffiniteSeuils:     ()   => resetAffiniteSeuils(),
   openAffiniteSeuilsModal: ()   => openAffiniteSeuilsModal(),
-  editHistoriqueEntry:     (btn) => editHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
+  editHistoriqueEntry:     (btn) => editHistoriqueEntry(btn, btn.dataset.npcId, Number(btn.dataset.idx), btn.dataset.focus),
   deleteHistoriqueEntry:   (btn) => deleteHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
-  saveHistoriqueEntry:     (btn) => saveHistoriqueEntry(btn.dataset.npcId, Number(btn.dataset.idx)),
   deleteAffiniteType:      (btn) => deleteAffiniteType(btn.dataset.id),
   saveAffiniteType:        ()   => saveAffiniteType(),
   _aftCancelEdit:          ()   => _aftCancelEdit(),
@@ -6128,7 +6222,6 @@ registerActions({
   _aftColorPickerInput:    (el) => _aftColorPickerInput(el),
   _aftColorHexInput:       (el) => _aftColorHexInput(el),
   _aftColorHexCommit:      (el) => _aftColorHexCommit(el),
-  _selectHistEditDelta:    (btn) => _selectHistEditDelta(Number(btn.dataset.val)),
   _openMjStatsView:        ()   => _openMjStatsView(),
   _npcSelectOrg:           (btn) => _npcSelectOrg(btn),
   _npcBackToOrgs:          ()   => _npcBackToOrgs(),

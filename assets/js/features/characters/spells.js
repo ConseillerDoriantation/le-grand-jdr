@@ -25,6 +25,7 @@ import { shouldTrackSpellStats } from '../../shared/spell-stats-policy.js';
 import { spellPlayChanges, spellPlayDiff, spellPlaySnapshot } from '../../shared/spell-validation.js';
 import { spellFacts, spellEffectLines } from './spell-facts.js';
 import { getRouteSub, setRouteSub } from '../../shared/route.js';
+import { captureViewContext, restoreViewContextAfterRender } from '../../shared/view-context.js';
 
 // Ressource de coût lisible d'un sort (label court : PM / PV / Or / —).
 const _sortResLabel = (s) => spellCostRes(s).label;
@@ -314,10 +315,21 @@ export function runSpellRerenderIfHosted(c) {
 function _renderSpellsTab(c = _getCurrentSpellChar()) {
   if (_spellRerenderOverride) { _spellRerenderOverride(c); return; }
   if (!c) return;
-  if (charSession.getCurrentCharTab() === 'sorts') {
+  const alreadyOnSpells = charSession.getCurrentCharTab() === 'sorts';
+  const root = alreadyOnSpells ? document.getElementById('main-content') : null;
+  const viewState = root ? captureViewContext(root, { includeWindow: true }) : null;
+  if (alreadyOnSpells) {
     charSession.renderTab('sorts', c, charSession.getCanEditChar());
   } else {
     charSession.renderSheet(c, 'sorts');
+  }
+  if (root && viewState) {
+    const characterId = c.id;
+    restoreViewContextAfterRender(root, viewState, {
+      includeWindow: true,
+      shouldRestore: () => charSession.getCurrentCharTab() === 'sorts'
+        && charSession.getCurrentChar()?.id === characterId,
+    });
   }
 }
 

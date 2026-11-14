@@ -14,6 +14,18 @@ test('choisir un sort met à jour la fiche sans re-rendre ni faire défiler la l
   assert.match(select, /_renderSpellSheet\(/);
 });
 
+test('modifier un sort conserve le défilement de la feuille', () => {
+  assert.match(spellsJs, /captureViewContext, restoreViewContextAfterRender/);
+  const start = spellsJs.indexOf('function _renderSpellsTab');
+  const end = spellsJs.indexOf('\nfunction _sortsHasActiveOrderFilter', start);
+  const render = spellsJs.slice(start, end);
+  assert.ok(start >= 0 && end > start, 'le rendu central des sorts doit exister');
+  assert.match(render, /captureViewContext\(root, \{ includeWindow: true \}\)/);
+  assert.match(render, /restoreViewContextAfterRender\(root, viewState/);
+  assert.match(render, /charSession\.getCurrentCharTab\(\) === 'sorts'/);
+  assert.match(render, /charSession\.getCurrentChar\(\)\?\.id === characterId/);
+});
+
 test('les champs libres de la fiche s’enregistrent au change, jamais à la frappe', () => {
   const sheet = fnBody('_renderSpellSheet');
   assert.ok(sheet, 'la fiche doit exister');

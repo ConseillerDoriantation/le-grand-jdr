@@ -24,7 +24,7 @@ test('les chiffres clés retirent la maîtrise et conservent CA vitesse Deck et 
 
 test('le sélecteur du nom propose les personnages avec leur portrait', () => {
   assert.match(miniSheet, /class="vtt-ms-pop-it vtt-ms-pop-char/);
-  assert.match(miniSheet, /x\?\.photoURL \|\| x\?\.photo \|\| x\?\.avatar/);
+  assert.match(miniSheet, /const photo = characterPortraitSrc\(x\)/);
   assert.match(miniSheet, /data-vtt-fn="_vttSelectMiniChar"/);
   assert.doesNotMatch(miniSheet, /class="vtt-ms-character-strip"/);
 });
@@ -55,7 +55,7 @@ test('les dons ciblent les personnages de la scène et affichent leur portrait',
   assert.match(targets, /VS\.activePage\?\.id/);
   assert.match(targets, /token\?\.pageId === pageId/);
   assert.match(targets, /token\.characterId !== senderCharId/);
-  assert.match(targets, /character\.photoURL \|\| character\.photo \|\| character\.avatar \|\| token\.imageUrl/);
+  assert.match(targets, /characterPortraitSrc\(character\) \|\| token\.imageUrl/);
   assert.doesNotMatch(targets, /Object\.entries\(VS\.presence/);
   assert.match(miniSheet, /function _msTargetAvatar\(target\)/);
   assert.match(css, /\.vtt-ms-target-av img\s*\{/);

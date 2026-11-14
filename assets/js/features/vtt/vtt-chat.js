@@ -42,7 +42,7 @@ const _CHAT_TYPES = {
   messages: new Set(['chat']),
 };
 
-const _entityPortrait = entity => entity?.photoURL || entity?.photo || entity?.avatar
+const _entityPortrait = entity => entity?.photo || entity?.photoURL || entity?.avatar
   || entity?.imageUrl || entity?.image || entity?.portraitUrl || null;
 
 function _chatTargetToken(target, tokenId = null) {
