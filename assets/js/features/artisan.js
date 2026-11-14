@@ -243,7 +243,7 @@ function _renderArtisanModal() {
       </div>`;
       return;
     }
-    openModal('🔨 Artisan', `
+    openModal('🔨 Amélioration', `
       <div style="padding:1rem;text-align:center;color:var(--text-dim);font-size:.9rem">
         Aucun personnage disponible.<br>
         ${STATE.isAdmin ? 'Aucun personnage n\'existe.' : 'Crée un personnage pour utiliser l\'artisan.'}
@@ -342,7 +342,7 @@ function _renderArtisanModal() {
     return;
   }
 
-  openModal('🔨 Artisan — Améliorations d\'équipement', modalBody,
+  openModal('🔨 Amélioration d\'équipement', modalBody,
     { subtitle: 'Choisis un objet à gauche pour l\'améliorer', accent: '#f4c430' });
   const modal = document.getElementById('modal-box');
   modal?.classList.add('modal--artisan');

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const root = new URL('../', import.meta.url);
 const feature = readFileSync(new URL('assets/js/features/characters/inventory.js', root), 'utf8');
+const equipment = readFileSync(new URL('assets/js/features/characters/equipment.js', root), 'utf8');
 // Familles, nature et bonus d'un objet : règles partagées avec le Marché du Bastion.
 const facts = readFileSync(new URL('assets/js/shared/item-facts.js', root), 'utf8');
 const sheet = readFileSync(new URL('assets/js/features/characters.js', root), 'utf8');
@@ -163,4 +164,33 @@ test('vendre un objet conserve la position de défilement réelle de la feuille'
   assert.match(view, /requestAnimationFrame\(\(\) => requestAnimationFrame/);
   assert.match(view, /sheet\?\.scrollTo\(\{ top: viewState\.sheetTop/);
   assert.match(view, /window\.scrollTo\(\{ top: viewState\.windowY/);
+});
+
+test('toutes les mutations d inventaire conservent la position de la feuille', () => {
+  for (const [name, next] of [
+    ['deleteInvItemBulk', 'export async function sendInvItem'],
+    ['sendInvItem', 'export async function openSendGoldModal'],
+    ['sendGold', 'export async function sendGoldTo'],
+    ['saveInvItemFromShop', 'export function editInvItem'],
+    ['saveInvItem', '// Mise à jour CIBLÉE'],
+    ['_invToggleBelt', 'async function _invConsumeOne'],
+    ['_invConsumeOne', 'registerActions({'],
+  ]) {
+    const start = feature.indexOf(`${name.startsWith('_') ? 'async function' : 'export async function'} ${name}`);
+    const end = feature.indexOf(next, start);
+    assert.ok(start >= 0 && end > start, `${name} doit être localisable`);
+    const source = feature.slice(start, end);
+    assert.match(source, /const (?:inventoryView|undoView) = _captureInventoryViewState\(\)/, `${name} capture le scroll avant écriture`);
+    assert.match(source, /_rerenderInventoryView\(\{ viewState: (?:inventoryView|undoView) \}\)/, `${name} restaure le scroll après rendu`);
+  }
+
+  assert.equal([...feature.matchAll(/_renderInventoryChar\(/g)].length, 2,
+    'seuls le helper de rendu et le rerender avec restauration peuvent appeler le rendu complet');
+});
+
+test('équiper ou retirer un objet depuis l inventaire conserve aussi le scroll', () => {
+  assert.match(equipment, /captureInventoryViewState, rerenderInventoryView/);
+  assert.match(equipment, /const inventoryView = _isInventoryTab\(renderTab\) \? captureInventoryViewState\(\) : null/g);
+  assert.match(equipment, /rerenderInventoryView\(\{ viewState: inventoryView \}\)/);
+  assert.match(equipment, /_renderEquipmentChar\(c, renderTab, inventoryView\)/g);
 });

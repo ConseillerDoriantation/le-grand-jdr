@@ -13,6 +13,7 @@ import { VS } from './vtt-state.js';
 import { _esc } from '../../shared/html.js';
 import { calcPVMax, calcPMMax } from '../../shared/char-stats.js';
 import { showNotif } from '../../shared/notifications.js';
+import { characterPortraitSrc } from '../../shared/portraits.js';
 import { _sesRef, _chrRef } from './vtt-refs.js';   // refs Firestore (leaf)
 import {
   openVttSessionDockPanel, registerVttSessionDockPanel, syncVttSessionDock, vttSessionDockIcon,
@@ -214,7 +215,7 @@ function _restMeter(label, cls, cur, max, next, fromCur = null, showGain = true)
 }
 
 function _restPortrait(character, token) {
-  const image = character?.photoURL || character?.photo || character?.avatar || token?.imageUrl || '';
+  const image = characterPortraitSrc(character) || token?.imageUrl || '';
   const initial = _esc((character?.nom || token?.name || '?').slice(0, 1).toUpperCase());
   const color = _esc(character?.couleur || character?.color || token?.color || '#4f8cff');
   return `<span class="vtt-rest-avatar" style="--rest-color:${color}">${image ? `<img src="${_esc(image)}" alt="">` : initial}</span>`;

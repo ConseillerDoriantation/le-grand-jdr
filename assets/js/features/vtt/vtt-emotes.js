@@ -31,6 +31,7 @@ import {
 import { _renderInspector } from './vtt-inspector.js'; // re-render après changement de mode de jet
 import { openVttSessionDockPanel, registerVttSessionDockPanel, syncVttSessionDock } from './vtt-session-dock.js';
 import { normalizeSimulatedNatural, simulatedDiceSlots, validateSimulatedValues } from './vtt-dice-simulation.js';
+import { characterPortraitSrc } from '../../shared/portraits.js';
 
 // État émotes (déplacé de vtt.js). _emotes exporté : préchargé au montage côté vtt.js.
 export let _emotes = [];        // [{id, name, url}] chargées depuis world/vtt_emotes
@@ -191,7 +192,7 @@ export async function _vttRollSkill(skillName, stat) {
   const characterName = genericMjRoll ? 'Maître du jeu' : (c?.nom || n?.nom || b?.nom || t?.name || null);
   const characterImage = (genericMjRoll
     ? (STATE.profile?.photoURL || STATE.profile?.photo || STATE.profile?.avatar || null)
-    : (c?.photoURL || c?.photo || c?.avatar
+    : (characterPortraitSrc(c)
     || n?.photoURL || n?.photo || n?.avatar || n?.imageUrl
     || b?.photoURL || b?.photo || b?.avatar || b?.imageUrl
     || t?.imageUrl || null));

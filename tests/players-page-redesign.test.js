@@ -115,6 +115,20 @@ test('la vue Liens utilise le réseau déterministe et ouvre les compagnons', ()
   assert.match(css, /\.pp-rel-edge-label-visual,\.pp-rel-node-visual\s*\{[^}]*scale\(var\(--u,1\)\)/s);
 });
 
+test('la vue Liens peut basculer sur les liens déclarés (saisis sur les fiches)', () => {
+  // Builder dédié, même forme {a,b,n} que le réseau "aventures" → réutilise layout/tablées.
+  assert.match(players, /export function _declaredRelationGraph\(items = \[\]\)/);
+  assert.match(players, /const target = r\?\.charId;/);
+  assert.match(players, /graph\.declared = true;/);
+  // Routage par source + bascule UI + handler.
+  assert.match(players, /STORE\.relSource === 'declared'\s*\?\s*_declaredRelationGraph\(items\)/s);
+  assert.match(players, /data-pp-action="relationSource" data-source="declared"/);
+  assert.match(players, /relationSource: \(el\) =>/);
+  // Arête colorée par sentiment, trait plein = réciproque (n>=2).
+  assert.match(players, /_REL_SENT_COLOR\[edge\.sent\]/);
+  assert.match(players, /edge\.n >= 2 \? '' : 'stroke-dasharray="5 3"'/);
+});
+
 test('les groupes du registre se replient et la galerie de fiche reste horizontale', () => {
   assert.match(players, /collapsedGroups:/);
   assert.match(players, /data-pp-action="togglePlayerGroup"/);

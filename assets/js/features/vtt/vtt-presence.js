@@ -15,6 +15,7 @@ import { _esc } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
 import { confirmModal } from '../../shared/modal.js';
 import { sortCharactersForDisplay } from '../../shared/char-stats.js';
+import { characterPortraitSrc } from '../../shared/portraits.js';
 import { makeStatsSessionKey, registerStatsSession, setActiveStatsSession, statsDateKey } from '../../shared/stats.js';
 import { _sesRef, _presenceRef } from './vtt-refs.js';   // refs Firestore (leaf)
 import { _renderTraySoon } from './vtt-tray.js';
@@ -159,7 +160,7 @@ function _renderPresenceCol() {
     const char  = chars.find(c => c.id === VS.miniCharId)
                || chars.find(c => c.isDefault)
                || chars[0];
-    const img   = char?.photoURL || char?.photo || char?.avatar || null;
+    const img   = characterPortraitSrc(char) || null;
     const init  = (char?.nom || p.pseudo || '?')[0].toUpperCase();
     const isOpen = VS.miniUid === p.uid;
     const isSelf = p.uid === myUid;

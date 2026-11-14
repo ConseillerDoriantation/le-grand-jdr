@@ -13,6 +13,7 @@ import { _norm } from '../../shared/html.js';
 import { getMod, calcPVMax, calcPMMax, calcCA, calcVitesse, computeEquipStatsBonus, computeEquipDerivedBonus } from '../../shared/char-stats.js';
 import { getMainWeapon, getArmorSetData } from '../../shared/equipment-utils.js';
 import { getEquipmentSlots, getPrimaryWeaponSlotId } from '../../shared/equipment-slots.js';
+import { characterPortraitSrc } from '../../shared/portraits.js';
 import { conditionDamageBonusApplies, conditionDamageFormula } from './vtt-condition-rules.js';
 import { _numOr, _activeConditionsOf, _npcStatMod, _npcCombat } from './vtt.js'; // circ. (runtime)
 
@@ -270,12 +271,17 @@ export function _live(t) {
     ? npcAttack
     : (t.attack ?? (c ? toucherMod + setBonus : (b ? _numOr(b.attaques?.[0]?.toucher, 5) : 5)));
 
+  const displayImage = c
+    ? (characterPortraitSrc(c) || t.imageUrl || null)
+    : n
+      ? (activeNpcPortrait?.imageUrl || e.photo || e.photoURL || e.avatar || e.imageUrl || t.imageUrl || null)
+      : (e.photo || e.photoURL || e.avatar || e.imageUrl || t.imageUrl || null);
   const result = {
     ...t,
     // Ennemis : le nom du token (instance) prime sur le nom générique du bestiaire
     // Joueurs/PNJ : le nom de la fiche prime (toujours à jour)
     displayName:       b ? (t.name || b.nom) : (e.nom || t.name),
-    displayImage:      e.photoURL || e.photo || e.avatar || activeNpcPortrait?.imageUrl || e.imageUrl || t.imageUrl || null,
+    displayImage,
     displayHp:         hpCurrent,
     displayHpMax:      hpMax,
     // État « à terre » (KO) dérivé des PV RÉELS, avant tout masquage joueur : permet

@@ -1052,6 +1052,7 @@ export function openDeleteInvModal(charId, indicesB64, nom) {
 export async function deleteInvItemBulk(charId, indicesB64) {
   const c = getCharacterById(charId);
   if (!c) return;
+  const inventoryView = _captureInventoryViewState();
   const previousState = {
     inventaire: _cloneInvState(c.inventaire || []),
     equipement: _cloneInvState(c.equipement || {}),
@@ -1104,6 +1105,7 @@ export async function deleteInvItemBulk(charId, indicesB64) {
       action: {
         label: '↶ Annuler',
         onClick: async () => {
+          const undoView = _captureInventoryViewState();
           const current = getCharacterById(charId) || c;
           const unchanged = ['inventaire', 'equipement', 'statsBonus', 'activeBuildId', 'inventoryHistory']
             .every(field => _sameInvState(current[field], postState[field]));
@@ -1144,7 +1146,7 @@ export async function deleteInvItemBulk(charId, indicesB64) {
             throw new Error('Restauration de l’inventaire impossible');
           }
           _patchInventoryHistoryLocal(current, previousState.inventoryHistory);
-          _renderInventoryChar(current, charSession.getCurrentCharTab() || 'inventaire');
+          _rerenderInventoryView({ viewState: undoView });
           showNotif('Suppression annulée.', 'success');
         },
       },
@@ -1152,7 +1154,7 @@ export async function deleteInvItemBulk(charId, indicesB64) {
   } else {
     Object.assign(c, previousState);
   }
-  _renderInventoryChar(c, charSession.getCurrentCharTab() || 'inventaire');
+  _rerenderInventoryView({ viewState: inventoryView });
 }
 
 // ══════════════════════════════════════════════
@@ -1272,6 +1274,7 @@ export async function openSendInvModal(charId, indicesB64OrIndex, nomOrUnused) {
 export async function sendInvItem(fromCharId, indicesB64) {
   const fromChar = STATE.characters?.find(x => x.id === fromCharId) || STATE.activeChar;
   if (!fromChar) return;
+  const inventoryView = _captureInventoryViewState();
 
   const targetId = document.querySelector('input[name="send-target"]:checked')?.value;
   if (!targetId) { showNotif('Sélectionne un personnage cible.','error'); return; }
@@ -1343,7 +1346,7 @@ export async function sendInvItem(fromCharId, indicesB64) {
     ? ` ${equipSync.removedSlots.length > 1 ? 'Objets déséquipés automatiquement.' : 'Objet déséquipé automatiquement.'}`
     : '';
   showNotif(`📤 ×${qty} "${firstItem.nom||'objet'}" envoyé${qty>1?'s':''} à ${toChar.nom||'?'} !${sendMsg}`, 'success');
-  _renderInventoryChar(fromChar, charSession.getCurrentCharTab() || 'inventaire');
+  _rerenderInventoryView({ viewState: inventoryView });
 }
 
 // ══════════════════════════════════════════════
@@ -1411,6 +1414,7 @@ export async function openSendGoldModal(charId) {
 export async function sendGold(fromCharId) {
   const fromChar = STATE.characters?.find(x => x.id === fromCharId) || STATE.activeChar;
   if (!fromChar) return;
+  const inventoryView = _captureInventoryViewState();
 
   const targetId = document.querySelector('input[name="gold-target"]:checked')?.value;
   if (!targetId) { showNotif('Sélectionne un destinataire.', 'error'); return; }
@@ -1427,7 +1431,7 @@ export async function sendGold(fromCharId) {
 
   closeModal();
   showNotif(`💰 ${montant} or envoyé à ${toChar.nom || 'joueur'} !`, 'success');
-  _renderInventoryChar(fromChar, charSession.getCurrentCharTab() || 'inventaire');
+  _rerenderInventoryView({ viewState: inventoryView });
 }
 
 /**
@@ -1653,6 +1657,7 @@ export function _lootPillStyle(id, active) {
 
 export async function saveInvItemFromShop() {
   const c = STATE.activeChar; if (!c) return;
+  const inventoryView = _captureInventoryViewState();
   const selId = _lootSelId;
   if (!selId) { showNotif('Sélectionne un objet.', 'error'); return; }
   const item = (_lootItems || []).find(i => i.id === selId);
@@ -1680,7 +1685,7 @@ export async function saveInvItemFromShop() {
     _lootSelId = null;
     showNotif(`${item.nom} ×${qte} ajouté !`, 'success');
   }
-  _renderInventoryChar(c, 'inventaire');
+  _rerenderInventoryView({ viewState: inventoryView });
   const panel = document.getElementById('loot-qty-panel');
   if (panel) panel.style.display = 'none';
   _lootRenderGrid?.(_lootCurCat, document.getElementById('loot-search')?.value || '');
@@ -1702,6 +1707,7 @@ export function editInvItem(idx) {
 
 export async function saveInvItem(idx) {
   const c = STATE.activeChar; if(!c) return;
+  const inventoryView = _captureInventoryViewState();
   const inv = [...(c.inventaire || [])];
   // Convention "1 entrée = 1 unité" : on respecte la qté saisie en N entrées
   const qte = Math.max(1, parseInt(document.getElementById('inv-qte')?.value) || 1);
@@ -1730,7 +1736,7 @@ export async function saveInvItem(idx) {
     closeModal();
     showNotif('Inventaire mis à jour !','success');
   }
-  _renderInventoryChar(c, 'inventaire');
+  _rerenderInventoryView({ viewState: inventoryView });
 }
 
 // Mise à jour CIBLÉE de la liste : ne reconstruit que .iv-list, laisse la barre
@@ -1776,6 +1782,16 @@ function _restoreInventoryViewState(viewState) {
   }));
 }
 
+// Exposés au sous-module d'équipement : équiper/déséquiper depuis l'onglet
+// Inventaire reconstruit aussi la fiche complète et doit suivre la même règle.
+export function captureInventoryViewState() {
+  return _captureInventoryViewState();
+}
+
+export function rerenderInventoryView(options = {}) {
+  _rerenderInventoryView(options);
+}
+
 function _rerenderInventoryView({ focusSearch = false, viewState = null } = {}) {
   const c = charSession.getCurrentChar?.() || STATE.activeChar;
   if (!c) return;
@@ -1798,18 +1814,20 @@ async function _invToggleBelt(charId, indicesB64, belt) {
   const c = getCharacterById(charId);
   const indices = _decodeIndices(indicesB64);
   if (!c || !indices.length || !canControlCharacter(c)) return;
+  const inventoryView = _captureInventoryViewState();
   const inv = (c.inventaire || []).map((item, index) => indices.includes(index) ? { ...item, belt } : item);
   if (!await trySave('characters', c.id, { inventaire: inv })) return;
   c.inventaire = inv;
   if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
   showNotif(belt ? 'Objet placé dans la ceinture.' : 'Objet rangé dans le sac.', 'success');
-  _rerenderInventoryView();
+  _rerenderInventoryView({ viewState: inventoryView });
 }
 
 async function _invConsumeOne(charId, indicesB64) {
   const c = getCharacterById(charId);
   const indices = _decodeIndices(indicesB64);
   if (!c || !indices.length || !canControlCharacter(c)) return;
+  const inventoryView = _captureInventoryViewState();
   const index = indices.find(i => c.inventaire?.[i]);
   const item = c.inventaire?.[index];
   if (!item) return;
@@ -1846,7 +1864,7 @@ async function _invConsumeOne(charId, indicesB64) {
   if (STATE.activeChar?.id === c.id) STATE.activeChar.inventaire = inv;
   _patchInventoryHistoryLocal(c, historyPatch.inventoryHistory);
   showNotif(`${item.nom || 'Objet'} utilisé.`, 'success');
-  _rerenderInventoryView();
+  _rerenderInventoryView({ viewState: inventoryView });
 }
 
 registerActions({

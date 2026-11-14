@@ -302,7 +302,12 @@ function _hitHandle(s, nx, ny) {
 
 function _toNative(canvas, scale, cx, cy) {
   const r = canvas.getBoundingClientRect();
-  return { x: (cx - r.left) / scale, y: (cy - r.top) / scale };
+  // Le canvas peut être contraint par une modale responsive. On utilise ses
+  // dimensions réellement affichées plutôt qu'une échelle théorique unique :
+  // aucun décalage des poignées même si le navigateur réduit le cadreur.
+  const scaleX = r.width > 0 ? canvas.width / r.width : 1 / scale;
+  const scaleY = r.height > 0 ? canvas.height / r.height : 1 / scale;
+  return { x: (cx - r.left) * scaleX, y: (cy - r.top) * scaleY };
 }
 
 function _initialFraming({ natW, natH, ratio, initialRatio }) {
@@ -369,13 +374,18 @@ export function attachSelectionCrop({
     ctx.fillRect(0, 0, natW, natH);
     ctx.drawImage(img, cropX, cropY, cropW, cropH, cropX, cropY, cropW, cropH);
 
+    // Toutes les commandes du canvas travaillent en pixels natifs. Adapter les
+    // ornements à l'échelle garantit des traits et poignées de taille constante
+    // à l'écran, y compris pour une source 4K.
+    const ui = 1 / Math.max(s.dispScale, 0.0001);
+    const handleRadius = 6 * ui;
     ctx.strokeStyle = '#e8b84b';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * ui;
     ctx.strokeRect(cropX, cropY, cropW, cropH);
 
     if (showGridlines) {
       ctx.strokeStyle = 'rgba(232,184,75,0.3)';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = ui;
       for (let i = 1; i <= 2; i++) {
         ctx.beginPath();
         ctx.moveTo(cropX + cropW * i / 3, cropY);
@@ -390,16 +400,17 @@ export function attachSelectionCrop({
 
     ctx.fillStyle = '#e8b84b';
     ctx.strokeStyle = '#0b1118';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.5 * ui;
     _handles(s).forEach(h => {
-      ctx.fillRect(h.x - 6, h.y - 6, 12, 12);
-      ctx.strokeRect(h.x - 6, h.y - 6, 12, 12);
+      ctx.fillRect(h.x - handleRadius, h.y - handleRadius, handleRadius * 2, handleRadius * 2);
+      ctx.strokeRect(h.x - handleRadius, h.y - handleRadius, handleRadius * 2, handleRadius * 2);
     });
 
     if (showSizeOverlay) {
       ctx.fillStyle = 'rgba(232,184,75,0.9)';
-      ctx.font = '12px monospace';
-      ctx.fillText(`${cropW}×${cropH}`, cropX + 6, cropY + 18);
+      ctx.font = `${12 * ui}px monospace`;
+      const ratioLabel = ratio ? ` · ${ratio.w}:${ratio.h}` : '';
+      ctx.fillText(`${cropW}×${cropH}${ratioLabel}`, cropX + 7 * ui, cropY + 19 * ui);
     }
   };
 
@@ -432,15 +443,41 @@ export function attachSelectionCrop({
     const a = { x: cropX, y: cropY, x2: cropX + cropW, y2: cropY + cropH };
 
     if (R) {
-      // Ratio verrouillé : la largeur (ou hauteur pour n/s) pilote, l'autre suit
-      if (handle === 'se')      { cropW = _clamp(x - a.x, MIN, W - a.x); cropH = Math.round(cropW / R); }
-      else if (handle === 'sw') { cropW = _clamp(a.x2 - x, MIN, a.x2);   cropH = Math.round(cropW / R); cropX = a.x2 - cropW; }
-      else if (handle === 'ne') { cropW = _clamp(x - a.x, MIN, W - a.x); cropH = Math.round(cropW / R); cropY = a.y2 - cropH; }
-      else if (handle === 'nw') { cropW = _clamp(a.x2 - x, MIN, a.x2);   cropH = Math.round(cropW / R); cropX = a.x2 - cropW; cropY = a.y2 - cropH; }
-      else if (handle === 'e')  { cropW = _clamp(x - a.x, MIN, W - a.x); cropH = Math.round(cropW / R); }
-      else if (handle === 'w')  { cropW = _clamp(a.x2 - x, MIN, a.x2);   cropH = Math.round(cropW / R); cropX = a.x2 - cropW; }
-      else if (handle === 's')  { cropH = _clamp(y - a.y, MIN, H - a.y); cropW = Math.round(cropH * R); }
-      else if (handle === 'n')  { cropH = _clamp(a.y2 - y, MIN, a.y2);   cropW = Math.round(cropH * R); cropY = a.y2 - cropH; }
+      // Ratio verrouillé : on borne les deux dimensions ensemble. L'ancien
+      // clamp final pouvait réduire uniquement la hauteur au bord de l'image et
+      // casser silencieusement le ratio demandé.
+      const fromWidth = (wanted, maxW, maxH) => {
+        let w = _clamp(wanted, MIN, Math.max(MIN, maxW));
+        let h = w / R;
+        if (h > maxH) { h = maxH; w = h * R; }
+        return { w: Math.max(MIN, w), h: Math.max(MIN, h) };
+      };
+      const fromHeight = (wanted, maxW, maxH) => {
+        let h = _clamp(wanted, MIN, Math.max(MIN, maxH));
+        let w = h * R;
+        if (w > maxW) { w = maxW; h = w / R; }
+        return { w: Math.max(MIN, w), h: Math.max(MIN, h) };
+      };
+      let box;
+      if (handle === 'se' || handle === 'e') {
+        box = fromWidth(x - a.x, W - a.x, H - a.y);
+        cropW = box.w; cropH = box.h;
+      } else if (handle === 'sw' || handle === 'w') {
+        box = fromWidth(a.x2 - x, a.x2, H - a.y);
+        cropW = box.w; cropH = box.h; cropX = a.x2 - cropW;
+      } else if (handle === 'ne') {
+        box = fromWidth(x - a.x, W - a.x, a.y2);
+        cropW = box.w; cropH = box.h; cropY = a.y2 - cropH;
+      } else if (handle === 'nw') {
+        box = fromWidth(a.x2 - x, a.x2, a.y2);
+        cropW = box.w; cropH = box.h; cropX = a.x2 - cropW; cropY = a.y2 - cropH;
+      } else if (handle === 's') {
+        box = fromHeight(y - a.y, W - a.x, H - a.y);
+        cropW = box.w; cropH = box.h;
+      } else if (handle === 'n') {
+        box = fromHeight(a.y2 - y, W - a.x, a.y2);
+        cropW = box.w; cropH = box.h; cropY = a.y2 - cropH;
+      }
     } else {
       // Ratio libre
       if (handle === 'se')      { cropW = _clamp(x - a.x, MIN, W - a.x); cropH = _clamp(y - a.y, MIN, H - a.y); }
@@ -490,12 +527,15 @@ export function attachSelectionCrop({
     s.img = img;
     s.natW = img.naturalWidth;
     s.natH = img.naturalHeight;
-    const maxW = Math.min(maxDisplayW, img.naturalWidth);
+    const parentWidth = Math.max(0, (canvas.parentElement?.clientWidth || maxDisplayW) - 22);
+    const maxW = Math.min(maxDisplayW, parentWidth || maxDisplayW, img.naturalWidth);
     s.dispScale = maxW / img.naturalWidth;
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
     canvas.style.width = maxW + 'px';
     canvas.style.height = Math.round(img.naturalHeight * s.dispScale) + 'px';
+    canvas.style.maxWidth = 'none';
+    canvas.style.maxHeight = 'none';
     Object.assign(s, _initialFraming({ natW: s.natW, natH: s.natH, ratio, initialRatio }));
     draw();
   };

@@ -7,7 +7,7 @@ const css = readFileSync(new URL('../assets/css/shop.css', import.meta.url), 'ut
 
 test('la page Artisan utilise les trois colonnes du handoff sans ancien bandeau dupliqué', () => {
   assert.match(artisan, /class="art-shell"[\s\S]*art-equipment-pane[\s\S]*art-workbench-pane[\s\S]*art-resources-pane/);
-  const inlineRender = artisan.slice(artisan.indexOf('if (inlineRoot)'), artisan.indexOf("openModal('🔨 Artisan"));
+  const inlineRender = artisan.slice(artisan.indexOf('if (inlineRoot)'), artisan.indexOf("openModal('🔨 Amélioration"));
   assert.doesNotMatch(inlineRender, /sh-tool-heading--artisan|\$\{toolbar\}/);
   assert.match(css, /\.sh-artisan-page \.art-shell \{[^}]*grid-template-columns:300px minmax\(480px,1fr\) 300px/);
 });

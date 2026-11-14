@@ -17,9 +17,19 @@ import {
   tokenResourceArcs,
   normalizeTokenTurnOrder,
 } from '../assets/js/features/vtt/vtt-token-visual.js';
+import { characterPortraitSrc } from '../assets/js/shared/portraits.js';
 
 const vttSource = readFileSync(new URL('../assets/js/features/vtt/vtt.js', import.meta.url), 'utf8');
+const effectiveSource = readFileSync(new URL('../assets/js/features/vtt/vtt-effective.js', import.meta.url), 'utf8');
 const vttCss = readFileSync(new URL('../assets/css/vtt.css', import.meta.url), 'utf8');
+
+test('le portrait actif de la fiche remplace immédiatement les anciennes images VTT', () => {
+  assert.equal(characterPortraitSrc({ photo:'nouveau', photoURL:'ancien', avatar:'avatar' }), 'nouveau');
+  assert.equal(characterPortraitSrc({ photoURL:'ancien', avatar:'avatar' }), 'ancien');
+  assert.match(effectiveSource, /characterPortraitSrc\(c\) \|\| t\.imageUrl/);
+  assert.match(vttSource, /const changed = _changedEntityIds\(prev, next\)[\s\S]*?_patchShape\(id\)/);
+  assert.match(vttSource, /if \(changed\.size\) \{[\s\S]*?_renderCombatTrackerSoon\(\)[\s\S]*?_renderPresenceCol\(\)/);
+});
 
 test('l’empreinte tactique distingue un portrait rond d’un token 3×3', () => {
   assert.deepEqual(tokenFootprintMeta(3, 3), {

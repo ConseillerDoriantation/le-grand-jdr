@@ -52,6 +52,35 @@ test('le passage Direct vers Par événements conserve le palier', async () => {
   assert.match(source, /valeur: Number\(_affiniteSeuils\[thresholdKeys\[currentLevel\]\]\) \|\| 0/);
 });
 
+test('un événement de relation accepte un montant de points libre', async () => {
+  const source = await readNpcs();
+  const css = await readNpcCss();
+  assert.match(source, /data-action="npcEventDeltaCustom" data-custom-delta/);
+  assert.match(source, /function _npcEventDeltaCustom\(button\)[\s\S]*button\.replaceWith\(input\)/);
+  assert.match(source, /npc-rd-event-delta-inline/);
+  assert.doesNotMatch(source, /promptModal\('Montant de points/);
+  assert.doesNotMatch(source, /id="npc-rd-event-delta-custom"/);
+  assert.match(source, /const delta = Number\(_histEditDelta\)/);
+  assert.match(source, /delta,\s*\n\s*texte: text/);
+  assert.match(source, /affinite\.valeur = \(Number\(affinite\.valeur\) \|\| 0\) \+ delta/);
+  assert.doesNotMatch(source, /Math\.(?:min|max)\([^\n]*_histEditDelta/);
+  assert.match(css, /\.npc-rd-event-delta-custom/);
+});
+
+test('les points, le texte et la date se modifient directement dans la ligne', async () => {
+  const source = await readNpcs();
+  const css = await readNpcCss();
+  for (const field of ['delta', 'text', 'date']) assert.match(source, new RegExp(`data-focus="${field}"`));
+  assert.match(source, /editHistoriqueEntry\(button, npcId, index, field = 'text'\)/);
+  assert.match(source, /npc-rd-event-inline-input--\$\{safeField\}/);
+  assert.match(source, /input\.addEventListener\('blur',[\s\S]*commit/);
+  assert.match(source, /trySave\('npcs', npcId, \{ affinite \}\)/);
+  assert.doesNotMatch(source, /openModal\(`Modifier l'événement/);
+  assert.doesNotMatch(source, /id="hist-edit-(?:delta|date|text)"/);
+  assert.match(css, /\.npc-rd-event-edit:hover/);
+  assert.match(css, /\.npc-rd-event-inline-input/);
+});
+
 test('les portraits restent tolérants quand personnage ou profil est absent', async () => {
   const source = await readNpcs();
   assert.match(source, /const _profilePortraitSrc[\s\S]*p\?\.portraitUrl/);

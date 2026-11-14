@@ -50,6 +50,7 @@ import {
 } from '../../shared/equipment-slots.js';
 import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell, spellValidationState } from '../../shared/spell-deck.js';
 import { lsJson } from '../../shared/local-storage.js';
+import { characterPortraitSrc } from '../../shared/portraits.js';
 
 let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)
 let _msSac   = 'obj';    // sous-onglet du Sac : 'obj' | 'craft' | 'bourse'
@@ -399,7 +400,7 @@ function _msStatsFixedHtml(c) {
 }
 
 function _msCollapsedHtml(c) {
-  const img = c?.photoURL || c?.photo || c?.avatar || null;
+  const img = characterPortraitSrc(c) || null;
   const init = _esc((c?.nom || '?')[0].toUpperCase());
   const niv = parseInt(c?.niveau) || 1;
   const tabs = [
@@ -468,7 +469,7 @@ function _msPopHtml(c, uid) {
     const chars = _msAvailableCharacters(_miniRosterUid || uid);
     h = `<div class="vtt-ms-pop-lbl">${STATE.isAdmin ? 'Personnages' : 'Personnages contrôlés'}</div>`
       + chars.map(x => {
-          const photo = x?.photoURL || x?.photo || x?.avatar || '';
+          const photo = characterPortraitSrc(x);
           const initial = _esc((x.nom || '?')[0].toUpperCase());
           const delegated = !STATE.isAdmin && x.uid !== STATE.user?.uid;
           const meta = _esc([x.race, x.classe, x.titreActuel || x.titre].filter(Boolean).join(' · '));
@@ -1288,7 +1289,7 @@ function _msPresentTargets(senderCharId) {
         charId: character.id,
         charNom: character.nom || token.name || 'Personnage',
         pseudo: presence?.pseudo || character.ownerPseudo || 'Présent sur la scène',
-        image: character.photoURL || character.photo || character.avatar || token.imageUrl || '',
+        image: characterPortraitSrc(character) || token.imageUrl || '',
       };
     })
     .filter(Boolean)
@@ -1733,7 +1734,7 @@ async function _vttMsCraft(charId, uid, recipeId) {
   addDoc(_logCol(), {
     type: 'craft', authorId: STATE.user?.uid || null, authorName,
     characterId: charId || null,
-    characterImage: c.photoURL || c.photo || c.avatar || null,
+    characterImage: characterPortraitSrc(c) || null,
     charName: c.nom || '', recipeName: recipe.nom || '',
     statLabel: 'Artisanat (INT)', mod, d20, total, dd: _MS_CRAFT_DD, passed,
     ...(VS.session?.live && VS.session?.statsSessionKey ? {
@@ -2308,7 +2309,7 @@ function _renderMiniSheetImpl(uid) {
   }
   const canEdit = _msCanEdit(uid, c?.id);
 
-  const img      = c?.photoURL || c?.photo || c?.avatar || null;
+  const img      = characterPortraitSrc(c) || null;
   const init     = (c?.nom || '?')[0].toUpperCase();
 
   // Migration des anciennes clés d'onglet → 4 onglets (Combat / Sorts / Sac / Carnet).

@@ -509,20 +509,25 @@ function renderCharRelations(c, canEdit) {
   const rels = c.relations || [];
   if (!rels.length) {
     return `<div class="q-empty">
-      👥 Aucune relation enregistrée.${canEdit?` Clique sur « ＋ Relation » pour noter les alliés, ennemis et PNJ croisés par ${_esc(c.nom||'ce personnage')} — avec leur sentiment et une note.`:''}
+      👥 Aucune relation enregistrée.${canEdit?` Clique sur « ＋ Relation » pour noter les coéquipiers, alliés, ennemis et PNJ liés à ${_esc(c.nom||'ce personnage')} — avec leur rôle, leur sentiment et une note.`:''}
     </div>`;
   }
   return `<div class="rel-grid">
     ${rels.map((r, i) => {
       const sent = _RELATION_PALETTE[r.sent ?? ''] || _RELATION_PALETTE[''];
-      const ini = (r.ini || r.nom || '?')[0]?.toUpperCase() || '?';
+      // Cible = co-PJ : portrait et nom résolus en direct (jamais figés dans le doc).
+      // Fallback null explicite : un charId obsolète ne doit pas retomber sur le perso courant.
+      const linked = r.charId ? getCharacterById(r.charId, null) : null;
+      const nom = linked?.nom || r.nom || 'Sans nom';
+      const img = linked?.photo || r.img;
+      const ini = (r.ini || nom || '?')[0]?.toUpperCase() || '?';
       return `<div class="rel-card" style="--rel-c:${sent[2]};--rel-bg:${sent[0]};--rel-bd:${sent[1]}">
-        ${r.img
-          ? `<div class="rel-avatar rel-avatar--img"><img src="${r.img}" alt=""></div>`
+        ${img
+          ? `<div class="rel-avatar rel-avatar--img"><img src="${img}" alt=""></div>`
           : `<div class="rel-avatar">${_esc(ini)}</div>`}
         <div class="rel-body">
           <div class="rel-name-row">
-            <span class="rel-name">${_esc(r.nom || 'Sans nom')}</span>
+            <span class="rel-name">${_esc(nom)}</span>
             ${r.sentiment || r.sent ? `<span class="rel-sentiment">${_esc(r.sentiment || r.sent)}</span>` : ''}
           </div>
           ${r.role ? `<span class="rel-role">${_esc(r.role)}</span>` : ''}
@@ -548,6 +553,7 @@ const _REL_SENTS = [
 const _REL_DEFAULT_LBL = { lien:'Allié', allie:'Amical', neutre:'Neutre', mefiance:'Méfiant', ennemi:'Hostile', '':'' };
 
 let _relNpcsCache = []; // PNJ chargés pour le sélecteur de relation (modale)
+let _relCharsCache = []; // Personnages du groupe (co-PJ) pour le sélecteur de relation
 async function _openRelationModal(charId, idx) {
   const c = getCharacterById(charId); if (!c) return;
   const isEdit = Number.isInteger(idx) && idx >= 0;
@@ -561,27 +567,53 @@ async function _openRelationModal(charId, idx) {
     .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
   const npcOpts = `<option value="">— Aucun (relation libre) —</option>` + _relNpcsCache.map(n =>
     `<option value="${n.id}" ${r?.npcId === n.id ? 'selected' : ''}>${_esc(n.nom || 'PNJ')}${n.role ? ' — ' + _esc(n.role) : ''}${STATE.isAdmin && n.embauchable === false ? ' 🚫' : ''}</option>`).join('');
+  // Personnages du groupe (co-PJ) : lien déclaré entre joueurs. On prend tout le
+  // roster de l'aventure (STATE.characters, session-live → 0 lecture), pas seulement
+  // les persos contrôlés — un joueur déclare un lien vers le PJ d'un autre joueur.
+  _relCharsCache = (Array.isArray(STATE.characters) ? STATE.characters : [])
+    .filter(x => x && x.id && x.id !== charId)
+    .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
+  const charOpts = `<option value="">— Aucun —</option>` + _relCharsCache.map(x =>
+    `<option value="${x.id}" ${r?.charId === x.id ? 'selected' : ''}>${_esc(x.nom || 'Personnage')}${x.classe ? ' — ' + _esc(x.classe) : ''}</option>`).join('');
   const linkedImg = r?.img || '';
   const previewHtml = linkedImg
     ? `<img src="${linkedImg}" alt="">`
     : `<span>${_esc((r?.ini || r?.nom || '?')[0]?.toUpperCase() || '?')}</span>`;
+  // Une seule cible à la fois (PNJ / co-PJ / libre) — choisie par un segment.
+  const hasChars = _relCharsCache.length > 0;
+  const initialType = (r?.charId && hasChars) ? 'char' : (r?.npcId ? 'npc' : 'free');
+  const typeBtn = (type, label) => `<button type="button" class="rel-sent-btn rel-target-btn ${initialType === type ? 'is-active' : ''}" data-type="${type}" data-action="csV3RelTargetType">${label}</button>`;
+  const pane = (type, inner) => `<div class="rel-target-pane" data-pane="${type}" ${initialType === type ? '' : 'style="display:none"'}>${inner}</div>`;
   openModal('', `
     <div class="rel-modal">
       <div class="rel-modal-head">
         <div class="rel-modal-ico">👥</div>
         <div class="rel-modal-head-txt">
           <h2>${isEdit ? 'Modifier la relation' : 'Nouvelle relation'}</h2>
-          <small>Allié, ennemi ou PNJ croisé par <b>${_esc(c.nom||'ce personnage')}</b>, et le lien qui les unit.</small>
+          <small>Allié, ennemi, PNJ ou autre personnage du groupe lié à <b>${_esc(c.nom||'ce personnage')}</b>, et le lien qui les unit.</small>
         </div>
       </div>
       <div class="rel-modal-body">
         <div class="form-group">
-          <label>🔗 Lier un PNJ existant <span class="rel-opt">(optionnel)</span></label>
+          <label>Cible de la relation</label>
+          <div class="rel-sent-seg" id="rel-target-seg">
+            ${hasChars ? typeBtn('char', '🛡️ Personnage du groupe') : ''}
+            ${typeBtn('npc', '👤 PNJ')}
+            ${typeBtn('free', '✍️ Libre')}
+          </div>
+          <input type="hidden" id="rel-target-type" value="${initialType}">
+        </div>
+        <div class="form-group">
           <div class="rel-npc-pick">
             <div class="rel-npc-preview" id="rel-npc-preview">${previewHtml}</div>
-            <select class="input-field" id="rel-npc" data-change="csV3RelPickNpc">${npcOpts}</select>
+            <div style="flex:1;min-width:0">
+              ${hasChars ? pane('char', `<select class="input-field" id="rel-charpick" data-change="csV3RelPickChar">${charOpts}</select>`) : ''}
+              ${pane('npc', `<select class="input-field" id="rel-npc" data-change="csV3RelPickNpc">${npcOpts}</select>`)}
+              ${pane('free', `<p class="rel-opt" style="margin:.25rem 0 0">Saisis le nom librement ci-dessous.</p>`)}
+            </div>
           </div>
-          <input type="hidden" id="rel-npcid" value="${_esc(r?.npcId||'')}">
+          <input type="hidden" id="rel-npcid" value="${initialType === 'npc' ? _esc(r?.npcId||'') : ''}">
+          <input type="hidden" id="rel-charid" value="${initialType === 'char' ? _esc(r?.charId||'') : ''}">
           <input type="hidden" id="rel-img" value="${linkedImg}">
         </div>
         <div class="form-group"><label>Nom</label>
@@ -627,9 +659,49 @@ function _csV3RelPickNpc(el) {
   const nomEl = document.getElementById('rel-nom');
   const roleEl = document.getElementById('rel-role');
   if (n) {
+    // Une seule cible à la fois : lier un PNJ efface le lien « personnage du groupe ».
+    const cp = document.getElementById('rel-charpick'); if (cp) cp.value = '';
+    const ci = document.getElementById('rel-charid'); if (ci) ci.value = '';
     if (nomEl) nomEl.value = n.nom || nomEl.value;
     if (roleEl && n.role && !roleEl.value.trim()) roleEl.value = n.role;
     if (prev) prev.innerHTML = n.imageUrl ? `<img src="${n.imageUrl}" alt="">` : `<span>${_esc((n.nom||'?')[0]?.toUpperCase()||'?')}</span>`;
+  } else if (prev) {
+    prev.innerHTML = `<span>${_esc((nomEl?.value || '?')[0]?.toUpperCase() || '?')}</span>`;
+  }
+}
+
+// Choix du type de cible : une seule cible active (co-PJ / PNJ / libre). Bascule
+// l'affichage du picker correspondant et efface les cibles des autres types.
+function _csV3RelTargetType(el) {
+  const type = el.dataset.type === 'char' ? 'char' : el.dataset.type === 'npc' ? 'npc' : 'free';
+  const tt = document.getElementById('rel-target-type'); if (tt) tt.value = type;
+  document.querySelectorAll('#rel-target-seg .rel-target-btn').forEach(b => b.classList.toggle('is-active', b.dataset.type === type));
+  document.querySelectorAll('.rel-target-pane').forEach(p => { p.style.display = p.dataset.pane === type ? '' : 'none'; });
+  if (type !== 'npc') { const s = document.getElementById('rel-npc'); if (s) s.value = ''; const i = document.getElementById('rel-npcid'); if (i) i.value = ''; }
+  if (type !== 'char') { const s = document.getElementById('rel-charpick'); if (s) s.value = ''; const i = document.getElementById('rel-charid'); if (i) i.value = ''; }
+  if (type === 'free') {
+    const img = document.getElementById('rel-img'); if (img) img.value = '';
+    const nomEl = document.getElementById('rel-nom');
+    const prev = document.getElementById('rel-npc-preview');
+    if (prev) prev.innerHTML = `<span>${_esc((nomEl?.value || '?')[0]?.toUpperCase() || '?')}</span>`;
+  }
+}
+
+// Sélection d'un co-PJ du groupe : préremplit nom + aperçu depuis sa fiche vivante.
+// On ne fige PAS son portrait dans la relation (résolu en direct via charId) → le
+// doc perso reste léger et l'avatar suit la fiche cible.
+function _csV3RelPickChar(el) {
+  const x = el.value ? _relCharsCache.find(o => o.id === el.value) : null;
+  const ci = document.getElementById('rel-charid'); if (ci) ci.value = x ? x.id : '';
+  const prev = document.getElementById('rel-npc-preview');
+  const nomEl = document.getElementById('rel-nom');
+  if (x) {
+    // Une seule cible : lier un co-PJ efface le lien PNJ et son image figée.
+    const npcSel = document.getElementById('rel-npc'); if (npcSel) npcSel.value = '';
+    const ni = document.getElementById('rel-npcid'); if (ni) ni.value = '';
+    const img = document.getElementById('rel-img'); if (img) img.value = '';
+    if (nomEl) nomEl.value = x.nom || nomEl.value;
+    if (prev) prev.innerHTML = x.photo ? `<img src="${x.photo}" alt="">` : `<span>${_esc((x.nom||'?')[0]?.toUpperCase()||'?')}</span>`;
   } else if (prev) {
     prev.innerHTML = `<span>${_esc((nomEl?.value || '?')[0]?.toUpperCase() || '?')}</span>`;
   }
@@ -647,6 +719,7 @@ async function _csV3SaveRelation(charId, idx) {
     sentiment: document.getElementById('rel-sentiment')?.value.trim() || (_REL_DEFAULT_LBL[sent] || ''),
     note:      document.getElementById('rel-note')?.value.trim() || '',
     npcId:     document.getElementById('rel-npcid')?.value || '',
+    charId:    document.getElementById('rel-charid')?.value || '',
     img:       document.getElementById('rel-img')?.value || '',
   };
   const rels = Array.isArray(c.relations) ? c.relations.slice() : [];
@@ -676,6 +749,6 @@ export {
   _csV3JournalSub, _csV3ToggleNote, _csV3AddNote, _csV3DeleteNote,
   _csV3SaveOpenNote, _csV3CloseNote,
   _csV3AddRelation, _csV3EditRelation,
-  _csV3RelSent, _csV3RelPickNpc, _csV3SaveRelation, _csV3DeleteRelation,
+  _csV3RelSent, _csV3RelTargetType, _csV3RelPickNpc, _csV3RelPickChar, _csV3SaveRelation, _csV3DeleteRelation,
   _csV3CycleNoteCat,
 };

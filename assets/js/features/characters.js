@@ -62,7 +62,7 @@ import {
   _csV3JournalSub, _csV3ToggleNote, _csV3AddNote, _csV3DeleteNote, _csV3CycleNoteCat,
   _csV3SaveOpenNote, _csV3CloseNote,
   _csV3AddRelation, _csV3EditRelation,
-  _csV3RelSent, _csV3RelPickNpc, _csV3SaveRelation, _csV3DeleteRelation,
+  _csV3RelSent, _csV3RelTargetType, _csV3RelPickNpc, _csV3RelPickChar, _csV3SaveRelation, _csV3DeleteRelation,
 } from './characters/journal.js';
 import {
   renderCharProfilV3,
@@ -2393,7 +2393,9 @@ registerActions({
   csV3EditRelation:        (btn)    => _csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
   csV3DeleteRelation:      (btn)    => _csV3DeleteRelation(btn.dataset.id, Number(btn.dataset.idx)),
   csV3RelSent:             (btn)    => _csV3RelSent(btn.dataset.sent),
+  csV3RelTargetType:       (btn)    => _csV3RelTargetType(btn),
   csV3RelPickNpc:          (el)     => _csV3RelPickNpc(el),
+  csV3RelPickChar:         (el)     => _csV3RelPickChar(el),
   csV3SaveRelation:        (btn)    => _csV3SaveRelation(btn.dataset.id, Number(btn.dataset.idx)),
   closeRelModal:           ()       => closeModalDirect(),
 
