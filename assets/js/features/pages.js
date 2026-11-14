@@ -1785,11 +1785,19 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const mvpUnitRows = [...mvpUnitsMap.values()]
     .map(dates => ({ date: dates.slice().sort()[0] || '', rows: _statsRowsFor(dates) }))
     .filter(unit => unit.rows.length > 0);
+  // Périmètre de calibrage STABLE : toute la mission (tous groupes), indépendant
+  // du filtre de groupe courant. Sans ça, sélectionner un groupe recalculerait les
+  // repères et changerait le score d'un même perso (ex. 80 en global vs 138 en groupe).
+  const calibrationScopeDates = isAct
+    ? selectedActDates
+    : (isMission ? selectedMissionDates : scopeDates);
+  const mvpCalibrationRows = needsImpact ? _statsRowsFor(calibrationScopeDates) : [];
   const mvpScores = needsImpact ? scoreMvpView({
     rows: allRows,
     sessionRows: mvpUnitRows.length > 1 ? mvpUnitRows : [],
     visibleIds: sel,
     autoCalibrate: true,
+    calibrationRows: mvpCalibrationRows,
   }) : [];
   const rowsById = new Map(rows.map(row => [row.id, row]));
   const impactRows = mvpScores.map(result => {
@@ -1801,8 +1809,13 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       impactDetails: result.details,
     } : null;
   }).filter(Boolean);
-  const eligibleImpactRows = impactRows.filter(row => row.impactEligible !== false);
-  const mvpPool = eligibleImpactRows.length ? eligibleImpactRows : impactRows;
+  // Un MVP n'est décerné que si les données le justifient : on exclut les profils
+  // en confiance « Fragile » (activité insuffisante) et on ne retombe PLUS sur
+  // l'ensemble des profils quand aucun n'est solide → pas de MVP couronné sur du
+  // bruit (ex. une séance sans combat, quelques jets).
+  const eligibleImpactRows = impactRows.filter(row =>
+    row.impactEligible !== false && (row.impactDetails?.confidence?.level || 'low') !== 'low');
+  const mvpPool = eligibleImpactRows;
   const topImpact = mvpPool[0]?.impact || 0;
   const mvps = topImpact > 0 ? mvpPool.filter(row => row.impact === topImpact) : [];
   // Award : renvoie { html, txt } pour mutualiser affichage et export.
@@ -2585,7 +2598,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     </div>
     <div class="stats-spotlight-grid">
       <div class="stats-mvp-stack">
-        ${mvpSec || '<div class="stats-empty-inline">Aucun MVP calculable pour cette vue.</div>'}
+        ${mvpSec || '<div class="stats-empty-inline">Pas de MVP marquant pour cette vue — activité trop faible pour départager équitablement.</div>'}
         ${mvpDetailSec || ''}
       </div>
       <div class="stats-spotlight-awards">

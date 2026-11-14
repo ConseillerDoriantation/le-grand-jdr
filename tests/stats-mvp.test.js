@@ -197,6 +197,31 @@ test('le calibrage rend l’axe signature au meilleur DPS malgré ses jets de co
   assert.equal(withCalib.details.entries[0].key, 'offense');
 });
 
+test('les échecs critiques de compétence ne rapportent pas de points (anti volume de jets)', () => {
+  const clean = buildMvpRawProfile({ id: 'a', name: 'A', combat: {}, sRolls: 5, sFumbles: 0 });
+  const fumbled = buildMvpRawProfile({ id: 'b', name: 'B', combat: {}, sRolls: 5, sFumbles: 2 });
+  assert.equal(clean.axes.skill.raw, 25);   // 5 jets × 5
+  assert.equal(fumbled.axes.skill.raw, 15); // (5 − 2 fumbles) × 5 : les ratés critiques ignorés
+  // Évidence (confiance) basée sur les jets nets, pas le volume brut.
+  assert.equal(fumbled.axes.skill.evidence, 3);
+});
+
+test('scoreMvpView : un périmètre de calibrage stable rend le score indépendant du filtre de groupe', () => {
+  const jader = row('jader', { dmgDealt: 40, attacks: 4 });
+  const groupA = [jader, row('x', { dmgDealt: 10, attacks: 1 })];
+  const everyone = [...groupA, row('y', { dmgDealt: 200, attacks: 10 }), row('z', { dmgDealt: 180, attacks: 9 })];
+  // Même calibrationRows (toute la mission) → score de Jader identique en vue
+  // globale et en vue « son groupe seul ».
+  const global = scoreMvpView({ rows: everyone, autoCalibrate: true, calibrationRows: everyone }).find(r => r.id === 'jader');
+  const grouped = scoreMvpView({ rows: groupA, autoCalibrate: true, calibrationRows: everyone }).find(r => r.id === 'jader');
+  assert.ok(global && grouped);
+  assert.equal(global.score, grouped.score);
+  // Ancien comportement (sans calibrationRows) : le score dérivait avec le périmètre.
+  const driftGlobal = scoreMvpView({ rows: everyone, autoCalibrate: true }).find(r => r.id === 'jader');
+  const driftGroup = scoreMvpView({ rows: groupA, autoCalibrate: true }).find(r => r.id === 'jader');
+  assert.notEqual(driftGlobal.score, driftGroup.score);
+});
+
 test('un personnage garde son score face à des coéquipiers beaucoup plus performants', () => {
   const liselotte = row('liselotte', { dmgDealt: 80, attacks: 4, heal: 30, supportSpells: 1 }, 4);
   const alone = scoreMvpSession([liselotte]).find(result => result.id === 'liselotte');
