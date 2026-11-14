@@ -44,7 +44,7 @@ const PAGE_TITLES = {
   map: 'Carte',
   quests: 'Quêtes',
   agenda: 'Agenda',
-  artisan: 'Artisanat',
+  artisan: 'Amélioration',
   account: 'Compte',
   aventures: 'Aventures',
   admin: 'Administration',

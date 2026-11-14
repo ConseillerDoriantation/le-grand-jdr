@@ -45,7 +45,7 @@ test('les traits annoncent clairement leur recyclage avant achat', () => {
 test('les onglets utilisent des icônes SVG et le portefeuille affiche le solde projeté', () => {
   assert.match(shop, /_shopIcon\('bag'\)\} Boutique/);
   assert.match(shop, /_shopIcon\('wand'\)\} Atelier/);
-  assert.match(shop, /_shopIcon\('hammer'\)\} Artisan/);
+  assert.match(shop, /_shopIcon\('hammer'\)\} Amélioration/);
   assert.match(shop, /après panier/);
   assert.match(shop, /sh-char-picker-gold/);
 });

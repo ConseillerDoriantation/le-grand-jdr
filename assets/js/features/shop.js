@@ -555,7 +555,7 @@ export async function renderShop() {
         </button>
         <button type="button" class="sh-page-tab ${_shopSection === 'artisan' ? 'active' : ''}"
           data-sh-action="setSection" data-section="artisan" data-nav-page="shop" data-nav-sub="artisan" role="tab" aria-selected="${_shopSection === 'artisan'}">
-          ${_shopIcon('hammer')} Artisan
+          ${_shopIcon('hammer')} Amélioration
         </button>
       </nav>
       </div>
@@ -565,7 +565,7 @@ export async function renderShop() {
       ${_shopSection === 'atelier'
         ? _renderAtelierPage()
         : _shopSection === 'artisan'
-          ? `<div class="sh-artisan-page" id="sh-artisan-page" aria-live="polite">${loadingHtml('Préparation de l\'artisan…')}</div>`
+          ? `<div class="sh-artisan-page" id="sh-artisan-page" aria-live="polite">${loadingHtml('Préparation de l\'amélioration…')}</div>`
           : _renderCatalog()}
     </div>
   </div>`;
