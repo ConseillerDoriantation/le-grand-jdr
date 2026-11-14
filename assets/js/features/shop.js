@@ -3862,7 +3862,7 @@ function _siReadDraftFromDom() {
   return draft;
 }
 
-function _siRefreshLive() {
+function _siRefreshLive({ refreshPreview = true } = {}) {
   const item = _siReadDraftFromDom() || _siEditorState?.draft;
   if (!item) return;
   const subtitle = document.getElementById('si-editor-subtitle');
@@ -3873,7 +3873,17 @@ function _siRefreshLive() {
       : 'Saisie rapide ou champ par champ — tout est sur une seule page';
   }
   const preview = document.getElementById('si-editor-preview');
-  if (preview) preview.innerHTML = _siPreviewHtml(item);
+  if (preview && refreshPreview) {
+    const previewHtml = _siPreviewHtml(item);
+    // Ne pas reconstruire l'aperçu à chaque frappe si son contenu n'a pas
+    // réellement changé (notamment pendant l'écriture du texte enrichi).
+    // Le remplacement de tout le DOM provoquait un reflow de la grille et des
+    // retours à la ligne visuels dans l'éditeur central.
+    if (preview._siPreviewHtml !== previewHtml) {
+      preview.innerHTML = previewHtml;
+      preview._siPreviewHtml = previewHtml;
+    }
+  }
   const sections = _SI_SECTIONS[_normalizeShopTemplate(item.template)] || _SI_SECTIONS.classique;
   sections.forEach(section => {
     const host = document.getElementById(`si-section-${section}`); if (!host) return;
@@ -3884,7 +3894,15 @@ function _siRefreshLive() {
     if (stateEl) stateEl.hidden = !!summary;
   });
   const nav = document.getElementById('si-editor-nav');
-  if (nav) nav.innerHTML = _siNavHtml(sections, item);
+  if (nav) sections.forEach(section => {
+    const row = nav.querySelector(`.si-nav-row[data-section="${section}"]`);
+    if (!row) return;
+    const status = _siSectionStatus(section, item);
+    const dot = row.querySelector('i');
+    const detail = row.querySelector('small');
+    if (dot) dot.className = status.cls;
+    if (detail) detail.textContent = status.text;
+  });
   const dirty = document.getElementById('si-editor-dirty');
   const changes = _siDiffCount(item, _siEditorState.originalDraft || {});
   _siEditorState.dirty = !!changes;
@@ -3903,6 +3921,31 @@ function _siRefreshLive() {
   });
 }
 
+let _siRefreshFrame = 0;
+let _siRefreshPreviewPending = false;
+function _siScheduleRefreshLive({ refreshPreview = true } = {}) {
+  _siRefreshPreviewPending ||= refreshPreview;
+  if (_siRefreshFrame) return;
+  _siRefreshFrame = requestAnimationFrame(() => {
+    const shouldRefreshPreview = _siRefreshPreviewPending;
+    _siRefreshFrame = 0;
+    _siRefreshPreviewPending = false;
+    _siRefreshLive({ refreshPreview: shouldRefreshPreview });
+  });
+}
+
+function _siBindRichTextEditors(root) {
+  return bindQuillEditors(root, {
+    onUserEdit: id => {
+      if (id !== 'si-readable-content') return;
+      // Le texte long n'est pas affiché dans l'aperçu boutique : mettre à jour
+      // seulement le brouillon et l'état « non enregistré », sans rerendre les
+      // trois colonnes de la modal à chaque caractère.
+      _siScheduleRefreshLive({ refreshPreview: false });
+    },
+  });
+}
+
 function _siRenderEditorPanels({ keepScroll = true } = {}) {
   const state = _siEditorState; if (!state) return;
   const scroll = document.getElementById('si-editor-scroll');
@@ -3918,7 +3961,7 @@ function _siRenderEditorPanels({ keepScroll = true } = {}) {
   if (form) form.innerHTML = `${_siQuickHtml()}${sections.map((section, index) => _siSectionHtml(section, tpl, item, tplKey, index)).join('')}`;
   if (preview) preview.innerHTML = _siPreviewHtml(item);
   _bindPrixListener(); _initAutocompletes();
-  if (state.open.has('lecture') || _siSectionHasContent('lecture', item)) bindQuillEditors(document.querySelector('.si-editor') || document).catch(() => {});
+  if (state.open.has('lecture') || _siSectionHasContent('lecture', item)) _siBindRichTextEditors(document.querySelector('.si-editor') || document).catch(() => {});
   if (scroll) scroll.scrollTop = y;
   _siRefreshLive();
 }
@@ -4007,12 +4050,15 @@ function _siBindEditor() {
     _siEditorGlobalBound = true;
     document.addEventListener('input', event => {
       if (!event.target?.closest?.('.si-editor')) return;
+      // Quill possède son propre événement `text-change`. Laisser aussi
+      // l'événement DOM remonter lançait deux actualisations par caractère.
+      if (event.target?.closest?.('.rtq-wrap')) return;
       if (event.target.id === 'si-quick-input') {
         _siEditorState.quick = event.target.value;
         const out = document.getElementById('si-quick-results'); if (out) out.innerHTML = _siQuickResultsHtml(event.target.value);
         return;
       }
-      _siRefreshLive();
+      _siScheduleRefreshLive();
     });
     document.addEventListener('change', event => {
       if (event.target?.closest?.('.si-editor')) _siRefreshLive();

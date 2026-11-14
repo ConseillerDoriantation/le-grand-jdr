@@ -1661,7 +1661,7 @@ function _renderNpcCrossEditor(n, c, e, f, admin) {
     ${AFFINITE.map((item, idx) => `<button type="button" class="${feelingLevel === idx ? 'is-on' : ''}" style="--scale:${item.couleur}" data-action="npcSetFeelingLevel" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" data-value="${NPC_LEVEL_TO_SENT[idx]}"><span><i></i>${_esc(item.label)}</span></button>`).join('')}
   </div>`;
   const relationTypes = _affiniteTypeChoices();
-  return `<div class="npc-rd-cross-editor${admin ? '' : ' is-player'}">
+  return `<div class="npc-rd-cross-editor${admin ? '' : ' is-player'}" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}">
     ${admin ? `<div class="npc-rd-editor-col"><div class="npc-rd-editor-head"><h3>${_esc(n.nom || 'PNJ')} envers ${_esc(c.nom || 'ce personnage')}</h3>${e ? `<button type="button" class="npc-rd-danger-link" data-action="npcRemoveException" data-id="${_esc(e.id)}">Retirer l’exception</button>` : ''}</div>
       ${exceptionScale}
       <div class="npc-rd-editor-label">Nature du lien <span>· optionnel</span></div><div class="npc-rd-type-picker">${_affiniteTypeChoices().map(type => `<button type="button" class="npc-rd-typechip is-pick${e?.typeId === type.id ? ' is-on' : ''}" style="--tc:${_esc(type.couleur || TYPE_COLORS[0])}" data-action="npcSetExceptionType" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" data-value="${_esc(type.id)}">${_esc(type.emoji || '')} ${_esc(type.label)}</button>`).join('')}</div>
@@ -5553,6 +5553,25 @@ function _refreshNpcCrossSummary(npcId, charId) {
   return true;
 }
 
+function _refreshNpcFeelingEditors(npcId, charId) {
+  const npc = _npcs.find(item => item.id === npcId);
+  const character = _npcLinkCharacter(charId);
+  if (!npc || !character) return false;
+  const selector = `.npc-rd-cross-editor[data-npc-id="${CSS.escape(npcId || '')}"][data-char-id="${CSS.escape(charId || '')}"]`;
+  const editors = [...document.querySelectorAll(selector)];
+  if (!editors.length) return false;
+  const exception = _npcExceptionFor(npcId, charId);
+  const feeling = _npcFeelingFor(npcId, character);
+
+  editors.forEach(editor => {
+    const scratch = document.createElement('div');
+    scratch.innerHTML = _renderNpcCrossEditor(npc, character, exception, feeling, STATE.isAdmin && !_npcIsPlayerView());
+    const next = scratch.firstElementChild;
+    if (next) replaceHtmlPreservingView(editor, next.innerHTML, { includeFocus: true, includeWindow: true });
+  });
+  return true;
+}
+
 function _refreshNpcAffiUi({ list = false, targeted = false, summary = false, npcId = '', charId = '' } = {}) {
   const signature = _npcAffiUiSignature();
   if (signature === _npcAffiRenderedSignature) return false;
@@ -5963,14 +5982,18 @@ async function _npcSaveFeeling(el) {
   else relations.push(next);
   character.relations = relations;
   if (choiceAction) {
-    if (!_refreshNpcCrossRelationsSection(npcId)) _refreshActivePanel();
+    const editorUpdated = _refreshNpcFeelingEditors(npcId, charId);
+    const summaryUpdated = _refreshNpcCrossSummary(npcId, charId);
+    if (!editorUpdated && !summaryUpdated) _refreshActivePanel();
   } else if (!_refreshNpcCrossSummary(npcId, charId)) {
     _refreshActivePanel();
   }
   if (!await trySave('characters', charId, { relations })) {
     character.relations = previousRelations;
     if (choiceAction) {
-      if (!_refreshNpcCrossRelationsSection(npcId)) _refreshActivePanel();
+      const editorUpdated = _refreshNpcFeelingEditors(npcId, charId);
+      const summaryUpdated = _refreshNpcCrossSummary(npcId, charId);
+      if (!editorUpdated && !summaryUpdated) _refreshActivePanel();
     } else if (!_refreshNpcCrossSummary(npcId, charId)) {
       _refreshActivePanel();
     }
