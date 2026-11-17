@@ -4,6 +4,11 @@
 
 const num = (value) => Number(value) || 0;
 const finite = value => value !== null && value !== '' && Number.isFinite(Number(value));
+const emptyD20Histogram = () => Array(20).fill(0);
+const recordD20 = (hist, value) => {
+  const face = Number(value);
+  if (Number.isInteger(face) && face >= 1 && face <= 20) hist[face - 1] += 1;
+};
 
 export function appliedDamageAmount({ beforeHp = null, afterHp = null, rolledDamage = 0, cancelled = false } = {}) {
   if (cancelled) return 0;
@@ -141,6 +146,7 @@ export function aggregateVttRollDetails(logs = [], {
       supplementalRolls: 0, supplementalNaturalTotal: 0,
       supplementalResultRolls: 0, supplementalResultTotal: 0,
       supplementalCrits: 0, supplementalFumbles: 0,
+      attackHist: emptyD20Histogram(), supplementalHist: emptyD20Histogram(),
       damageEvents: 0, damageTotal: 0, biggestHit: 0,
     },
   });
@@ -189,12 +195,14 @@ export function aggregateVttRollDetails(logs = [], {
       if (!id || !skill || !finite(natural) || !finite(total)) continue;
       const target = entryFor(id).skills[skill] ??= {
         trackedRolls: 0, naturalTotal: 0, resultTotal: 0, crits: 0, fumbles: 0,
+        hist: emptyD20Histogram(),
       };
       target.trackedRolls += 1;
       target.naturalTotal += Number(natural);
       target.resultTotal += Number(total);
       target.crits += log.isCrit === true || (log.isCrit == null && Number(natural) === 20) ? 1 : 0;
       target.fumbles += log.isFumble === true || (log.isFumble == null && Number(natural) === 1) ? 1 : 0;
+      recordD20(target.hist, natural);
       relevantLogs += 1;
       continue;
     }
@@ -214,6 +222,7 @@ export function aggregateVttRollDetails(logs = [], {
       }
       combat.supplementalCrits += log.isCrit === true || (log.isCrit == null && Number(log.hitD20) === 20) ? 1 : 0;
       combat.supplementalFumbles += log.isFumble === true || (log.isFumble == null && Number(log.hitD20) === 1) ? 1 : 0;
+      recordD20(combat.supplementalHist, log.hitD20);
       relevantLogs += 1;
       continue;
     }
@@ -234,6 +243,7 @@ export function aggregateVttRollDetails(logs = [], {
         combat.supplementalNaturalTotal += castNatural;
         combat.supplementalCrits += log.castIsCrit === true || (log.castIsCrit == null && castNatural === 20) || /💥\s*RC/u.test(String(log.castEffect || '')) ? 1 : 0;
         combat.supplementalFumbles += log.castIsFumble === true || log.castEC === true ? 1 : 0;
+        recordD20(combat.supplementalHist, castNatural);
         relevantLogs += 1;
         continue;
       }
@@ -256,6 +266,7 @@ export function aggregateVttRollDetails(logs = [], {
         combat.fumbles += actionFumble;
         combat.attackRolls += 1;
         combat.attackRollTotal += Number(log.hitD20);
+        recordD20(combat.attackHist, log.hitD20);
         if (finite(log.hitTotal)) {
           combat.attackResultRolls += 1;
           combat.attackResultTotal += Number(log.hitTotal);
@@ -368,7 +379,11 @@ export function aggregateVttRollDetails(logs = [], {
 export function mergeVttRollDetails(details = []) {
   const mergeNode = (target, source, key = '') => {
     for (const [childKey, value] of Object.entries(source || {})) {
-      if (typeof value === 'number') {
+      if (Array.isArray(value)) {
+        const current = Array.isArray(target[childKey]) ? target[childKey] : [];
+        target[childKey] = Array.from({ length: Math.max(current.length, value.length) }, (_, index) =>
+          num(current[index]) + num(value[index]));
+      } else if (typeof value === 'number') {
         target[childKey] = childKey === 'biggestHit'
           ? Math.max(Number(target[childKey]) || 0, value)
           : (Number(target[childKey]) || 0) + value;
@@ -448,11 +463,14 @@ export function mergeTrackedSkillStats(current = {}, fromLog = {}) {
     merged.crits = num(fromLog.crits);
     merged.fumbles = num(fromLog.fumbles);
   }
+  merged.hist = Array.isArray(fromLog.hist) ? fromLog.hist.slice(0, 20).map(num) : emptyD20Histogram();
   return merged;
 }
 
 export function mergeTrackedCombatStats(current = {}, fromLog = {}) {
   const merged = { ...current };
+  merged.attackHist = Array.isArray(fromLog.attackHist) ? fromLog.attackHist.slice(0, 20).map(num) : emptyD20Histogram();
+  merged.supplementalHist = Array.isArray(fromLog.supplementalHist) ? fromLog.supplementalHist.slice(0, 20).map(num) : emptyD20Histogram();
   // On ne remplace jamais les totaux de campagne par le journal, qui peut être
   // partiel ou en cache. On retire seulement les doublons multicibles prouvés.
   for (const [field, excess] of Object.entries(fromLog.actionOvercounts || {})) {
@@ -555,6 +573,7 @@ export function normalizeSkillStats(name, value = {}) {
     resultAvg: detailValid ? statsAverage(value.resultTotal, trackedRolls) : null,
     critRate: rolls ? Math.round(crits / rolls * 100) : 0,
     fumbleRate: rolls ? Math.round(fumbles / rolls * 100) : 0,
+    hist: Array.isArray(value.hist) ? value.hist.slice(0, 20).map(num) : emptyD20Histogram(),
   };
 }
 
@@ -566,16 +585,18 @@ export function aggregateSkillAverages(rows = []) {
   let resultTotal = 0;
   let crits = 0;
   let fumbles = 0;
+  const hist = emptyD20Histogram();
 
   rows.forEach(row => {
     (row.perSkill || []).forEach(skill => {
       const current = bySkill.get(skill.sk) || {
         sk: skill.sk, rolls: 0, trackedRolls: 0, crits: 0, fumbles: 0,
-        naturalTotal: 0, resultTotal: 0,
+        naturalTotal: 0, resultTotal: 0, hist: emptyD20Histogram(),
       };
       for (const key of ['rolls', 'trackedRolls', 'crits', 'fumbles', 'naturalTotal', 'resultTotal']) {
         current[key] += num(skill[key]);
       }
+      current.hist = current.hist.map((value, index) => value + num(skill.hist?.[index]));
       bySkill.set(skill.sk, current);
       rolls += num(skill.rolls);
       trackedRolls += num(skill.trackedRolls);
@@ -583,6 +604,7 @@ export function aggregateSkillAverages(rows = []) {
       resultTotal += num(skill.resultTotal);
       crits += num(skill.crits);
       fumbles += num(skill.fumbles);
+      for (let index = 0; index < 20; index += 1) hist[index] += num(skill.hist?.[index]);
     });
   });
 
@@ -604,6 +626,7 @@ export function aggregateSkillAverages(rows = []) {
     naturalAvg: statsAverage(naturalTotal, trackedRolls),
     resultAvg: statsAverage(resultTotal, trackedRolls),
     coverage: rolls ? Math.round(trackedRolls / rolls * 100) : 0,
+    hist,
     perSkill: [...bySkill.values()].map(decorate)
       .sort((a, b) => (b.trackedRolls - a.trackedRolls) || (b.rolls - a.rolls) || a.sk.localeCompare(b.sk, 'fr')),
   };
@@ -628,6 +651,8 @@ export function aggregateActionAverages(skills = {}, combat = {}, supplemental =
   const resultTotal = num(skills.resultTotal) + num(combat.attackResultTotal) + num(supplemental.resultTotal);
   const crits = num(skills.crits) + num(combat.crits) + num(supplemental.crits);
   const fumbles = num(skills.fumbles) + num(combat.fumbles) + num(supplemental.fumbles);
+  const hist = Array.from({ length: 20 }, (_, index) =>
+    num(skills.hist?.[index]) + num(combat.attackHist?.[index]) + num(supplemental.hist?.[index]));
 
   return {
     rolls,
@@ -646,6 +671,7 @@ export function aggregateActionAverages(skills = {}, combat = {}, supplemental =
     fumbleRate: rolls ? Math.round(fumbles / rolls * 100) : null,
     coverage: rolls ? Math.round(trackedRolls / rolls * 100) : 0,
     resultCoverage: rolls ? Math.round(resultTrackedRolls / rolls * 100) : 0,
+    hist,
   };
 }
 

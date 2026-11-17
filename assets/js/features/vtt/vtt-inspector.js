@@ -708,6 +708,7 @@ export function _renderInspectorImpl(t) {
       <section class="vtt-ins-drawer-section">
         <div class="vtt-ins-section-heading"><span>Actions MJ</span></div>
         <div class="vtt-ins-actions">
+          ${t.improvised ? `<button class="vtt-ins-ghost" data-vtt-fn="_vttPromoteImprovised" data-vtt-args="${t.id}|${t.type === 'enemy' ? 'bestiary' : 'npc'}" title="Conserver durablement ce figurant">★ ${t.type === 'enemy' ? 'Ajouter au bestiaire' : 'Garder dans les PNJ'}</button>` : ''}
           ${VS.session?.combat?.active?`<button class="vtt-ins-ghost" data-vtt-fn="_vttResetTurn" data-vtt-args="${t.id}" title="Réinitialiser le tour de ce token">${_insIcon('turn')}Réinitialiser le tour</button>`:''}
           ${t.pageId?`<button class="vtt-ins-ghost" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="Retirer de la carte">${_insIcon('out')}Retirer de la carte</button>`:''}
           ${(t.buffs||[]).length?`<button class="vtt-ins-ghost danger" data-vtt-fn="_vttClearBuffs" data-vtt-args="${t.id}" title="Supprimer tous les effets actifs">${_insIcon('trash')}Purger les effets (${(t.buffs||[]).length})</button>`:''}

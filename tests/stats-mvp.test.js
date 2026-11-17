@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildMvpRawProfile, calibrateReferences, DEFAULT_REFERENCES, MVP_AXIS_GUIDE, MVP_SCORING_GUIDE, scoreMvpAxis, scoreMvpCampaign, scoreMvpSession, scoreMvpView } from '../assets/js/shared/stats-mvp.js';
+import { buildMvpRawProfile, calibrateReferences, DEFAULT_REFERENCES, MVP_AXIS_GUIDE, MVP_SCORING_GUIDE, mvpCalibrationRows, scoreMvpAxis, scoreMvpCampaign, scoreMvpSession, scoreMvpView } from '../assets/js/shared/stats-mvp.js';
 
 const row = (id, combat = {}, sRolls = 0) => ({ id, name: id, combat, sRolls });
 
@@ -220,6 +220,19 @@ test('scoreMvpView : un périmètre de calibrage stable rend le score indépenda
   const driftGlobal = scoreMvpView({ rows: everyone, autoCalibrate: true }).find(r => r.id === 'jader');
   const driftGroup = scoreMvpView({ rows: groupA, autoCalibrate: true }).find(r => r.id === 'jader');
   assert.notEqual(driftGlobal.score, driftGroup.score);
+});
+
+test('le calibrage de campagne utilise les lignes par mission et non leurs totaux cumulés', () => {
+  const damages = [80, 40, 60, 100, 20, 50];
+  const mission = damages.map((dmgDealt, index) => row(`a${index}`, { dmgDealt, attacks: 4 }));
+  const cloneMission = prefix => damages.map((dmgDealt, index) => row(`${prefix}${index}`, { dmgDealt, attacks: 4 }));
+  const baseUnits = [{ key: 'mission-1', rows: mission, totals: row('total-1', { dmgDealt: 350 }) }];
+  const extendedUnits = [...baseUnits, { key: 'mission-2', rows: cloneMission('b') }, { key: 'mission-3', rows: cloneMission('c') }];
+  const baseScore = scoreMvpView({ rows: mission, autoCalibrate: true, calibrationRows: mvpCalibrationRows(baseUnits) }).find(result => result.id === 'a0');
+  const extendedScore = scoreMvpView({ rows: mission, autoCalibrate: true, calibrationRows: mvpCalibrationRows(extendedUnits) }).find(result => result.id === 'a0');
+
+  assert.equal(baseScore.score, extendedScore.score);
+  assert.equal(mvpCalibrationRows(baseUnits).some(entry => entry.id === 'total-1'), false);
 });
 
 test('un personnage garde son score face à des coéquipiers beaucoup plus performants', () => {

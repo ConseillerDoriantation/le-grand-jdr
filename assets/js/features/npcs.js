@@ -5643,7 +5643,7 @@ function _npcCreateFromSearch() {
   requestAnimationFrame(() => document.getElementById('npc-express-role')?.focus());
 }
 
-function _npcBasePayload({ nom = 'Nouveau PNJ', role = '', organisations = [] } = {}) {
+export function _npcBasePayload({ nom = 'Nouveau PNJ', role = '', organisations = [] } = {}) {
   return {
     nom, role, lieu: '', organisations, description: '', noteMJ: '',
     imageUrl: '', imageFull: '', portraits: [], activePortraitId: '', embauchable: true,

@@ -64,6 +64,7 @@ test('normalizeSkillStats sépare les jets historiques des jets détaillés', ()
     fumbles: 1,
     naturalTotal: 39,
     resultTotal: 51,
+    hist: Array(20).fill(0),
     naturalAvg: 13,
     resultAvg: 17,
     critRate: 13,
@@ -127,6 +128,7 @@ test('aggregateActionAverages réunit compétences et combat dans tout le résum
     resultTotal: 89,
     crits: 4,
     fumbles: 1,
+    hist: Array(20).fill(0),
     naturalAvg: 13.3,
     resultAvg: 17.8,
     critRate: 50,
@@ -222,8 +224,8 @@ test('aggregateVttRollDetails reconstruit les moyennes depuis les logs VTT', () 
   ], { dateKeys: ['2026-08-11'] });
 
   assert.deepEqual(result.byCharacter.c1.skills, {
-    Perception: { trackedRolls: 2, naturalTotal: 28, resultTotal: 36, crits: 0, fumbles: 0 },
-    Artisanat: { trackedRolls: 1, naturalTotal: 12, resultTotal: 16, crits: 0, fumbles: 0 },
+    Perception: { trackedRolls: 2, naturalTotal: 28, resultTotal: 36, crits: 0, fumbles: 0, hist: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0] },
+    Artisanat: { trackedRolls: 1, naturalTotal: 12, resultTotal: 16, crits: 0, fumbles: 0, hist: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0] },
   });
   assert.deepEqual(result.byCharacter.c1.combat, {
     canonicalActions: 4,
@@ -241,11 +243,28 @@ test('aggregateVttRollDetails reconstruit les moyennes depuis les logs VTT', () 
     supplementalResultTotal: 0,
     supplementalCrits: 1,
     supplementalFumbles: 0,
+    attackHist: [0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+    supplementalHist: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
     damageEvents: 3,
     damageTotal: 17,
     biggestHit: 8,
   });
   assert.equal(result.relevantLogs, 7);
+});
+
+test('les histogrammes d20 fusionnent face par face entre plusieurs rollups', () => {
+  const first = aggregateVttRollDetails([
+    { type: 'roll', characterId: 'c1', rollSkill: 'Perception', rollRaw: 1, rollResult: 4 },
+    { type: 'attack', sourceCharacterId: 'c1', hitD20: 20, hitTotal: 25, hit: true, dmgTotal: 4 },
+  ]);
+  const second = aggregateVttRollDetails([
+    { type: 'roll', characterId: 'c1', rollSkill: 'Perception', rollRaw: 1, rollResult: 5 },
+    { type: 'attack', sourceCharacterId: 'c1', hitD20: 10, hitTotal: 15, hit: true, dmgTotal: 3 },
+  ]);
+  const merged = mergeVttRollDetails([first, second]);
+  assert.equal(merged.byCharacter.c1.skills.Perception.hist[0], 2);
+  assert.equal(merged.byCharacter.c1.combat.attackHist[9], 1);
+  assert.equal(merged.byCharacter.c1.combat.attackHist[19], 1);
 });
 
 test('un jet simulé MJ reste dans le chat mais jamais dans les statistiques', () => {
@@ -419,6 +438,8 @@ test('une attaque multicible ne compte que comme un seul jet critique ou échec'
     supplementalResultTotal: 0,
     supplementalCrits: 0,
     supplementalFumbles: 0,
+    attackHist: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    supplementalHist: Array(20).fill(0),
     damageEvents: 0,
     damageTotal: 0,
     biggestHit: 0,
@@ -451,6 +472,8 @@ test('une attaque multicible ne compte que comme un seul jet critique ou échec'
     attackRollTotal: 1,
     attackResultRolls: 1,
     attackResultTotal: 5,
+    attackHist: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    supplementalHist: Array(20).fill(0),
     biggestHit: 0,
   });
   assert.deepEqual(aggregateActionAverages({ rolls: 0 }, correctedCombat), {
@@ -464,6 +487,7 @@ test('une attaque multicible ne compte que comme un seul jet critique ou échec'
     resultTotal: 5,
     crits: 0,
     fumbles: 1,
+    hist: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     naturalAvg: 1,
     resultAvg: 5,
     critRate: 0,
@@ -541,7 +565,7 @@ test('les détails du journal remplacent seulement une couverture plus faible', 
   assert.deepEqual(mergeTrackedSkillStats(
     { rolls: 8, trackedRolls: 2, naturalTotal: 12, resultTotal: 20 },
     { trackedRolls: 5, naturalTotal: 55, resultTotal: 75, crits: 1, fumbles: 1 },
-  ), { rolls: 8, trackedRolls: 5, naturalTotal: 55, resultTotal: 75 });
+  ), { rolls: 8, trackedRolls: 5, naturalTotal: 55, resultTotal: 75, hist: Array(20).fill(0) });
   assert.deepEqual(mergeTrackedCombatStats(
     { attacks: 7, attackRolls: 1, attackRollTotal: 8, damageEvents: 1, damageTotal: 4 },
     { attackActions: 3, hits: 2, crits: 1, fumbles: 1, attackRolls: 3, attackRollTotal: 32, attackResultRolls: 3, attackResultTotal: 43, damageEvents: 3, damageTotal: 17 },
@@ -551,6 +575,8 @@ test('les détails du journal remplacent seulement une couverture plus faible', 
     attackRollTotal: 32,
     attackResultRolls: 3,
     attackResultTotal: 43,
+    attackHist: Array(20).fill(0),
+    supplementalHist: Array(20).fill(0),
     damageEvents: 3,
     damageTotal: 17,
     biggestHit: 0,

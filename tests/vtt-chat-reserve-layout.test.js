@@ -8,32 +8,32 @@ const tray = readFileSync(new URL('../assets/js/features/vtt/vtt-tray.js', impor
 const maplib = readFileSync(new URL('../assets/js/features/vtt/vtt-maplib.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../assets/css/vtt.css', import.meta.url), 'utf8');
 
-test('le chat et la réserve s ouvrent depuis des onglets de bord uniques', () => {
+test('la régie sépare la Distribution à gauche et le chat à droite', () => {
   assert.match(vtt, /class="vtt-slide-edge"/);
   assert.match(vtt, /data-edge-mode="chat"/);
-  assert.match(vtt, /data-edge-mode="reserve"/);
+  assert.doesNotMatch(vtt, /data-edge-mode="reserve"/);
+  assert.match(vtt, /class="vtt-distribution" id="vtt-distribution"/);
+  assert.match(vtt, /id="vtt-distribution-search"/);
+  assert.match(vtt, /id="vtt-scene-tokens"[\s\S]*id="vtt-reserve-body"[\s\S]*id="vtt-bestiary-body"/);
   assert.doesNotMatch(vtt, /<div class="vtt-mj-quick"/);
   assert.match(css, /--pw:\s*392px/);
-  assert.match(vtt, /M4 5h16v11H9l-5 4z/);
-  assert.match(vtt, /M3 20c0-3\.3 2\.7-5\.5 6-5\.5/);
+  assert.match(css, /--vtt-distribution-w:\s*310px/);
   assert.match(css, /\.vtt-edge-badge\[hidden\]\s*\{\s*display:\s*none\s*!important/);
 });
 
-test('le panneau MJ commence par Personnages et réunit scène et réserve', () => {
-  const chars = vtt.indexOf('>Personnages</button>');
-  const scenes = vtt.indexOf('>Scènes</button>');
-  assert.ok(chars >= 0 && scenes > chars);
-  assert.match(vtt, /vtt-reserve-stage[\s\S]*id="vtt-scene-tokens"[\s\S]*id="vtt-reserve-body"/);
+test('la Distribution réunit scène réserve bestiaire et création rapide', () => {
+  assert.match(vtt, /vtt-distribution-scroll[\s\S]*vtt-reserve-stage[\s\S]*id="vtt-scene-tokens"[\s\S]*id="vtt-reserve-body"[\s\S]*id="vtt-bestiary-body"/);
+  assert.match(vtt, /data-vtt-fn="_vttImproviser"[\s\S]*Improviser/);
+  assert.match(vtt, /data-vtt-distribution-filter="player"/);
+  assert.match(vtt, /data-vtt-distribution-filter="npc"/);
+  assert.match(vtt, /data-vtt-distribution-filter="bestiary"/);
+  assert.match(vtt, /data-vtt-distribution-filter="improvised"/);
   assert.match(tray, /localStorage\.getItem\('vtt-tray-tab'\) \|\| 'reserve'/);
-  assert.match(vtt, /M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z/);
-  assert.match(vtt, /M8 17c0-2\.5 2-4\.5 4\.5-4\.5/);
-  assert.match(css, /\.vtt-tray-tab \.vtt-tt-ic\s*\{[\s\S]*?stroke:\s*currentColor/);
-  assert.match(css, /\.vtt-tray-tab\s*\{[\s\S]*?flex-direction:\s*row;/);
   assert.match(vtt, /class="vtt-slide-x"[\s\S]*?<svg[\s\S]*?M6 6l12 12M18 6 6 18/);
   assert.match(css, /\.vtt-slide-hd \.vtt-slide-pin,[\s\S]*?width:\s*32px;\s*height:\s*32px;[\s\S]*?border:\s*0/);
 });
 
-test('la réserve propose cartes liste sélection multiple et placement groupé', () => {
+test('la Distribution propose une liste dense, le groupe et les placements tactiques', () => {
   assert.match(tray, /vtt-reserve-layout/);
   assert.match(tray, /_vttReservePick/);
   assert.match(tray, /_vttReservePlacePicked/);
@@ -42,10 +42,18 @@ test('la réserve propose cartes liste sélection multiple et placement groupé'
   assert.match(tray, /const playerLabel = token/);
   assert.match(tray, /sortTokensByName/);
   assert.match(css, /\.vtt-scene-token-ring\s*\{[\s\S]*?conic-gradient/);
-  assert.match(css, /\.vtt-res-line-dot\s*\{[\s\S]*?width:\s*54px/);
-  assert.match(css, /#vtt-reserve-body \.vtt-res-line\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-direction:\s*column;[\s\S]*?margin:\s*0/);
-  assert.match(css, /#vtt-reserve-body \.vtt-res-line\s*\{[\s\S]*?height:\s*154px;[\s\S]*?padding:\s*30px 6px 10px/);
-  assert.match(css, /#vtt-reserve-body \.vtt-res-line-main\s*\{[\s\S]*?height:\s*52px;[\s\S]*?flex:\s*0 0 52px/);
+  assert.match(vtt, /id="vtt-bring-group"/);
+  assert.match(vtt, /class="vtt-improv-launch"/);
+  assert.match(vtt, /class="vtt-improv-identity"/);
+  assert.match(vtt, /class="vtt-improv-segment"/);
+  assert.match(vtt, /class="vtt-improv-visibility"/);
+  assert.match(vtt, /function _vttImprovisedCount/);
+  assert.match(vtt, /function _vttArmBestiaryPlacement[\s\S]*?kind:'beast'/);
+  assert.match(vtt, /if \(!cell\) \{ _vttArmBestiaryPlacement\(beastId\); return; \}/);
+  assert.match(css, /#vtt-reserve-body \.vtt-res-line,[\s\S]*?height:\s*48px;[\s\S]*?display:\s*grid/);
+  assert.match(css, /#vtt-reserve-body \.vtt-res-line-dot\s*\{[\s\S]*?width:\s*32px/);
+  assert.match(css, /\.vtt-placement-ghost\.is-group/);
+  assert.match(css, /\.vtt-placement-ghost\.is-beast/);
   assert.match(css, /#vtt-reserve-body \.vtt-res-line-meta i\s*\{[\s\S]*?text-overflow:\s*ellipsis/);
   assert.match(css, /#vtt-reserve-body \.vtt-res-line-meta i\s*\{[\s\S]*?background:\s*none/);
   assert.match(vtt, /function _patchHpOptimistically[\s\S]*?_refreshDisplayedIdentitySoon\(token\.id\);[\s\S]*?_renderTraySoon\(\);/);
@@ -65,13 +73,42 @@ test('la vue Scènes reprend le résumé et les cartes compactes de la maquette'
 
 test('le Bestiaire utilise l en-tête et les cartes horizontales de la maquette', () => {
   assert.doesNotMatch(vtt, /<div class="vtt-tray-section-hd"><span>👹 Bestiaire/);
-  assert.match(tray, /class="vtt-bst-create"[\s\S]*?data-vtt-fn="_vttCreateEnemy"/);
+  assert.doesNotMatch(tray, /class="vtt-bst-create"[\s\S]*?data-vtt-fn="_vttCreateEnemy"/);
   assert.match(tray, /class="vtt-bst-meta"[\s\S]*?<i>PV<\/i>[\s\S]*?<i>CA<\/i>[\s\S]*?<i>VIT<\/i>/);
-  assert.match(tray, /class="vtt-tray-search-ic"[\s\S]*?<circle cx="11" cy="11" r="6"/);
-  assert.match(css, /#vtt-bestiary-body \.vtt-bst-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\)/);
-  assert.match(css, /#vtt-bestiary-body \.vtt-bst-tile\s*\{[\s\S]*?display:\s*flex;[\s\S]*?min-height:\s*84px/);
-  assert.match(css, /#vtt-bestiary-body \.vtt-bst-portrait\s*\{[\s\S]*?width:\s*40px;\s*height:\s*40px/);
+  assert.match(vtt, /id="vtt-distribution-search"[\s\S]*data-vtt-fn="_vttDistributionSearch"/);
+  assert.match(css, /#vtt-bestiary-body \.vtt-bst-grid\s*\{\s*display:\s*block/);
+  assert.match(css, /#vtt-bestiary-body \.vtt-bst-tile\s*\{[\s\S]*?min-height:\s*54px/);
+  assert.match(css, /#vtt-bestiary-body \.vtt-bst-portrait\s*\{[\s\S]*?width:\s*36px;\s*height:\s*36px/);
   assert.match(css, /\.vtt-slide,[\s\S]*?\.vtt-slide-hd,[\s\S]*?\.vtt-tray-view\s*\{\s*background-color:\s*var\(--surface-1\)/);
+});
+
+test('la pellicule et la recherche rapide portent le nouveau flux de régie', () => {
+  assert.match(vtt, /id="vtt-scene-reel"/);
+  assert.match(tray, /export function _renderSceneReel/);
+  assert.match(tray, /vtt-reel-card/);
+  assert.match(tray, /Nouvelle scène/);
+  assert.match(tray, /export function _vttReelFolderMenu/);
+  assert.match(tray, /export function _vttPageMoveMenu/);
+  assert.match(tray, /new Sortable\(track/);
+  assert.match(tray, /vtt-scene-popover-folders/);
+  assert.match(tray, /vtt-scene-popover-new/);
+  assert.match(tray, /_vttOpenSceneFromPopover/);
+  assert.match(tray, /vtt-regie-state is-live\$\{_reelCompact/);
+  assert.match(tray, /const structureKey = JSON\.stringify/);
+  assert.match(tray, /el\.dataset\.structureKey === structureKey/);
+  assert.match(tray, /const paint = \(key, html\)/);
+  assert.match(css, /\.vtt-scene-popover-grid\s*\{[\s\S]*?repeat\(auto-fill,minmax\(150px,1fr\)\)/);
+  assert.match(css, /\.vtt-scene-popover-card\s*\{[\s\S]*?height:\s*84px/);
+  assert.match(css, /\.vtt-scene-popover-head \.vtt-scene-popover-new\s*\{[\s\S]*?height:\s*29px/);
+  assert.match(css, /\.vtt-scene-popover-grid \.vtt-scene-popover-open\s*\{[\s\S]*?background-position:\s*center;[\s\S]*?background-size:\s*cover/);
+  assert.match(css, /\.vtt-scene-popover-grid \.vtt-scene-popover-open b\s*\{[\s\S]*?bottom:\s*0;[\s\S]*?align-items:\s*flex-end/);
+  assert.match(vtt, /function _vttFinderOpen\(\)/);
+  assert.match(vtt, /Scène, personnage, PNJ, créature, carte/);
+  assert.match(vtt, /document\.getElementById\('vtt-finder'\)[\s\S]*_vttFinderClose\(\)/);
+  assert.match(vtt, /_vttSceneDraftPick/);
+  assert.match(vtt, /_vttConfirmSceneFromLibrary/);
+  assert.match(css, /\.vtt-finder\s*\{/);
+  assert.match(css, /\.vtt-reel-card/);
 });
 
 test('la bibliothèque Images devient une galerie deux colonnes avec un import unifié', () => {
