@@ -35,11 +35,16 @@ let _trayFilter       = 'all'; // filtre actif : 'all'|'player'|'npc'|'enemy'
 let _traySearch       = '';    // filtre texte appliqué à la réserve
 let _reserveFilter    = (() => { try { const value = localStorage.getItem('vtt-reserve-filter') || 'all'; return value === 'online' ? 'player' : value; } catch { return 'all'; } })();
 let _bstSearch        = '';    // filtre texte appliqué au bestiaire
+let _distributionFilter = 'all'; // all | player | npc | bestiary | improvised
 export let _trayTab          = (() => { try { return localStorage.getItem('vtt-tray-tab') || 'reserve'; } catch { return 'reserve'; } })(); // onglet actif du panneau MJ
 let _reserveLayout = 'grid';
 const _reservePicked = new Set();
 let _pageSearch       = '';    // filtre texte appliqué à la liste des pages
 let _pageFolderFilter = (() => { try { return localStorage.getItem('vtt-page-folder-filter') || 'all'; } catch { return 'all'; } })();
+let _reelCompact      = (() => { try { return localStorage.getItem('vtt-bar-mode') === 'compact'; } catch { return false; } })();
+let _reelSortable     = null;
+let _reelPopoverSortables = [];
+let _reelPopoverOutsideHandler = null;
 const _savePageFolderFilter = () => { try { localStorage.setItem('vtt-page-folder-filter', _pageFolderFilter); } catch {} };
 const _pageFoldClosed = (() => { // dossiers de pages repliés (persistés)
   try { return new Set(JSON.parse(localStorage.getItem('vtt-page-folds') || '[]')); } catch { return new Set(); }
@@ -67,6 +72,16 @@ export function _resetTraySearch() { _traySearch = ''; }
 export function _vttTrayFilter(f) { _trayFilter = f; _renderTraySoon(); }
 export function _vttTraySearch(v) { _traySearch = String(v || ''); _renderTraySoon(); }
 export function _vttTrayClearSearch() { _traySearch = ''; _renderTraySoon(); }
+export function _vttDistributionSearch(v) {
+  _traySearch = String(v || '');
+  _bstSearch = _traySearch;
+  _renderTraySoon();
+}
+export function _vttDistributionFilter(filter) {
+  _distributionFilter = ['player', 'npc', 'bestiary', 'improvised'].includes(filter) ? filter : 'all';
+  _reserveFilter = _distributionFilter === 'player' ? 'player' : (_distributionFilter === 'npc' || _distributionFilter === 'improvised' ? 'npc' : 'all');
+  _renderTraySoon();
+}
 export function _vttReserveFilter(f) { _reserveFilter = f || 'all'; _saveReserveFilter(); _renderTraySoon(); }
 export function _vttReserveLayout(layout) {
   _reserveLayout = layout === 'list' ? 'list' : 'grid';
@@ -127,6 +142,35 @@ export function _vttPlaceOnlineReserve() {
   ).map(token => token.id);
   return _placeReserveTokens([...new Set(ids)]);
 }
+
+export async function _vttRevealPageTokens() {
+  if (!STATE.isAdmin || !VS.activePage) return;
+  const hidden = Object.values(VS.tokens || {})
+    .map(entry => entry?.data)
+    .filter(token => token?.pageId === VS.activePage.id && token.visible === false);
+  if (!hidden.length) return;
+  const setVisible = async visible => {
+    const batch = writeBatch(db);
+    hidden.forEach(token => batch.update(_tokRef(token.id), { visible }));
+    await batch.commit();
+  };
+  try {
+    await setVisible(true);
+    showNotif(`${hidden.length} token${hidden.length > 1 ? 's' : ''} révélé${hidden.length > 1 ? 's' : ''}.`, 'success', {
+      duration: 7000,
+      action: {
+        label: 'Annuler',
+        onClick: async () => {
+          await setVisible(false);
+          showNotif('Visibilité restaurée.', 'info');
+        },
+      },
+    });
+  } catch (error) {
+    console.error('[vtt] révélation groupée', error);
+    showNotif('Impossible de révéler tous les tokens.', 'error');
+  }
+}
 export function _vttBstSearch(v) { _bstSearch = String(v || ''); _renderTraySoon(); }
 export function _vttBstClearSearch() { _bstSearch = ''; _renderTraySoon(); }
 // Onglets du panneau MJ (Scènes / Réserve / Bestiaire / Images) — affiche une vue à la fois.
@@ -163,7 +207,9 @@ export function _renderTray() {
 }
 export function _renderTrayImpl() {
   if (!STATE.isAdmin) { _renderPageTabs(); return; }
-  if (_trayTab === 'bestiary') void _loadBestiaryCatalog();
+  // La nouvelle Distribution expose le bestiaire en permanence : charge le
+  // catalogue dès que ce panneau existe, sans ajouter de listener Firestore.
+  if (_trayTab === 'bestiary' || document.getElementById('vtt-distribution')) void _loadBestiaryCatalog();
   // Préserve la position de défilement de la vue Scènes : sans ça, reconstruire
   // la liste des pages + les tokens de scène (au changement de scène) fait
   // remonter le panneau tout en haut.
@@ -192,6 +238,22 @@ export function _renderTrayImpl() {
   });
   const edgeReserveCount = document.getElementById('vtt-edge-reserve-count');
   if (edgeReserveCount) edgeReserveCount.textContent = String(reserve.length);
+  const distributionCount = document.getElementById('vtt-distribution-count');
+  if (distributionCount) distributionCount.textContent = `${onPage.length} en scène · ${reserve.length} à placer`;
+  const distributionCounts = {
+    all: all.length + Object.keys(VS.bestiary || {}).length,
+    player: all.filter(token => token.type === 'player').length,
+    npc: all.filter(token => token.type === 'npc' && !token.improvised).length,
+    bestiary: Object.keys(VS.bestiary || {}).length,
+    improvised: all.filter(token => !!token.improvised).length,
+  };
+  document.querySelectorAll('[data-vtt-distribution-filter]').forEach(button => {
+    const active = button.dataset.vttDistributionFilter === _distributionFilter;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+    const count = button.querySelector('b');
+    if (count) count.textContent = String(distributionCounts[button.dataset.vttDistributionFilter] || 0);
+  });
 
   const ae = document.activeElement;
   const focusedSearch = ae?.classList?.contains('vtt-tray-search-input') ? ae.dataset.search : null;
@@ -214,7 +276,7 @@ export function _renderTrayImpl() {
     const actionBtn = t.type === 'enemy'
       ? `<button class="vtt-scene-token-remove" data-vtt-fn="_vttDeleteToken" data-vtt-args="${t.id}" title="Supprimer de la scène">×</button>`
       : `<button class="vtt-scene-token-remove" data-vtt-fn="_vttRetireToken" data-vtt-args="${t.id}" title="${isSummon ? 'Dissiper cette invocation' : 'Renvoyer en réserve'}">${isSummon ? '×' : '↩'}</button>`;
-    return `<div class="vtt-scene-token ${VS.selected === t.id ? 'active' : ''}" data-vtt-fn="_vttSelectFromTray" data-vtt-args="${t.id}" title="${_esc(ld.displayName ?? t.name)}${hpKnownL ? ` · PV ${hp}/${hpm}` : ''}">
+    return `<div class="vtt-scene-token ${VS.selected === t.id ? 'active' : ''}${t.visible === false ? ' is-hidden' : ''}" data-vtt-fn="_vttSelectFromTray" data-vtt-args="${t.id}" title="${_esc(ld.displayName ?? t.name)}${hpKnownL ? ` · PV ${hp}/${hpm}` : ''}${t.visible === false ? ' · Caché aux joueurs' : ''}">
       <div class="vtt-scene-token-ring" style="--hp:${Math.round(rat * 100)}%;--hc:${hpKnownL ? hpColor(rat) : '#64748b'};--tc:${TYPE_COLOR[t.type] ?? '#888'}">
       <div class="vtt-tray-dot">
         ${ld.displayImage
@@ -222,6 +284,7 @@ export function _renderTrayImpl() {
           : `<span>${_esc(tokenInitial(t, ld))}</span>`}
       </div>
       </div>
+      ${t.visible === false ? '<span class="vtt-scene-token-hidden" title="Caché aux joueurs">◉̸</span>' : ''}
       ${actionBtn}
     </div>`;
   };
@@ -233,7 +296,10 @@ export function _renderTrayImpl() {
     const pageName = t.pageId && t.pageId !== VS.activePage?.id ? (VS.pages[t.pageId]?.name || 'autre scène') : '';
     const hpKnown = ld.displayHp !== null && ld.displayHpMax !== null;
     const level = t.characterId ? Number(VS.characters?.[t.characterId]?.niveau || VS.characters?.[t.characterId]?.level || 0) : 0;
-    const subline = t.type === 'player' ? `${playerLabel(t)}${level ? ` · Nv ${level}` : ''}` : 'PNJ';
+    const npc = t.npcId ? VS.npcs?.[t.npcId] : null;
+    const subline = t.type === 'player'
+      ? `${playerLabel(t)}${level ? ` · Nv ${level}` : ''}`
+      : [t.role || npc?.role || (t.improvised ? 'Figurant' : 'PNJ'), npc?.lieu].filter(Boolean).join(' · ');
     const statusDot = t.type === 'player'
       ? `<span class="vtt-res-line-status ${online ? 'is-online' : ''}" title="${online ? 'En ligne' : 'Hors ligne'}"></span>` : '';
     const name = _esc(ld.displayName ?? t.name);
@@ -259,14 +325,27 @@ export function _renderTrayImpl() {
   if (scEl) {
     const countEl = document.getElementById('vtt-scene-token-count');
     if (countEl) countEl.textContent = String(onPage.length);
+      const revealEl = document.getElementById('vtt-scene-reveal-all');
+      const hiddenCount = onPage.filter(token => token.visible === false).length;
+      if (revealEl) {
+        revealEl.hidden = !hiddenCount;
+        revealEl.innerHTML = `Tout révéler <b>${hiddenCount}</b>`;
+      }
     const pageEl = document.getElementById('vtt-scene-token-page');
     if (pageEl) pageEl.textContent = VS.activePage?.name || '';
-    if (!onPage.length) {
+    const visibleOnPage = onPage.filter(token => {
+      if (_distributionFilter === 'player') return token.type === 'player';
+      if (_distributionFilter === 'npc') return token.type === 'npc' && !token.improvised;
+      if (_distributionFilter === 'bestiary') return token.type === 'enemy' && !token.improvised;
+      if (_distributionFilter === 'improvised') return !!token.improvised;
+      return true;
+    }).filter(token => !_traySearch || _searchIncludes(`${_live(token).displayName ?? token.name ?? ''} ${token.role || ''}`, _traySearch));
+    if (!visibleOnPage.length) {
       scEl.innerHTML = `<div class="vtt-tray-empty">Aucun token sur cette scène</div>`;
     } else {
-      const players = sortTokensByName(onPage.filter(t => t.type === 'player'));
-      const npcs    = sortTokensByName(onPage.filter(t => t.type === 'npc'));
-      let   enemies = onPage.filter(t => t.type === 'enemy');
+      const players = sortTokensByName(visibleOnPage.filter(t => t.type === 'player'));
+      const npcs    = sortTokensByName(visibleOnPage.filter(t => t.type === 'npc'));
+      let   enemies = visibleOnPage.filter(t => t.type === 'enemy');
       if (inCombat && enemies.length > 1) {
         enemies = [...enemies].sort((a, b) => {
           const la = _live(a), lb = _live(b);
@@ -289,60 +368,56 @@ export function _renderTrayImpl() {
       npc: reserve.filter(t => t.type === 'npc').length,
       elsewhere: reserve.filter(t => t.pageId && t.pageId !== VS.activePage?.id).length,
     };
+    const showReserve = _distributionFilter !== 'bestiary';
     const filterMatch = t => {
-      if (_reserveFilter === 'player') return t.type === 'player';
+      if (_distributionFilter === 'player') return t.type === 'player';
+      if (_distributionFilter === 'npc') return t.type === 'npc' && !t.improvised;
+      if (_distributionFilter === 'improvised') return !!t.improvised;
       if (_reserveFilter === 'offline') return t.type === 'player' && !isOnline(t.ownerId);
-      if (_reserveFilter === 'npc') return t.type === 'npc';
       if (_reserveFilter === 'elsewhere') return !!(t.pageId && t.pageId !== VS.activePage?.id);
       return true;
     };
     const searched = reserve.filter(t =>
       filterMatch(t)
-      && (!_traySearch || _searchIncludes(`${_live(t).displayName ?? t.name ?? ''} ${VS.pages[t.pageId]?.name || ''}`, _traySearch)));
+      && (!_traySearch || _searchIncludes(`${_live(t).displayName ?? t.name ?? ''} ${t.role || ''} ${VS.npcs?.[t.npcId]?.role || ''} ${VS.npcs?.[t.npcId]?.lieu || ''} ${playerLabel(t)} ${VS.pages[t.pageId]?.name || ''}`, _traySearch)));
     const presentPlayers = sortTokensByName(searched.filter(t => t.type === 'player' && isOnline(t.ownerId)));
     const absentPlayers  = sortTokensByName(searched.filter(t => t.type === 'player' && !isOnline(t.ownerId)));
-    const npcs           = sortTokensByName(searched.filter(t => t.type === 'npc'));
+    const npcs           = sortTokensByName(searched.filter(t => t.type === 'npc' && !t.improvised));
+    const improvised     = sortTokensByName(searched.filter(t => !!t.improvised));
     const mkBlock = (label, items) => {
       if (!items.length) return '';
       return `<div class="vtt-res-group-title">${label} · ${items.length}</div>` + items.map(mkResLine).join('');
     };
-    const clrBtn = _traySearch ? `<button class="vtt-tray-search-clr" data-vtt-fn="_vttTrayClearSearch" title="Effacer">✕</button>` : '';
-    const filterChip = (key, label, count) => `<button class="vtt-res-filter ${_reserveFilter === key ? 'active' : ''}" data-vtt-fn="_vttReserveFilter" data-vtt-args="${key}">${label}<b>${count}</b></button>`;
     const list = searched.length
       ? mkBlock('Joueurs en ligne', presentPlayers)
         + mkBlock('Joueurs hors ligne', absentPlayers)
         + mkBlock('PNJ', npcs)
+        + mkBlock('Figurants', improvised)
       : `<div class="vtt-tray-empty">${reserve.length ? 'Aucun résultat' : 'Réserve vide'}</div>`;
     const onlineReserveCount = reserve.filter(t => t.type === 'player' && isOnline(t.ownerId)).length;
     const selectionBar = _reservePicked.size ? `<div class="vtt-res-selection"><span><b>${_reservePicked.size}</b> sélectionné${_reservePicked.size > 1 ? 's' : ''}</span><button data-vtt-fn="_vttReserveClearPicked">Annuler</button><button class="primary" data-vtt-fn="_vttReservePlacePicked">＋ Placer</button></div>` : '';
-    reEl.innerHTML = `
-      <div class="vtt-res-head">
-        <strong>En réserve</strong><span>${reserve.length}</span><i></i>
-        ${onlineReserveCount ? `<button type="button" class="vtt-res-place-online" data-vtt-fn="_vttPlaceOnlineReserve">＋ Placer les joueurs en ligne · ${onlineReserveCount}</button>` : ''}
-      </div>
+    reEl.hidden = !showReserve;
+    reEl.innerHTML = showReserve ? `
       ${blockedSummons.length ? `<div class="vtt-res-summon-warning"><span>🐾 ${blockedSummons.length} invocation${blockedSummons.length > 1 ? 's' : ''} bloquée${blockedSummons.length > 1 ? 's' : ''}</span><button type="button" data-vtt-fn="_vttClearReserveSummons">Dissiper</button></div>` : ''}
-      <div class="vtt-tray-search">
-        <svg class="vtt-tray-search-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
-        <input type="text" class="vtt-tray-search-input" data-search="reserve" placeholder="Nom, joueur, scène…"
-          value="${_esc(_traySearch)}" data-vtt-fn="_vttTraySearch" data-vtt-on="input" data-vtt-args="$value">
-        ${clrBtn}
-      </div>
-      <div class="vtt-res-filters">
-        ${filterChip('all', 'Tous', counts.all)}
-        ${filterChip('player', 'Joueurs', counts.online + counts.offline)}
-        ${filterChip('npc', 'PNJ', counts.npc)}
-        ${counts.elsewhere ? filterChip('elsewhere', 'Ailleurs', counts.elsewhere) : ''}
-      </div>
-      <div class="vtt-res-scroll vtt-res-cards is-grid${_reservePicked.size ? ' is-selecting' : ''}">${list}</div>
-      ${selectionBar}`;
+      <div class="vtt-res-scroll vtt-res-cards is-list${_reservePicked.size ? ' is-selecting' : ''}">${list}</div>
+      ${selectionBar}` : '';
+
+    const bringEl = document.getElementById('vtt-bring-group');
+    if (bringEl) {
+      const onlineReserve = reserve.filter(t => t.type === 'player' && isOnline(t.ownerId));
+      const pageNames = [...new Set(onlineReserve.map(token => VS.pages?.[token.pageId]?.name).filter(Boolean))];
+      bringEl.hidden = !onlineReserveCount || !['all','player'].includes(_distributionFilter);
+      bringEl.innerHTML = !bringEl.hidden ? `<div class="vtt-bring-avatars">${onlineReserve.slice(0,4).map(token => { const ld = _live(token); const initial = tokenInitial(token, ld); return `<span>${ld.displayImage ? `<img src="${_esc(ld.displayImage)}" alt="">` : _esc(initial)}</span>`; }).join('')}</div><span><b>${onlineReserveCount} joueur${onlineReserveCount > 1 ? 's' : ''} en ligne</b><small>${pageNames.length === 1 ? `sur ${_esc(pageNames[0])}` : pageNames.length > 1 ? `sur ${pageNames.length} autres scènes` : 'à placer sur cette scène'}</small></span><button type="button" data-vtt-fn="_vttBringOnlinePlayers">Amener</button>` : '';
+    }
   }
 
   const beEl = document.getElementById('vtt-bestiary-body');
   if (beEl) {
+    const showBestiary = _distributionFilter === 'all' || _distributionFilter === 'bestiary';
+    beEl.hidden = !showBestiary;
     const bsts = Object.values(VS.bestiary)
       .filter(b => !_bstSearch || _searchIncludes(b.nom || '', _bstSearch))
       .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
-    const clrBtn = _bstSearch ? `<button class="vtt-tray-search-clr" data-vtt-fn="_vttBstClearSearch" title="Effacer">✕</button>` : '';
     const grid = bsts.length
       ? `<div class="vtt-bst-grid">${bsts.map(b => {
           const img = normalizeImageUrl(b.imageUrl || b.photoURL || b.photo || b.avatar || b.portraitUrl || '');
@@ -371,13 +446,6 @@ export function _renderTrayImpl() {
         <strong>Bestiaire</strong>
         <span>${bsts.length}/${Object.keys(VS.bestiary).length}</span>
         <i></i>
-        <button type="button" class="vtt-bst-create" data-vtt-fn="_vttCreateEnemy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Créer</button>
-      </div>
-      <div class="vtt-tray-search">
-        <svg class="vtt-tray-search-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>
-        <input type="text" class="vtt-tray-search-input" data-search="bestiary" placeholder="Rechercher une créature…"
-          value="${_esc(_bstSearch)}" data-vtt-fn="_vttBstSearch" data-vtt-on="input" data-vtt-args="$value">
-        ${clrBtn}
       </div>
       <div class="vtt-bst-scroll">${grid}</div>`;
   }
@@ -413,7 +481,7 @@ function _pageSmartSort(a, b) {
   return (a.order ?? 0) - (b.order ?? 0);
 }
 
-function _pageThumbUrl(p) {
+export function _pageThumbUrl(p) {
   const imgs = Array.isArray(p?.backgroundImages) ? p.backgroundImages : [];
   for (const image of imgs) {
     const resolved = resolveMapImageUrl(image);
@@ -462,16 +530,49 @@ function _pageCard(p, broadcastId, { showFolder = false } = {}) {
   </div>`;
 }
 
-function _pageMenuItems(pageId) {
+export function _pageMenuItems(pageId) {
   const page = VS.pages[pageId];
   if (!page) return [];
   return [
     { label:'📡 Envoyer aux joueurs', action:'_vttSendToPage', args:pageId },
+    { label:'▣ Changer la carte…', action:'_vttReplacePageMap', args:pageId },
+    { label:'📁 Déplacer vers…', action:'_vttPageMoveMenu', args:`$event|${pageId}` },
     { label:'✏️ Modifier la scène', action:'_vttEditPage', args:pageId },
     { label:'⧉ Dupliquer sans les tokens', action:'_vttDuplicatePage', args:pageId },
     '---',
     { label:'🗑️ Supprimer la scène', action:'_vttDeletePage', args:pageId },
   ];
+}
+
+export function _vttPageMoveMenu(event, pageId) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const page = VS.pages?.[pageId];
+  if (!page) return;
+  const folders = [...new Set(Object.values(VS.pages || {}).map(item => (item.folder || '').trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'fr',{sensitivity:'base'}));
+  const rect = event?.currentTarget?.getBoundingClientRect?.();
+  _showCtxMenu(event?.clientX || rect?.left || 0, event?.clientY || rect?.bottom || 0, [
+    { label:'Déplacer la scène' },
+    { label:`${!page.folder ? '✓ ' : ''}Sans dossier`, action:'_vttMovePageToFolder', args:`${pageId}|` },
+    ...folders.map(folder => ({ label:`${(page.folder || '').trim() === folder ? '✓ ' : ''}${folder}`, action:'_vttMovePageToFolder', args:`${pageId}|${encodeURIComponent(folder)}` })),
+  ]);
+}
+
+export async function _vttMovePageToFolder(pageId, encodedFolder = '') {
+  const page = VS.pages?.[pageId]; if (!page) return;
+  const folder = encodedFolder ? decodeURIComponent(encodedFolder) : '';
+  if ((page.folder || '').trim() === folder) return;
+  const siblings = Object.values(VS.pages || {}).filter(item => (item.folder || '').trim() === folder);
+  try {
+    await updateDoc(_pgRef(pageId), { folder, order:siblings.length });
+    Object.assign(page, { folder, order:siblings.length });
+    _renderSceneReel();
+    showNotif(`Scène déplacée vers « ${_pageFolderLabel(folder)} ».`, 'success');
+  } catch (error) {
+    console.error('[vtt] déplacement scène', error);
+    showNotif('Impossible de déplacer la scène.', 'error');
+  }
 }
 
 export function _vttPageMenu(e, pageId) {
@@ -694,6 +795,246 @@ export function _vttPageFolderFilter(f) {
   _renderPageList();
 }
 
+export function _vttReelFolder(folder) {
+  _pageFolderFilter = folder === 'all' ? 'all' : decodeURIComponent(folder || '');
+  _savePageFolderFilter();
+  _renderSceneReel();
+}
+
+export function _vttReelFolderMenu(event) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const all = Object.values(VS.pages || {});
+  const ordered = [...new Set([
+    ...(VS.session?.pageFolderOrder || []).filter(Boolean),
+    ...all.map(page => (page.folder || '').trim()).filter(Boolean).sort((a,b)=>a.localeCompare(b,'fr',{sensitivity:'base'})),
+  ])];
+  const rect = event?.currentTarget?.getBoundingClientRect?.();
+  _showCtxMenu(event?.clientX || rect?.left || 0, event?.clientY || rect?.bottom || 0, [
+    { label:`${_pageFolderFilter === 'all' ? '✓ ' : ''}Toutes les scènes · ${all.length}`, action:'_vttReelFolder', args:'all' },
+    ...ordered.map(folder => ({ label:`${_pageFolderFilter === folder ? '✓ ' : ''}${folder} · ${all.filter(page => (page.folder || '').trim() === folder).length}`, action:'_vttReelFolder', args:encodeURIComponent(folder) })),
+    ...(all.some(page => !(page.folder || '').trim()) ? [{ label:`${_pageFolderFilter === '' ? '✓ ' : ''}Sans dossier · ${all.filter(page => !(page.folder || '').trim()).length}`, action:'_vttReelFolder', args:'' }] : []),
+  ]);
+}
+
+export function _vttReelToggle() {
+  _closeScenePopover();
+  _reelCompact = !_reelCompact;
+  try { localStorage.setItem('vtt-bar-mode', _reelCompact ? 'compact' : 'strip'); } catch {}
+  _renderPageTabs();
+}
+
+function _closeScenePopover() {
+  const popover = document.getElementById('vtt-scene-popover');
+  if (popover) popover.hidden = true;
+  _reelPopoverSortables.forEach(sortable => { try { sortable.destroy(); } catch {} });
+  _reelPopoverSortables = [];
+  if (_reelPopoverOutsideHandler) {
+    document.removeEventListener('pointerdown', _reelPopoverOutsideHandler, true);
+    _reelPopoverOutsideHandler = null;
+  }
+}
+
+export async function _vttOpenSceneFromPopover(pageId) {
+  _closeScenePopover();
+  await _switchPage(pageId);
+}
+
+export function _vttSceneStep(direction = '1') {
+  const pages = Object.values(VS.pages || {})
+    .filter(page => _pageFolderFilter === 'all' || (page.folder || '').trim() === _pageFolderFilter)
+    .sort(_pageSmartSort);
+  if (!pages.length) return;
+  const index = Math.max(0, pages.findIndex(page => page.id === VS.activePage?.id));
+  const step = Number(direction) < 0 ? -1 : 1;
+  _switchPage(pages[(index + step + pages.length) % pages.length].id);
+}
+
+export function _vttReelAll() {
+  const popover = document.getElementById('vtt-scene-popover');
+  if (!popover) return;
+  if (!popover.hidden) {
+    _closeScenePopover();
+    return;
+  }
+  const pages = Object.values(VS.pages || {});
+  const folderOrder = [...new Set([
+    ...(VS.session?.pageFolderOrder || []).filter(Boolean),
+    ...pages.map(page => (page.folder || '').trim()).filter(Boolean).sort((a,b)=>a.localeCompare(b,'fr',{sensitivity:'base'})),
+    '',
+  ])];
+  const sceneCard = page => {
+    const thumb = _pageThumbUrl(page);
+    const isActive = page.id === VS.activePage?.id;
+    const isPlayers = page.id === VS.session?.activePageId;
+    const sendIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M8 8a5.6 5.6 0 0 0 0 8M16 8a5.6 5.6 0 0 1 0 8M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg>';
+    return `<article class="vtt-scene-popover-card" data-page-id="${page.id}" data-scene-search="${_esc(`${page.name || ''} ${page.folder || ''}`.toLowerCase())}">
+      <button type="button" class="vtt-scene-popover-open${isActive ? ' active' : ''}" data-vtt-fn="_vttOpenSceneFromPopover" data-vtt-args="${page.id}" style="${thumb ? `background-image:url('${_esc(thumb)}')` : ''}">
+        ${isPlayers ? '<small>Joueurs</small>' : ''}<b>${_esc(page.name || 'Scène')}</b>
+      </button>
+      <span class="vtt-scene-popover-actions">${isPlayers ? '' : `<button type="button" data-vtt-fn="_vttSendToPage" data-vtt-args="${page.id}" title="Envoyer les joueurs">${sendIcon}</button>`}<button type="button" data-vtt-fn="_vttPageMenu" data-vtt-args="$event|${page.id}" aria-label="Actions">•••</button></span>
+    </article>`;
+  };
+  const grouped = folderOrder.map(folder => ({
+    folder,
+    pages:pages.filter(page => (page.folder || '').trim() === folder).sort(_pageSmartSort),
+  })).filter(group => group.pages.length);
+  const searchIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg>';
+  const plusIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+  popover.innerHTML = `<div class="vtt-scene-popover-head"><h3>Scènes</h3><label class="vtt-scene-popover-search">${searchIcon}<input type="search" placeholder="Rechercher une scène, un dossier…" data-vtt-fn="_vttScenePopoverSearch" data-vtt-on="input" data-vtt-args="$value"></label><button type="button" class="vtt-scene-popover-new" data-vtt-fn="_vttAddPage">${plusIcon}Nouvelle</button><button type="button" class="vtt-scene-popover-close" data-vtt-fn="_vttReelAll" aria-label="Fermer">×</button></div>
+    <div class="vtt-scene-popover-body"><div class="vtt-scene-popover-folders">${grouped.map(group => `<section class="vtt-scene-popover-folder" data-folder="${encodeURIComponent(group.folder)}"><h4><i>⋮⋮</i><span>${_esc(_pageFolderLabel(group.folder))}</span><b>${group.pages.length}</b><em></em></h4><div class="vtt-scene-popover-grid">${group.pages.map(sceneCard).join('')}</div></section>`).join('')}</div><div class="vtt-scene-popover-empty" hidden>Aucune scène ne correspond.<button type="button" data-vtt-fn="_vttAddPage">${plusIcon}Créer une scène</button></div></div>`;
+  popover.hidden = false;
+  _reelPopoverSortables.forEach(sortable => { try { sortable.destroy(); } catch {} });
+  _reelPopoverSortables = [];
+  const persistPages = async () => {
+    const batch = writeBatch(db);
+    let changed = 0;
+    popover.querySelectorAll('.vtt-scene-popover-folder').forEach(section => {
+      const folder = decodeURIComponent(section.dataset.folder || '');
+      section.querySelectorAll('.vtt-scene-popover-card[data-page-id]').forEach((card, order) => {
+        const page = VS.pages?.[card.dataset.pageId];
+        if (!page || ((page.folder || '').trim() === folder && (page.order ?? 0) === order)) return;
+        Object.assign(page, { folder, order });
+        batch.update(_pgRef(page.id), { folder, order });
+        changed++;
+      });
+    });
+    if (changed) await batch.commit().catch(error => { console.error('[vtt] rangement scènes', error); showNotif('Impossible de ranger les scènes.', 'error'); });
+  };
+  popover.querySelectorAll('.vtt-scene-popover-grid').forEach(grid => _reelPopoverSortables.push(new Sortable(grid, {
+    group:'vtt-scene-popover-pages', animation:140, draggable:'.vtt-scene-popover-card', onEnd:persistPages,
+  })));
+  const foldersEl = popover.querySelector('.vtt-scene-popover-folders');
+  if (foldersEl) _reelPopoverSortables.push(new Sortable(foldersEl, {
+    animation:140, draggable:'.vtt-scene-popover-folder', handle:'h4',
+    onEnd:async () => {
+      const order = [...foldersEl.querySelectorAll('.vtt-scene-popover-folder')].map(section => decodeURIComponent(section.dataset.folder || '')).filter(Boolean);
+      await setDoc(_sesRef(), { pageFolderOrder:order }, { merge:true }).catch(error => { console.error('[vtt] ordre dossiers', error); showNotif("Impossible d'enregistrer l'ordre des dossiers.", 'error'); });
+    },
+  }));
+  window.setTimeout(() => {
+    _reelPopoverOutsideHandler = event => {
+      if (popover.hidden || popover.contains(event.target) || event.target?.closest?.('[data-vtt-fn="_vttReelAll"]')) return;
+      _closeScenePopover();
+    };
+    document.addEventListener('pointerdown', _reelPopoverOutsideHandler, true);
+    popover.querySelector('input')?.focus();
+  }, 0);
+}
+
+export function _vttScenePopoverSearch(value) {
+  const q = String(value || '').trim().toLocaleLowerCase('fr');
+  document.querySelectorAll('#vtt-scene-popover [data-scene-search]').forEach(card => {
+    card.hidden = !!q && !String(card.dataset.sceneSearch || '').includes(q);
+  });
+  document.querySelectorAll('#vtt-scene-popover .vtt-scene-popover-folder').forEach(section => {
+    section.hidden = ![...section.querySelectorAll('[data-scene-search]')].some(card => !card.hidden);
+  });
+  const empty = document.querySelector('#vtt-scene-popover .vtt-scene-popover-empty');
+  if (empty) empty.hidden = [...document.querySelectorAll('#vtt-scene-popover [data-scene-search]')].some(card => !card.hidden);
+}
+
+export function _vttRegieMenu(event) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const rect = event?.currentTarget?.getBoundingClientRect?.();
+  const playerPage = VS.pages?.[VS.session?.activePageId];
+  const items = [
+    { label:'📡 Envoyer les joueurs', action:'_vttSendToPage', args:VS.activePage?.id || '' },
+    { label:'♟ Envoyer et amener le groupe', action:'_vttSendAndBring', args:VS.activePage?.id || '' },
+  ];
+  if (playerPage && playerPage.id !== VS.activePage?.id) {
+    items.push('---', { label:`↩ Revenir sur « ${playerPage.name || 'scène joueurs'} »`, action:'_vttSwitchPage', args:playerPage.id });
+  }
+  _showCtxMenu(event?.clientX || rect?.left || 0, event?.clientY || rect?.bottom || 0, items);
+}
+
+export function _renderSceneReel() {
+  const el = document.getElementById('vtt-scene-reel');
+  if (!el || !STATE.isAdmin) return;
+  const all = Object.values(VS.pages || {}).sort(_pageSmartSort);
+  const folders = [...new Set([
+    ...(VS.session?.pageFolderOrder || []).filter(Boolean),
+    ...all.map(page => (page.folder || '').trim()),
+  ])].filter(folder => all.some(page => (page.folder || '').trim() === folder));
+  if (_pageFolderFilter !== 'all' && !folders.includes(_pageFolderFilter)) _pageFolderFilter = 'all';
+  const pages = all.filter(page => _pageFolderFilter === 'all' || (page.folder || '').trim() === _pageFolderFilter);
+  const currentFolderLabel = _pageFolderFilter === 'all' ? 'Toutes les scènes' : _pageFolderLabel(_pageFolderFilter);
+  const currentFolderCount = _pageFolderFilter === 'all' ? all.length : pages.length;
+  const sendIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M8 8a5.6 5.6 0 0 0 0 8M16 8a5.6 5.6 0 0 1 0 8M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg>';
+  const folderIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h6l2-2h9v13h-17z"/></svg>';
+  const downIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>';
+  const gridIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/></svg>';
+  const upIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 14 5-5 5 5"/></svg>';
+  const cards = pages.map(page => {
+    const thumb = _pageThumbUrl(page);
+    const isMj = page.id === VS.activePage?.id;
+    const isPlayers = page.id === VS.session?.activePageId;
+    return `<article class="vtt-reel-card${isMj ? ' is-active' : ''}${isPlayers ? ' is-players' : ''}" data-page-id="${page.id}">
+      <button type="button" class="vtt-reel-open" data-vtt-fn="_vttSwitchPage" data-vtt-args="${page.id}" style="${thumb ? `background-image:url('${_esc(thumb)}')` : ''}" aria-label="Ouvrir ${_esc(page.name || 'la scène')}"><b>${_esc(page.name || 'Scène')}</b><em${isPlayers ? '' : ' hidden'}>Joueurs</em></button>
+      <span class="vtt-reel-actions"><button type="button" class="vtt-reel-send" data-vtt-fn="_vttSendToPage" data-vtt-args="${page.id}" title="Envoyer les joueurs"${isPlayers ? ' hidden' : ''}>${sendIcon}</button><button type="button" data-vtt-fn="_vttPageMenu" data-vtt-args="$event|${page.id}" title="Actions">•••</button></span>
+    </article>`;
+  }).join('');
+  el.hidden = _reelCompact;
+  const structureKey = JSON.stringify({
+    filter:_pageFolderFilter,
+    pages:pages.map(page => [page.id, page.name || '', _pageThumbUrl(page), page.order ?? 0, (page.folder || '').trim()]),
+  });
+  if (el.dataset.structureKey === structureKey && el.querySelector('.vtt-reel-track')) {
+    el.querySelectorAll('.vtt-reel-card[data-page-id]').forEach(card => {
+      const isActive = card.dataset.pageId === VS.activePage?.id;
+      const isPlayers = card.dataset.pageId === VS.session?.activePageId;
+      card.classList.toggle('is-active', isActive);
+      card.classList.toggle('is-players', isPlayers);
+      const badge = card.querySelector('.vtt-reel-open em');
+      const send = card.querySelector('.vtt-reel-send');
+      if (badge) badge.hidden = !isPlayers;
+      if (send) send.hidden = isPlayers;
+    });
+    requestAnimationFrame(() => el.querySelector('.vtt-reel-card.is-active')?.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'nearest' }));
+    return;
+  }
+  el.dataset.structureKey = structureKey;
+  el.innerHTML = `<button type="button" class="vtt-reel-folder" data-vtt-fn="_vttReelFolderMenu" data-vtt-args="$event" title="Changer de dossier"><small>Dossier · ${currentFolderCount}</small><span>${folderIcon}<b>${_esc(currentFolderLabel)}</b>${downIcon}</span></button>
+    <div class="vtt-reel-track" id="vtt-reel-track">${cards}<button type="button" class="vtt-reel-new" data-vtt-fn="_vttAddPage"${_pageFolderFilter === 'all' ? '' : ` data-vtt-args="${encodeURIComponent(_pageFolderFilter)}"`}><span>＋</span><b>Nouvelle scène</b></button></div>
+    <div class="vtt-reel-tools"><button type="button" data-vtt-fn="_vttReelAll" title="Toutes les scènes">${gridIcon}</button><button type="button" data-vtt-fn="_vttReelToggle" title="Réduire la pellicule">${upIcon}</button></div>`;
+  try { _reelSortable?.destroy(); } catch {}
+  _reelSortable = null;
+  const track = document.getElementById('vtt-reel-track');
+  if (track && pages.length > 1) {
+    _reelSortable = new Sortable(track, {
+      animation: 140,
+      direction: 'horizontal',
+      draggable: '.vtt-reel-card',
+      ghostClass: 'vtt-reel-sortable-ghost',
+      chosenClass: 'vtt-reel-sortable-chosen',
+      onEnd: async () => {
+        const grouped = new Map();
+        track.querySelectorAll('.vtt-reel-card[data-page-id]').forEach(card => {
+          const page = VS.pages?.[card.dataset.pageId];
+          if (!page) return;
+          const folder = (page.folder || '').trim();
+          if (!grouped.has(folder)) grouped.set(folder, []);
+          grouped.get(folder).push(page);
+        });
+        const batch = writeBatch(db);
+        let changed = 0;
+        grouped.forEach(items => items.forEach((page, order) => {
+          if ((page.order ?? 0) === order) return;
+          page.order = order;
+          batch.update(_pgRef(page.id), { order });
+          changed++;
+        }));
+        if (changed) await batch.commit().catch(error => {
+          console.error('[vtt] ordre pellicule', error);
+          showNotif("Impossible d'enregistrer l'ordre des scènes.", 'error');
+        });
+      },
+    });
+  }
+  requestAnimationFrame(() => el.querySelector('.vtt-reel-card.is-active')?.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'nearest' }));
+}
+
 export function _vttPageFoldersMenu(e) {
   e?.preventDefault?.();
   e?.stopPropagation?.();
@@ -763,8 +1104,35 @@ export function _vttPageFolderToggle(f) {
 
 // ─ Indicateur de page courant pour les joueurs (lecture seule) ──────
 export function _renderPageTabs() {
-  if (STATE.isAdmin) { _renderPageList(); return; } // MJ : liste dans le tray
   const el=document.getElementById('vtt-page-tabs'); if (!el) return;
+  const paint = (key, html) => {
+    if (el.dataset.renderKey === key) return;
+    el.dataset.renderKey = key;
+    el.innerHTML = html;
+  };
+  if (STATE.isAdmin) {
+    const active = VS.activePage;
+    const players = VS.pages?.[VS.session?.activePageId];
+    const synced = !!(active?.id && active.id === players?.id);
+    const root = document.getElementById('vtt-root');
+    root?.toggleAttribute('data-vtt-preview', !synced);
+    if (root) root.dataset.reelCompact = _reelCompact ? '1' : '0';
+    const state = synced
+      ? `<span class="vtt-regie-state is-live${_reelCompact ? ' is-compact' : ''}"><i></i><b>En direct</b>${_reelCompact ? '' : `<em>·</em><strong>${_esc(active?.name || 'Aucune scène')}</strong>`}<small>Les joueurs voient ta scène</small></span>`
+      : `<span class="vtt-regie-state is-preview${_reelCompact ? ' is-compact' : ''}"><i></i><b>Aperçu</b>${_reelCompact ? '' : `<em>·</em><strong>${_esc(active?.name || 'Aucune scène')}</strong>`}<small>Joueurs sur <button type="button" data-vtt-fn="_vttSwitchPage" data-vtt-args="${players?.id || ''}">${_esc(players?.name || 'aucune scène')}</button></small></span><button type="button" class="vtt-regie-send" data-vtt-fn="_vttSendToPage" data-vtt-args="${active?.id || ''}">Envoyer les joueurs</button><button type="button" class="vtt-regie-more" data-vtt-fn="_vttRegieMenu" data-vtt-args="$event" aria-label="Plus d’options">⌄</button>`;
+    if (_reelCompact) {
+      const thumb = _pageThumbUrl(active);
+      const leftIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 7-5 5 5 5"/></svg>';
+      const rightIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 7 5 5-5 5"/></svg>';
+      const downIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>';
+      const stripIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M8 6v12M16 6v12"/></svg>';
+      paint(`mj|compact|${active?.id || ''}|${active?.name || ''}|${thumb}|${players?.id || ''}|${players?.name || ''}|${synced}`, `<div class="vtt-regie-compact"><button type="button" class="vtt-regie-compact-step" data-vtt-fn="_vttSceneStep" data-vtt-args="-1" aria-label="Scène précédente">${leftIcon}</button><button type="button" data-vtt-fn="_vttReelAll" class="vtt-regie-compact-scene"><span style="${thumb ? `background-image:url('${_esc(thumb)}')` : ''}"></span><b>${_esc(active?.name || 'Aucune scène')}</b>${downIcon}</button><button type="button" class="vtt-regie-compact-step" data-vtt-fn="_vttSceneStep" data-vtt-args="1" aria-label="Scène suivante">${rightIcon}</button><button type="button" class="vtt-regie-compact-expand" data-vtt-fn="_vttReelToggle" title="Afficher la pellicule">${stripIcon}</button></div>${state}`);
+    } else {
+      paint(`mj|strip|${active?.id || ''}|${active?.name || ''}|${players?.id || ''}|${players?.name || ''}|${synced}`, state);
+    }
+    _renderSceneReel();
+    return;
+  }
   // Les joueurs ne naviguent pas — ils voient juste le nom de leur page courante
   const name = VS.activePage?.name ?? '…';
   const uid  = STATE.user?.uid;
@@ -786,7 +1154,7 @@ export function _renderPageTabs() {
   const actionBtn =
     (canInvoke ? `<button class="vtt-btn-sm" data-vtt-fn="_vttInvokeMyToken" title="Placer un personnage sur cette carte">${invokeLbl}</button>` : '') +
     (canRetire ? `<button class="vtt-btn-sm" data-vtt-fn="_vttRetireMyToken" title="Retirer un personnage de la carte">${retireLbl}</button>` : '');
-  el.innerHTML = `<span class="vtt-page-current-label">📍 ${_esc(name)}</span>${actionBtn}`;
+  paint(`player|${VS.activePage?.id || ''}|${name}|${canInvoke}|${canRetire}|${multi}`, `<span class="vtt-page-current-label">📍 ${_esc(name)}</span>${actionBtn}`);
 }
 
 export async function _switchPage(pageId) {

@@ -14,7 +14,8 @@ import { isAgendaSessionUpcoming } from '../shared/agenda-sessions.js';
 import { calcPalier, calcPVMax, calcPMMax, calcCA, calcOr, getDefaultCharForUser, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { loadStats, peekStats, applyStatsLegacyRollup, resetStats, deleteCharStats, deleteCharDateStats, deleteDateStats, deleteMissionStats, correctDateCombatStats, setSessionMission } from '../shared/stats.js';
 import { aggregateActionAverages, aggregateSkillAverages, aggregateVttRollDetails, combatAverages, mergeTrackedCombatStats, mergeTrackedSkillStats, mergeVttRollDetails, normalizeSkillStats, topStatTies, vttLogTimeMs } from '../shared/stats-analysis.js';
-import { MVP_AXIS_GUIDE, MVP_SCORING_GUIDE, scoreMvpView } from '../shared/stats-mvp.js';
+import { MVP_AXIS_GUIDE, MVP_SCORING_GUIDE, mvpCalibrationRows, scoreMvpView } from '../shared/stats-mvp.js';
+import { statsBalance, statsInsights, statsRecords, statsSessionTotal, statsSpotlight, suggestStatsSessionLink } from '../shared/stats-insights.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
 import { copyText } from '../shared/clipboard.js';
 import { confirmModal, openModal, promptModal, closeModalDirect } from '../shared/modal.js';
@@ -31,7 +32,7 @@ import { createDashboardWallFeed, dashboardWallView } from '../shared/dashboard-
 import { bastionRoomProjects, roomInvestmentContributors } from '../shared/bastion-investments.js';
 import { bastionSignalSnapshot } from '../shared/bastion-signal.js';
 import { timeAgo } from '../shared/relative-time.js';
-import { normalizeEmoteCatalog } from '../shared/emote-admin.js';
+import { createEmoteLookup, normalizeEmoteCatalog, sanitizeEmoteName } from '../shared/emote-admin.js';
 
 import { charSession } from '../shared/char-session.js';
 import { openAdventureSwitcher } from '../core/layout.js';
@@ -58,13 +59,22 @@ let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par
 let _statsCmpType   = 'bars';          // type du comparatif : 'bars' | 'pie'
 let _statsEvoMetric = 'dmgDealt';      // métrique du comparatif missions/groupes
 let _statsAnalysisMode = 'overview';   // 'overview' | 'compare'
-let _statsTab = 'overview';            // onglet actif : overview|ranking|players|rolls|audit
-const _STATS_TABS = ['overview', 'ranking', 'players', 'rolls', 'audit'];
+let _statsTab = 'summary';             // summary|sessions|characters|dice|data
+const _STATS_TABS = ['summary', 'sessions', 'characters', 'dice', 'data'];
+const _STATS_TAB_ALIASES = { overview: 'summary', ranking: 'characters', players: 'characters', rolls: 'dice', audit: 'data' };
 let _statsPopOpen = false;             // popover « joueurs ciblés » ouvert (persisté entre rendus)
 let _statsMissionPopOpen = false;      // popover « Mission » (avec images) ouvert
 let _statsRankSort = { key: 'dmg', dir: -1 }; // tri du tableau de classement (dir : -1 desc, 1 asc)
+let _statsRankMode = 'total';          // total | session
+let _statsSessionsMode = 'mission';    // mission | chrono
+let _statsSessionsPendingOnly = false; // filtre MJ des séances à relier
+let _statsDrawerId = '';
+let _statsDrawerTab = 'profile';       // profile | sessions | dice | compare
+let _statsDiceKind = 'all';            // all | skills | attacks
+let _statsDrawerKeyboardBound = false;
 let _statsRollSort = { table: 'skills', key: 'count', dir: -1 }; // tri des tableaux Jets & moyennes
 let _statsRythmeView = 'timeline';     // vue du rythme : 'timeline' (barres) | 'pie' (camembert répartition)
+let _statsEvolutionMode = 'total';     // total | participant (graphique du résumé)
 let _statsCompareKind = 'players';     // 'players' | 'groups'
 const _statsCompareSelection = { players: [], groups: [] };
 let _statsMissionPickerSearch = '';
@@ -228,6 +238,15 @@ function _statsSessionLabel(sessionKey, { short = false } = {}) {
   const date = _statsFmtDate(sessionKey);
   const time = _statsSessionTime(sessionKey);
   return [short ? date.slice(0, 5) : date, time].filter(Boolean).join(' · ');
+}
+function _statsSessionDateParts(sessionKey) {
+  const raw = _statsDateOf(sessionKey);
+  if (!raw) return { weekday: '', date: 'Date inconnue', long: 'Date inconnue' };
+  const date = new Date(`${raw}T12:00:00`);
+  const weekday = new Intl.DateTimeFormat('fr-FR', { weekday: 'short' }).format(date).replace('.', '').toUpperCase();
+  const short = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short' }).format(date);
+  const long = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(date);
+  return { weekday, date: short, long };
 }
 
 // Mission d'une séance (libellé MJ), ou '' si non renseignée.
@@ -521,14 +540,29 @@ const _STATS_AWARD_CATALOG = [
   ['emotes', 'Le Bavard'],
   ['rolls', 'Le Joueur'],
   ['crit', 'Le plus critique'],
+  ['luck', 'Insolente chance'],
   ['fumble', 'Le plus malchanceux'],
 ];
 
 const _statsNum = (v) => Number(v) || 0;
+const _statsEmoteSignature = (name) => sanitizeEmoteName(name).split('_').filter(Boolean).sort().join('_');
+function _statsEmoteSources(url = '') {
+  const remote = String(url || '');
+  try {
+    const path = new URL(remote, document.baseURI).pathname;
+    const match = path.match(/\/(images\/emotes\/[^?#]+)$/i);
+    if (!match) return { src: remote, fallback: '' };
+    const local = new URL(match[1], document.baseURI).href;
+    return local === remote ? { src: remote, fallback: '' } : { src: local, fallback: remote };
+  } catch { return { src: remote, fallback: '' }; }
+}
 function _statsEmoteHtml(name, cls = 'stats-emote') {
   if (!name) return '—';
-  const url = _statsEmoteUrl.get(name);
-  return url ? `<img class="${cls}" src="${url}" alt="${_esc(name)}" title="${_esc(name)}">` : _esc(name);
+  const key = sanitizeEmoteName(name);
+  const url = _statsEmoteUrl.get(key) || _statsEmoteUrl.get(`~${_statsEmoteSignature(key)}`);
+  if (!url) return _esc(name);
+  const source = _statsEmoteSources(url);
+  return `<img class="${cls}" src="${_esc(source.src)}"${source.fallback ? ` data-stats-emote-fallback="${_esc(source.fallback)}"` : ''} alt="${_esc(name)}" title="${_esc(name)}">`;
 }
 function _statsFavoritesHtml(spells = [], emotes = []) {
   const normalize = (items) => (Array.isArray(items)
@@ -549,17 +583,16 @@ function _statsFavoritesHtml(spells = [], emotes = []) {
   </section>` : '';
   const content = [
     group('⭐', 'Sorts favoris', spellTop, n => _esc(n)),
-    group('😄', 'Émotes favorites', emoteTop, n => _statsEmoteUrl.has(n)
-      ? `<span class="stats-favorite-emote">${_statsEmoteHtml(n, 'stats-emote-sm')}<span>${_esc(n)}</span></span>`
-      : _esc(n)),
+    group('😄', 'Émotes favorites', emoteTop, n => `<span class="stats-favorite-emote">${_statsEmoteHtml(n, 'stats-emote-sm')}<span>${_esc(n)}</span></span>`),
   ].filter(Boolean).join('');
   return content ? `<div class="stats-favorite-groups">${content}</div>` : '';
 }
 function _statsLoadAwardPrefs() {
   try {
-    const raw = JSON.parse(localStorage.getItem(_STATS_AWARD_PREF_KEY) || '[]');
+    const saved = localStorage.getItem(_STATS_AWARD_PREF_KEY);
+    const raw = saved == null ? ['mage', 'emotes', 'rolls'] : JSON.parse(saved);
     _statsHiddenAwards = new Set(Array.isArray(raw) ? raw : []);
-  } catch { _statsHiddenAwards = new Set(); }
+  } catch { _statsHiddenAwards = new Set(['mage', 'emotes', 'rolls']); }
 }
 function _statsSaveAwardPrefs() {
   try { localStorage.setItem(_STATS_AWARD_PREF_KEY, JSON.stringify([..._statsHiddenAwards])); } catch {}
@@ -1049,17 +1082,11 @@ function _statsGauge(pct, color = '#22c38e', size = 92, stroke = 9, sub = '') {
   </svg>`;
 }
 
-// Sparkline SVG inline (série d'une métrique sur les séances du scope). Aucune
-// dépendance graphique : polyline étirée + point terminal.
-function _statsSpark(vals, color) {
-  if (!Array.isArray(vals) || vals.length < 2) return '<div class="stats-spark"></div>';
-  const max = Math.max(...vals, 1), min = Math.min(...vals);
-  const w = 100, h = 26, span = Math.max(1, max - min);
-  const pts = vals.map((v, i) => `${(i / (vals.length - 1) * w).toFixed(1)},${(h - 3 - (v - min) / span * (h - 7)).toFixed(1)}`);
-  const [lx, ly] = pts[pts.length - 1].split(',');
-  return `<svg class="stats-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-    <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke" opacity=".8"/>
-    <circle cx="${lx}" cy="${ly}" r="2" fill="${color}"/></svg>`;
+// Mini-histogramme du handoff : une barre par séance, sans dépendance graphique.
+function _statsMiniBars(vals) {
+  if (!Array.isArray(vals) || vals.length < 2) return '<span class="stats-kpi-mini" aria-hidden="true"></span>';
+  const max = Math.max(...vals, 1);
+  return `<span class="stats-kpi-mini" aria-hidden="true">${vals.map(value => `<i style="height:${Math.max(6, Number(value || 0) / max * 100)}%"></i>`).join('')}</span>`;
 }
 
 // Sélecteur de métrique (comparatif / évolution) — data-change → re-render.
@@ -1252,6 +1279,7 @@ function _statsRowsFor(dateKeys) {
       attackResultTotal: num(loggedCombat.attackResultTotal),
       crits: num(loggedCombat.crits),
       fumbles: num(loggedCombat.fumbles),
+      attackHist: Array.isArray(loggedCombat.attackHist) ? loggedCombat.attackHist : [],
     } : combat;
     const actionExtrasSource = hasCompleteVttDetails ? loggedCombat : combat;
     const actionExtras = {
@@ -1262,6 +1290,7 @@ function _statsRowsFor(dateKeys) {
       resultTotal: num(actionExtrasSource.supplementalResultTotal),
       crits: num(actionExtrasSource.supplementalCrits),
       fumbles: num(actionExtrasSource.supplementalFumbles),
+      hist: Array.isArray(actionExtrasSource.supplementalHist) ? actionExtrasSource.supplementalHist : [],
     };
     const combatActionCount = hasCompleteVttDetails ? num(loggedCombat.canonicalActions) : null;
     const actionAverages = aggregateActionAverages(skillAverages, actionCombat, actionExtras);
@@ -1280,7 +1309,7 @@ function _statsRowsFor(dateKeys) {
   return rows;
 }
 
-const STATS_ROLLUP_VERSION = 2;
+const STATS_ROLLUP_VERSION = 3;
 const STATS_ROLLUP_LEASE_MS = 5 * 60_000;
 
 function _statsRollupReady(rollup) {
@@ -1479,6 +1508,17 @@ function _statsBindRenderedInteractions(root) {
   _statsBindNavSpy(root);
   _statsBindPopCloser();
 
+  root.querySelectorAll('img[data-stats-emote-fallback]').forEach(image => {
+    if (image.dataset.statsEmoteBound === 'true') return;
+    image.dataset.statsEmoteBound = 'true';
+    image.addEventListener('error', () => {
+      const fallback = image.dataset.statsEmoteFallback;
+      if (!fallback || image.src === fallback) return;
+      image.removeAttribute('data-stats-emote-fallback');
+      image.src = fallback;
+    }, { once: true });
+  });
+
   root.querySelectorAll('.stats-char').forEach(charDetails => {
     if (charDetails.dataset.statsToggleBound === 'true') return;
     charDetails.dataset.statsToggleBound = 'true';
@@ -1486,6 +1526,189 @@ function _statsBindRenderedInteractions(root) {
       if (charDetails.dataset.drawerKey) _statsDrawerState.set(charDetails.dataset.drawerKey, !!charDetails.open);
     });
   });
+
+  if (!_statsDrawerKeyboardBound) {
+    _statsDrawerKeyboardBound = true;
+    document.addEventListener('keydown', event => {
+      if (!_statsDrawerId || !document.querySelector('#stats-root .stats-v2-drawer')) return;
+      if (/INPUT|TEXTAREA|SELECT/.test(event.target?.tagName) || event.target?.isContentEditable) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        _statsDrawerId = '';
+        _statsRender(_statsScope);
+        return;
+      }
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      const ids = [...document.querySelectorAll('#stats-root [data-action="_statsDrawerOpen"]')].map(button => button.dataset.id).filter(Boolean);
+      const current = ids.indexOf(_statsDrawerId);
+      if (current < 0 || ids.length < 2) return;
+      _statsDrawerId = ids[(current + (event.key === 'ArrowRight' ? 1 : -1) + ids.length) % ids.length];
+      _statsRender(_statsScope);
+    });
+  }
+}
+
+function _statsSessionModels(sessionKeys = [], selectedIds = null) {
+  return sessionKeys.map(key => {
+    const rows = _statsRowsFor([key]).filter(row => !selectedIds?.size || selectedIds.has(row.id));
+    const stored = _statsSessionEntry(key);
+    return {
+      key, rows, ...stored,
+      dateLabel: _statsSessionLabel(key),
+      missionLabel: _statsMissionOf(key) || 'Séance non reliée',
+      groupLabel: _statsGroupOf(key),
+      total: statsSessionTotal(rows),
+    };
+  }).filter(session => session.rows.length);
+}
+
+function _statsHistogramHtml(hist = [], { tone = 'all' } = {}) {
+  const values = Array.from({ length: 20 }, (_, index) => Number(hist?.[index]) || 0);
+  const max = Math.max(1, ...values);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return `<div class="stats-v2-hist is-${tone}" aria-label="Histogramme des faces du d20">
+    ${values.map((value, index) => `<div class="stats-v2-face${index === 0 ? ' is-fumble' : index === 19 ? ' is-crit' : ''}" title="Face ${index + 1} : ${value}"><span>${value || ''}</span><i style="height:${Math.max(value ? 5 : 0, Math.round(value / max * 100))}%"></i><b>${index + 1}</b></div>`).join('')}
+  </div><p class="stats-v2-coverage">${total.toLocaleString('fr-FR')} résultat${total > 1 ? 's' : ''} naturel${total > 1 ? 's' : ''} détaillé${total > 1 ? 's' : ''}</p>`;
+}
+
+function _statsSessionsV2Html(sessionKeys, selectedIds = null) {
+  const sessions = _statsSessionModels(sessionKeys, selectedIds)
+    .sort((a, b) => _statsDateOf(b.key).localeCompare(_statsDateOf(a.key)) || b.key.localeCompare(a.key));
+  const pending = sessions.filter(session => !session.missionId);
+  const linked = sessions.filter(session => session.missionId);
+  const missionOptions = _statsMissionList();
+  const row = session => {
+    const mvp = scoreMvpView({ rows: session.rows, autoCalibrate: true })
+      .find(result => result.eligible !== false && result.details?.confidence?.level !== 'low');
+    const visibleParticipants = session.rows.slice(0, 6);
+    const participants = visibleParticipants.map(item => _statsAvatar(item.id, item.name, 28)).join('');
+    const extraParticipants = Math.max(0, session.rows.length - visibleParticipants.length);
+    const date = _statsSessionDateParts(session.key);
+    const time = _statsSessionTime(session.key);
+    const suggestion = suggestStatsSessionLink(session, _statsQuests, sessions);
+    const inlineLink = STATE.isAdmin ? `<div class="stats-v2-linker">
+      <select data-stats-link-mission aria-label="Mission">${missionOptions.map(mission => `<option value="${_esc(mission.id)}"${(session.missionId || suggestion.missionId) === mission.id ? ' selected' : ''}>${_esc(mission.name)}</option>`).join('')}</select>
+      <button type="button" data-action="_statsLinkInline" data-session="${_esc(session.key)}" data-group="${_esc(session.groupId || suggestion.groupId)}">${session.missionId ? 'Modifier' : 'Relier'}</button>
+    </div>` : '';
+    return `<article class="stats-v2-session${session.missionId ? '' : ' is-pending'}">
+      <button type="button" class="stats-v2-session-main" data-action="_statsOpenSessionSummary" data-scope="${_esc(session.key)}">
+        <time><small>${_esc(date.weekday)}.</small><b>${_esc(date.date)}</b></time>
+        <span class="stats-v2-session-copy"><b>${_esc(session.missionId ? (session.groupLabel || 'Groupe non renseigné') : 'Groupe à préciser')}</b><small>${time ? `${_esc(time.replace(':', ' h '))} · ` : ''}${session.rows.length} joueur${session.rows.length > 1 ? 's' : ''}${!session.missionId ? ' · À relier' : ''}</small></span>
+        <span class="stats-v2-participants">${participants}${extraParticipants ? `<i>+${extraParticipants}</i>` : ''}</span>
+        <span class="stats-v2-session-metric is-dmg"><b>${session.total.dmg || '—'}</b><small>Dégâts</small></span>
+        <span class="stats-v2-session-metric is-ko"><b>${session.total.ko || '—'}</b><small>KO</small></span>
+        <span class="stats-v2-session-metric is-heal"><b>${session.total.heal || '—'}</b><small>Soin</small></span>
+        <span class="stats-v2-session-metric is-taken"><b>${session.total.taken || '—'}</b><small>Encaissé</small></span>
+        <span class="stats-v2-session-mvp">${mvp ? `${_statsAvatar(mvp.id, mvp.name, 28)}<span><small>MVP</small><b>${_esc(mvp.name)}</b></span>` : '<span><small>MVP</small><b>—</b></span>'}</span>
+        <span class="stats-v2-session-chevron">›</span>
+      </button>${!session.missionId ? inlineLink : ''}
+    </article>`;
+  };
+  const grouped = new Map();
+  linked.forEach(session => {
+    const mission = missionOptions.find(item => item.id === session.missionId);
+    const actLabel = _statsActLabel(mission?.story);
+    const act = grouped.get(actLabel) || new Map();
+    const entry = act.get(session.missionId) || { mission, name: session.missionLabel, sessions: [] };
+    entry.sessions.push(session);
+    act.set(session.missionId, entry);
+    grouped.set(actLabel, act);
+  });
+  const missionSection = ({ mission, name, sessions: list }) => {
+    const total = statsSessionTotal(list.flatMap(item => item.rows));
+    const groups = [...new Set(list.map(item => item.groupLabel).filter(Boolean))];
+    return `<section class="stats-v2-mission-session">
+      <header class="stats-v2-mission-session-head">
+        ${_statsMissionArtHtml(mission || { name }, 38)}
+        <span class="stats-v2-mission-session-copy"><b>${_esc(name)}</b><small>${list.length} séance${list.length > 1 ? 's' : ''} · ${total.dmg.toLocaleString('fr-FR')} dégâts · ${total.ko.toLocaleString('fr-FR')} KO · ${total.down.toLocaleString('fr-FR')} PJ à terre</small></span>
+        <span class="stats-v2-mission-groups">${groups.map((group, index) => `<i style="--gc:${['#5795ff','#ff9544','#b985ff'][index % 3]}">${_esc(group)}</i>`).join('')}</span>
+        <button type="button" data-action="_statsSetScope" data-scope="mission:${_esc(mission?.id || list[0]?.missionId || '')}">Bilan <span>›</span></button>
+      </header>${list.map(row).join('')}
+    </section>`;
+  };
+  const missionBody = [...grouped.entries()].map(([act, missions]) => `<div class="stats-v2-act-group"><h3>${_esc(act)}</h3>${[...missions.values()].map(missionSection).join('')}</div>`).join('');
+  const chronoBody = sessions.length ? `<section class="stats-v2-mission-session stats-v2-session-chrono">${sessions.map(row).join('')}</section>` : '';
+  const showPending = STATE.isAdmin && pending.length && _statsSessionsMode === 'mission';
+  const body = _statsSessionsPendingOnly
+    ? (pending.length ? `<div class="stats-v2-pending stats-v2-pending--only">${pending.map(row).join('')}</div>` : '<p class="stats-empty-inline">Toutes les séances sont reliées.</p>')
+    : (_statsSessionsMode === 'chrono' ? chronoBody : missionBody);
+  return `<section class="stats-v2-section">
+    <header class="stats-v2-title"><div><h2>Journal des séances</h2><small>${sessions.length} séance${sessions.length > 1 ? 's' : ''}</small></div><nav>
+      ${STATE.isAdmin && pending.length ? `<button type="button" class="stats-v2-pending-filter${_statsSessionsPendingOnly ? ' on' : ''}" data-action="_statsSessionsPending">△ À relier · ${pending.length}</button>` : ''}
+      <span class="stats-v2-session-modes"><button type="button" class="${_statsSessionsMode === 'mission' ? 'on' : ''}" data-action="_statsSessionsMode" data-mode="mission">Par mission</button><button type="button" class="${_statsSessionsMode === 'chrono' ? 'on' : ''}" data-action="_statsSessionsMode" data-mode="chrono">Chronologique</button></span>
+    </nav></header>
+    ${showPending && !_statsSessionsPendingOnly ? `<div class="stats-v2-pending"><header><span class="stats-v2-pending-icon">△</span><span><b>Séances à relier</b><small>Elles comptent dans la campagne mais dans aucune mission, aucun acte ni aucun MVP de mission.</small></span><em>${pending.length} séance${pending.length > 1 ? 's' : ''}</em></header>${pending.map(row).join('')}</div>` : ''}
+    <div class="stats-v2-session-groups">${body || '<p class="stats-empty-inline">Aucune séance sur ce périmètre.</p>'}</div>
+  </section>`;
+}
+
+function _statsDataV2Html(sessionKeys) {
+  if (!STATE.isAdmin) return '';
+  const pending = _statsUnlinkedDates(sessionKeys);
+  const tracked = Object.entries(_statsData?.chars || {});
+  const rosterIds = new Set((STATE.characters || []).map(char => char.id));
+  const outsideRoster = tracked.filter(([id]) => !rosterIds.has(id));
+  const detailed = _statsLegacyRollups?.['*']?.relevantLogs || 0;
+  const totalRolls = _statsRowsFor(null).reduce((sum, row) => sum + Number(row.actionAverages?.rolls || 0), 0);
+  const coverage = totalRolls ? Math.min(100, Math.round(detailed / totalRolls * 100)) : 0;
+  const sessionModels = _statsSessionModels(sessionKeys).sort((a, b) => b.key.localeCompare(a.key));
+  const aggregate = _statsAggregateRows(_statsRowsFor(sessionKeys));
+  const sessionRow = session => {
+    const source = _statsData?.sessions?.[session.key] || {};
+    const participants = session.rows.slice(0, 7).map(row => _statsAvatar(row.id, row.name, 22)).join('');
+    const extra = Math.max(0, session.rows.length - 7);
+    const date = _statsSessionDateParts(session.key);
+    return `<tr>
+      <td class="stats-data-session"><b>${_esc(date.long)}</b><small>${_esc(_statsSessionTime(session.key)?.replace(':', ' h ') || '')}</small></td>
+      <td class="stats-data-mission">${session.missionId ? `<b>${_esc(session.missionLabel || 'Mission')}</b><small>${_esc(session.groupLabel || 'Groupe non renseigné')}</small>` : '<span class="stats-data-state is-warn">Non reliée</span>'}</td>
+      <td><span class="stats-data-avatars">${participants}${extra ? `<i>+${extra}</i>` : ''}</span></td>
+      <td>${source.manual || source.corrected ? '<span class="stats-data-state">Corrigée</span>' : '<span class="stats-tbl-z">—</span>'}</td>
+      <td class="stats-data-actions"><button type="button" class="${session.missionId ? '' : 'is-warn'}" data-action="_statsEditMission" data-scope="${_esc(session.key)}">⌁ ${session.missionId ? 'Modifier' : 'Relier'}</button><button type="button" class="is-icon is-danger" data-action="_statsDelDate" data-scope="${_esc(session.key)}" title="Supprimer les statistiques de cette séance" aria-label="Supprimer les statistiques de cette séance">⌫</button></td>
+    </tr>`;
+  };
+  const charRow = ([id, statsChar]) => {
+    const char = STATE.characters?.find(item => item.id === id) || { id, nom: statsChar.name };
+    const played = sessionKeys.filter(key => _statsSessionBucket(statsChar, key));
+    const last = [...played].sort().at(-1);
+    const player = char.ownerPseudo || char.joueur || char.player || statsChar.player || '—';
+    return `<tr>
+      <td class="stats-data-character">${characterAvatarHtml(char, { size: 24 })}<b>${_esc(statsChar.name || char.nom || 'Personnage')}</b></td>
+      <td>${_esc(player)}</td><td>${played.length}</td><td>${last ? _esc(_statsSessionDateParts(last).long) : '—'}</td>
+      <td>${rosterIds.has(id) ? '<span class="stats-data-state is-ok">Actif</span>' : '<span class="stats-data-state is-warn">Hors roster</span>'}</td>
+      <td class="stats-data-actions"><button type="button" data-action="_statsCharDates" data-id="${_esc(id)}">Séances</button><button type="button" class="is-icon is-danger" data-action="_statsDelChar" data-id="${_esc(id)}" data-name="${_esc(statsChar.name || 'Personnage')}" title="Supprimer ses statistiques" aria-label="Supprimer ses statistiques">⌫</button></td>
+    </tr>`;
+  };
+  const rawGroup = (title, entries) => `<section><h4>${title}</h4>${entries.map(([label, value]) => `<p><span>${label}</span><b>${Number(value || 0).toLocaleString('fr-FR')}</b></p>`).join('')}</section>`;
+  return `<section class="stats-v2-section stats-v2-data">
+    <header class="stats-v2-page-head"><div><h2>Données</h2><span>MJ uniquement</span></div><p>Les filtres de la page ne suppriment jamais rien. Chaque suppression annonce son périmètre avant confirmation.</p></header>
+    <div class="stats-v2-health">
+      <button type="button" data-action="_statsSetTab" data-tab="sessions" class="${pending.length ? 'is-warn' : 'is-ok'}"><i>⌁</i><span><b>${pending.length ? `${pending.length} séance${pending.length > 1 ? 's' : ''} à relier` : 'Associations à jour'}</b><small>${pending.length ? 'Sans mission, elles ne comptent dans aucun bilan d’acte ou de mission.' : 'Toutes les séances sont reliées à une mission.'}</small></span></button>
+      <div class="${coverage < 70 ? 'is-warn' : 'is-ok'}"><i>▦</i><span><b>${coverage}% des jets détaillés</b><small>${Number(detailed).toLocaleString('fr-FR')} jets ont leur d20 enregistré. Les moyennes ignorent les autres, sans rien inventer.</small></span></div>
+      <div class="${outsideRoster.length ? 'is-warn' : 'is-ok'}"><i>${outsideRoster.length ? '!' : '✓'}</i><span><b>${outsideRoster.length ? `${outsideRoster.length} personnage${outsideRoster.length > 1 ? 's' : ''} hors roster` : 'Roster cohérent'}</b><small>${outsideRoster.length ? outsideRoster.map(([, char]) => char.name).filter(Boolean).join(', ') : 'Aucun personnage inconnu dans les statistiques.'}</small></span></div>
+    </div>
+    <section class="stats-v2-data-card"><header><div><span>Séances</span><h3>Séances enregistrées</h3></div><small>${sessionKeys.length} séance${sessionKeys.length > 1 ? 's' : ''} · même date = heure affichée</small></header><div class="stats-tbl-wrap"><table class="stats-tbl stats-data-table"><thead><tr><th>Séance</th><th>Mission · groupe</th><th>Participants</th><th>Correction</th><th>Actions</th></tr></thead><tbody>${sessionModels.map(sessionRow).join('') || '<tr><td colspan="5" class="stats-tbl-z">Aucune séance enregistrée.</td></tr>'}</tbody></table></div></section>
+    <section class="stats-v2-data-card"><header><div><span>Personnages</span><h3>Personnages suivis</h3></div><small>Supprimer ici efface ses statistiques, jamais le personnage.</small></header><div class="stats-tbl-wrap"><table class="stats-tbl stats-data-table"><thead><tr><th>Personnage</th><th>Joueur·se</th><th>Séances</th><th>Dernière séance</th><th>État</th><th></th></tr></thead><tbody>${tracked.map(charRow).join('') || '<tr><td colspan="6" class="stats-tbl-z">Aucun personnage suivi.</td></tr>'}</tbody></table></div></section>
+    <details class="stats-v2-raw"><summary><span>⌄</span><b>Compteurs bruts</b><small>· toute la campagne — ancien onglet « Audit »</small></summary><div class="stats-v2-raw-grid">${rawGroup('Combat', [['Attaques', aggregate.combat.attacks], ['Touches', aggregate.combat.hits], ['Dégâts infligés', aggregate.combat.dmgDealt], ['KO infligés', aggregate.combat.kosDealt], ['Dégâts subis', aggregate.combat.dmgTaken], ['Fois mis KO', aggregate.combat.kosTaken]])}${rawGroup('Magie & soutien', [['Sorts lancés', aggregate.combat.spellsCast], ['Soutiens', aggregate.combat.supportSpells], ['Contrôles', aggregate.combat.controlSpells], ['PM dépensés', aggregate.combat.pmSpent], ['Soin prodigué', aggregate.combat.heal]])}${rawGroup('Compétences & RP', [['Jets de compétence', aggregate.skills.rolls], ['Critiques', aggregate.skills.crits], ['Échecs critiques', aggregate.skills.fumbles], ['Journal détaillé', detailed], ['Personnages', tracked.length], ['Séances', sessionKeys.length]])}</div></details>
+    <section class="stats-v2-danger"><div><span>Zone de danger</span><h3>Effacer toutes les statistiques</h3><p>Efface les statistiques de <b>${tracked.length} personnage${tracked.length > 1 ? 's' : ''}</b> sur <b>${sessionKeys.length} séance${sessionKeys.length > 1 ? 's' : ''}</b>. Les personnages, missions, groupes et scènes VTT sont conservés.</p></div><button type="button" data-action="_statsResetAsk">⌫ Tout effacer…</button></section>
+  </section>`;
+}
+
+function _statsDrawerV2Html(rows, sessionKeys) {
+  const row = rows.find(item => item.id === _statsDrawerId);
+  if (!row) return '';
+  const char = STATE.characters?.find(item => item.id === row.id) || { id: row.id, nom: row.name };
+  const playedKeys = sessionKeys.filter(key => _statsSessionBucket(_statsData?.chars?.[row.id], key));
+  const total = row.combat;
+  const profile = `<div class="stats-v2-drawer-kpis"><span><b>${row.impact || 0}</b>Impact</span><span><b>${total.dmgDealt || 0}</b>Dégâts</span><span><b>${total.kosDealt || 0}</b>KO</span><span><b>${total.heal || 0}</b>Soin</span><span><b>${total.dmgTaken || 0}</b>Encaissé</span><span><b>${total.attacksAvoided || 0}</b>Évitées</span></div>`;
+  const sessions = `<div class="stats-v2-drawer-list">${playedKeys.map(key => { const one = _statsRowsFor([key]).find(item => item.id === row.id); return `<button type="button" data-action="_statsSetScope" data-scope="${_esc(key)}"><time>${_esc(_statsSessionLabel(key))}</time><span>${_esc(_statsMissionOf(key) || 'Séance non reliée')}</span><b>${one?.combat?.dmgDealt || 0} dmg</b></button>`; }).join('') || '<p>Aucune séance détaillée.</p>'}</div>`;
+  const dice = `${_statsHistogramHtml(row.actionAverages?.hist || [])}<div class="stats-v2-drawer-kpis"><span><b>${row.actionAverages?.naturalAvg ?? '—'}</b>d20 moyen</span><span><b>${row.actionAverages?.crits || 0}</b>Critiques</span><span><b>${row.actionAverages?.fumbles || 0}</b>Échecs</span></div>`;
+  const compareRows = rows.filter(item => item.id !== row.id);
+  const compareId = _statsCompareSelection.players?.find(id => id && id !== row.id) || compareRows[0]?.id;
+  const other = compareRows.find(item => item.id === compareId) || compareRows[0];
+  const compare = other ? `<label class="stats-v2-compare-pick">Comparer avec<select data-change="_statsDrawerCompare">${compareRows.map(item => `<option value="${_esc(item.id)}"${item.id === other.id ? ' selected' : ''}>${_esc(item.name)}</option>`).join('')}</select></label><div class="stats-v2-compare">${[['Dégâts','dmgDealt'],['KO','kosDealt'],['Soin','heal'],['Encaissé','dmgTaken'],['Évitées','attacksAvoided']].map(([label,key]) => `<div><b>${row.combat[key] || 0}</b><span>${label}</span><b>${other.combat[key] || 0}</b></div>`).join('')}</div>` : '<p>Aucun autre personnage à comparer.</p>';
+  const panes = { profile, sessions, dice, compare };
+  return `<aside class="stats-v2-drawer" aria-label="Fiche statistique de ${_esc(row.name)}"><header>${characterAvatarHtml(char, { size: 48, className: 'stats-v2-drawer-avatar' })}<span><small>Fiche statistique</small><h2>${_esc(row.name)}</h2><em>${playedKeys.length} séance${playedKeys.length > 1 ? 's' : ''} jouée${playedKeys.length > 1 ? 's' : ''}</em></span><div class="stats-v2-drawer-nav"><button type="button" data-action="_statsDrawerStep" data-step="-1" aria-label="Personnage précédent">‹</button><button type="button" data-action="_statsDrawerStep" data-step="1" aria-label="Personnage suivant">›</button><button type="button" data-action="_statsDrawerClose" aria-label="Fermer">×</button></div></header><nav>${[['profile','Profil'],['sessions','Séances'],['dice','Dés'],['compare','Comparer']].map(([id,label]) => `<button type="button" class="${_statsDrawerTab === id ? 'on' : ''}" data-action="_statsDrawerTab" data-tab="${id}">${label}</button>`).join('')}</nav><div class="stats-v2-drawer-body">${panes[_statsDrawerTab] || profile}</div></aside><button type="button" class="stats-v2-drawer-scrim" data-action="_statsDrawerClose" aria-label="Fermer la fiche"></button>`;
 }
 
 // Rendu complet de la page pour un scope (réutilisé au changement de séance).
@@ -1525,17 +1748,23 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const filteredMissionDates = (_statsGroupSel && _statsGroupSel.size)
     ? selectedMissionDates.filter(d => _statsGroupSel.has(_statsGroupKeyOf(d)))
     : selectedMissionDates;
-  const scopeDates = isAct ? selectedActDates : (isMission ? filteredMissionDates : (dateKey ? [dateKey] : null));
-
+  const sel = _statsPlayerSel;
+  const baseScopeDates = isAct ? selectedActDates : (isMission ? filteredMissionDates : (dateKey ? [dateKey] : null));
+  const baseAllRows = _statsRowsFor(baseScopeDates);
+  // Un filtre personnage retire aussi les séances auxquelles aucun des
+  // personnages choisis n'a participé : les moyennes « par séance » ne sont
+  // ainsi jamais diluées par les autres groupes.
+  const scopeDates = sel?.size ? (baseScopeDates || allDates).filter(key =>
+    [...sel].some(id => !!_statsSessionBucket(_statsData?.chars?.[id], key))) : baseScopeDates;
   const allRows = _statsRowsFor(scopeDates);   // participants du scope courant
   // Filtre « joueurs ciblés » : recalcule toute la page sur le sous-ensemble choisi.
-  const sel = _statsPlayerSel;
   const rows = (sel && sel.size) ? allRows.filter(r => sel.has(r.id)) : allRows;
-  const renderOverview = _statsTab === 'overview';
-  const renderRanking = _statsTab === 'ranking';
-  const renderPlayers = _statsTab === 'players';
-  const renderRolls = _statsTab === 'rolls';
-  const renderAudit = _statsTab === 'audit';
+  const renderOverview = _statsTab === 'summary';
+  const renderSessions = _statsTab === 'sessions';
+  const renderRanking = _statsTab === 'characters';
+  const renderPlayers = false;
+  const renderRolls = _statsTab === 'dice';
+  const renderAudit = _statsTab === 'data' && STATE.isAdmin;
   const comparableAggregate = (entry) => {
     const trackedDates = entry.dates.filter(d => {
       const dateRows = _statsRowsFor([d]);
@@ -1584,8 +1813,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     : [];
   const groupScopeText = activeGroupNames.length ? activeGroupNames.join(', ') : '';
 
-  const exportBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExport" title="Copier un récapitulatif texte pour Discord" aria-label="Copier le récapitulatif"><span class="stats-tool-icon" aria-hidden="true">📋</span><span class="stats-tool-label">Copier</span></button>` : '';
-  const visualBtn = rows.length ? `<button class="stats-tool-btn" data-action="_statsExportImage" title="Télécharger le récapitulatif visuel en PNG" aria-label="Télécharger le récapitulatif visuel"><span class="stats-tool-icon" aria-hidden="true">🖼️</span><span class="stats-tool-label">Visuel</span></button>` : '';
+  const shareBtn = rows.length ? `<button class="stats-share-btn" data-action="_statsShare" title="Préparer un récapitulatif à partager"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M16 6l-4-4-4 4M12 2v13"/></svg><span>Partager</span></button>` : '';
   const manageStatus = unlinkedDates.length
     ? `<span class="stats-tool-state is-pending" aria-hidden="true">${unlinkedDates.length}</span>`
     : allDates.length
@@ -1597,10 +1825,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       ? 'Toutes les séances datées sont reliées à une mission'
       : 'Aucune séance datée à relier pour le moment';
   const manageStateClass = unlinkedDates.length ? ' has-pending' : (allDates.length ? ' is-complete' : ' is-empty');
-  const manageBtn = STATE.isAdmin ? `<button class="stats-tool-btn stats-tool-btn--manage${manageStateClass}" data-action="_statsManage" title="${manageTitle}" aria-label="Données statistiques : ${manageTitle}"><span class="stats-tool-icon" aria-hidden="true">⚙</span><span class="stats-tool-label">Données</span>${manageStatus}</button>` : '';
-  const toolsBar = exportBtn || visualBtn || manageBtn ? `<div class="stats-tools" role="group" aria-label="Actions sur les statistiques">
-    ${rows.length ? '<span class="stats-tools-caption">Exporter</span>' : ''}${exportBtn}${visualBtn}${manageBtn}
-  </div>` : '';
+  const toolsBar = shareBtn ? `<div class="stats-tools" role="group" aria-label="Actions sur les statistiques">${shareBtn}</div>` : '';
   // ── Barre sticky (refonte) : périmètre 3 selects + popover joueurs + onglets ──
   const scopeKicker = dateKey ? `Séance du ${_statsSessionLabel(dateKey)}`
     : isMission ? (selectedMission?.name || 'Mission')
@@ -1610,53 +1835,75 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const missionOpts = (isAct && selectedAct ? selectedAct.missions : missions);
   const sessionOpts = selectedMissionId ? selectedMissionDates
     : (isAct && selectedAct ? selectedActDates : allDates);
-  const scopeBar = `<div class="stats-scope">
+  const scopeBar = `<nav class="stats-scope stats-breadcrumb" aria-label="Périmètre statistique">
+    <button type="button" class="stats-crumb-home${!scope ? ' on' : ''}" data-action="_statsSetScope" data-scope="">⌂ <span>Campagne</span></button><i>›</i>
     <label class="stats-sc${isAct ? ' on' : ''}"><small>Acte</small>
       <select data-change="_statsSetScopeSel" data-level="act">
-        ${_scOpt('', 'Toute la campagne', isAct ? actKey : '')}
+        ${_scOpt('', 'Tous les actes', isAct ? actKey : '')}
         ${acts.map(a => _scOpt(a.key, a.label, isAct ? actKey : '')).join('')}
-      </select></label>
+      </select></label><i>›</i>
     <div class="stats-pop stats-msn${_statsMissionPopOpen ? ' open' : ''}">
       <button type="button" class="stats-sc stats-sc--btn${selectedMissionId ? ' on' : ''}" data-action="_statsMissionPop">
         <small>Mission</small>
-        <span class="stats-msn-cur">${selectedMission ? `${_statsMissionArtHtml(selectedMission, 22)}<span>${_esc(selectedMission.name)}</span>` : `<span>${missionOpts.length} mission${missionOpts.length > 1 ? 's' : ''}</span>`}<i class="stats-msn-caret">▾</i></span>
+        <span class="stats-msn-cur">${selectedMission ? `${_statsMissionArtHtml(selectedMission, 22)}<span>${_esc(selectedMission.name)}</span>` : '<span>Toutes les missions</span>'}<i class="stats-msn-caret">▾</i></span>
       </button>
       <div class="stats-pop-menu stats-msn-menu">
         <button type="button" class="stats-msn-item${!selectedMissionId ? ' on' : ''}" data-action="_statsScopeMission" data-id=""><span class="stats-msn-item-ic">🌍</span><span>Toutes les missions</span></button>
         ${acts.map(a => `<div class="stats-msn-act">${_esc(a.label)}</div>${a.missions.map(m => `<button type="button" class="stats-msn-item${m.id === selectedMissionId ? ' on' : ''}" data-action="_statsScopeMission" data-id="${_esc(m.id)}">${_statsMissionArtHtml(m, 30)}<span>${_esc(m.name)}</span></button>`).join('')}`).join('')}
       </div>
-    </div>
+    </div><i>›</i>
     <label class="stats-sc${dateKey ? ' on' : ''}"><small>Séance</small>
       <select data-change="_statsSetScopeSel" data-level="session" data-mission="${_esc(selectedMissionId || '')}" data-act="${isAct ? _esc(actKey) : ''}">
-        ${_scOpt('', `${sessionOpts.length} séance${sessionOpts.length > 1 ? 's' : ''}`, dateKey || '')}
+        ${_scOpt('', 'Toutes les séances', dateKey || '')}
         ${sessionOpts.map(d => _scOpt(d, `${_statsSessionLabel(d, { short: true })}${_statsGroupOf(d) ? ' · ' + _statsGroupOf(d) : ''}`, dateKey || '')).join('')}
       </select></label>
-  </div>`;
-  const popRows = allRows;
+  </nav>`;
+  const popRows = baseAllRows;
+  const shortcutDates = Array.isArray(scopeDates) ? scopeDates : allDates;
+  const shortcutGroupMap = new Map();
+  _statsGroupOptionsForDates(shortcutDates).filter(group => group.key !== '__nogroup').forEach(group => {
+    const labelKey = String(group.label || '').trim().toLocaleLowerCase('fr');
+    const current = shortcutGroupMap.get(labelKey);
+    if (current) current.dates = [...new Set([...current.dates, ...group.dates])];
+    else shortcutGroupMap.set(labelKey, { ...group, dates: [...group.dates] });
+  });
+  const shortcutGroups = [...shortcutGroupMap.values()].map((group, index) => {
+    const ids = new Set(group.dates.flatMap(date => _statsRowsFor([date]).map(row => row.id)));
+    return { ...group, ids: [...ids].filter(id => popRows.some(row => row.id === id)), color: group.quest?.couleur || group.quest?.color || ['#5795ff','#31d2a0','#b985ff','#ff9544','#e8b84b'][index % 5] };
+  }).filter(group => group.ids.length);
+  const mineIds = STATE.isAdmin ? [] : getControlledCharacters(STATE.characters || [], STATE.user?.uid).map(char => char.id).filter(id => popRows.some(row => row.id === id));
+  const selectionMatches = ids => !!sel?.size && ids.length === sel.size && ids.every(id => sel.has(id));
+  const activeShortcut = shortcutGroups.find(group => selectionMatches(group.ids));
+  const mineShortcutActive = selectionMatches(mineIds);
+  const selectedRows = sel?.size ? popRows.filter(row => sel.has(row.id)) : popRows;
+  const playerFilterLabel = !sel?.size ? 'Tous' : mineShortcutActive ? 'Mes personnages' : activeShortcut?.label || `${sel.size} personnage${sel.size > 1 ? 's' : ''}`;
   const playersPop = popRows.length ? `<div class="stats-pop${_statsPopOpen ? ' open' : ''}">
     <button class="stats-pill${sel && sel.size ? ' on' : ''}" data-action="_statsPlayersPop">
-      <span class="stats-avstack">${popRows.slice(0, 4).map(r => _statsAvatar(r.id, r.name, 20)).join('')}</span>
-      ${sel && sel.size ? `${rows.length} joueur${rows.length > 1 ? 's' : ''} ciblé${rows.length > 1 ? 's' : ''}` : `Tous les joueurs · ${popRows.length}`} ▾
+      <span class="stats-avstack">${selectedRows.slice(0, 3).map(r => _statsAvatar(r.id, r.name, 20)).join('')}</span>
+      <span>${_esc(playerFilterLabel)}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
     </button>
-    <div class="stats-pop-menu">
-      <div class="stats-pop-hd"><span>Joueurs ciblés</span><button data-action="_statsTogglePlayer" data-id="__all">Tout sélectionner</button></div>
-      <div class="stats-pop-list">${popRows.map(r => `<button class="stats-pop-item${sel && sel.has(r.id) ? ' on' : ''}" data-action="_statsTogglePlayer" data-id="${r.id}">${_statsAvatar(r.id, r.name, 20)}<span>${_esc(r.name)}</span></button>`).join('')}</div>
+    <div class="stats-pop-menu stats-players-menu">
+      <div class="stats-pop-section-title">Raccourcis</div>
+      <div class="stats-player-shortcuts">
+        <button class="${!sel?.size ? 'on' : ''}" data-action="_statsPlayerShortcut" data-kind="all">Tous</button>
+        ${mineIds.length ? `<button class="${mineShortcutActive ? 'on' : ''}" data-action="_statsPlayerShortcut" data-kind="mine" data-ids="${_esc(mineIds.join(','))}">Mes personnages</button>` : ''}
+        ${shortcutGroups.map(group => `<button class="${selectionMatches(group.ids) ? 'on' : ''}" data-action="_statsPlayerShortcut" data-kind="group" data-ids="${_esc(group.ids.join(','))}"><i style="--gc:${group.color}"></i>${_esc(group.label)}</button>`).join('')}
+      </div>
+      <div class="stats-pop-section-title stats-pop-section-title--list"><span>Personnages du périmètre</span><b>${popRows.length}</b></div>
+      <div class="stats-pop-list">${popRows.map(r => `<button class="stats-pop-item${sel && sel.has(r.id) ? ' on' : ''}" data-action="_statsTogglePlayer" data-id="${r.id}">${_statsAvatar(r.id, r.name, 20)}<span>${_esc(r.name)}</span><i class="stats-player-check"></i></button>`).join('')}</div>
     </div>
   </div>` : '';
-  const tabDefs = [['overview', 'Vue d’ensemble'], ['ranking', 'Classement'], ['players', 'Joueurs'], ['rolls', 'Jets & moyennes'], ['audit', 'Audit']];
-  const tabCounts = { ranking: rows.length, players: rows.length };
+  const tabDefs = [['summary', 'Résumé'], ['sessions', 'Séances'], ['characters', 'Personnages'], ['dice', 'Dés'], ...(STATE.isAdmin ? [['data', 'Données']] : [])];
+  const tabCounts = { sessions: allDates.length, characters: rows.length, data: unlinkedDates.length };
   const tabsBar = `<div class="stats-tabs">${tabDefs.map(([k, l]) => `<button class="stats-tab${_statsTab === k ? ' on' : ''}" data-action="_statsSetTab" data-tab="${k}" data-nav-page="statistiques" data-nav-sub="${k}">${l}${tabCounts[k] ? `<span class="stats-tab-cnt">${tabCounts[k]}</span>` : ''}</button>`).join('')}</div>`;
-  const controls = `<div class="stats-topbar"><div class="stats-topbar-in">
+  const controls = `<div class="stats-topbar stats-topbar-v2"><div class="stats-topbar-in">
     <div class="stats-topbar-row">
-      <div class="stats-brand"><h1>Statistiques</h1><small>${_esc(scopeKicker)}</small></div>
+      <div class="stats-brand"><h1>Statistiques</h1></div>
+      ${scopeBar}
       <div class="stats-spacer"></div>
+      ${playersPop}
       ${toolsBar}
     </div>
-    <div class="stats-topbar-scope">
-      <span class="stats-scope-art" title="${_esc(selectedMission?.name || scopeKicker)}">${selectedMission ? _statsMissionArtHtml(selectedMission, 56) : `<span class="stats-scope-art-ph">${isAct ? '📖' : '🌍'}</span>`}</span>
-      ${scopeBar}
-    </div>
-    ${playersPop ? `<div class="stats-topbar-players"><span class="stats-scope-art stats-scope-art--ghost" aria-hidden="true"></span>${playersPop}</div>` : ''}
     ${tabsBar}
   </div></div>`;
 
@@ -1753,6 +2000,9 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   );
   const critLeaders = topStatTies(rows, row => row.actionAverages?.crits || 0);
   const fumbleLeaders = topStatTies(rows, row => row.actionAverages?.fumbles || 0);
+  const luckLeaders = topStatTies(rows
+    .filter(row => (row.actionAverages?.trackedRolls || 0) >= (dateKey ? 6 : 25))
+    .map(row => ({ ...row, luckAverage: row.actionAverages?.naturalAvg || 0 })), row => row.luckAverage);
   const emoteLeaders = topStatTies(rows, row => row.emoteTotal);
   const rollLeaders = topStatTies(rows, row => row.sRolls);
   // Le panneau d'audit historique attend encore un personnage unique ; la carte
@@ -1791,13 +2041,22 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const calibrationScopeDates = isAct
     ? selectedActDates
     : (isMission ? selectedMissionDates : scopeDates);
-  const mvpCalibrationRows = needsImpact ? _statsRowsFor(calibrationScopeDates) : [];
+  const calibrationUnitsMap = new Map();
+  for (const date of calibrationScopeDates || []) {
+    const unitKey = _statsData?.sessions?.[date]?.missionId || `date:${date}`;
+    const bucket = calibrationUnitsMap.get(unitKey);
+    if (bucket) bucket.push(date); else calibrationUnitsMap.set(unitKey, [date]);
+  }
+  const calibrationUnits = [...calibrationUnitsMap.values()].map(dates => ({ rows: _statsRowsFor(dates) }));
+  const calibrationRowsForMvp = needsImpact
+    ? (calibrationUnits.length ? mvpCalibrationRows(calibrationUnits) : allRows)
+    : [];
   const mvpScores = needsImpact ? scoreMvpView({
     rows: allRows,
     sessionRows: mvpUnitRows.length > 1 ? mvpUnitRows : [],
     visibleIds: sel,
     autoCalibrate: true,
-    calibrationRows: mvpCalibrationRows,
+    calibrationRows: calibrationRowsForMvp,
   }) : [];
   const rowsById = new Map(rows.map(row => [row.id, row]));
   const impactRows = mvpScores.map(result => {
@@ -1959,18 +2218,19 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const combatTitle = dateKey ? `⚔️ Combat — séance du ${_statsSessionLabel(dateKey)}`
     : isMission ? `⚔️ Combat — ${_esc(missionName)}` : '⚔️ Combat (table)';
   const awardCards = [
-    award('dmg', '🗡️', 'Dégâts totaux', dmgLeaders.winners, `${dmgLeaders.value} dmg`, '#f4c430'),
+    award('dmg', '🗡️', 'Plus gros frappeur', dmgLeaders.winners, `${dmgLeaders.value} dmg`, '#f4c430'),
     award('bigHit', '💥', 'Plus gros coup', bigHitLeaders.winners, `${bigHitLeaders.value} dmg`, '#ff8b6b'),
-    award('hitRate', '🎯', 'Meilleur taux de touche', hitLeaders.winners, `${hitLeaders.value} %`, '#22c38e'),
-    award('ko', '☠️', 'Mises à terre', koLeaders.winners, `${koLeaders.value} KO`, '#ef4444'),
-    award('heal', '💚', 'Soin prodigué', healLeaders.winners, `${healLeaders.value} PV`, '#4fd3a6'),
+    award('hitRate', '🎯', 'Main sûre', hitLeaders.winners, `${hitLeaders.value} %`, '#22c38e'),
+    award('ko', '☠️', 'Bourreau', koLeaders.winners, `${koLeaders.value} KO`, '#ef4444'),
+    award('heal', '💚', 'Ange gardien', healLeaders.winners, `${healLeaders.value} PV`, '#4fd3a6'),
     award('mage', '🧙', 'Sorts lancés', mageLeaders.winners, `${mageLeaders.value} sorts`, '#bca0ff'),
-    award('tank', '🪨', 'Dégâts encaissés', tankLeaders.winners, `${tankLeaders.value} dmg`, '#9aa0aa'),
-    award('parry', '🛡️', 'Coups parés ou esquivés', parryLeaders.winners, `${parryLeaders.value} coup${parryLeaders.value > 1 ? 's' : ''}`, '#76a9ff'),
+    award('tank', '🪨', 'L’Increvable', tankLeaders.winners, `${tankLeaders.value} dmg`, '#9aa0aa'),
+    award('parry', '🛡️', 'Le Rempart', parryLeaders.winners, `${parryLeaders.value} évitée${parryLeaders.value > 1 ? 's' : ''}`, '#76a9ff'),
     award('emotes', '💬', 'Émotes envoyées', emoteLeaders.winners, `${emoteLeaders.value} émotes`, '#4f8cff'),
     award('rolls', '🎲', 'Jets de dés', rollLeaders.winners, `${rollLeaders.value} jets`, '#7fb0ff'),
-    award('crit', '🌟', 'Réussites critiques', critLeaders.winners, `${critLeaders.value} critique${critLeaders.value > 1 ? 's' : ''}`, '#f4c430'),
-    award('fumble', '🤡', 'Échecs critiques', fumbleLeaders.winners, `${fumbleLeaders.value} échec${fumbleLeaders.value > 1 ? 's' : ''}`, '#ff6b6b'),
+    award('crit', '🌟', 'Béni des dés', critLeaders.winners, `${critLeaders.value} critique${critLeaders.value > 1 ? 's' : ''}`, '#f4c430'),
+    award('luck', '🍀', 'Insolente chance', luckLeaders.winners, luckLeaders.value ? `${Number(luckLeaders.value).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} moy. d20` : '', '#31d2a0'),
+    award('fumble', '🤡', 'Maudit', fumbleLeaders.winners, `${fumbleLeaders.value} échec${fumbleLeaders.value > 1 ? 's' : ''}`, '#ff6b6b'),
   ].filter(Boolean);
   const awardsHtml = awardCards.join('');
 
@@ -2051,7 +2311,6 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     const parts = [];
     if (mvps.length === 1) parts.push(...mvpParts(mvps[0]));
     else mvps.forEach(leader => parts.push(`${_esc(leader.name)} · ${mvpParts(leader).slice(0, 3).join(' · ') || 'impact équilibré'}`));
-    const campaignMvp = mvps.some(leader => leader.impactDetails?.mode === 'campaign');
     const title = mvps.length > 1 ? "MVP d'impact V2 ex æquo" : "MVP d'impact V2";
     const leadersHtml = mvps.map(leader => `<div class="stats-mvp-leader">
       ${_statsAvatar(leader.id, leader.name, 42)}
@@ -2152,10 +2411,12 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       const guide = MVP_AXIS_GUIDE[a.key] || {};
       const formula = axisFormula(a.key);
       const contrib = `${guide.summary || a.label} ${formula ? `Calcul brut : ${formula}. ` : ''}Indice ${fmtMvpNum(perf)} (repère 100), puis ${Math.round((a.dampener ?? 1) * 100)} % au rang #${a.axisRank || 1}.`;
+      const scaleWidth = Math.round(Math.min(250, Math.max(0, perf)) / 250 * 100);
       return `<div class="stats-axe stats-axe--${_esc(a.key)}" title="${_esc(contrib)}">
-      <i>${a.icon || '•'}</i><span class="stats-axe-copy"><b>${_esc(a.label)}</b><small>${_esc(formula)}</small></span>
-      <span class="stats-axe-bar"><i style="width:${Math.round(perf / axesMax * 100)}%"></i></span>
-      <span class="stats-axe-pts"><b>${fmtMvpNum(perf)}</b><small>indice</small></span>
+      <span class="stats-axe-label"><i></i><b>${_esc(a.label)}</b></span>
+      <span class="stats-axe-bar"><i style="width:${scaleWidth}%"></i></span>
+      <span class="stats-axe-pts"><b>${fmtMvpNum(perf)}</b><small>%</small></span>
+      <span class="stats-axe-weight">${Number(a.points || 0) >= .5 ? `+${fmtMvpNum(a.points)}` : '—'}</span>
     </div>`;
     }).join('');
     const detailedAxesHtml = axes.map(axis => {
@@ -2207,15 +2468,19 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       ${detailLeaders.slice(0, 4).map((p, i) => `<button type="button" class="stats-runner${p.id === lead?.id ? ' on' : ''}" data-action="_statsMvpDetailPick" data-id="${_esc(p.id)}">
         ${_statsAvatar(p.id, p.name, 24)}<span>${_esc(p.name)}<em>${i === 0 ? 'MVP' : '#' + (i + 1)}</em></span><b>${p.impactDetails?.score ?? p.impact}</b>
       </button>`).join('')}</div>` : '';
+    const mvpMode = leadDetails.mode === 'campaign'
+      ? `médiane de ${leadDetails.sessionCount || mvpUnitRows.length || 1} mission${(leadDetails.sessionCount || mvpUnitRows.length || 1) > 1 ? 's' : ''}`
+      : 'sur cette séance';
+    const confidence = leadDetails.confidence || { level: 'low', label: 'Provisoire' };
     return `<div class="stats-mvp">
       <div class="stats-mvp-top">
-        ${_statsAvatar(lead.id, lead.name, 52)}
-        <div class="stats-mvp-name"><span class="stats-mvp-k">MVP d'impact${isTopLead ? '' : ' · candidat'}</span><b>${_esc(lead.name)}</b></div>
-        <div class="stats-mvp-sc"><b>${leadDetails.score ?? lead.impact}</b><small>${campaignMvp ? 'médiane' : 'score'}</small></div>
+        ${_statsAvatar(lead.id, lead.name, 58)}
+        <div class="stats-mvp-name"><span class="stats-mvp-k">${isTopLead ? 'Meilleur impact' : 'Candidat au MVP'}</span><b>${_esc(lead.name)}</b><small>${_esc(mvpMode)} · <span class="stats-mvp-confidence is-${_esc(confidence.level || 'low')}">${_esc(confidence.label || 'Provisoire')}</span></small></div>
+        <div class="stats-mvp-sc"><b>${leadDetails.score ?? lead.impact}</b><small>points</small></div>
       </div>
       <div class="stats-axes">${axesHtml || '<div class="stats-empty-inline">Aucun axe positif sur ce périmètre.</div>'}</div>
-      ${mvpExplanationHtml}
-      ${runnersHtml}
+      <p class="stats-v2-mvp-note">Barre = performance par rapport au <b>repère</b> du périmètre (trait = 100 %, la performance médiane). L’axe dominant compte en entier, le 2ᵉ à 20 %, le 3ᵉ à 5 %.</p>
+      <div class="stats-mvp-footer">${runnersHtml}<button type="button" data-action="_statsMvpExplain"><span aria-hidden="true">ⓘ</span> Comment c’est calculé ?</button></div>
     </div>`;
   })() : '';
   const groupMax = {
@@ -2461,48 +2726,39 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       <td><span style="color:var(--amber)">💥 ${a.crits}</span> <span class="stats-dim">${a.critRate || 0}%</span> &nbsp; <span style="color:var(--crimson)">💔 ${a.fumbles}</span> <span class="stats-dim">${a.fumbleRate || 0}%</span></td>
     </tr>`;
   }).join('') : '';
+  const skillHist = Array.isArray(GS.hist) ? GS.hist : Array(20).fill(0);
+  const attackHist = Array.from({ length: 20 }, (_, index) => rows.reduce((sum, row) =>
+    sum + Number(row.actionCombat?.attackHist?.[index] || 0) + Number(row.actionExtras?.hist?.[index] || 0), 0));
+  const diceHist = _statsDiceKind === 'skills' ? skillHist : _statsDiceKind === 'attacks' ? attackHist
+    : skillHist.map((value, index) => value + attackHist[index]);
+  const diceTracked = diceHist.reduce((sum, value) => sum + value, 0);
+  const diceAverage = diceTracked ? diceHist.reduce((sum, value, index) => sum + value * (index + 1), 0) / diceTracked : null;
+  const dicePeople = rows.map(row => {
+    const skill = Array.isArray(row.skillAverages?.hist) ? row.skillAverages.hist : Array(20).fill(0);
+    const attacks = Array.from({ length: 20 }, (_, index) => Number(row.actionCombat?.attackHist?.[index] || 0) + Number(row.actionExtras?.hist?.[index] || 0));
+    const hist = _statsDiceKind === 'skills' ? skill : _statsDiceKind === 'attacks' ? attacks : skill.map((value, index) => value + attacks[index]);
+    const count = hist.reduce((sum, value) => sum + value, 0);
+    const average = count ? hist.reduce((sum, value, index) => sum + value * (index + 1), 0) / count : null;
+    return { id: row.id, name: row.name, count, average, crits: hist[19] || 0, fumbles: hist[0] || 0 };
+  }).filter(row => row.count).sort((a, b) => b.average - a.average);
+  const dicePeopleHtml = dicePeople.length ? `<section class="stats-v2-dice-people stats-v2-dice-card"><header><div><span>Qui a la main chaude ?</span><h3>Chance par personnage</h3></div></header><div>${dicePeople.map(person => {
+    const offset = Math.max(-1, Math.min(1, (person.average - 10.5) / 3));
+    return `<article class="${person.count < 20 ? 'is-provisional' : ''}" title="${person.count < 20 ? 'Échantillon faible : moins de 20 jets détaillés' : ''}">${_statsAvatar(person.id, person.name, 24)}<b>${_esc(person.name)}</b><span class="stats-v2-luck-track"><i style="--luck:${offset}"></i></span><strong class="${person.average >= 10.8 ? 'is-lucky' : person.average <= 10.2 ? 'is-unlucky' : ''}">${person.average.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</strong><small>${person.count} jets · ${person.crits}★ ${person.fumbles}✕</small></article>`;
+  }).join('')}</div><p>Barre centrée sur 10,5 (vert = au-dessus, rouge = en dessous, pleine à ±3). Grisé = moins de 20 jets : trop peu pour conclure.</p></section>` : '';
   const _avgNote = (!actionMean.trackedRolls || actionMean.coverage < 100 || actionMean.resultCoverage < 100 || combatMean.damageAverageEstimated)
     ? `<div class="stats-note"><span>ℹ️</span><span>Le journal VTT complet de l’aventure est pris en compte, sans limite de 500 entrées. Un tiret signifie que certaines actions très anciennes ne contenaient pas encore la valeur détaillée du d20 ou de ses bonus ; leur nombre et leurs critiques restent comptés.</span></div>` : '';
-  const averagesHtml = renderRolls ? `<section class="stats-surface" id="moyennes">
-    <div class="stats-surface-head"><div><span>Compétences, combat et ensemble</span><h3>Moyennes des jets</h3></div><small>Historique complet de l’aventure</small></div>
-    <div class="stats-roll-groups">
-      ${_rollGroup('🎲', 'Compétences', 'Jets de compétence uniquement', [
-        _rollMetric('Nombre', GS.rolls, 'jets enregistrés', '#7fb0ff'),
-        _rollMetric('Chance au dé', GS.naturalAvg == null ? '—' : `${statsAvg(GS.naturalAvg)}/20`, 'd20 naturel, sans bonus', '#4fd3a6'),
-        _rollMetric('Résultat moyen', statsAvg(GS.resultAvg), 'd20 + modificateurs', '#7fb0ff'),
-        _rollMetric('Crit. / échecs', `${GS.crits} / ${GS.fumbles}`, '20 naturels / 1 naturels', '#f4c430'),
-      ], '#7fb0ff')}
-      ${_rollGroup('⚔️', 'Combat', 'Attaques et sorts réellement lancés', [
-        _rollMetric('Nombre', aggregate.combatActionCount ?? '…', '1 par attaque ou sort réellement lancé', '#ff9d7a'),
-        _rollMetric('Chance au dé', combatActionMean.naturalAvg == null ? '—' : `${statsAvg(combatActionMean.naturalAvg)}/20`, 'd20 naturel, sans bonus', '#4fd3a6'),
-        _rollMetric('Résultat moyen', statsAvg(combatActionMean.resultAvg), 'd20 + modificateurs', '#7fb0ff'),
-        _rollMetric('Crit. / échecs', `${combatActionMean.crits} / ${combatActionMean.fumbles}`, 'toutes actions de combat', '#f4c430'),
-        _rollMetric('Dégâts moyens', statsAvg(combatMean.damageAverage), combatMean.damageAverageEstimated ? 'par touche' : 'par impact suivi', '#c9b6ff'),
-      ], '#ff9d7a')}
-      ${_rollGroup('∑', 'Tous les jets', 'Compétences + combat', [
-        _rollMetric('Nombre', actionMean.rolls, actionBreakdown, '#ff9d7a'),
-        _rollMetric('Chance au dé', actionMean.naturalAvg == null ? '—' : `${statsAvg(actionMean.naturalAvg)}/20`, 'd20 naturel, sans bonus', '#4fd3a6'),
-        _rollMetric('Résultat moyen', statsAvg(actionMean.resultAvg), 'd20 + tous les modificateurs', '#7fb0ff'),
-        _rollMetric('Crit. / échecs', `${actionMean.crits} / ${actionMean.fumbles}`, 'toutes actions au d20', '#f4c430'),
-      ], '#bca0ff')}
+  const averagesHtml = renderRolls ? `<section class="stats-v2-section stats-v2-dice" id="moyennes">
+    <header class="stats-v2-page-head"><div><h2>Dés & chance</h2></div><nav class="stats-segm"><button type="button" class="${_statsDiceKind === 'all' ? 'on' : ''}" data-action="_statsDiceKind" data-kind="all">Tous les jets</button><button type="button" class="${_statsDiceKind === 'skills' ? 'on' : ''}" data-action="_statsDiceKind" data-kind="skills">Compétences</button><button type="button" class="${_statsDiceKind === 'attacks' ? 'on' : ''}" data-action="_statsDiceKind" data-kind="attacks">Attaques</button></nav></header>
+    <div class="stats-v2-dice-overview">
+      <section class="stats-v2-dice-card stats-v2-dice-summary"><header><div><span>Synthèse</span><h3>Chance au dé</h3></div></header><div class="stats-v2-dice-average"><small>Moyenne naturelle</small><b>${diceAverage == null ? '—' : diceAverage.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</b><span>/ 20 · théorie 10,5</span><i style="--avg:${diceAverage == null ? 50 : Math.max(0, Math.min(100, diceAverage / 20 * 100))}%"><u></u></i><em><span>1</span><span>10,5</span><span>20</span></em></div><div class="stats-v2-luck"><div><small>Jets détaillés</small><b>${diceTracked.toLocaleString('fr-FR')}</b></div><div><small>Réussites critiques</small><b>${diceHist[19] || 0} <i>${diceTracked ? ((diceHist[19] || 0) / diceTracked * 100).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) : 0}%</i></b><span>attendu 5 %</span></div><div><small>Échecs critiques</small><b>${diceHist[0] || 0} <i>${diceTracked ? ((diceHist[0] || 0) / diceTracked * 100).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) : 0}%</i></b><span>attendu 5 %</span></div></div><p>${diceTracked.toLocaleString('fr-FR')} jets au d20 détaillés. Les plus anciens peuvent n’enregistrer que leur nombre et leurs critiques.</p></section>
+      <section class="stats-v2-dice-card stats-v2-dice-hist"><header><div><span>Distribution</span><h3>Faces obtenues <em>Nouveau</em></h3></div></header>${_statsHistogramHtml(diceHist, { tone: _statsDiceKind })}<p>Chaque face devrait sortir environ 5 %. Un écart isolé est normal : regarde la tendance, pas une barre.</p></section>
     </div>
-    <div class="stats-legend">
-      <span><b>Chance au dé</b> = moyenne du d20 naturel, sans aucun bonus (10,5 est la moyenne théorique).</span>
-      <span><b>Résultat moyen</b> = moyenne réellement obtenue après les bonus et malus.</span>
-      <span><b>Dégâts</b> = total infligé ÷ impacts</span>
-      <span><b>Nombre (combat)</b> = une action par attaque ou sort lancé, quel que soit le nombre de cibles.</span>
-    </div>
+    ${dicePeopleHtml}
     ${_avgNote}
-    <div class="stats-surface-head stats-surface-head--sub"><div><span>Détail des compétences</span><h3>Par compétence</h3></div><small>Cliquer sur un libellé pour trier</small></div>
-    <div class="stats-tbl-wrap"><table class="stats-tbl">
+    <section class="stats-v2-dice-card stats-v2-skills"><header><div><span>Compétences</span><h3>Par compétence</h3></div><small>${_skillsSorted.length} compétence${_skillsSorted.length > 1 ? 's' : ''} jouée${_skillsSorted.length > 1 ? 's' : ''}</small></header><div class="stats-tbl-wrap"><table class="stats-tbl">
       <thead><tr>${_rollTh('skills', 'name', 'Compétence', 'stats-th-who')}${_rollTh('skills', 'count', 'Nombre')}${_rollTh('skills', 'natural', 'Chance au dé')}${_rollTh('skills', 'result', 'Résultat moyen')}${_rollTh('skills', 'crits', 'Crit. / échecs')}</tr></thead>
       <tbody>${averageSkillRows || '<tr><td colspan="5" class="stats-tbl-z" style="text-align:center;padding:16px">Aucun jet de compétence sur ce périmètre.</td></tr>'}</tbody>
-    </table></div>
-    <div class="stats-surface-head stats-surface-head--sub"><div><span>Détail des actions de combat</span><h3>Combat par personnage</h3></div><small>Une attaque ou un sort = une action</small></div>
-    <div class="stats-tbl-wrap"><table class="stats-tbl">
-      <thead><tr>${_rollTh('combat', 'name', 'Personnage', 'stats-th-who')}${_rollTh('combat', 'count', 'Nombre')}${_rollTh('combat', 'natural', 'Chance au dé')}${_rollTh('combat', 'result', 'Résultat moyen')}${_rollTh('combat', 'crits', 'Crit. / échecs')}</tr></thead>
-      <tbody>${averageCombatRows || '<tr><td colspan="5" class="stats-tbl-z" style="text-align:center;padding:16px">Aucune action de combat au d20 sur ce périmètre.</td></tr>'}</tbody>
-    </table></div>
+    </table></div></section>
   </section>` : '';
   // Scoreboard (refonte) : jauge + périmètre, puis 5 KPI avec delta vs séance
   // précédente + sparkline. Les séries réutilisent les rows par séance déjà
@@ -2514,39 +2770,45 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       date: s.date,
       agg: _statsAggregateRows((sel && sel.size) ? s.rows.filter(r => sel.has(r.id)) : s.rows),
       mission: _statsMissionOf(s.date),
+      group: _statsGroupOf(s.date),
+      participants: ((sel && sel.size) ? s.rows.filter(r => sel.has(r.id)) : s.rows).length,
     })) : [];
   const kpiSeries = chronoSessions.map(s => s.agg);
   const _statsSessMetric = (agg, key) => key === 'rolls' ? (agg?.skills?.rolls || 0) : (agg?.combat?.[key] || 0);
   const _kpiNum = (v) => Number(v || 0).toLocaleString('fr-FR');
   const KPI_DEFS = [
-    ['DMG', GC.dmgDealt, '🗡️', 'D&eacute;g&acirc;ts inflig&eacute;s', '#c9b6ff', a => a.combat.dmgDealt],
-    ['PV', GC.heal, '💚', 'Soin produit', '#4fd3a6', a => a.combat.heal],
-    ['MAG', GC.spellsCast, '🔮', 'Sorts lanc&eacute;s', '#bca0ff', a => a.combat.spellsCast],
-    ['D20', GS.rolls, '🎲', 'Jets de d&eacute;s', '#7fb0ff', a => a.skills.rolls],
-    ['KO', GC.kosDealt, '☠️', 'KO inflig&eacute;s', '#ef4444', a => a.combat.kosDealt],
+    ['DMG', GC.dmgDealt, 'D&eacute;g&acirc;ts inflig&eacute;s', '#ff8b6b', a => a.combat.dmgDealt, 'dmgDealt'],
+    ['KO', GC.kosDealt, 'Ennemis mis KO', '#ff7a59', a => a.combat.kosDealt, 'kosDealt'],
+    ['PV', GC.heal, 'Soin prodigu&eacute;', '#31d2a0', a => a.combat.heal, 'heal'],
+    ['SUB', GC.dmgTaken, 'D&eacute;g&acirc;ts encaiss&eacute;s', '#8fb7e8', a => a.combat.dmgTaken, 'dmgTaken'],
+    ['DOWN', GC.kosTaken, 'PJ mis &agrave; terre', '#ff5a7e', a => a.combat.kosTaken, 'kosTaken'],
   ];
-  const _statsKpi = (short, value, icon, label, color, pick) => {
+  const _statsKpi = (short, value, label, color, pick, metricKey) => {
     const vals = kpiSeries.map(pick);
     const n = vals.length;
-    const d = n > 1 ? vals[n - 1] - vals[n - 2] : null;
-    const prev = n > 1 ? vals[n - 2] : 0;
+    const referenceValues = dateKey ? allDates.filter(key => key !== dateKey).map(key => {
+      const dateRows = _statsRowsFor([key]);
+      return pick(_statsAggregateRows((sel && sel.size) ? dateRows.filter(row => sel.has(row.id)) : dateRows));
+    }) : [];
+    const reference = referenceValues.length ? referenceValues.reduce((sum, item) => sum + item, 0) / referenceValues.length : null;
+    const d = dateKey && reference != null ? value - reference : null;
+    const prev = dateKey ? reference : 0;
     const pct = (d != null && prev) ? Math.round(d / prev * 100) : null;
-    const hasDelta = d != null && d !== 0;
-    return `<div class="stats-kpi">
-      <div class="stats-kpi-t"><span>${short}</span>${hasDelta ? `<span class="stats-kpi-d ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '▲' : '▼'} ${pct != null ? Math.abs(pct) + '%' : Math.abs(d)}</span>` : ''}</div>
-      <div class="stats-kpi-v" style="color:${color}">${_kpiNum(value)}</div>
-      <div class="stats-kpi-l">${icon} ${label}</div>
-      ${_statsSpark(vals, color)}
-      ${hasDelta ? '<div class="stats-kpi-l stats-kpi-sub">vs s&eacute;ance pr&eacute;c&eacute;dente</div>' : ''}
-    </div>`;
+    const hasDelta = d != null && Math.abs(pct || 0) >= 8;
+    const drillKey = ({ DMG: 'dmg', KO: 'ko', PV: 'heal', SUB: 'taken', DOWN: 'taken' })[short] || 'impact';
+    return `<button type="button" class="stats-kpi${_statsEvoMetric === metricKey ? ' on' : ''}" style="--mc:${color}" data-action="_statsKpiDrill" data-key="${drillKey}">
+      <div class="stats-kpi-t"><span class="stats-kpi-label"><i></i><span>${label}</span></span>${hasDelta ? `<span class="stats-kpi-d ${d >= 0 ? 'up' : 'down'}${(short === 'SUB' || short === 'DOWN') ? ' is-inverse' : ''}">${d >= 0 ? '▲' : '▼'} ${pct != null ? Math.abs(pct) + '%' : Math.abs(d)}</span>` : (dateKey && reference != null ? '<span class="stats-kpi-d is-even">≈</span>' : '')}</div>
+      <div class="stats-kpi-v">${_kpiNum(value)}</div>
+      <div class="stats-kpi-sub">${scopeDateCount > 1 ? `≈ ${statsAvg(value / Math.max(1, scopeDateCount))} par séance` : hasDelta ? 'vs moyenne des séances' : 'séance sélectionnée'}</div>
+      ${_statsMiniBars(vals)}
+    </button>`;
   };
   const heroSec = renderOverview ? `<section class="stats-board">
     <div class="stats-bd-id">
-      ${_statsGauge(hitRate, '#22c38e', 104, 10, 'r&eacute;ussite')}
       <div class="stats-bd-copy">
-        <span class="stats-bd-k">P&eacute;rim&egrave;tre analys&eacute;</span>
+        <span class="stats-bd-k">${dateKey ? 'Récap de séance' : 'Bilan'}</span>
         <h2>${_esc(scopeLabel)}</h2>
-        <p>${rows.length} personnage${rows.length > 1 ? 's' : ''} &middot; ${scopeDateCount} s&eacute;ance${scopeDateCount > 1 ? 's' : ''} &middot; ${_kpiNum(GC.attacks)} attaque${GC.attacks > 1 ? 's' : ''}</p>
+        <p>${scopeDateCount} s&eacute;ance${scopeDateCount > 1 ? 's' : ''} &middot; ${rows.length} personnage${rows.length > 1 ? 's' : ''}${dateKey ? ` · ${_esc(_statsMissionOf(dateKey) || 'Mission non renseignée')}` : ''}</p>
       </div>
     </div>
     <div class="stats-kpis">${KPI_DEFS.map(d => _statsKpi(...d)).join('')}</div>
@@ -2555,25 +2817,40 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   // ── Rythme de campagne (refonte, étape 6) : évolution par séance + missions ──
   const evoKey = _STATS_METRICS[_statsEvoMetric] ? _statsEvoMetric : 'dmgDealt';
   const evoM = _STATS_METRICS[evoKey];
-  const evoVals = chronoSessions.map(s => _statsSessMetric(s.agg, evoKey));
+  const evoVals = chronoSessions.map(s => {
+    const total = _statsSessMetric(s.agg, evoKey);
+    return _statsEvolutionMode === 'participant' ? total / Math.max(1, s.participants) : total;
+  });
   const evoMax = Math.max(...evoVals, 1);
   const evoAvg = evoVals.length ? Math.round(evoVals.reduce((a, b) => a + b, 0) / evoVals.length) : 0;
   const evoStep = chronoSessions.length > 12 ? 2 : 1;
   const _canTimeline = chronoSessions.length > 1;
-  const _rythmeView = (_statsRythmeView === 'pie' || !_canTimeline) ? 'pie' : 'timeline';
   const rythmeToggle = `<div class="stats-segm">
-    <button class="${_rythmeView === 'timeline' ? 'on' : ''}"${_canTimeline ? '' : ' disabled'} data-action="_statsRythmeView" data-view="timeline">📈 Évolution</button>
-    <button class="${_rythmeView === 'pie' ? 'on' : ''}" data-action="_statsRythmeView" data-view="pie">◔ Répartition</button>
+    <button class="${_statsEvolutionMode === 'total' ? 'on' : ''}" data-action="_statsEvolutionMode" data-mode="total">Total</button>
+    <button class="${_statsEvolutionMode === 'participant' ? 'on' : ''}" data-action="_statsEvolutionMode" data-mode="participant">Par participant</button>
   </div>`;
-  const rythmeBody = _rythmeView === 'pie'
-    ? _statsPieChart(rows, evoKey)
-    : `<div class="stats-tl">${chronoSessions.map((s, i) => `<button type="button" class="stats-tl-col${s.date === dateKey ? ' on' : ''}" data-action="_statsSetScope" data-scope="${s.date === dateKey ? '' : s.date}" style="--mc:${evoM.color}">
+  const missionBands = [];
+  chronoSessions.forEach((session, index) => {
+    const key = `${session.mission || 'Sans mission'}\u0000${session.group || ''}`;
+    const previous = missionBands.at(-1);
+    if (previous?.key === key) previous.count += 1;
+    else missionBands.push({ key, label: session.mission || 'Sans mission', group: session.group, start: index, count: 1 });
+  });
+  const groupColors = new Map();
+  const missionBandHtml = missionBands.length ? `<div class="stats-v2-mission-bands" style="grid-template-columns:repeat(${Math.max(1, chronoSessions.length)},minmax(0,1fr))">${missionBands.map(band => {
+    if (!groupColors.has(band.group || band.label)) groupColors.set(band.group || band.label, ['#5795ff','#31d2a0','#b985ff','#ff9544','#e8b84b'][groupColors.size % 5]);
+    const color = band.label === 'Sans mission' ? 'var(--border-md)' : groupColors.get(band.group || band.label);
+    return `<button type="button" data-action="_statsSetScope" data-scope="${_esc(chronoSessions[band.start]?.date || '')}" style="--bc:${color};grid-column:${band.start + 1}/span ${band.count}" title="${_esc([band.label, band.group].filter(Boolean).join(' · '))}"><i></i><span>${_esc(band.label)}</span></button>`;
+  }).join('')}</div>` : '';
+  const rythmeBody = `<div class="stats-tl"><span class="stats-v2-evo-average" style="bottom:${Math.max(0, Math.min(100, evoAvg / evoMax * 100))}%"><small>moy. ${_kpiNum(evoAvg)}</small></span>${chronoSessions.map((s, i) => `<button type="button" class="stats-tl-col${s.date === dateKey ? ' on' : ''}" data-action="_statsSetScope" data-scope="${s.date === dateKey ? '' : s.date}" style="--mc:${evoM.color}">
         <span class="stats-tl-tip">${_statsSessionLabel(s.date)} · <b>${_kpiNum(evoVals[i])}</b> ${evoM.lbl.toLowerCase()}${s.mission ? `<br><span class="stats-dim">${_esc(s.mission)}</span>` : ''}</span>
+        <span class="stats-tl-v">${_kpiNum(evoVals[i])}</span>
         <span class="stats-tl-bar" style="height:${Math.max(3, Math.round(evoVals[i] / evoMax * 100))}%"></span>
         <span class="stats-tl-x">${i % evoStep === 0 ? (_statsSessionTime(s.date) || _statsFmtDate(s.date).slice(0, 5)) : ''}</span></button>`).join('')}</div>
-      <div class="stats-tl-legend"><span>Pic : ${_kpiNum(evoMax)} · moyenne : ${_kpiNum(evoAvg)} / séance</span><span>${evoM.lbl}</span></div>`;
+      ${missionBandHtml}
+      <div class="stats-tl-legend"><span>Pic : ${_kpiNum(evoMax)} · moyenne : ${_kpiNum(evoAvg)} ${_statsEvolutionMode === 'participant' ? 'par participant' : 'par séance'} · clic sur une barre = récap</span><span>${evoM.lbl}</span></div>`;
   const timelineSec = renderOverview && (_canTimeline || rows.length) ? `<div class="stats-surface stats-chart">
-    <div class="stats-chart-hd"><div><b>${_rythmeView === 'pie' ? 'Répartition par personnage' : 'Évolution par séance'}</b><small>${_rythmeView === 'pie' ? `Part de chaque personnage · ${evoM.lbl.toLowerCase()}` : chronoSessions.length + ' séances · cliquer pour cadrer la vue'}</small></div><div class="stats-chart-ctrl">${rythmeToggle}${_statsMetricSelect(evoKey, '_statsEvoMetric')}</div></div>
+    <div class="stats-chart-hd"><div><b>Évolution par séance</b><small>${chronoSessions.length} séances · cliquer pour ouvrir le récap</small></div><div class="stats-chart-ctrl">${rythmeToggle}${_statsMetricSelect(evoKey, '_statsEvoMetric')}</div></div>
     ${rythmeBody}
   </div>` : '';
   const missionRythme = renderOverview ? missionCompare
@@ -2586,9 +2863,9 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
       <div class="stats-mb-l"><b>${_esc(m.label)}</b><small>${m.n} séance${m.n > 1 ? 's' : ''}</small><span class="stats-mb-track"><i style="width:${Math.round(m.avg / mRythmeMax * 100)}%"></i></span></div>
       <div class="stats-mb-v"><b>${_kpiNum(m.avg)}</b><small>/ séance</small></div></button>`).join('')}</div>
   </div>` : '';
-  const rythmeSec = renderOverview && (timelineSec || missionsSec) ? `<section class="stats-sec stats-rythme">
-    <div class="stats-surface-head"><div><span>Tendance</span><h3>Rythme de campagne</h3></div></div>
-    <div class="stats-rythme-grid${missionsSec && timelineSec ? '' : ' stats-rythme-grid--solo'}">${timelineSec}${missionsSec}</div>
+  const rythmeSec = renderOverview && timelineSec ? `<section class="stats-v2-evolution">
+    <div class="stats-v2-block-title"><div><span>Tendance</span><h3>Évolution par séance · ${_esc(evoM.lbl)}</h3></div></div>
+    ${timelineSec}
   </section>` : '';
 
   const spotlightHtml = renderOverview ? `<section class="stats-surface" id="temps-forts">
@@ -2623,18 +2900,24 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   // ── Tableau de classement triable (refonte, étape 3) ──
   // Colonnes : accès à la donnée + couleur de métrique. La colonne triée reçoit
   // une barre-dans-cellule proportionnelle au max de la colonne.
+  const rankDates = Array.isArray(scopeDates) ? scopeDates : allDates;
+  const sessionsPlayed = r => rankDates.filter(key => _statsSessionBucket(_statsData?.chars?.[r.id], key)).length;
   const RANK_COLS = [
-    ['attacks', 'Att.', '#ff9d7a', r => r.combat.attacks],
-    ['hitRate', 'Touche', '#22c38e', r => (r.combat.attacks ? Math.round(r.combat.hits / r.combat.attacks * 100) : null)],
-    ['dmg', 'Dégâts', '#c9b6ff', r => r.combat.dmgDealt],
-    ['heal', 'Soin', '#4fd3a6', r => r.combat.heal],
-    ['spells', 'Sorts', '#bca0ff', r => r.combat.spellsCast],
-    ['rolls', 'Jets', '#7fb0ff', r => r.sRolls],
-    ['taken', 'Subis', '#a7b4c4', r => r.combat.dmgTaken],
-    ['ko', 'KO', '#ef4444', r => r.combat.kosDealt],
-    ['impact', 'Impact', '#f4c430', r => r.impact],
+    ['sessions', 'Séances', '#8294ad', r => sessionsPlayed(r), false],
+    ['impact', 'Impact', '#f4c430', r => r.impact, true],
+    ['dmg', 'Dégâts', '#ff8b6b', r => r.combat.dmgDealt, true],
+    ['ko', 'KO', '#ff7a59', r => r.combat.kosDealt, true],
+    ['heal', 'Soin', '#31d2a0', r => r.combat.heal, true],
+    ['taken', 'Encaissé', '#8fb7e8', r => r.combat.dmgTaken, true],
+    ['avoided', 'Évitées', '#8fb7e8', r => r.combat.attacksAvoided, true],
+    ['hitRate', 'Touche', '#22c38e', r => (r.combat.attacks ? Math.round(r.combat.hits / r.combat.attacks * 100) : null), false],
+    ['rolls', 'Jets', '#e8b84b', r => r.actionAverages?.rolls || r.sRolls, true],
+    ['d20', 'd20 moy.', '#bca0ff', r => r.actionAverages?.naturalAvg, false],
   ];
-  const rankGet = Object.fromEntries(RANK_COLS.map(([k, , , get]) => [k, get]));
+  const rankGet = Object.fromEntries(RANK_COLS.map(([k, , , get, normalize]) => [k, r => {
+    const value = get(r);
+    return _statsRankMode === 'session' && normalize ? (sessionsPlayed(r) ? value / sessionsPlayed(r) : 0) : value;
+  }]));
   const rankColor = Object.fromEntries(RANK_COLS.map(([k, , col]) => [k, col]));
   const rankSortKey = rankGet[_statsRankSort.key] ? _statsRankSort.key : 'dmg';
   const rankDir = _statsRankSort.dir === 1 ? 1 : -1;
@@ -2642,25 +2925,26 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     ? [...impactRows].sort((a, b) => (((rankGet[rankSortKey](b) || 0) - (rankGet[rankSortKey](a) || 0)) * (rankDir === -1 ? 1 : -1)))
     : [];
   const rankMax = renderRanking ? Math.max(...impactRows.map(r => rankGet[rankSortKey](r) || 0), 1) : 1;
-  const rankNum = (v) => Number(v || 0).toLocaleString('fr-FR');
+  const rankNum = (v) => Number(v || 0).toLocaleString('fr-FR', { maximumFractionDigits: _statsRankMode === 'session' ? 1 : 0 });
   const rankCell = (r, key) => {
     const v = rankGet[key](r);
     if (key === 'hitRate') return v == null
       ? '<td><span class="stats-tbl-z">—</span></td>'
       : `<td><span class="stats-hr-pill" style="color:${v >= 65 ? 'var(--emerald)' : v >= 45 ? 'var(--text)' : 'var(--crimson)'}">${v}%</span></td>`;
+    if (key === 'd20') return v == null ? '<td class="stats-tbl-z">—</td>' : `<td>${Number(v).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>`;
     if (key === rankSortKey) return `<td class="on"><span class="stats-cellbar" style="--mc:${rankColor[key]}"><i style="width:${Math.max(2, (v || 0) / rankMax * 100)}%"></i><b>${rankNum(v)}</b></span></td>`;
     return v ? `<td>${rankNum(v)}</td>` : '<td class="stats-tbl-z">—</td>';
   };
   const rankTh = (key, label) => `<th class="stats-th-sort${key === rankSortKey ? ' on' : ''}" data-action="_statsSortRank" data-key="${key}">${label}${key === rankSortKey ? `<span class="stats-th-arw">${rankDir === -1 ? '▼' : '▲'}</span>` : ''}</th>`;
-  const rankingSec = renderRanking ? `<section class="stats-surface" id="classement">
-    <div class="stats-surface-head"><div><span>Qui a fait quoi</span><h3>Classement</h3></div><small>Clique une colonne pour trier · ${rankRows.length} personnage${rankRows.length > 1 ? 's' : ''}</small></div>
+  const rankingSec = renderRanking ? `<section class="stats-v2-section stats-v2-characters" id="classement">
+    <header class="stats-v2-page-head"><div><h2>Personnages</h2><span>${rankRows.length}</span></div><nav class="stats-v2-rank-tools"><label><i>⌕</i><input type="search" placeholder="Rechercher un personnage…" aria-label="Rechercher un personnage" data-input="_statsCharacterSearch"></label><span class="stats-segm"><button type="button" class="${_statsRankMode === 'total' ? 'on' : ''}" data-action="_statsRankMode" data-mode="total">Totaux</button><button type="button" class="${_statsRankMode === 'session' ? 'on' : ''}" data-action="_statsRankMode" data-mode="session">Par séance jouée</button></span></nav></header>
     <div class="stats-tbl-wrap"><table class="stats-tbl">
       <thead><tr><th class="stats-th-rk"></th><th class="stats-th-who">Personnage</th>${RANK_COLS.map(([k, l]) => rankTh(k, l)).join('')}</tr></thead>
-      <tbody>${rankRows.map((r, i) => `<tr>
+      <tbody>${rankRows.map((r, i) => { const char = STATE.characters?.find(item => item.id === r.id); const mine = !STATE.isAdmin && canControlCharacter(char, STATE.user?.uid); const player = char?.ownerPseudo || char?.joueur || char?.player || ''; const charGroups = [...new Set(rankDates.filter(key => _statsSessionBucket(_statsData?.chars?.[r.id], key)).map(key => _statsGroupOf(key)).filter(Boolean))]; const meta = [player, charGroups.length ? `${charGroups[0]}${charGroups.length > 1 ? ` +${charGroups.length - 1}` : ''}` : ''].filter(Boolean).join(' · '); return `<tr class="stats-v2-character-row${mine ? ' is-me' : ''}" data-stats-character="${_esc(_norm(`${r.name} ${player}`))}">
         <td class="stats-td-rk${i === 0 ? ' stats-rk1' : ''}">${i + 1}</td>
-        <td class="stats-td-who"><span class="stats-who-in">${_statsAvatar(r.id, r.name, 26)}<b>${_esc(r.name)}</b></span></td>
+        <td class="stats-td-who"><button type="button" class="stats-who-in" data-action="_statsDrawerOpen" data-id="${_esc(r.id)}">${_statsAvatar(r.id, r.name, 30)}<span><b>${_esc(r.name)}</b>${meta ? `<small>${_esc(meta)}</small>` : ''}</span>${mine ? '<em>Vous</em>' : ''}</button></td>
         ${RANK_COLS.map(([k]) => rankCell(r, k)).join('')}
-      </tr>`).join('')}</tbody>
+      </tr>`; }).join('')}</tbody>
     </table></div>
   </section>` : '';
 
@@ -2694,13 +2978,74 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     </section>`;
   }
 
+  const sessionModels = _statsSessionModels(Array.isArray(scopeDates) ? scopeDates : allDates, sel);
+  const insights = statsInsights(sessionModels);
+  const records = statsRecords(sessionModels);
+  const insightsHtml = insights.length ? `<section class="stats-v2-insights"><span>Faits marquants</span>${insights.map(item => `<p class="is-${item.tone}"><i></i>${_esc(item.text)}</p>`).join('')}</section>` : '';
+  const summaryCard = (kick, title, body, { className = '', tool = '' } = {}) => `<section class="stats-v2-summary-card ${className}">
+    <header><div><span>${kick}</span><h3>${title}</h3></div>${tool}</header>
+    <div class="stats-v2-summary-card-body">${body}</div>
+  </section>`;
+  const recordsCard = summaryCard('Hall of fame', 'Records', records.length ? `<div class="stats-v2-record-list">${records.map(record => `<button type="button" data-action="_statsSetScope" data-scope="${_esc(record.session.key)}" style="--rc:#e8b84b">
+    <i>${record.icon}</i><span><small>${_esc(record.label)}</small><span class="stats-v2-record-meta"><b>${record.row ? `${_statsAvatar(record.row.id, record.row.name, 24)}${_esc(record.row.name)}` : _esc(record.session.groupLabel || record.session.missionLabel)}</b><i>·</i><em>${_esc(_statsSessionDateParts(record.session.key).long)}${_statsSessionTime(record.session.key) ? ` · ${_esc(_statsSessionTime(record.session.key).replace(':', ' h '))}` : ''}</em></span></span><strong>${record.value.toLocaleString('fr-FR')}</strong>
+  </button>`).join('')}</div>` : '<div class="stats-empty-inline">Les records apparaîtront après les premières séances.</div>', { className: 'stats-v2-records-card' });
+  const favoriteColumn = (title, items, { emote = false, color = '#b985ff' } = {}) => {
+    const top = items.slice(0, 5);
+    const max = Math.max(1, ...top.map(item => item.c));
+    return `<section style="--fc:${color}"><h4>${title}</h4>${top.length ? top.map(item => `<div class="stats-v2-favorite-row">
+      <span>${emote ? _statsEmoteHtml(item.n, 'stats-emote-sm') : _esc(item.n)}<small>${item.contributor ? `· ${_esc(item.contributor.name)}${item.contributors.length > 1 ? ` +${item.contributors.length - 1}` : ''}` : ''}</small></span><b>${item.c.toLocaleString('fr-FR')}</b><i><u style="width:${Math.round(item.c / max * 100)}%"></u></i>
+    </div>`).join('') : '<p>—</p>'}</section>`;
+  };
+  const favoritesCard = summaryCard('Habitudes de la table', 'Coups de cœur', `<div class="stats-v2-favorites">
+    ${favoriteColumn('Sorts les plus lancés', spellTally, { color: '#b985ff' })}
+    ${favoriteColumn('Émotes favorites', emoteTally, { emote: true, color: '#e8b84b' })}
+  </div>`, { className: 'stats-v2-favorites-card' });
+  const highlightsRow = `<div class="stats-v2-summary-row stats-v2-summary-row--highlights">
+    ${summaryCard(dateKey ? 'Temps fort de la séance' : 'Temps fort', 'MVP d’impact', mvpSec || '<div class="stats-empty-inline">Pas de MVP pour cette vue : l’activité est trop faible pour départager équitablement.</div>', { className: 'stats-v2-mvp-card' })}
+    ${summaryCard(dateKey ? 'Palmarès de la séance' : 'Palmarès', 'Distinctions', awardsHtml ? `<div class="stats-trophies stats-trophies--all">${awardsHtml}</div>` : '<div class="stats-empty-inline">Aucune distinction visible pour cette vue.</div>', { className: 'stats-v2-awards-card', tool: awardTotal ? '<button class="stats-sec-tool" data-action="_statsAwardsConfig" title="Choisir les distinctions affichées">⚙</button>' : '' })}
+  </div>`;
+  const campaignBottomRow = `<div class="stats-v2-summary-row stats-v2-summary-row--bottom">${recordsCard}${favoritesCard}</div>`;
+  const recapExtra = dateKey && sessionModels[0] ? (() => {
+    const balance = statsBalance(sessionModels[0], _statsSessionModels(allDates));
+    const spotlight = statsSpotlight(sessionModels[0].rows);
+    const equalShare = spotlight.length ? Math.round(100 / spotlight.length) : 0;
+    const actionCard = summaryCard('Participation', 'Répartition de l’action', `<div class="stats-v2-action-list">${spotlight.map(item => `<div>${_statsAvatar(item.id, item.name, 22)}<b>${_esc(item.name)}</b><i><u style="width:${Math.round(item.share * 100)}%"></u><em style="left:${equalShare}%"></em></i><strong>${item.actions}<small>${Math.round(item.share * 100)} %</small></strong></div>`).join('')}</div><p>Le trait indique une part égale (${equalShare} %).</p>`, { className: 'stats-v2-action-card' });
+    const balanceCard = summaryCard('Lecture du combat', 'Équilibre', `<div class="stats-v2-balance"><span><b>${balance.dealt.toLocaleString('fr-FR')}</b><i>Dégâts infligés</i></span><strong>${balance.ratio == null ? '—' : balance.ratio.toLocaleString('fr-FR', { maximumFractionDigits: 1 })}×</strong><span><b>${balance.taken.toLocaleString('fr-FR')}</b><i>Dégâts encaissés</i></span></div><div class="stats-v2-balance-foot"><span>☠️ ${balance.ko} ennemis KO</span><span>⚰️ ${balance.down} PJ à terre</span></div>`, { className: 'stats-v2-balance-card' });
+    return `<div class="stats-v2-summary-row stats-v2-summary-row--recap">${actionCard}${balanceCard}</div>`;
+  })() : '';
+  const sessionsHtml = renderSessions ? _statsSessionsV2Html(Array.isArray(scopeDates) ? scopeDates : allDates, sel) : '';
+  const dataV2Html = renderAudit ? _statsDataV2Html(allDates) : '';
+  const drawerHtml = renderRanking ? _statsDrawerV2Html(impactRows, rankDates) : '';
+  const summaryGroups = [...new Set(sessionModels.map(session => session.groupLabel).filter(Boolean))];
+  const summaryDates = sessionModels.map(session => _statsDateOf(session.key)).filter(Boolean).sort();
+  const sessionOrder = [...allDates].sort();
+  const sessionIndex = dateKey ? sessionOrder.indexOf(dateKey) : -1;
+  const previousSession = sessionIndex > 0 ? sessionOrder[sessionIndex - 1] : '';
+  const nextSession = sessionIndex >= 0 && sessionIndex < sessionOrder.length - 1 ? sessionOrder[sessionIndex + 1] : '';
+  const sessionMission = dateKey ? _statsData?.sessions?.[dateKey]?.missionId : '';
+  const summaryNav = dateKey ? `<div class="stats-v2-summary-nav">
+    <button type="button" data-action="_statsSetScope" data-scope="${_esc(previousSession)}"${previousSession ? '' : ' disabled'}>← Séance précédente</button>
+    <button type="button" data-action="_statsSetScope" data-scope="${_esc(nextSession)}"${nextSession ? '' : ' disabled'}>Séance suivante →</button>
+    ${sessionMission ? `<button type="button" data-action="_statsSetScope" data-scope="mission:${_esc(sessionMission)}">Bilan de la mission</button>` : ''}
+    ${STATE.isAdmin ? `<button type="button" data-action="_statsEditMission" data-scope="${_esc(dateKey)}">${sessionMission ? '✎ Modifier le lien' : '⌁ Relier à une mission'}</button>` : ''}
+  </div>` : '';
+  const summaryIntro = renderOverview ? `<section class="stats-v2-summary-intro">
+    <div class="stats-v2-summary-copy">
+      <span>${dateKey ? `Récap de séance · ${_esc(_statsSessionLabel(dateKey))}` : isMission ? 'Bilan de mission' : isAct ? 'Bilan d’acte' : 'Bilan de campagne'}</span>
+      <h2>${_esc(dateKey ? (_statsMissionOf(dateKey) || 'Séance non reliée') : scopeLabel.replace(/^./, letter => letter.toUpperCase()))}</h2>
+      <div class="stats-v2-summary-meta">${dateKey ? `${summaryGroups.map((group, index) => `<em style="--gc:${['#5795ff','#ff9544','#b985ff'][index % 3]}">${_esc(group)}</em>`).join('')}<i></i><span class="stats-v2-participants">${rows.slice(0, 7).map(row => _statsAvatar(row.id, row.name, 22)).join('')}</span><b>${rows.length} participant${rows.length > 1 ? 's' : ''}</b>` : `<b>${scopeDateCount} séance${scopeDateCount > 1 ? 's' : ''}</b><i></i><b>${rows.length} personnage${rows.length > 1 ? 's' : ''}</b>${summaryGroups.map((group, index) => `<em style="--gc:${['#5795ff','#ff9544','#b985ff'][index % 3]}">${_esc(group)}</em>`).join('')}${summaryDates.length ? `<i></i><small>${_esc(_statsFmtDate(summaryDates[0]))} → ${_esc(_statsFmtDate(summaryDates.at(-1)))}</small>` : ''}`}</div>
+      ${summaryNav}
+    </div>
+    ${insightsHtml || '<section class="stats-v2-insights"><span>Faits marquants</span><p><i></i>Les faits marquants apparaîtront après les premières séances.</p></section>'}
+  </section>
+  <section class="stats-v2-kpi-strip">${KPI_DEFS.map(definition => _statsKpi(...definition)).join('')}</section>` : '';
   const activeTabHtml = {
-    overview: `${heroSec}${spotlightHtml}${rythmeSec}${contextSec}`,
-    ranking: `${rankingSec}${duelSec}${groupsHtml}<div class="stats-content-grid stats-content-grid--solo">${palmaresHtml}</div>`,
-    players: rosterHtml,
-    rolls: averagesHtml,
-    audit: detailsHtml,
-  }[_statsTab] || `${heroSec}${spotlightHtml}${rythmeSec}${contextSec}`;
+    summary: `${summaryIntro}${dateKey ? '' : rythmeSec}${highlightsRow}${dateKey ? recapExtra : campaignBottomRow}`,
+    sessions: sessionsHtml,
+    characters: `${rankingSec}${drawerHtml}`,
+    dice: averagesHtml,
+    data: dataV2Html,
+  }[_statsTab] || `${summaryIntro}${dateKey ? '' : rythmeSec}${highlightsRow}${dateKey ? recapExtra : campaignBottomRow}`;
 
   root.innerHTML = `
     ${controls}
@@ -3826,8 +4171,10 @@ const PAGES = {
   // ─── STATISTIQUES ─────────────────────────────────────────────────────────────
   async statistiques() {
     const routeTab = getRouteSub('statistiques');
-    if (_STATS_TABS.includes(routeTab)) _statsTab = routeTab;
-    else setRouteSub('statistiques', _statsTab, { replace: true });
+    const resolvedTab = _STATS_TAB_ALIASES[routeTab] || routeTab;
+    _statsTab = _STATS_TABS.includes(resolvedTab) && (resolvedTab !== 'data' || STATE.isAdmin)
+      ? resolvedTab : 'summary';
+    if (routeTab !== _statsTab) setRouteSub('statistiques', _statsTab, { replace: true });
     const content = document.getElementById('main-content');
     content.innerHTML = `<div id="stats-root" class="stats-root">${loadingHtml('Chargement des statistiques…')}</div>`;
     const revision = ++_statsLoadRevision;
@@ -3976,7 +4323,13 @@ const PAGES = {
       _statsLegacyRollups = vttLogResult?.rollups || null;
       _statsVttDetailCache = new Map();
       _statsRowsCache = new Map();
-      _statsEmoteUrl = new Map(normalizeEmoteCatalog(emoteDoc?.emotes).map(e => [e.name, e.url]));
+      const emoteLookup = createEmoteLookup(normalizeEmoteCatalog(emoteDoc?.emotes));
+      _statsEmoteUrl = new Map();
+      emoteLookup.forEach((emote, key) => {
+        _statsEmoteUrl.set(key, emote.url);
+        const signature = _statsEmoteSignature(key);
+        if (signature && !_statsEmoteUrl.has(`~${signature}`)) _statsEmoteUrl.set(`~${signature}`, emote.url);
+      });
       _statsRefreshEnrichedView(_statsScope);
     }).catch(err => {
       console.warn('[stats] enrichissement secondaire indisponible', err);
@@ -4320,6 +4673,15 @@ registerActions({
   },
   // Frise de séances : clic sur une chip → change la vue (sans relecture réseau).
   _statsSetScope: (btn) => { _statsRender(btn.dataset.scope || null); },
+  // Journal des séances : ouvre directement le récapitulatif de la séance.
+  _statsOpenSessionSummary: (btn) => {
+    const scope = btn.dataset.scope;
+    if (!scope) return;
+    _statsTab = 'summary';
+    setRouteSub('statistiques', 'summary');
+    _statsRender(scope);
+    document.getElementById('stats-root')?.scrollIntoView({ block: 'start' });
+  },
   // Barre de périmètre (3 selects) : Acte → Mission → Séance ; chaque niveau
   // réinitialise les niveaux inférieurs (retombe sur le parent quand on vide).
   _statsSetScopeSel: (el) => {
@@ -4333,12 +4695,102 @@ registerActions({
   // Onglets : le contenu lourd est monté à la demande. Les données et agrégats
   // restent en mémoire, donc aucun nouvel accès réseau n'est déclenché.
   _statsSetTab: (btn) => {
-    const tab = btn.dataset.tab;
-    if (!_STATS_TABS.includes(tab) || tab === _statsTab) return;
+    const tab = _STATS_TAB_ALIASES[btn.dataset.tab] || btn.dataset.tab;
+    if (!_STATS_TABS.includes(tab) || tab === _statsTab || (tab === 'data' && !STATE.isAdmin)) return;
     _statsTab = tab;
     setRouteSub('statistiques', tab);
     _statsRender(_statsScope);
     document.getElementById('stats-root')?.scrollIntoView({ block: 'start' });
+  },
+  _statsSessionsMode: (btn) => {
+    _statsSessionsMode = btn.dataset.mode === 'chrono' ? 'chrono' : 'mission';
+    _statsSessionsPendingOnly = false;
+    _statsRender(_statsScope);
+  },
+  _statsSessionsPending: () => {
+    _statsSessionsPendingOnly = !_statsSessionsPendingOnly;
+    _statsRender(_statsScope);
+  },
+  _statsRankMode: (btn) => {
+    _statsRankMode = btn.dataset.mode === 'session' ? 'session' : 'total';
+    _statsRender(_statsScope);
+  },
+  _statsCharacterSearch: (el) => {
+    const query = _norm(el.value || '');
+    document.querySelectorAll('.stats-v2-character-row').forEach(row => {
+      row.hidden = !!query && !String(row.dataset.statsCharacter || '').includes(query);
+    });
+  },
+  _statsDrawerOpen: (btn) => {
+    _statsDrawerId = btn.dataset.id || '';
+    _statsDrawerTab = 'profile';
+    _statsRender(_statsScope);
+  },
+  _statsDrawerClose: () => {
+    _statsDrawerId = '';
+    _statsRender(_statsScope);
+  },
+  _statsDrawerStep: (btn) => {
+    const ids = [...document.querySelectorAll('#stats-root [data-action="_statsDrawerOpen"]')].map(button => button.dataset.id).filter(Boolean);
+    const current = ids.indexOf(_statsDrawerId);
+    if (current < 0 || ids.length < 2) return;
+    const step = Number(btn.dataset.step) < 0 ? -1 : 1;
+    _statsDrawerId = ids[(current + step + ids.length) % ids.length];
+    _statsRender(_statsScope);
+  },
+  _statsDrawerTab: (btn) => {
+    const tab = btn.dataset.tab;
+    if (!['profile', 'sessions', 'dice', 'compare'].includes(tab)) return;
+    _statsDrawerTab = tab;
+    _statsRender(_statsScope);
+  },
+  _statsDrawerCompare: (el) => {
+    _statsCompareSelection.players = [_statsDrawerId, el.value || ''];
+    _statsRender(_statsScope);
+  },
+  _statsDiceKind: (btn) => {
+    _statsDiceKind = ['skills', 'attacks'].includes(btn.dataset.kind) ? btn.dataset.kind : 'all';
+    _statsRender(_statsScope);
+  },
+  _statsKpiDrill: (btn) => {
+    const key = btn.dataset.key || 'impact';
+    _statsRankSort = { key, dir: -1 };
+    _statsTab = 'characters';
+    setRouteSub('statistiques', 'characters');
+    _statsRender(_statsScope);
+  },
+  _statsMvpExplain: () => openModal('MVP d’impact', `
+    <div class="stats-v2-mvp-help">
+      <p>Le MVP mesure l’impact utile, pas seulement le volume d’actions.</p>
+      <ol>
+        <li><b>Quatre axes</b><span>Offense, soutien, protection et compétences.</span></li>
+        <li><b>Un repère commun</b><span>100 % correspond à la performance de référence du périmètre.</span></li>
+        <li><b>Des rendements décroissants</b><span>Dépasser le repère reste valorisé sans écraser les autres contributions.</span></li>
+        <li><b>Des axes pondérés</b><span>L’axe dominant compte davantage que les axes secondaires.</span></li>
+        <li><b>Une confiance minimale</b><span>Aucun MVP n’est décerné si les données sont trop faibles.</span></li>
+      </ol>
+    </div>`, { subtitle: 'Comprendre le score', accent: '#e8b84b' }),
+  _statsLinkInline: async (btn) => {
+    if (!STATE.isAdmin) return;
+    const sessionKey = btn.dataset.session;
+    const missionId = btn.closest('.stats-v2-linker')?.querySelector('[data-stats-link-mission]')?.value || '';
+    const mission = _statsMissionList().find(item => item.id === missionId);
+    const groupId = btn.dataset.group || '';
+    const group = (_statsQuests || []).find(item => item.id === groupId);
+    btn.disabled = true;
+    const done = await setSessionMission(sessionKey, {
+      missionId, mission: mission?.name || '', groupId, group: group ? _statsGroupName(group) : '',
+    });
+    btn.disabled = false;
+    if (!done) { showNotif('Impossible de relier cette séance.', 'error'); return; }
+    _statsData = peekStats() || _statsData;
+    _statsRowsCache = new Map();
+    showNotif('Séance reliée.', 'success');
+    _statsRender(_statsScope);
+  },
+  _statsShare: () => {
+    if (!_statsLastSummary) return;
+    openModal('Partager les statistiques', `<div class="stats-v2-share"><span class="stats-v2-share-kicker">Aperçu Discord</span><pre>${_esc(_statsLastSummary)}</pre><div><button type="button" data-action="_statsExport">Copier le texte</button><button type="button" class="is-primary" data-action="_statsExportImage">Télécharger le visuel</button></div></div>`, { subtitle: 'Un seul récapitulatif, deux formats', accent: '#4f8cff' });
   },
   // Rythme : bascule barres d'évolution ↔ camembert de répartition.
   _statsRythmeView: (btn) => { _statsRythmeView = btn.dataset.view === 'pie' ? 'pie' : 'timeline'; _statsRender(_statsScope); },
@@ -4368,6 +4820,11 @@ registerActions({
     const root = btn.closest('.stats-root') || document.getElementById('stats-root');
     root?.querySelectorAll('.stats-pop.open').forEach(p => p.classList.remove('open'));
     if (_statsPopOpen) btn.closest('.stats-pop')?.classList.add('open');
+  },
+  _statsPlayerShortcut: (btn) => {
+    const ids = String(btn.dataset.ids || '').split(',').filter(Boolean);
+    _statsPlayerSel = btn.dataset.kind === 'all' || !ids.length ? null : new Set(ids);
+    _statsRender(_statsScope);
   },
   // Popover « Mission » (avec images) : ouverture/fermeture.
   _statsMissionPop: (btn) => {
@@ -4416,6 +4873,10 @@ registerActions({
   // Métriques des graphiques (comparatif / évolution).
   _statsCmpMetric: (el) => { _statsCmpMetric = el.value; _statsRender(_statsScope); },
   _statsEvoMetric: (el) => { _statsEvoMetric = el.value; _statsRender(_statsScope); },
+  _statsEvolutionMode: (btn) => {
+    _statsEvolutionMode = btn.dataset.mode === 'participant' ? 'participant' : 'total';
+    _statsRender(_statsScope);
+  },
   // Type du graphique comparatif : barres ↔ camembert.
   _statsCmpType: (btn) => { _statsCmpType = btn.dataset.type === 'pie' ? 'pie' : 'bars'; _statsRender(_statsScope); },
   _statsAnalysisMode: (btn) => {
@@ -4665,9 +5126,10 @@ document.addEventListener('app:route-sub-changed', (event) => {
     _cmjSetTab(sub, { syncRoute: false });
     return;
   }
-  if (page === 'statistiques' && document.getElementById('stats-root') && _STATS_TABS.includes(sub)) {
+  const statsSub = _STATS_TAB_ALIASES[sub] || sub;
+  if (page === 'statistiques' && document.getElementById('stats-root') && _STATS_TABS.includes(statsSub) && (statsSub !== 'data' || STATE.isAdmin)) {
     event.preventDefault();
-    _statsTab = sub;
+    _statsTab = statsSub;
     _statsRender(_statsScope);
     document.getElementById('stats-root')?.scrollIntoView({ block: 'start' });
   }

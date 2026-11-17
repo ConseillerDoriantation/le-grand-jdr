@@ -341,3 +341,10 @@ export function scoreMvpView({ rows = [], sessionRows = [], visibleIds = null, a
   if (!visibleIds?.size) return scores;
   return scores.filter(result => visibleIds.has(result.id));
 }
+
+// Le repère d'une vue campagne/acte doit être construit avec les performances
+// de chaque unité comparable (une mission × un personnage), jamais avec les
+// totaux cumulés du périmètre qui grossissent au fil de la campagne.
+export function mvpCalibrationRows(units = []) {
+  return (units || []).flatMap(unit => Array.isArray(unit?.rows) ? unit.rows : []);
+}

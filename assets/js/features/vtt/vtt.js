@@ -10,7 +10,7 @@ import { STATE } from '../../core/state.js';
 import { PRESENCE_TTL_MS } from '../../shared/presence-ttl.js';
 import { registerActions } from '../../core/actions.js';
 import Sortable from '../../vendor/sortable.esm.js';
-import { getDocData, getDocDataSilent, saveDoc, replaceDoc, loadCollection, subscribeCollection, subscribeDoc } from '../../data/firestore.js';
+import { getDocData, getDocDataSilent, saveDoc, replaceDoc, loadCollection, subscribeCollection, subscribeDoc, addToCol } from '../../data/firestore.js';
 import {
   db, doc, getDoc, addDoc, updateDoc, deleteDoc,
   setDoc, onSnapshot, serverTimestamp, writeBatch, deleteField,
@@ -131,9 +131,12 @@ import {
   _renderTraySoon, _renderPageTabs, _switchPage, _trayTab, _resetTraySearch,
   _vttTrayFilter, _vttTraySearch, _vttTrayClearSearch, _vttBstSearch, _vttBstClearSearch, _vttTrayTab,
   _vttToggleOn, _vttToggleOff, _vttToggleNpc, _vttReserveFilter, _vttPageSearch, _vttPageSearchClear, _vttPageFolderToggle,
-  _vttPageFolderFilter, _vttPageMenu, _vttPageFoldersMenu, _vttPageFolderRename,
+  _vttPageFolderFilter, _vttPageMenu, _vttPageMoveMenu, _vttMovePageToFolder, _vttPageFoldersMenu, _vttPageFolderRename,
   _vttReserveLayout, _vttReservePick, _vttReserveCard, _vttReserveClearPicked,
   _vttReservePlacePicked, _vttPlaceOnlineReserve,
+  _vttDistributionSearch, _vttDistributionFilter, _vttRevealPageTokens,
+  _renderSceneReel, _vttReelFolder, _vttReelFolderMenu, _vttReelToggle, _vttReelAll, _vttSceneStep,
+  _vttScenePopoverSearch, _vttOpenSceneFromPopover, _vttRegieMenu, _pageThumbUrl,
 } from './vtt-tray.js';
 import {
   VTT_ACTION_RUNE, _parseDice, _maxDice, _maxEffectDisplay, _effectDisplay,
@@ -494,6 +497,7 @@ let _vttClipboard = { tokens: [], annots: [] }; // presse-papier Ctrl+C/V (mémo
 let _annotTransformer = null; // Konva Transformer pour resize/rotation
 let _annotMovePassthrough = false; // les cases de mouvement priment temporairement sur les dessins
 let _annotGroupDragOrigins = null; // { [id]: {x,y} } pour déplacement groupé annotations
+let _regiePlacement = null; // placement ponctuel depuis la Distribution (groupe / figurants)
 let _skipAnnotRebuild = new Set(); // ids dont le onSnapshot doit sauter le rebuild (transform local)
 
 // Marquee (lasso rectangle)
@@ -1255,9 +1259,10 @@ function _cleanup() {
   _resetAutoSync();
   _delegationSyncAttempts.clear();
   _resetTraySearch();
+  _regiePlacement = null;
   VS.imgTr = null; VS.imgTrFg = null; VS.selImg = null; VS.mapMode = false;
   _hideCtxMenu();
-  document.removeEventListener('keydown', _keyHandler);
+  document.removeEventListener('keydown', _keyHandler, true);
   const mc = document.getElementById('main-content');
   if (mc) { mc.style.overflow = ''; mc.style.height = ''; mc.style.paddingBottom = ''; }
 }
@@ -1549,6 +1554,7 @@ function _initCanvas(container) {
     // Coordonnées canvas-relatives à partir de l'événement natif (plus fiable que getPointerPosition)
     const rect = VS.stage.container().getBoundingClientRect();
     const stagePtr = { x: e.evt.clientX - rect.left, y: e.evt.clientY - rect.top };
+    if (_regiePlacement) _vttMoveRegiePlacementGhost(stagePtr);
     if (_pingTimer && _pingOrigin) {
       const dx = stagePtr.x - _pingOrigin.x, dy = stagePtr.y - _pingOrigin.y;
       if (dx*dx + dy*dy > 64) { clearTimeout(_pingTimer); _pingTimer = null; }
@@ -1571,6 +1577,7 @@ function _initCanvas(container) {
   });
   VS.stage.on('contextmenu', e => {
     e.evt.preventDefault();
+    if (_regiePlacement) { _vttCancelRegiePlacement(); return; }
     if (e.target !== VS.stage) return;
     if (VS.tool === 'ruler') return; // clic droit en mode règle = annulation, pas de désélection
     const moved = _rightStageDown
@@ -1589,6 +1596,12 @@ function _initCanvas(container) {
     if (e.evt.button !== 0) return; // ignore middle/right (pan caméra)
     if (e.target===VS.stage) {
       if (_suppressNextClick) { _suppressNextClick = false; return; }
+      if (_regiePlacement) {
+        const rect = VS.stage.container().getBoundingClientRect();
+        const world = _stageToWorld({ x:e.evt.clientX - rect.left, y:e.evt.clientY - rect.top });
+        void _vttCommitRegiePlacement({ col:Math.floor(world.x / CELL), row:Math.floor(world.y / CELL) });
+        return;
+      }
       if (_selfCtx) return; // placement déplacement actif : clic hors case = ne rien faire
       if (_zoneCtx) { _zoneClickAction(); return; }
       _deselect(); _deselectAnnot();
@@ -14006,16 +14019,139 @@ function _vttPgDimensions(pfx, changedAxis = '') {
   });
 }
 
+let _sceneDraftImageId = '';
+let _sceneDraftReplaceId = '';
+let _sceneDraftQuery = '';
+let _sceneDraftFolderId = 'all';
+
+function _sceneGridGuess(image) {
+  const text = `${image?.name || ''} ${image?.sourcePath || ''} ${image?.url || ''}`;
+  const found = text.match(/(?:^|[^\d])(\d{1,3})\s*[x×]\s*(\d{1,3})(?:[^\d]|$)/i);
+  if (found) return { cols:Math.max(8, Math.min(200, Number(found[1]))), rows:Math.max(8, Math.min(200, Number(found[2]))), detected:true };
+  return { cols:30, rows:20, detected:false };
+}
+function _sceneDraftImages() {
+  return (VS.mapLib?.images || []).filter(image => resolveMapImageUrl(image));
+}
+function _sceneDraftBody({ folder = '', replacePage = null } = {}) {
+  const images = _sceneDraftImages();
+  const libraryFolders = VS.mapLib?.folders || [];
+  const folders = [...new Set(Object.values(VS.pages || {}).map(page => (page.folder || '').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr',{sensitivity:'base'}));
+  const selected = images.find(image => image.id === _sceneDraftImageId) || null;
+  const grid = selected ? _sceneGridGuess(selected) : { cols:replacePage?.cols || 30, rows:replacePage?.rows || 20, detected:false };
+  const name = replacePage?.name || selected?.name || '';
+  const previewUrl = selected ? resolveMapImageUrl(selected) : '';
+  const usage = image => Object.values(VS.pages || {}).filter(page => (page.backgroundImages || []).some(entry => entry?.sourcePath && entry.sourcePath === image.sourcePath || resolveMapImageUrl(entry) === resolveMapImageUrl(image))).length;
+  return `<div class="vtt-scene-create" data-replace-id="${replacePage?.id || ''}">
+    <section class="vtt-scene-library">
+      <header><div><span>Bibliothèque</span><h3>Choisir une carte</h3></div><button type="button" data-vtt-fn="_vttLibImportMenu" data-vtt-args="$event">＋ Importer</button></header>
+      <label><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><input type="search" placeholder="Rechercher une carte…" data-vtt-fn="_vttSceneDraftSearch" data-vtt-on="input" data-vtt-args="$value"></label>
+      <nav class="vtt-scene-library-folders" aria-label="Dossiers de cartes">
+        <button type="button" class="active" data-scene-library-folder="all" data-vtt-fn="_vttSceneDraftFolder" data-vtt-args="all">Toutes <b>${images.length}</b></button>
+        <button type="button" data-scene-library-folder="root" data-vtt-fn="_vttSceneDraftFolder" data-vtt-args="root">Sans dossier <b>${images.filter(image => !image.folderId).length}</b></button>
+        ${libraryFolders.map(item => `<button type="button" data-scene-library-folder="${_esc(item.id)}" data-vtt-fn="_vttSceneDraftFolder" data-vtt-args="${_esc(item.id)}">${_esc(item.name || 'Dossier')} <b>${images.filter(image => image.folderId === item.id).length}</b></button>`).join('')}
+      </nav>
+      <div class="vtt-scene-library-grid">
+        <button type="button" class="vtt-scene-map-choice is-blank${selected ? '' : ' active'}" data-vtt-fn="_vttSceneDraftPick" data-vtt-args=""><span></span><b>Grille vide</b><small>Sans image</small></button>
+        ${images.map(image => { const url = resolveMapImageUrl(image); const guess = _sceneGridGuess(image); const dimensions = image.width && image.height ? `${image.width} × ${image.height} px` : (guess.detected ? `${guess.cols} × ${guess.rows} cases` : 'Grille calculée'); return `<button type="button" class="vtt-scene-map-choice${image.id === selected?.id ? ' active' : ''}" data-vtt-fn="_vttSceneDraftPick" data-vtt-args="${image.id}" data-scene-map-folder="${_esc(image.folderId || 'root')}" data-scene-map-search="${_esc(`${image.name || ''} ${image.sourcePath || ''}`.toLowerCase())}"><span style="background-image:url('${_esc(url)}')"></span><b>${_esc(image.name || 'Carte')}</b><small>${dimensions} · ${usage(image)} scène${usage(image) > 1 ? 's' : ''}</small></button>`; }).join('')}
+      </div>
+    </section>
+    <section class="vtt-scene-settings">
+      <header><span>Réglages</span><h3>${replacePage ? 'Changer la carte' : 'Nouvelle scène'}</h3></header>
+      <div class="vtt-scene-preview ${previewUrl ? '' : 'is-blank'}" id="vtt-scene-draft-preview" style="${previewUrl ? `background-image:url('${_esc(previewUrl)}')` : ''}"><i></i><small id="vtt-scene-grid-note">${selected && grid.detected ? 'Détectée dans le nom du fichier' : 'Calculée d’après le format'}</small></div>
+      <label class="vtt-scene-field"><span>Nom</span><input id="vtt-scene-draft-name" value="${_esc(name)}" placeholder="Nom de la scène"></label>
+      <label class="vtt-scene-field"><span>Dossier</span><input id="vtt-scene-draft-folder" value="${_esc(replacePage?.folder ?? folder)}" list="vtt-scene-folders" placeholder="Sans dossier"><datalist id="vtt-scene-folders">${folders.map(item => `<option value="${_esc(item)}">`).join('')}</datalist></label>
+      <div class="vtt-scene-grid-fields"><label><span>Colonnes</span><input type="number" min="8" max="200" id="vtt-scene-draft-cols" value="${grid.cols}"></label><button type="button" data-vtt-fn="_vttSceneDraftSwap" title="Inverser les dimensions">⇄</button><label><span>Lignes</span><input type="number" min="8" max="200" id="vtt-scene-draft-rows" value="${grid.rows}"></label></div>
+      ${replacePage ? '<p class="vtt-scene-keep">Les tokens et annotations restent en place.</p>' : `<fieldset><legend>Ensuite</legend><label><input type="radio" name="vtt-scene-next" value="preview" checked> Ouvrir en aperçu</label><label><input type="radio" name="vtt-scene-next" value="send"> Ouvrir et envoyer les joueurs</label><label><input type="radio" name="vtt-scene-next" value="closed"> Créer sans ouvrir</label></fieldset>`}
+    </section>
+  </div><div class="vtt-scene-create-actions"><button type="button" class="btn-secondary" data-action="close-modal">Annuler</button><button type="button" class="btn-primary" data-vtt-fn="_vttConfirmSceneFromLibrary">${replacePage ? 'Remplacer la carte' : 'Créer la scène'}</button></div>`;
+}
 function _vttAddPage(encodedFolder = '') {
+  const scenePopover = document.getElementById('vtt-scene-popover');
+  if (scenePopover && !scenePopover.hidden) _vttReelAll();
+  _sceneDraftReplaceId = '';
+  _sceneDraftImageId = '';
+  _sceneDraftQuery = '';
+  _sceneDraftFolderId = 'all';
   const folder = encodedFolder ? decodeURIComponent(encodedFolder) : '';
-  openModal('🗺️ Nouvelle scène', `
-    ${_pgModalBody('vpf-', { folder, fog:false })}
-    <div class="vtt-pgm-actions">
-      <button class="btn-secondary" data-action="close-modal">Annuler</button>
-      <button class="btn-secondary" data-vtt-fn="_vttConfirmAddPage" data-vtt-args="false">Créer seulement</button>
-      <button class="btn-primary" data-vtt-fn="_vttConfirmAddPage" data-vtt-args="true">Créer et ouvrir</button>
-    </div>`, { subtitle:folder ? `Nouvelle scène dans « ${folder} »` : 'Une grille prête pour tes cartes et tes combats', accent:'#7eb0ff' });
-  _vttPgInit('vpf-');
+  openModal('Nouvelle scène', _sceneDraftBody({ folder }), { subtitle:'Choisis une carte et règle la scène en une seule étape', accent:'#7eb0ff', wide:true });
+}
+function _vttReplacePageMap(pageId) {
+  const page = VS.pages?.[pageId]; if (!page) return;
+  _sceneDraftReplaceId = pageId;
+  _sceneDraftQuery = '';
+  _sceneDraftFolderId = 'all';
+  const current = (page.backgroundImages || [])[0];
+  _sceneDraftImageId = _sceneDraftImages().find(image => image.id === current?.id || image.sourcePath && image.sourcePath === current?.sourcePath || resolveMapImageUrl(image) === resolveMapImageUrl(current))?.id || '';
+  openModal('Changer la carte', _sceneDraftBody({ replacePage:page }), { subtitle:page.name || 'Scène', accent:'#7eb0ff', wide:true });
+}
+function _vttSceneDraftSearch(value) {
+  _sceneDraftQuery = String(value || '').trim().toLocaleLowerCase('fr');
+  _vttApplySceneDraftFilters();
+}
+function _vttSceneDraftFolder(folderId = 'all') {
+  _sceneDraftFolderId = folderId || 'all';
+  _vttApplySceneDraftFilters();
+}
+function _vttApplySceneDraftFilters() {
+  document.querySelectorAll('[data-scene-library-folder]').forEach(button => button.classList.toggle('active', button.dataset.sceneLibraryFolder === _sceneDraftFolderId));
+  document.querySelectorAll('.vtt-scene-map-choice[data-scene-map-search]').forEach(card => {
+    const matchesQuery = !_sceneDraftQuery || String(card.dataset.sceneMapSearch || '').includes(_sceneDraftQuery);
+    const matchesFolder = _sceneDraftFolderId === 'all' || card.dataset.sceneMapFolder === _sceneDraftFolderId;
+    card.hidden = !(matchesQuery && matchesFolder);
+  });
+}
+function _vttSceneDraftPick(imageId = '') {
+  _sceneDraftImageId = imageId || '';
+  const image = _sceneDraftImages().find(item => item.id === _sceneDraftImageId) || null;
+  document.querySelectorAll('.vtt-scene-map-choice').forEach(card => card.classList.toggle('active', (card.dataset.vttArgs || '') === _sceneDraftImageId));
+  const preview = document.getElementById('vtt-scene-draft-preview');
+  const url = image ? resolveMapImageUrl(image) : '';
+  if (preview) { preview.style.backgroundImage = url ? `url("${url.replace(/"/g, '%22')}")` : ''; preview.classList.toggle('is-blank', !url); }
+  const guessed = image ? _sceneGridGuess(image) : { cols:30, rows:20, detected:false };
+  const apply = (cols, rows, detected = false) => {
+    const colsEl = document.getElementById('vtt-scene-draft-cols'), rowsEl = document.getElementById('vtt-scene-draft-rows');
+    if (colsEl) colsEl.value = cols; if (rowsEl) rowsEl.value = rows;
+    const note = document.getElementById('vtt-scene-grid-note'); if (note) note.textContent = detected ? 'Détectée dans le nom du fichier' : 'Calculée d’après le format';
+  };
+  apply(guessed.cols, guessed.rows, guessed.detected);
+  if (image && !guessed.detected && url) {
+    const probe = new Image();
+    probe.onload = () => { const ratio = probe.naturalWidth / Math.max(1, probe.naturalHeight); apply(ratio >= 1 ? 30 : Math.max(8, Math.round(30 * ratio)), ratio >= 1 ? Math.max(8, Math.round(30 / ratio)) : 30); };
+    probe.src = url;
+  }
+  const nameEl = document.getElementById('vtt-scene-draft-name');
+  if (nameEl && image && (!nameEl.value.trim() || !_sceneDraftReplaceId)) nameEl.value = image.name || 'Nouvelle scène';
+}
+function _vttSceneDraftSwap() {
+  const cols = document.getElementById('vtt-scene-draft-cols'), rows = document.getElementById('vtt-scene-draft-rows');
+  if (cols && rows) [cols.value, rows.value] = [rows.value, cols.value];
+}
+async function _vttConfirmSceneFromLibrary() {
+  const name = (document.getElementById('vtt-scene-draft-name')?.value || '').trim();
+  const folder = (document.getElementById('vtt-scene-draft-folder')?.value || '').trim();
+  const cols = Math.max(8, Math.min(200, parseInt(document.getElementById('vtt-scene-draft-cols')?.value) || 30));
+  const rows = Math.max(8, Math.min(200, parseInt(document.getElementById('vtt-scene-draft-rows')?.value) || 20));
+  if (!name) { showNotif('Nom requis', 'error'); return; }
+  const image = _sceneDraftImages().find(item => item.id === _sceneDraftImageId) || null;
+  const backgroundImages = image ? [{ id:image.id || crypto.randomUUID(), url:resolveMapImageUrl(image), sourcePath:image.sourcePath || '', x:0, y:0, w:cols, h:rows }] : [];
+  try {
+    if (_sceneDraftReplaceId) {
+      await updateDoc(_pgRef(_sceneDraftReplaceId), { backgroundImages, cols, rows });
+      const page = VS.pages[_sceneDraftReplaceId]; if (page) Object.assign(page, { backgroundImages, cols, rows });
+      if (VS.activePage?.id === _sceneDraftReplaceId) { VS.activePage = VS.pages[_sceneDraftReplaceId]; _drawGrid(); _renderMapImages(_MAP_IMG_DEPS); }
+      closeModalDirect(); showNotif('Carte remplacée.', 'success'); return;
+    }
+    const order = Object.keys(VS.pages || {}).length;
+    const pageRef = await addDoc(_pgsCol(), { name, folder, cols, rows, fogEnabled:false, visionUnlimited:false, backgroundImages, order, createdAt:serverTimestamp() });
+    VS.pages[pageRef.id] = { id:pageRef.id, name, folder, cols, rows, fogEnabled:false, visionUnlimited:false, backgroundImages, order, createdAt:new Date() };
+    const next = document.querySelector('input[name="vtt-scene-next"]:checked')?.value || 'preview';
+    closeModalDirect();
+    if (next !== 'closed') await _switchPage(pageRef.id);
+    if (next === 'send') await _vttSendToPage(pageRef.id);
+    else _renderPageTabs();
+    showNotif('Scène créée.', 'success');
+  } catch (error) { console.error('[vtt] création scène', error); showNotif('Erreur création de la scène', 'error'); }
 }
 
 // Datalist des dossiers de pages existants (suggestions de saisie)
@@ -14144,6 +14280,185 @@ async function _vttSendToPage(pageId) {
   const p=VS.pages[pageId]; if (!p) return;
   await setDoc(_sesRef(),{activePageId:pageId},{merge:true}).catch(e=>{ console.error('[vtt] changement page', e); showNotif('Échec du changement de page', 'error'); });
   showNotif(`📡 Tous les joueurs → « ${p.name} »`,'success');
+}
+async function _vttSendAndBring(pageId) {
+  const page = VS.pages?.[pageId]; if (!page || !STATE.isAdmin) return;
+  if (VS.activePage?.id !== pageId) await _switchPage(pageId);
+  _vttBringOnlinePlayers(pageId);
+}
+
+function _vttOnlineReserveIds() {
+  const now = Date.now();
+  return [...new Set(Object.values(VS.tokens || {}).map(entry => entry?.data).filter(token =>
+    token?.type === 'player' && token.pageId !== VS.activePage?.id && token.ownerId
+      && VS.presence[token.ownerId] && now - (VS.presence[token.ownerId].lastSeen || 0) < PRESENCE_TTL_MS
+  ).map(token => token.id))];
+}
+
+function _vttPlacementCells(count, origin) {
+  if (!VS.activePage) return [];
+  const occupied = new Set(Object.values(VS.tokens || {}).map(entry => entry?.data)
+    .filter(token => token?.pageId === VS.activePage.id)
+    .map(token => `${token.col || 0},${token.row || 0}`));
+  const result = [];
+  const center = {
+    col:Math.max(0, Math.min(VS.activePage.cols - 1, Number(origin?.col) || 0)),
+    row:Math.max(0, Math.min(VS.activePage.rows - 1, Number(origin?.row) || 0)),
+  };
+  for (let radius = 0; result.length < count && radius <= Math.max(VS.activePage.cols, VS.activePage.rows); radius++) {
+    for (let rowOffset = -radius; rowOffset <= radius && result.length < count; rowOffset++) {
+      for (let colOffset = -radius; colOffset <= radius && result.length < count; colOffset++) {
+        if (Math.max(Math.abs(colOffset), Math.abs(rowOffset)) !== radius) continue;
+        const col = center.col + colOffset, row = center.row + rowOffset;
+        const key = `${col},${row}`;
+        if (col < 0 || row < 0 || col >= VS.activePage.cols || row >= VS.activePage.rows || occupied.has(key)) continue;
+        occupied.add(key);
+        result.push({ col, row });
+      }
+    }
+  }
+  return result;
+}
+
+function _vttRefreshRegiePlacement() {
+  const bar = document.getElementById('vtt-placement-bar');
+  const wrap = document.getElementById('vtt-canvas-wrap');
+  if (!bar || !wrap) return;
+  let ghost = document.getElementById('vtt-placement-ghost');
+  if (!ghost) {
+    ghost = document.createElement('div');
+    ghost.id = 'vtt-placement-ghost';
+    ghost.className = 'vtt-placement-ghost';
+    ghost.hidden = true;
+    wrap.appendChild(ghost);
+  }
+  bar.hidden = !_regiePlacement;
+  wrap.classList.toggle('is-regie-placing', !!_regiePlacement);
+  ghost.hidden = !_regiePlacement;
+  if (!_regiePlacement) return;
+  const isStamp = _regiePlacement.kind === 'beast';
+  const remaining = _regiePlacement.kind === 'improvised'
+    ? Math.max(1, _regiePlacement.count - _regiePlacement.index)
+    : _regiePlacement.kind === 'group' ? _regiePlacement.ids.length : null;
+  const placementHint = isStamp
+    ? 'Clique pour poser · Échap ou clic droit pour terminer'
+    : `Clique sur une case${remaining == null ? '' : ` · ${remaining} à placer`}`;
+  const avatar = _regiePlacement.image
+    ? `<img src="${_esc(_regiePlacement.image)}" alt="">`
+    : (_regiePlacement.kind === 'group' ? '♟' : (_regiePlacement.type === 'enemy' ? '⚔' : '●'));
+  bar.innerHTML = `<span class="vtt-placement-avatar">${avatar}</span><span><b>${_esc(_regiePlacement.label)}</b><small>${placementHint}</small></span><button type="button" class="${_regiePlacement.visible ? 'active' : ''}" data-vtt-fn="_vttToggleRegiePlacementVisibility">${_regiePlacement.visible ? 'Visible' : 'Caché'} <kbd>H</kbd></button><button type="button" data-vtt-fn="_vttCancelRegiePlacement">Annuler</button>`;
+  ghost.className = `vtt-placement-ghost is-${_regiePlacement.kind}`;
+  ghost.innerHTML = _regiePlacement.kind === 'group'
+    ? '<i></i><i></i><i></i><i></i>'
+    : avatar;
+}
+
+function _vttMoveRegiePlacementGhost(point) {
+  if (!_regiePlacement || !point) return;
+  const ghost = document.getElementById('vtt-placement-ghost');
+  if (!ghost) return;
+  ghost.style.left = `${point.x}px`;
+  ghost.style.top = `${point.y}px`;
+}
+
+function _vttCancelRegiePlacement() {
+  _regiePlacement = null;
+  _vttRefreshRegiePlacement();
+}
+
+function _vttToggleRegiePlacementVisibility() {
+  if (!_regiePlacement) return;
+  _regiePlacement.visible = !_regiePlacement.visible;
+  _vttRefreshRegiePlacement();
+}
+
+function _vttBringOnlinePlayers(sendAfterPageId = '') {
+  if (!STATE.isAdmin || !VS.activePage) return;
+  const ids = _vttOnlineReserveIds();
+  if (!ids.length) return showNotif('Tous les joueurs en ligne sont déjà sur cette scène.', 'info');
+  _regiePlacement = {
+    kind:'group',
+    ids,
+    label:`Amener le groupe · ${ids.length}`,
+    visible:true,
+    sendAfterPageId:sendAfterPageId || '',
+  };
+  _vttRefreshRegiePlacement();
+}
+
+function _vttArmBestiaryPlacement(beastId) {
+  if (!STATE.isAdmin || !VS.activePage) return;
+  const beast = VS.bestiary?.[beastId];
+  if (!beast) return;
+  _regiePlacement = {
+    kind:'beast',
+    beastId,
+    type:'enemy',
+    label:`Tampon · ${beast.nom || 'Créature'}`,
+    image:normalizeImageUrl(beast.imageUrl || beast.photoURL || beast.photo || beast.avatar || beast.portraitUrl || ''),
+    visible:true,
+  };
+  _vttRefreshRegiePlacement();
+}
+
+async function _vttCommitRegiePlacement(cell) {
+  const placement = _regiePlacement;
+  if (!placement || !VS.activePage) return;
+  if (placement.kind === 'group') {
+    const cells = _vttPlacementCells(placement.ids.length, cell);
+    const batch = writeBatch(db);
+    placement.ids.forEach((id, index) => {
+      const target = cells[index] || cell;
+      batch.update(_tokRef(id), { pageId:VS.activePage.id, col:target.col, row:target.row, visible:placement.visible });
+    });
+    try {
+      await batch.commit();
+      const sendAfter = placement.sendAfterPageId;
+      _vttCancelRegiePlacement();
+      if (sendAfter) await _vttSendToPage(sendAfter);
+      showNotif(`${placement.ids.length} joueur${placement.ids.length > 1 ? 's' : ''} amené${placement.ids.length > 1 ? 's' : ''}.`, 'success');
+    } catch (error) {
+      console.error('[vtt] placement groupe', error);
+      showNotif('Impossible de placer le groupe.', 'error');
+    }
+    return;
+  }
+  if (placement.kind === 'improvised') {
+    const index = placement.index;
+    const ref = doc(_toksCol());
+    try {
+      await setDoc(ref, {
+        name:placement.count > 1 ? `${placement.name} ${index + 1}` : placement.name,
+        role:placement.role,
+        improvised:true,
+        type:placement.type,
+        characterId:null, npcId:null, beastId:null, ownerId:null,
+        pageId:VS.activePage.id,
+        col:Math.max(0, Math.min(VS.activePage.cols - 1, cell.col)),
+        row:Math.max(0, Math.min(VS.activePage.rows - 1, cell.row)),
+        visible:placement.visible,
+        hp:placement.stats[0], hpMax:placement.stats[0], defense:placement.stats[1],
+        attackDice:placement.type === 'enemy' ? '1d6' : null,
+        movement:4, range:1, imageUrl:null,
+        movedThisTurn:false, attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false,
+        createdAt:serverTimestamp(),
+      });
+      placement.index++;
+      if (placement.index >= placement.count) {
+        _vttCancelRegiePlacement();
+        _vttCloseImproviser();
+        showNotif(`${placement.count} figurant${placement.count > 1 ? 's' : ''} placé${placement.count > 1 ? 's' : ''}.`, 'success');
+      } else _vttRefreshRegiePlacement();
+    } catch (error) {
+      console.error('[vtt] placement figurant', error);
+      showNotif('Impossible de placer le figurant.', 'error');
+    }
+    return;
+  }
+  if (placement.kind === 'beast') {
+    await _vttPlaceFromBestiary(placement.beastId, cell);
+    _vttRefreshRegiePlacement();
+  }
 }
 
 // Placer un token sur la page active (depuis le tray)
@@ -14385,7 +14700,25 @@ async function _vttMoveTokenToPage(tokenId,pageId) {
 function _vttSelectFromTray(id) {
   const t=VS.tokens[id]?.data; if (!t) return;
   if (!t.pageId&&STATE.isAdmin) { _vttPlace(id); return; }
-  if (t.pageId===VS.activePage?.id) _select(id);
+  if (t.pageId===VS.activePage?.id) {
+    _select(id);
+    if (VS.stage) {
+      const dims = _tokenDims(t);
+      const scale = VS.stage.scaleX();
+      const worldX = (t.col + dims.w / 2) * CELL;
+      const worldY = (t.row + dims.h / 2) * CELL;
+      VS.stage.to({
+        x:VS.stage.width() / 2 - worldX * scale,
+        y:VS.stage.height() / 2 - worldY * scale,
+        duration:vttLowFx() ? 0 : .34,
+        easing:window.Konva?.Easings?.EaseOut,
+      });
+      const ring = VS.tokens[id]?.shape?.findOne?.('.sel');
+      if (ring && !vttLowFx()) {
+        ring.to({ opacity:.25, duration:.12, onFinish:() => ring.to({ opacity:1, duration:.18 }) });
+      }
+    }
+  }
 }
 async function _vttToggleVisible(id) {
   const t=VS.tokens[id]?.data; if (!t) return;
@@ -15507,8 +15840,168 @@ function _openStatsModal(t) {
       </div>
     </div>`);
 }
+// ── Figurants improvisés (sans quitter la carte) ───────────────────
+const _IMPROVISED_NAMES = ['Aldren','Bérénice','Célian','Doria','Esmé','Faolan','Garen','Héloïse','Isarn','Juna','Kaël','Liora','Maëlan','Neria','Orso','Perrine','Quentin','Rhéa','Silas','Tessa'];
+function _vttImproviser() {
+  if (!STATE.isAdmin) return;
+  _distributionOpen = true;
+  _vttApplyDistribution();
+  const card = document.getElementById('vtt-improv-card'); if (!card) return;
+  const launch = document.getElementById('vtt-improv-launch');
+  const opening = card.hidden;
+  card.hidden = !opening;
+  if (launch) launch.hidden = opening;
+  if (!opening) return;
+  const defaultName = _IMPROVISED_NAMES[Math.floor(Math.random()*_IMPROVISED_NAMES.length)];
+  const userIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 18c.6-3.2 2.4-5 5.5-5s4.9 1.8 5.5 5M18 8v6M15 11h6"/></svg>';
+  const diceIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="15" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="9" cy="15" r="1"/></svg>';
+  const targetIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>';
+  const eyeIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3-5 9-5 9 5 9 5-3 5-9 5-9-5-9-5Z"/><circle cx="12" cy="12" r="2"/></svg>';
+  const eyeOffIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4l16 16M10 7.2A10 10 0 0 1 12 7c6 0 9 5 9 5a14 14 0 0 1-2.1 2.6M14.4 14.4A3.4 3.4 0 0 1 9.6 9.6M6.2 9.1A14 14 0 0 0 3 12s3 5 9 5c1 0 1.8-.1 2.6-.4"/></svg>';
+  card.innerHTML = `<header class="vtt-improv-head"><span>${userIcon}</span><h3>Improviser</h3><button type="button" data-vtt-fn="_vttImproviser" aria-label="Fermer">×</button></header>
+    <div class="vtt-improv-identity"><span class="vtt-improv-avatar" id="vtt-improv-avatar">${_esc(defaultName.charAt(0))}</span><div>
+      <label class="vtt-improv-field"><input id="vtt-improv-name" value="${_esc(defaultName)}" placeholder="Nom" autocomplete="off" spellcheck="false" data-vtt-fn="_vttImprovisedIdentity" data-vtt-on="input" data-vtt-args="$value"><button type="button" data-vtt-fn="_vttImprovisedRandomName" title="Nom au hasard">${diceIcon}</button></label>
+      <label class="vtt-improv-field"><input id="vtt-improv-role" placeholder="Rôle, apparence… (optionnel)" autocomplete="off"></label>
+    </div></div>
+    <div class="vtt-improv-roles">${['Garde','Marchand','Serviteur','Habitant','Éclaireur'].map(role => `<button type="button" data-vtt-fn="_vttImprovisedRole" data-vtt-args="${role}">${role}</button>`).join('')}</div>
+    <div class="vtt-improv-option"><label>Camp</label><div class="vtt-improv-segment"><button type="button" class="active is-npc" data-vtt-fn="_vttImprovisedCamp" data-vtt-args="npc">PNJ</button><button type="button" class="is-enemy" data-vtt-fn="_vttImprovisedCamp" data-vtt-args="enemy">Ennemi</button></div><input id="vtt-improv-camp" type="hidden" value="npc"></div>
+    <div class="vtt-improv-option vtt-improv-template" hidden><label>Gabarit</label><div class="vtt-improv-segment"><button type="button" data-vtt-fn="_vttImprovisedTier" data-vtt-args="minion">Sbire <small>7</small></button><button type="button" class="active" data-vtt-fn="_vttImprovisedTier" data-vtt-args="standard">Standard <small>15</small></button><button type="button" data-vtt-fn="_vttImprovisedTier" data-vtt-args="tough">Coriace <small>30</small></button></div><input id="vtt-improv-template" type="hidden" value="standard"></div>
+    <div class="vtt-improv-option"><label>Nombre</label><div class="vtt-improv-step"><button type="button" data-vtt-fn="_vttImprovisedCount" data-vtt-args="-1" aria-label="Retirer un figurant">−</button><input id="vtt-improv-count" type="number" min="1" max="12" value="1" aria-label="Nombre de figurants"><button type="button" data-vtt-fn="_vttImprovisedCount" data-vtt-args="1" aria-label="Ajouter un figurant">+</button></div><span></span><div class="vtt-improv-visibility"><button type="button" class="active" data-vtt-fn="_vttImprovisedVisibility" data-vtt-args="visible" title="Visible des joueurs">${eyeIcon}</button><button type="button" data-vtt-fn="_vttImprovisedVisibility" data-vtt-args="hidden" title="Caché aux joueurs">${eyeOffIcon}Caché</button></div><input id="vtt-improv-visible" type="checkbox" checked hidden></div>
+    <div class="vtt-improv-actions"><button type="button" class="vtt-improv-place" data-vtt-fn="_vttAimImprovised">${targetIcon}Poser sur la carte</button><button type="button" data-vtt-fn="_vttConfirmImprovised">Au centre</button></div>`;
+  card.querySelector('input')?.focus();
+}
+function _vttCloseImproviser() {
+  const card = document.getElementById('vtt-improv-card');
+  const launch = document.getElementById('vtt-improv-launch');
+  if (card) card.hidden = true;
+  if (launch) launch.hidden = false;
+}
+function _vttImprovisedRandomName() {
+  const input = document.getElementById('vtt-improv-name');
+  if (!input) return;
+  input.value = _IMPROVISED_NAMES[Math.floor(Math.random()*_IMPROVISED_NAMES.length)];
+  _vttImprovisedIdentity(input.value);
+}
+function _vttImprovisedIdentity(value = '') {
+  const avatar = document.getElementById('vtt-improv-avatar');
+  if (avatar) avatar.textContent = String(value || '?').trim().charAt(0).toUpperCase() || '?';
+}
+function _vttImprovisedRole(role) {
+  const input = document.getElementById('vtt-improv-role'); if (!input) return;
+  input.value = input.value === role ? '' : (role || '');
+  document.querySelectorAll('#vtt-improv-card .vtt-improv-roles button').forEach(button => button.classList.toggle('active', button.dataset.vttArgs === input.value));
+  input.focus();
+}
+function _vttImprovisedCamp(camp = 'npc') {
+  const template = document.querySelector('#vtt-improv-card .vtt-improv-template');
+  if (template) template.hidden = camp !== 'enemy';
+  const input = document.getElementById('vtt-improv-camp'); if (input) input.value = camp;
+  document.querySelectorAll('#vtt-improv-card [data-vtt-fn="_vttImprovisedCamp"]').forEach(button => button.classList.toggle('active', button.dataset.vttArgs === camp));
+  document.getElementById('vtt-improv-avatar')?.classList.toggle('is-enemy', camp === 'enemy');
+}
+function _vttImprovisedTier(tier = 'standard') {
+  const input = document.getElementById('vtt-improv-template'); if (input) input.value = tier;
+  document.querySelectorAll('#vtt-improv-card .vtt-improv-template button').forEach(button => button.classList.toggle('active', button.dataset.vttArgs === tier));
+}
+function _vttImprovisedCount(delta = '0') {
+  const input = document.getElementById('vtt-improv-count');
+  if (!input) return;
+  input.value = String(Math.max(1, Math.min(12, (Number(input.value) || 1) + Number(delta || 0))));
+}
+function _vttImprovisedVisibility(mode = 'visible') {
+  const input = document.getElementById('vtt-improv-visible'); if (input) input.checked = mode !== 'hidden';
+  document.querySelectorAll('#vtt-improv-card .vtt-improv-visibility button').forEach(button => button.classList.toggle('active', button.dataset.vttArgs === mode));
+}
+function _vttImprovisedDraft() {
+  const name = (document.getElementById('vtt-improv-name')?.value || '').trim() || 'Figurant';
+  const role = (document.getElementById('vtt-improv-role')?.value || '').trim();
+  const type = document.getElementById('vtt-improv-camp')?.value === 'enemy' ? 'enemy' : 'npc';
+  const template = document.getElementById('vtt-improv-template')?.value || 'standard';
+  return {
+    name,
+    role,
+    type,
+    stats:{ minion:[7,11], standard:[15,13], tough:[30,15] }[template] || [15,13],
+    count:Math.max(1, Math.min(12, Number(document.getElementById('vtt-improv-count')?.value) || 1)),
+    visible:!!document.getElementById('vtt-improv-visible')?.checked,
+  };
+}
+function _vttAimImprovised() {
+  if (!STATE.isAdmin || !VS.activePage) return showNotif('Ouvre une scène avant de placer un figurant.', 'error');
+  _regiePlacement = { kind:'improvised', ..._vttImprovisedDraft(), index:0, label:'Placer un figurant' };
+  _vttRefreshRegiePlacement();
+}
+async function _vttConfirmImprovised() {
+  if (!STATE.isAdmin || !VS.activePage) return showNotif('Ouvre une scène avant de placer un figurant.', 'error');
+  const { name, role, type, stats, count, visible } = _vttImprovisedDraft();
+  const batch = writeBatch(db);
+  for (let index = 0; index < count; index++) {
+    const ref = doc(_toksCol());
+    batch.set(ref, { name:count > 1 ? `${name} ${index + 1}` : name, role, improvised:true, type, characterId:null, npcId:null, beastId:null, ownerId:null, pageId:VS.activePage.id, col:Math.min(VS.activePage.cols - 1, Math.floor(VS.activePage.cols / 2) + index), row:Math.floor(VS.activePage.rows / 2), visible, hp:stats[0], hpMax:stats[0], defense:stats[1], attackDice:type === 'enemy' ? '1d6' : null, movement:4, range:1, imageUrl:null, movedThisTurn:false, attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false, createdAt:serverTimestamp() });
+  }
+  try { await batch.commit(); _vttCloseImproviser(); showNotif(`${count} figurant${count > 1 ? 's' : ''} placé${count > 1 ? 's' : ''}.`, 'success'); }
+  catch (error) { console.error('[vtt] improvisation', error); showNotif('Impossible de placer le figurant.', 'error'); }
+}
+
+async function _vttPromoteImprovised(tokenId, destination = '') {
+  if (!STATE.isAdmin) return;
+  const token = VS.tokens?.[tokenId]?.data;
+  if (!token?.improvised) return;
+  const name = String(token.name || 'Figurant').trim() || 'Figurant';
+  const role = String(token.role || '').trim();
+  try {
+    if (destination === 'npc') {
+      const { _npcBasePayload } = await import('../npcs.js');
+      const npcId = await addToCol('npcs', _npcBasePayload({ nom:name, role }));
+      await updateDoc(_tokRef(tokenId), {
+        npcId,
+        beastId:null,
+        type:'npc',
+        improvised:false,
+      });
+      showNotif(`« ${name} » est maintenant un PNJ.`, 'success');
+      return;
+    }
+    if (destination === 'bestiary') {
+      const beastId = await addToCol('bestiary', {
+        nom:name,
+        emoji:'?',
+        rang:'classique',
+        type:role,
+        environnement:'',
+        niveau:0,
+        dangerositeXp:0,
+        pvMax:Math.max(1, Number(token.hpMax ?? token.hp) || 15),
+        pmMax:0,
+        ca:Number(token.defense) || 13,
+        vitesse:Number(token.movement) || 4,
+        initiative:0,
+        force:0, dexterite:0, constitution:0, intelligence:0, sagesse:0, charisme:0,
+        tokenW:Math.max(1, Number(token.tokenW) || 1),
+        tokenH:Math.max(1, Number(token.tokenH) || 1),
+        imageUrl:token.imageUrl || '',
+        description:role,
+        resistances:[], immunites:[], absorptions:[], faiblesses:[],
+        armesNaturelles:[], actions:[], traits:[], butins:[],
+      });
+      await updateDoc(_tokRef(tokenId), {
+        beastId,
+        npcId:null,
+        type:'enemy',
+        improvised:false,
+      });
+      showNotif(`« ${name} » a été ajouté au Bestiaire.`, 'success');
+    }
+  } catch (error) {
+    console.error('[vtt] promotion figurant', error);
+    showNotif("Impossible de conserver ce figurant.", 'error');
+  }
+}
+
 // ── Création d'ennemis personnalisés ────────────────────────────────
 function _vttCreateEnemy() {
+  return _vttImproviser();
+  /* ancienne modale conservée ci-dessous pour compatibilité des anciennes actions */
   openModal('👹 Créer un ennemi', `
     <div class="vtt-form">
       <div class="form-group"><label>Nom</label>
@@ -15596,6 +16089,10 @@ async function _vttPlaceFromBestiary(beastId, cell = null) {
   if (!STATE.isAdmin) return;
   if (!VS.activePage) return showNotif('Aucune page active — ouvre une page d\'abord','error');
   const b=VS.bestiary[beastId]; if (!b) return;
+  // Dans la Distribution, un clic active un tampon persistant : chaque clic
+  // sur la carte crée une nouvelle instance. Le drag & drop fournit déjà
+  // une cellule et conserve donc son placement ponctuel historique.
+  if (!cell) { _vttArmBestiaryPlacement(beastId); return; }
   // Purger les tokens fantômes (anciens auto-créés, non placés, non modifiés)
   const ghosts=Object.values(VS.tokens).filter(e=>e.data.beastId===beastId&&!e.data.pageId&&e.data.hp==null);
   if (ghosts.length) {
@@ -15625,13 +16122,12 @@ async function _vttPlaceFromBestiary(beastId, cell = null) {
     pageId:VS.activePage.id,
     col:Math.max(0,Math.min(VS.activePage.cols-sw,cx)),
     row:Math.max(0,Math.min(VS.activePage.rows-sh,cy)),
-    visible:true,
+    visible:_regiePlacement?.kind === 'beast' ? _regiePlacement.visible : true,
     imageUrl:null, movement:null, range:1, attack:null, defense:null,
     hp:null, hpMax:null,
     movedThisTurn:false, attackedThisTurn:false, bonusActionThisTurn:false, reactionThisTurn:false,
     createdAt:serverTimestamp(),
   }).catch(()=>showNotif('Erreur placement','error'));
-  showNotif(`👹 ${name} placé !`,'success');
 }
 
 // Supprimer définitivement un token ennemi
@@ -15816,6 +16312,8 @@ async function _vttPasteClipboard() {
 // Échap : ferme le premier panneau flottant ouvert (dés, musique, butin,
 // repos, émotes) ou le HUD d'action. Renvoie true si quelque chose a été fermé.
 function _vttEscapeCloseFloaters() {
+  const scenePopover = document.getElementById('vtt-scene-popover');
+  if (scenePopover && !scenePopover.hidden) { _vttReelAll(); return true; }
   const panels = [
     ['vtt-dice-panel',  'vtt-dice-trigger',  _closeDicePanel],
     ['vtt-music-panel', 'vtt-music-trigger', _closeMusicPanel],
@@ -15867,6 +16365,60 @@ async function _vttConfirmDeleteMapImage() {
   }
 }
 
+let _vttFinderItems = [];
+let _vttFinderIndex = 0;
+function _vttFinderCatalog(query = '') {
+  const q = _norm(query);
+  const matches = text => !q || _searchIncludes(text, q);
+  const now = Date.now();
+  const pages = Object.values(VS.pages || {}).filter(page => matches(`${page.name || ''} ${page.folder || ''}`)).map(page => ({ kind:'scene', id:page.id, title:page.name || 'Scène', meta:page.folder || 'Sans dossier', image:_pageThumbUrl(page), badge:page.id === VS.session?.activePageId ? 'Joueurs' : (page.id === VS.activePage?.id ? 'Aperçu' : '') }));
+  const seen = new Set();
+  const people = Object.values(VS.tokens || {}).map(entry => entry?.data).filter(token => {
+    if (!token || seen.has(_tokenEntityKey(token) || token.id)) return false;
+    seen.add(_tokenEntityKey(token) || token.id);
+    const live = _live(token);
+    return matches(`${live.displayName || token.name || ''} ${token.role || ''} ${VS.pages?.[token.pageId]?.name || ''}`) && (q || token.pageId === VS.activePage?.id || (token.ownerId && VS.presence?.[token.ownerId] && now - (VS.presence[token.ownerId].lastSeen || 0) < PRESENCE_TTL_MS));
+  }).map(token => { const live = _live(token); return { kind:'token', id:token.id, title:live.displayName || token.name || 'Personnage', meta:token.pageId === VS.activePage?.id ? 'Sur cette scène' : (VS.pages?.[token.pageId]?.name ? `Sur ${VS.pages[token.pageId].name}` : 'À placer'), image:live.displayImage || '', badge:token.type === 'player' ? 'Joueur' : token.type === 'enemy' ? 'Créature' : token.improvised ? 'Figurant' : 'PNJ' }; });
+  const beasts = q ? Object.values(VS.bestiary || {}).filter(beast => matches(`${beast.nom || ''} ${beast.type || beast.famille || ''}`)).map(beast => ({ kind:'beast', id:beast.id, title:beast.nom || 'Créature', meta:beast.type || beast.famille || 'Bestiaire', image:normalizeImageUrl(beast.imageUrl || beast.photoURL || beast.photo || beast.avatar || beast.portraitUrl || ''), badge:'Placer' })) : [];
+  const maps = q ? _sceneDraftImages().filter(image => matches(`${image.name || ''} ${image.sourcePath || ''}`)).map(image => ({ kind:'map', id:image.id, title:image.name || 'Carte', meta:'Créer une scène avec cette carte', image:resolveMapImageUrl(image), badge:'Carte' })) : [];
+  const shortcuts = q ? [{ kind:'improv', id:q, title:`Improviser « ${query.trim()} »`, meta:'Créer un figurant sur la scène', badge:'N' }, { kind:'new-scene', id:q, title:`Nouvelle scène « ${query.trim()} »`, meta:'Choisir ensuite une carte', badge:'＋' }] : [];
+  return [...pages, ...people, ...beasts, ...maps, ...shortcuts].slice(0, 40);
+}
+function _vttFinderRender(query = '') {
+  const list = document.getElementById('vtt-finder-list'); if (!list) return;
+  _vttFinderItems = _vttFinderCatalog(query);
+  _vttFinderIndex = Math.min(_vttFinderIndex, Math.max(0, _vttFinderItems.length - 1));
+  list.innerHTML = _vttFinderItems.length ? _vttFinderItems.map((item, index) => `<button type="button" class="${index === _vttFinderIndex ? 'active' : ''}" data-vtt-fn="_vttFinderPick" data-vtt-args="${index}">${item.image ? `<img src="${_esc(item.image)}" alt="">` : `<i>${item.kind === 'scene' ? '▣' : item.kind === 'map' ? '▧' : item.kind === 'token' || item.kind === 'beast' ? '♟' : '＋'}</i>`}<span><b>${_esc(item.title)}</b><small>${_esc(item.meta || '')}</small></span>${item.badge ? `<em>${_esc(item.badge)}</em>` : ''}</button>`).join('') : '<p>Aucun résultat</p>';
+}
+function _vttFinderOpen() {
+  if (!STATE.isAdmin) return;
+  let overlay = document.getElementById('vtt-finder');
+  if (overlay) { overlay.remove(); return; }
+  overlay = document.createElement('div');
+  overlay.id = 'vtt-finder'; overlay.className = 'vtt-finder';
+  overlay.innerHTML = `<button type="button" class="vtt-finder-scrim" data-vtt-fn="_vttFinderClose" aria-label="Fermer"></button><section role="dialog" aria-modal="true" aria-label="Recherche rapide"><header><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><input id="vtt-finder-input" type="search" placeholder="Scène, personnage, PNJ, créature, carte…" autocomplete="off"><kbd>Échap</kbd></header><div id="vtt-finder-list"></div><footer><span><kbd>↑</kbd><kbd>↓</kbd> naviguer</span><span><kbd>↵</kbd> ouvrir ou placer</span><span><kbd>Maj</kbd>+<kbd>↵</kbd> ouvrir et envoyer</span></footer></section>`;
+  document.getElementById('vtt-root')?.appendChild(overlay);
+  const input = overlay.querySelector('input');
+  input.addEventListener('input', () => { _vttFinderIndex = 0; _vttFinderRender(input.value); });
+  input.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); _vttFinderIndex = (_vttFinderIndex + (event.key === 'ArrowDown' ? 1 : -1) + Math.max(1, _vttFinderItems.length)) % Math.max(1, _vttFinderItems.length); _vttFinderRender(input.value); }
+    else if (event.key === 'Enter') { event.preventDefault(); _vttFinderPick(String(_vttFinderIndex), event); }
+    else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); _vttFinderClose(); }
+  });
+  _vttFinderRender(''); input.focus();
+}
+function _vttFinderClose() { document.getElementById('vtt-finder')?.remove(); }
+async function _vttFinderPick(index, event = null) {
+  const item = _vttFinderItems[Number(index) || 0]; if (!item) return;
+  _vttFinderClose();
+  if (item.kind === 'scene') { await _switchPage(item.id); if (event?.shiftKey) await _vttSendToPage(item.id); return; }
+  if (item.kind === 'token') { const token = VS.tokens?.[item.id]?.data; if (token?.pageId === VS.activePage?.id) _vttSelectFromTray(item.id); else await _vttPlace(item.id); return; }
+  if (item.kind === 'beast') { await _vttPlaceFromBestiary(item.id); return; }
+  if (item.kind === 'map') { _vttAddPage(); _vttSceneDraftPick(item.id); return; }
+  if (item.kind === 'improv') { _vttImproviser(); const input = document.getElementById('vtt-improv-name'); if (input) input.value = item.id; return; }
+  if (item.kind === 'new-scene') { _vttAddPage(); const input = document.getElementById('vtt-scene-draft-name'); if (input) input.value = item.id; }
+}
+
 function _keyHandler(e) {
   if (!document.getElementById('vtt-canvas-wrap')) return;
   const typingTarget = _vttIsTypingTarget(e.target);
@@ -15874,6 +16426,10 @@ function _keyHandler(e) {
   // Échap : traité AVANT le filtre de saisie, pour fermer un panneau dont le
   // champ de recherche a le focus (émotes, dés, musique…).
   if (e.key === 'Escape') {
+    if (_regiePlacement) { _vttCancelRegiePlacement(); e.preventDefault(); return; }
+    // La recherche de table est prioritaire : Échap la ferme sans modifier
+    // l'outil actif, la sélection ou le focus du plateau derrière elle.
+    if (document.getElementById('vtt-finder')) { _vttFinderClose(); e.preventDefault(); return; }
     // a) Modale ouverte → la modale gère sa propre fermeture (ne pas désélectionner derrière).
     if (document.getElementById('modal-overlay')?.classList.contains('show')) return;
     // Le panneau des raccourcis est purement informatif : il se ferme avant
@@ -15900,8 +16456,23 @@ function _keyHandler(e) {
     return;
   }
 
-  // Autres raccourcis : ignorés quand la frappe vise un champ de saisie.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'k' || e.key === 'K') && STATE.isAdmin) {
+    e.preventDefault(); e.stopImmediatePropagation(); _vttFinderOpen(); return;
+  }
+  // Les autres raccourcis restent ignorés quand la frappe vise un champ.
   if (typingTarget) return;
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && STATE.isAdmin && (e.key === '[' || e.key === ']')) {
+    e.preventDefault(); _vttSceneStep(e.key === '[' ? '-1' : '1'); return;
+  }
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && STATE.isAdmin && (e.key === 'n' || e.key === 'N')) {
+    e.preventDefault(); _vttImproviser(); return;
+  }
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && STATE.isAdmin && (e.key === 'h' || e.key === 'H') && _regiePlacement) {
+    e.preventDefault(); _vttToggleRegiePlacementVisibility(); return;
+  }
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && STATE.isAdmin && e.key === '/') {
+    e.preventDefault(); _distributionOpen = true; _vttApplyDistribution(); document.getElementById('vtt-distribution-search')?.focus(); return;
+  }
   if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();
     _vttOpenKeyboardHelp();
@@ -16054,13 +16625,13 @@ let _slidePeekTimer = null;
 let _slideInitialChatPending = true;
 // Épinglage : quand actif, le panneau reste ouvert et se range À CÔTÉ de la
 // toile (la toile rétrécit au lieu d'être recouverte). Préférence persistée.
-let _slidePinned = lsJson.get('vtt-slide-pinned', false);
+let _slidePinned = lsJson.get('vtt-right-pin', lsJson.get('vtt-slide-pinned', false));
+let _distributionOpen = true;
+let _distributionPinned = lsJson.get('vtt-left-pin', true);
 function _vttSlide(arg) {
   const slide = document.getElementById('vtt-slide');
   if (!slide) return;
-  const wantReserve = arg === 'reserve';
-  if (wantReserve && !STATE.isAdmin) return;   // réserve = MJ uniquement
-  const nextMode = wantReserve ? 'reserve' : 'sheet';   // sheet = Chat
+  const nextMode = 'sheet';
   // Toggle : re-cliquer le panneau déjà affiché le ferme.
   const already = _slideOpen && slide.dataset.slide === nextMode;
   if (already) {
@@ -16071,14 +16642,12 @@ function _vttSlide(arg) {
   _slideOpen = true;
   slide.classList.add('open');
   slide.setAttribute('aria-hidden', 'false');
-  if (!wantReserve) {
-    _vttRcolView('chat');
-    _slideUnread = 0;
-    _vttRemoveChatPeek();
-    if (_slideInitialChatPending) {
-      _slideInitialChatPending = false;
-      requestAnimationFrame(() => _vttChatShowNew(true));
-    }
+  _vttRcolView('chat');
+  _slideUnread = 0;
+  _vttRemoveChatPeek();
+  if (_slideInitialChatPending) {
+    _slideInitialChatPending = false;
+    requestAnimationFrame(() => _vttChatShowNew(true));
   }
   _vttRefreshSlideShell();
 }
@@ -16115,14 +16684,11 @@ function _vttRefreshSlideShell({ ping = false } = {}) {
   const slide = document.getElementById('vtt-slide');
   if (!root || !slide) return;
   root.dataset.slideOpen = _slideOpen ? '1' : '';
-  const reserve = slide.dataset.slide === 'reserve';
   const onlineCount = _vttOnlinePlayerCount();
   const title = document.getElementById('vtt-slide-title');
-  if (title) title.innerHTML = reserve
-    ? `Réserve<small>${_esc(VS.activePage?.name || 'Aucune scène')}</small>`
-    : `Chat &amp; jets<small>${onlineCount} joueur${onlineCount > 1 ? 's' : ''} en ligne</small>`;
+  if (title) title.innerHTML = `Chat &amp; jets<small>${onlineCount} joueur${onlineCount > 1 ? 's' : ''} en ligne</small>`;
   document.querySelectorAll('.vtt-slide-edge-btn').forEach(btn => {
-    const active = _slideOpen && btn.dataset.edgeMode === (reserve ? 'reserve' : 'chat');
+    const active = _slideOpen && btn.dataset.edgeMode === 'chat';
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
@@ -16192,9 +16758,38 @@ function _vttApplySlidePin() {
 function _vttSlidePin() {
   _slidePinned = !_slidePinned;
   lsJson.set('vtt-slide-pinned', _slidePinned);
+  lsJson.set('vtt-right-pin', _slidePinned);
   // Épingler alors que rien n'est ouvert → ouvre le Chat par défaut.
   if (_slidePinned && !_slideOpen) _vttSlide('chat');
   _vttApplySlidePin();
+}
+
+function _vttApplyDistribution() {
+  const root = document.getElementById('vtt-root');
+  const panel = document.getElementById('vtt-distribution');
+  if (!root || !panel || !STATE.isAdmin) return;
+  root.dataset.distributionOpen = _distributionOpen ? '1' : '0';
+  root.dataset.distributionPinned = _distributionPinned ? '1' : '0';
+  panel.classList.toggle('open', _distributionOpen);
+  panel.setAttribute('aria-hidden', String(!_distributionOpen));
+  const pin = document.getElementById('vtt-distribution-pin');
+  pin?.classList.toggle('is-on', _distributionPinned);
+  pin?.setAttribute('aria-pressed', String(_distributionPinned));
+}
+function _vttDistributionToggle() {
+  if (!STATE.isAdmin) return;
+  _distributionOpen = !_distributionOpen;
+  _vttApplyDistribution();
+}
+function _vttDistributionClose() {
+  _distributionOpen = false;
+  _vttApplyDistribution();
+}
+function _vttDistributionPin() {
+  if (!STATE.isAdmin) return;
+  _distributionPinned = !_distributionPinned;
+  lsJson.set('vtt-left-pin', _distributionPinned);
+  _vttApplyDistribution();
 }
 // Échap ferme le panneau (sauf saisie en cours ou visée active — elles priment).
 // Épinglé : le panneau est volontairement permanent → Échap ne le ferme pas.
@@ -16229,6 +16824,7 @@ function _buildHtml() {
     <span class="vtt-band-sep"></span>
     <nav id="vtt-page-tabs" class="vtt-scenes vtt-page-tabs" aria-label="Scènes"></nav>
     <span class="vtt-band-grow"></span>
+    ${mj ? `<button type="button" class="vtt-regie-search" data-vtt-fn="_vttFinderOpen" title="Rechercher dans la table (Ctrl K)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><span>Rechercher</span><kbd>Ctrl K</kbd></button>` : ''}
     ${mj ? `<button class="vtt-canvas-control vtt-session-btn" id="vtt-session-btn" data-vtt-fn="_vttToggleSessionLive" title="Démarrer la session et prévenir les joueurs qui rejoignent">
       <span class="vtt-canvas-ctl-icon" aria-hidden="true">▶</span><span class="vtt-canvas-ctl-copy"><strong>Session</strong><small>Démarrer</small></span>
     </button>` : ''}
@@ -16242,8 +16838,41 @@ function _buildHtml() {
   <div class="vtt-ribbon" id="vtt-ribbon" aria-hidden="true"></div>
 
   <div class="vtt-body">
+    ${mj ? `<aside class="vtt-distribution" id="vtt-distribution" aria-label="Distribution" aria-hidden="false">
+      <header class="vtt-distribution-head">
+        <div><h2>Distribution</h2><small>sur <span id="vtt-distribution-scene">la scène</span></small></div>
+        <button type="button" class="vtt-distribution-head-btn" id="vtt-distribution-pin" data-vtt-fn="_vttDistributionPin" title="Épingler la Distribution" aria-label="Épingler la Distribution" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6M10 4v5l-2 4h8l-2-4V4M12 17v3"/></svg></button>
+        <button type="button" class="vtt-distribution-head-btn" data-vtt-fn="_vttDistributionClose" title="Fermer" aria-label="Fermer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </header>
+      <div class="vtt-distribution-tools">
+        <label><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><input id="vtt-distribution-search" type="search" placeholder="Nom, rôle, lieu, famille, joueur…" data-vtt-fn="_vttDistributionSearch" data-vtt-on="input" data-vtt-args="$value"><kbd>/</kbd></label>
+        <nav aria-label="Filtrer la distribution">
+          <button type="button" class="active" data-vtt-distribution-filter="all" data-vtt-fn="_vttDistributionFilter" data-vtt-args="all" aria-pressed="true">Tout <b>0</b></button>
+          <button type="button" data-vtt-distribution-filter="player" data-vtt-fn="_vttDistributionFilter" data-vtt-args="player">Joueurs <b>0</b></button>
+          <button type="button" data-vtt-distribution-filter="npc" data-vtt-fn="_vttDistributionFilter" data-vtt-args="npc">PNJ <b>0</b></button>
+          <button type="button" data-vtt-distribution-filter="bestiary" data-vtt-fn="_vttDistributionFilter" data-vtt-args="bestiary">Bestiaire <b>0</b></button>
+          <button type="button" data-vtt-distribution-filter="improvised" data-vtt-fn="_vttDistributionFilter" data-vtt-args="improvised">Figurants <b>0</b></button>
+        </nav>
+      </div>
+      <div class="vtt-distribution-scroll">
+        <section class="vtt-reserve-stage"><div class="vtt-res-section-hd"><h3>En scène</h3><span id="vtt-scene-token-count"></span><i></i><small id="vtt-scene-token-page"></small><button type="button" id="vtt-scene-reveal-all" data-vtt-fn="_vttRevealPageTokens" hidden></button></div><div id="vtt-scene-tokens"></div></section>
+        <div class="vtt-bring-group" id="vtt-bring-group" hidden></div>
+        <button type="button" class="vtt-improv-launch" id="vtt-improv-launch" data-vtt-fn="_vttImproviser"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3.5 18c.6-3.2 2.4-5 5.5-5s4.9 1.8 5.5 5M18 8v6M15 11h6"/></svg></span><b>Improviser un PNJ</b><kbd>N</kbd></button>
+        <section class="vtt-improv-card" id="vtt-improv-card" hidden></section>
+        <div id="vtt-reserve-body"></div>
+        <div id="vtt-bestiary-body"></div>
+      </div>
+      <footer class="vtt-distribution-foot"><span id="vtt-distribution-count">0 en scène</span></footer>
+    </aside>
+    <button type="button" class="vtt-distribution-edge" data-vtt-fn="_vttDistributionToggle" title="Ouvrir la Distribution" aria-label="Ouvrir la Distribution"><span>♟</span><small>Distrib.</small></button>` : ''}
+    <div class="vtt-stage-column">
+      ${mj ? '<div class="vtt-reel" id="vtt-scene-reel" aria-label="Pellicule de scènes"></div>' : ''}
+      <div class="vtt-preview-label">Aperçu — Les joueurs ne voient pas cette scène</div>
+      <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
+      ${mj ? '<div class="vtt-placement-bar" id="vtt-placement-bar" hidden></div>' : ''}
+    </div>
+    ${mj ? '<div class="vtt-scene-popover" id="vtt-scene-popover" hidden></div>' : ''}
     <div class="vtt-mini-panel" id="vtt-mini-panel"></div>
-    <div class="vtt-canvas-wrap" id="vtt-canvas-wrap"></div>
 
     <!-- ── FICHE : dock flottant compact en bas à gauche (identité + onglets déployables + Jets) ── -->
     <div class="vtt-fiche-dock" id="vtt-fiche-dock">
@@ -16260,9 +16889,6 @@ function _buildHtml() {
       <button class="vtt-slide-edge-btn" data-edge-mode="chat" data-vtt-fn="_vttSlide" data-vtt-args="chat" aria-pressed="false" title="Chat &amp; jets">
         <svg class="vtt-edge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg><small>Chat</small><b id="vtt-edge-chat-count" class="vtt-edge-badge" hidden>0</b>
       </button>
-      ${mj ? `<button class="vtt-slide-edge-btn" data-edge-mode="reserve" data-vtt-fn="_vttSlide" data-vtt-args="reserve" aria-pressed="false" title="Réserve">
-        <svg class="vtt-edge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M16 5.2a3 3 0 0 1 0 5.6M18 14.8c1.8.7 3 2.5 3 5.2"/></svg><small>Réserve</small><b id="vtt-edge-reserve-count" class="vtt-edge-badge is-soft">0</b>
-      </button>` : ''}
     </nav>
 
     <!-- ── PANNEAU GLISSANT : fiche/chat + réserve MJ ── -->
@@ -16273,30 +16899,6 @@ function _buildHtml() {
         <button class="vtt-slide-x" data-vtt-fn="_vttSlideClose" title="Fermer (Échap)" aria-label="Fermer le panneau"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
       </div>
       <div class="vtt-slide-body">
-    ${mj?`
-    <div class="vtt-tray" id="vtt-tray">
-      <div class="vtt-tray-tabs" role="tablist" aria-label="Panneau du maître de jeu">
-        <button id="vtt-tray-tab-reserve" class="vtt-tray-tab${_trayTab==='reserve'?' active':''}" data-tab="reserve" data-vtt-fn="_vttTrayTab" data-vtt-args="reserve" title="Personnages en scène et en réserve" role="tab" aria-selected="${_trayTab === 'reserve'}" aria-controls="vtt-tray-view-reserve"><svg class="vtt-tt-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5M16 5.2a3 3 0 0 1 0 5.6M18 14.8c1.8.7 3 2.5 3 5.2"/></svg>Personnages</button>
-        <button id="vtt-tray-tab-scenes" class="vtt-tray-tab${_trayTab==='scenes'?' active':''}" data-tab="scenes" data-vtt-fn="_vttTrayTab" data-vtt-args="scenes" title="Scènes &amp; pages" role="tab" aria-selected="${_trayTab === 'scenes'}" aria-controls="vtt-tray-view-scenes"><svg class="vtt-tt-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14"/></svg>Scènes</button>
-        <button id="vtt-tray-tab-bestiary" class="vtt-tray-tab${_trayTab==='bestiary'?' active':''}" data-tab="bestiary" data-vtt-fn="_vttTrayTab" data-vtt-args="bestiary" title="Bestiaire" role="tab" aria-selected="${_trayTab === 'bestiary'}" aria-controls="vtt-tray-view-bestiary"><svg class="vtt-tt-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="7" cy="10" r="1.8"/><circle cx="11" cy="6.5" r="1.8"/><circle cx="15.5" cy="7.5" r="1.8"/><circle cx="18" cy="12" r="1.8"/><path d="M8 17c0-2.5 2-4.5 4.5-4.5S17 14 16 17c-.6 2-3 2.5-4 2-1 .5-3.6.3-4-2z"/></svg>Bestiaire</button>
-        <button id="vtt-tray-tab-images" class="vtt-tray-tab${_trayTab==='images'?' active':''}" data-tab="images" data-vtt-fn="_vttTrayTab" data-vtt-args="images" title="Bibliothèque d'images" role="tab" aria-selected="${_trayTab === 'images'}" aria-controls="vtt-tray-view-images"><svg class="vtt-tt-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>Images</button>
-      </div>
-      <div class="vtt-tray-views">
-        <div id="vtt-tray-view-scenes" class="vtt-tray-view${_trayTab==='scenes'?' active':''}" data-view="scenes" role="tabpanel" aria-labelledby="vtt-tray-tab-scenes" ${_trayTab === 'scenes' ? '' : 'hidden'}>
-          <div id="vtt-tray-pages">${loadingHtml('Chargement…', { compact: true })}</div>
-        </div>
-        <div id="vtt-tray-view-reserve" class="vtt-tray-view${_trayTab==='reserve'?' active':''}" data-view="reserve" role="tabpanel" aria-labelledby="vtt-tray-tab-reserve" ${_trayTab === 'reserve' ? '' : 'hidden'}>
-          <section class="vtt-reserve-stage"><div class="vtt-res-section-hd"><h3>En scène</h3><span id="vtt-scene-token-count"></span><i></i><small id="vtt-scene-token-page"></small></div><div id="vtt-scene-tokens"></div></section>
-          <div id="vtt-reserve-body"></div>
-        </div>
-        <div id="vtt-tray-view-bestiary" class="vtt-tray-view${_trayTab==='bestiary'?' active':''}" data-view="bestiary" role="tabpanel" aria-labelledby="vtt-tray-tab-bestiary" ${_trayTab === 'bestiary' ? '' : 'hidden'}>
-          <div id="vtt-bestiary-body"></div>
-        </div>
-        <div id="vtt-tray-view-images" class="vtt-tray-view${_trayTab==='images'?' active':''}" data-view="images" role="tabpanel" aria-labelledby="vtt-tray-tab-images" ${_trayTab === 'images' ? '' : 'hidden'}>
-          <div id="vtt-tray-library"></div>
-        </div>
-      </div>
-    </div>`:''}
     <div class="vtt-right-col vtt-right-col--chatonly" id="vtt-right-col">
       <div class="vtt-chat">
         <div class="vtt-chat-filters" id="vtt-chat-filters"></div>
@@ -16461,7 +17063,7 @@ function _vttToolbarMarkup() {
       <div class="vtt-tool-panel-body vtt-shortcut-groups">
         <div><span class="vtt-tool-section-label">Outils</span><ul>${shortcutRow('Sélection',['V'])}${shortcutRow('Règle',['R'])}${shortcutRow('Dessin',['D'])}${STATE.isAdmin ? shortcutRow('Structure',['M']) : ''}${shortcutRow('Recentrer sur mon personnage',['X'])}${shortcutRow('Revenir à la sélection',['Échap'])}</ul></div>
         <div><span class="vtt-tool-section-label">Édition</span><ul>${shortcutRow('Annuler',['Ctrl','Z'])}${shortcutRow('Rétablir',['Ctrl','Y'])}${shortcutRow('Copier / coller',['Ctrl','C / V'])}${shortcutRow('Retirer',['Suppr'])}${shortcutRow('Fermer le polygone',['Entrée'])}</ul></div>
-        <div><span class="vtt-tool-section-label">Table</span><ul>${shortcutRow('Mini-fiche',['C'])}${shortcutRow('Roue d’émotes',['E'])}${shortcutRow('Émote rapide',['1 — 8'])}</ul></div>
+        <div><span class="vtt-tool-section-label">Table</span><ul>${STATE.isAdmin ? `${shortcutRow('Recherche rapide',['Ctrl','K'])}${shortcutRow('Scène précédente / suivante',['[',']'])}${shortcutRow('Improviser un figurant',['N'])}${shortcutRow('Rechercher la Distribution',['/'])}${shortcutRow('Visible / caché pendant placement',['H'])}` : ''}${shortcutRow('Mini-fiche',['C'])}${shortcutRow('Roue d’émotes',['E'])}${shortcutRow('Émote rapide',['1 — 8'])}</ul></div>
         <div class="vtt-map-legend"><span class="vtt-tool-section-label">Lire la carte</span><ul>${legendRow('wall','Mur','Vue et passage bloqués')}${legendRow('door-closed','Porte fermée','Vue et passage bloqués')}${legendRow('door-open','Porte ouverte','Passage libre')}${legendRow('window-closed','Vitre fermée','Vue libre, passage bloqué')}${legendRow('window-open','Vitre ouverte','Vue et passage libres')}${legendRow('locked','Verrou','Interaction réservée au MJ')}</ul></div>
       </div>
     </section>
@@ -16572,9 +17174,21 @@ async function _vttMountTable(content) {
   _slideInitialChatPending = true;
   if (_slidePinned) _vttSlide('chat');
   _vttApplySlidePin();
+  _vttApplyDistribution();
+  _renderPageTabs();
+  _renderTraySoon();
+  const sceneReel = document.getElementById('vtt-scene-reel');
+  const reelWheel = event => {
+    const track = document.getElementById('vtt-reel-track');
+    if (!track || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    event.preventDefault();
+    track.scrollLeft += event.deltaY;
+  };
+  sceneReel?.addEventListener('wheel', reelWheel, { passive:false });
+  if (sceneReel) VS.unsubs.push(() => sceneReel.removeEventListener('wheel', reelWheel));
   // NB : le lanceur de dés libre vit désormais dans le panneau « Jets » du
   // pupitre (vtt-inspector.js) — plus de puce flottante dédiée ici.
-  document.addEventListener('keydown',_keyHandler);
+  document.addEventListener('keydown',_keyHandler, true);
   document.getElementById('vtt-img-input')?.addEventListener('change',e=>{
     const f=e.target.files?.[0]; if (f) _handleUpload(f); e.target.value='';
   });
@@ -16651,6 +17265,30 @@ export const VTT_ACTIONS = {
   _vttSlide,
   _vttSlideClose,
   _vttSlidePin,
+  _vttDistributionToggle,
+  _vttDistributionClose,
+  _vttDistributionPin,
+  _vttDistributionSearch,
+  _vttDistributionFilter,
+  _vttRevealPageTokens,
+  _vttImproviser,
+  _vttCloseImproviser,
+  _vttImprovisedRandomName,
+  _vttImprovisedIdentity,
+  _vttImprovisedRole,
+  _vttImprovisedCamp,
+  _vttImprovisedTier,
+  _vttImprovisedCount,
+  _vttImprovisedVisibility,
+  _vttAimImprovised,
+  _vttPromoteImprovised,
+  _vttBringOnlinePlayers,
+  _vttCancelRegiePlacement,
+  _vttToggleRegiePlacementVisibility,
+  _vttConfirmImprovised,
+  _vttFinderOpen,
+  _vttFinderClose,
+  _vttFinderPick,
   _vttChatFilter,
   _vttChatShowNew,
   _vttMsAttackSlot,
@@ -16899,13 +17537,29 @@ export const VTT_ACTIONS = {
   _vttPageFoldersMenu,
   _vttPageFolderRename,
   _vttPageMenu,
+  _vttPageMoveMenu,
+  _vttMovePageToFolder,
   _vttPageSearch,
   _vttPageSearchClear,
+  _vttReelFolder,
+  _vttReelFolderMenu,
+  _vttReelToggle,
+  _vttReelAll,
+  _vttSceneStep,
+  _vttScenePopoverSearch,
+  _vttOpenSceneFromPopover,
+  _vttRegieMenu,
   _vttPgDimensions,
   _vttPgFogMode,
   _vttPgPreset,
   _vttPgSwap,
   _vttPgToggleFit,
+  _vttReplacePageMap,
+  _vttSceneDraftSearch,
+  _vttSceneDraftFolder,
+  _vttSceneDraftPick,
+  _vttSceneDraftSwap,
+  _vttConfirmSceneFromLibrary,
   _vttPickOpt,
   _vttPlColorSelect,
   _vttPlace,
@@ -16938,6 +17592,7 @@ export const VTT_ACTIONS = {
   _vttSelectFromTray,
   _vttSelectMiniChar,
   _vttSendToPage,
+  _vttSendAndBring,
   _vttAdjustVital,
   _vttSetHp,
   _vttSetImgbbKey,

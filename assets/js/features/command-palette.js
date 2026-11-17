@@ -114,28 +114,14 @@ function _firstStr(obj, keys) {
   return '';
 }
 
-// Collections nécessaires pour réafficher un élément « Récemment ouvert ».
-const _RECENT_TYPE_COLLECTIONS = {
-  npc: ['npcs'], group: ['quests', 'story'], shop: ['shop'], achievement: ['achievements'],
-  collection: ['collection'], story: ['story'], recipe: ['recipes'],
-};
-
-// Quota : ouvrir la palette (souvent juste pour changer de page) amorçait les
-// 8 catalogues (lecture complète de chacun, puis listeners pour la session).
-// À l'ouverture (`deep: false`), on n'utilise que ce qui est déjà en mémoire, plus
-// les collections des éléments récents. Le reste est chargé dès 2 caractères tapés.
-async function _loadEntries({ deep = true } = {}) {
-  const needed = new Set();
-  if (!deep) {
-    for (const item of getRecentNavigation()) (_RECENT_TYPE_COLLECTIONS[item.type] || []).forEach(col => needed.add(col));
-  }
-  const get = (col, force = false) => (deep || force || needed.has(col))
-    ? loadCollection(col).catch(() => [])
-    : Promise.resolve(getCachedCollection(col) || []);
-  // Les catalogues secrets contiennent souvent de grandes images. La palette ne
-  // les amorce jamais : le MJ peut les retrouver s'ils sont déjà en cache après
-  // une visite des pages concernées, sans lecture Firestore supplémentaire.
+// Quota : la palette ne déclenche PLUS aucune lecture Firestore. Elle n'indexe
+// que ce qui est déjà en mémoire (collections session-live déjà amorcées par les
+// pages visitées) : chercher ne prime plus npcs/boutique/collection/… depuis le
+// serveur. Un catalogue jamais ouvert n'apparaît qu'après la visite de sa page.
+// (Recherche peu utilisée ici → on privilégie franchement le quota de lectures.)
+async function _loadEntries(_opts = {}) {
   const cachedOnly = col => Promise.resolve(getCachedCollection(col) || []);
+  const get = cachedOnly;
   const [npcs, chars, quests, shop, achievements, achievementSecrets, collection, collectionSecrets, story, recipes] =
     await Promise.all([
       get('npcs'),
@@ -783,6 +769,7 @@ export function initCommandPalette() {
 
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      if (document.getElementById('vtt-root')) return;
       e.preventDefault();
       if (_open) closePalette();
       else openPalette();
