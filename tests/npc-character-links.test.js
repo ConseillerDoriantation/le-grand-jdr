@@ -88,6 +88,23 @@ test('les portraits restent tolérants quand personnage ou profil est absent', a
   assert.match(source, /const _profileCroppedAvatar[\s\S]*profile\?\.imageUrl/);
 });
 
+test('la liste des exceptions complète le cache personnages avec les présentations liées', async () => {
+  const source = await readNpcs();
+  assert.match(source, /function _npcLinkableCharacters\(\)[\s\S]*_relationCharacters[\s\S]*STATE\.characters/);
+  assert.match(source, /for \(const profile of _playerProfiles \|\| \[\]\)[\s\S]*profile\?\.charId[\s\S]*_profileFallback: true/);
+  assert.match(source, /return sortCharactersForDisplay\(\[\.\.\.byId\.values\(\)\]\)/);
+});
+
+test('une exception et son ouverture restent strictement liées au couple PNJ personnage', async () => {
+  const source = await readNpcs();
+  assert.match(source, /function _npcExceptionFor[\s\S]*String\(a\?\.npcId[\s\S]*String\(a\?\.charId/);
+  assert.match(source, /function _npcCrossKey\(npcId, charId\)/);
+  assert.match(source, /_npcCrossOpen === _npcCrossKey\(n\.id, c\.id\)/);
+  assert.match(source, /data-action="npcCrossOpen" data-npc-id="\$\{_esc\(n\.id\)\}" data-char-id/);
+  assert.match(source, /function _npcCrossOpenRow[\s\S]*npcId !== _activeId[\s\S]*_npcCrossKey\(npcId, charId\)/);
+  assert.match(source, /npcShowAllRelations:\s*\(btn\) => _npcShowAllRelations\(btn\)/);
+});
+
 test('les écritures relationnelles partent au change via la couche Firestore existante', async () => {
   const source = await readNpcs();
   assert.match(source, /data-change="npcSaveException"/);

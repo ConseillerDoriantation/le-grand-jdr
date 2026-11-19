@@ -9,6 +9,104 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const NEGATIVE_BUFFS = new Set(['dot', 'move_debuff', 'affliction']);
 const NEUTRAL_BUFFS = new Set(['suspended_spell']);
 
+export const TOKEN_EFFECT_TONE_RING = Object.freeze({
+  negative: '#f87171',
+  positive: '#4ade80',
+  neutral: '#a5b4fc',
+});
+
+const hexRgb = value => {
+  let hex = String(value || '').trim().replace(/^#/, '');
+  if (hex.length === 3) hex = [...hex].map(char => char + char).join('');
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return null;
+  return [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16));
+};
+
+/** Mélange une couleur d'effet dans le fond presque noir du token. */
+export function tokenEffectTint(hex, base = '#070b12', amount = .3) {
+  const foreground = hexRgb(hex) || hexRgb('#64748b');
+  const background = hexRgb(base) || hexRgb('#070b12');
+  const ratio = clamp(Number(amount) || 0, 0, 1);
+  return `#${background.map((value, index) => Math.round(value * (1 - ratio) + foreground[index] * ratio)
+    .toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Décompose le numéro final utilisé lors de la duplication des créatures. */
+export function tokenNameParts(name) {
+  const full = String(name || '?').trim() || '?';
+  const match = full.match(/^(.*\S)\s(\d{1,3})$/);
+  const base = (match?.[1] || full).trim() || full;
+  return {
+    full,
+    base,
+    first: base.split(/[ ']/)[0] || base,
+    ordinal: match ? Number(match[2]) : null,
+  };
+}
+
+export function tokenOrdinal(name, peerNames = []) {
+  const current = tokenNameParts(name);
+  if (current.ordinal != null) return current.ordinal;
+  return (peerNames || []).some(peerName => {
+    const peer = tokenNameParts(peerName);
+    return peer.base === current.base && peer.ordinal != null;
+  }) ? 1 : null;
+}
+
+function fitTokenPlateEllipsis(text, maxWidth, measure) {
+  const source = String(text || '');
+  if (measure(source, 700) <= maxWidth) return source;
+  let candidate = source;
+  while (candidate.length > 1 && measure(`${candidate.trimEnd()}…`, 700) > maxWidth) {
+    candidate = candidate.slice(0, -1);
+  }
+  return `${candidate.trimEnd()}…`;
+}
+
+/**
+ * Choisit la plaque la plus riche qui tient dans maxWidth. `names` est ordonné
+ * du nom préféré au repli (base complète, puis premier mot).
+ */
+export function tokenPlateFit({
+  names = [], value = '', reserve = [], dropValue = false,
+  maxWidth = 0, left = 0, right = 0, gap = 0,
+  measure = text => String(text || '').length,
+} = {}) {
+  const candidates = [...new Set((names || []).map(name => String(name || '')).filter(Boolean))];
+  if (!candidates.length) candidates.push('?');
+  const originalValue = value == null ? '' : String(value);
+  const values = dropValue && originalValue ? [originalValue, ''] : [originalValue];
+  const reserveWidths = (reserve || []).filter(item => item != null && String(item) !== '')
+    .map(item => measure(String(item), 800));
+  const valueWidth = candidate => candidate
+    ? Math.max(measure(candidate, 800), ...reserveWidths, 0)
+    : 0;
+  const totalWidth = (name, candidate, width) => left + measure(name, 700)
+    + (candidate ? gap + width : 0) + right;
+
+  for (const candidate of values) {
+    const width = valueWidth(candidate);
+    for (const name of candidates) {
+      const total = totalWidth(name, candidate, width);
+      if (total <= maxWidth) {
+        return { name, value:candidate, valueWidth:width, width:total, dropped:!!originalValue && !candidate };
+      }
+    }
+  }
+
+  const candidate = values[values.length - 1];
+  const width = valueWidth(candidate);
+  const available = Math.max(0, maxWidth - left - right - (candidate ? gap + width : 0));
+  const name = fitTokenPlateEllipsis(candidates[candidates.length - 1], available, measure);
+  return {
+    name,
+    value:candidate,
+    valueWidth:width,
+    width:Math.min(maxWidth, totalWidth(name, candidate, width)),
+    dropped:!!originalValue && !candidate,
+  };
+}
+
 export const TOKEN_BUFF_VIZ = Object.freeze({
   dot:             { icon: '🩸', color: '#dc2626', label: 'Dégâts par tour' },
   regen:           { icon: '💚', color: '#22c55e', label: 'Régénération' },

@@ -195,8 +195,17 @@ function _statsBindNavSpy(root) {
   onScroll();
 }
 
-const _statsAvatar = (id, name, size = 18) =>
-  characterAvatarHtml(STATE.characters?.find(x => x.id === id) || { nom: name }, { size, className: 'stats-av-xs', title: name });
+const _statsCharacterById = id => (STATE.characters || []).find(char => char?.id === id);
+
+function _statsCharacterName(id, fallback = '') {
+  const live = _statsCharacterById(id);
+  return String(live?.nom || live?.name || fallback || 'Personnage').trim() || 'Personnage';
+}
+
+const _statsAvatar = (id, name, size = 18) => {
+  const currentName = _statsCharacterName(id, name);
+  return characterAvatarHtml(_statsCharacterById(id) || { nom: currentName }, { size, className: 'stats-av-xs', title: currentName });
+};
 
 function _statsCaptureDrawerState(root = document.getElementById('stats-root')) {
   if (!root) return;
@@ -1210,10 +1219,15 @@ function _statsRowsFor(dateKeys) {
   }
   if (!vttDetails) {
     const names = new Map();
-    for (const [charId, char] of Object.entries(_statsData?.chars || {})) {
-      const key = _norm(char?.name || '');
-      if (!key) continue;
+    const addName = (name, charId) => {
+      const key = _norm(name || '');
+      if (!key) return;
       names.set(key, names.has(key) ? '' : charId);
+    };
+    for (const [charId, char] of Object.entries(_statsData?.chars || {})) {
+      addName(char?.name, charId);
+      const live = _statsCharacterById(charId);
+      addName(live?.nom || live?.name, charId);
     }
     const resolveCharacterId = (log, kind) => {
       const direct = kind === 'attack' ? log?.sourceCharacterId : log?.characterId;
@@ -1295,7 +1309,7 @@ function _statsRowsFor(dateKeys) {
     const combatActionCount = hasCompleteVttDetails ? num(loggedCombat.canonicalActions) : null;
     const actionAverages = aggregateActionAverages(skillAverages, actionCombat, actionExtras);
     return {
-      id, name: c.name || '?',
+      id, name: _statsCharacterName(id, c.name),
       // Une seule source pour les totaux de compétences : le même agrégat que
       // celui des cartes de moyenne et du calcul MVP.
       sRolls: skillAverages.rolls,
@@ -1668,15 +1682,16 @@ function _statsDataV2Html(sessionKeys) {
     </tr>`;
   };
   const charRow = ([id, statsChar]) => {
-    const char = STATE.characters?.find(item => item.id === id) || { id, nom: statsChar.name };
+    const name = _statsCharacterName(id, statsChar.name);
+    const char = _statsCharacterById(id) || { id, nom: name };
     const played = sessionKeys.filter(key => _statsSessionBucket(statsChar, key));
     const last = [...played].sort().at(-1);
     const player = char.ownerPseudo || char.joueur || char.player || statsChar.player || '—';
     return `<tr>
-      <td class="stats-data-character">${characterAvatarHtml(char, { size: 24 })}<b>${_esc(statsChar.name || char.nom || 'Personnage')}</b></td>
+      <td class="stats-data-character">${characterAvatarHtml(char, { size: 24 })}<b>${_esc(name)}</b></td>
       <td>${_esc(player)}</td><td>${played.length}</td><td>${last ? _esc(_statsSessionDateParts(last).long) : '—'}</td>
       <td>${rosterIds.has(id) ? '<span class="stats-data-state is-ok">Actif</span>' : '<span class="stats-data-state is-warn">Hors roster</span>'}</td>
-      <td class="stats-data-actions"><button type="button" data-action="_statsCharDates" data-id="${_esc(id)}">Séances</button><button type="button" class="is-icon is-danger" data-action="_statsDelChar" data-id="${_esc(id)}" data-name="${_esc(statsChar.name || 'Personnage')}" title="Supprimer ses statistiques" aria-label="Supprimer ses statistiques">⌫</button></td>
+      <td class="stats-data-actions"><button type="button" data-action="_statsCharDates" data-id="${_esc(id)}">Séances</button><button type="button" class="is-icon is-danger" data-action="_statsDelChar" data-id="${_esc(id)}" data-name="${_esc(name)}" title="Supprimer ses statistiques" aria-label="Supprimer ses statistiques">⌫</button></td>
     </tr>`;
   };
   const rawGroup = (title, entries) => `<section><h4>${title}</h4>${entries.map(([label, value]) => `<p><span>${label}</span><b>${Number(value || 0).toLocaleString('fr-FR')}</b></p>`).join('')}</section>`;
@@ -4462,7 +4477,7 @@ registerActions({
     if (!STATE.isAdmin) return;
     const id = btn.dataset.id; if (!id) return;
     const date = btn.dataset.date || '';
-    const name = btn.dataset.name || btn.closest('.stats-char')?.querySelector('.stats-char-name')?.textContent || _statsData?.chars?.[id]?.name || 'ce personnage';
+    const name = btn.dataset.name || btn.closest('.stats-char')?.querySelector('.stats-char-name')?.textContent || _statsCharacterName(id, _statsData?.chars?.[id]?.name || 'ce personnage');
     const singleSession = !!date;
     const message = singleSession
       ? `<span class="stats-delete-scope">Une seule séance</span>Supprimer uniquement les statistiques de <b>${_esc(name)}</b> pour le <b>${_statsSessionLabel(date)}</b> ?<br><small>Ses autres séances sont conservées. La séance, son lien mission/groupe et les données des autres personnages ne changent pas.</small>`
@@ -4485,6 +4500,7 @@ registerActions({
   _statsCharDates: (btn) => {
     const id = btn.dataset.id; if (!id) return;
     const c = _statsData?.chars?.[id]; if (!c) return;
+    const name = _statsCharacterName(id, c.name);
     const dates = [...new Set([...Object.keys(c.byDate || {}), ...Object.keys(c.bySession || {})])]
       .sort((a, b) => _statsDateOf(b).localeCompare(_statsDateOf(a)) || Number(_statsSessionEntry(b).startedAt || 0) - Number(_statsSessionEntry(a).startedAt || 0));
     const metric = (icon, value, label, color = '') => `<span class="stats-date-kpi">
@@ -4526,7 +4542,7 @@ registerActions({
         <div class="stats-date-body">
           ${STATE.isAdmin ? `<div class="stats-date-admin">
             <button type="button" data-action="_statsCorrectDateCombat" data-id="${_esc(id)}" data-date="${_esc(d)}">✎ Corriger les compteurs</button>
-            <button type="button" class="stats-date-delete" data-action="_statsDelChar" data-id="${_esc(id)}" data-date="${_esc(d)}" data-name="${_esc(c.name || 'Personnage')}" data-origin="dates-modal" title="Supprimer uniquement cette séance pour ce personnage">🗑 Supprimer cette séance</button>
+            <button type="button" class="stats-date-delete" data-action="_statsDelChar" data-id="${_esc(id)}" data-date="${_esc(d)}" data-name="${_esc(name)}" data-origin="dates-modal" title="Supprimer uniquement cette séance pour ce personnage">🗑 Supprimer cette séance</button>
           </div>` : ''}
           <div class="stats-date-detail-grid">
             <section class="stats-char-detail">
@@ -4566,7 +4582,7 @@ registerActions({
         </div>
       </details>`;
     }).join('') : '<div class="stats-empty">Aucune séance enregistrée.</div>';
-    openModal(`📅 ${_esc(c.name || 'Personnage')}`, `<div class="stats-dates">${body}</div>`, {
+    openModal(`📅 ${_esc(name)}`, `<div class="stats-dates">${body}</div>`, {
       subtitle: `${dates.length} séance${dates.length > 1 ? 's' : ''} enregistrée${dates.length > 1 ? 's' : ''}`,
       accent: '#7fb0ff',
     });
@@ -4581,7 +4597,7 @@ registerActions({
       <span>${label}${hint ? `<small>${hint}</small>` : ''}</span>
       <input type="text" inputmode="numeric" pattern="[0-9]*" data-stats-field="${field}" value="${Math.max(0, Math.trunc(Number(combat[field]) || 0))}">
     </label>`;
-    openModal(`🧾 Corriger ${_esc(c.name || 'Personnage')}`, `
+    openModal(`🧾 Corriger ${_esc(_statsCharacterName(id, c.name))}`, `
       <div class="stats-correction">
         <div class="stats-correction-note"><b>Séance du ${_statsSessionLabel(date)}</b><span>Modifie les valeurs réellement observées. Les totaux de campagne seront ajustés automatiquement.</span></div>
         <section><h4>⚔️ Actions offensives</h4><div class="stats-correction-grid">

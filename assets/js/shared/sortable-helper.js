@@ -31,6 +31,15 @@ const DRAG_DEFAULTS = {
   delay: 150,
   delayOnTouchOnly: true,
   touchStartThreshold: 5,
+  // La zone de 30 px fournie par Sortable est trop étroite pour les longues
+  // listes : le pointeur sort facilement de la fenêtre avant que la page ne
+  // commence à suivre. Ces valeurs gardent le défilement progressif tout en
+  // laissant le temps de déposer précisément entre deux éléments.
+  scroll: true,
+  forceAutoScrollFallback: true,
+  scrollSensitivity: 96,
+  scrollSpeed: 18,
+  bubbleScroll: true,
 };
 
 /**

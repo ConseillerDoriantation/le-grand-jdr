@@ -110,3 +110,11 @@ test('l onglet Données reprend les contrôles MJ complets de la maquette', () =
   assert.match(css, /\.stats-root \.stats-data-table td/);
   assert.match(css, /\.stats-root \.stats-v2-danger/);
 });
+
+test('les statistiques affichent le nom actuel de la fiche personnage', () => {
+  assert.match(pages, /function _statsCharacterName\(id, fallback = ''\)/);
+  assert.match(pages, /live\?\.nom \|\| live\?\.name \|\| fallback/);
+  assert.match(pages, /id, name: _statsCharacterName\(id, c\.name\)/);
+  assert.match(pages, /const name = _statsCharacterName\(id, statsChar\.name\)/);
+  assert.match(pages, /addName\(live\?\.nom \|\| live\?\.name, charId\)/);
+});

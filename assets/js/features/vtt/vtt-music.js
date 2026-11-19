@@ -48,13 +48,6 @@ function _refreshMusicDockTrigger(ms = _musicState) {
   if (!trigger) return;
   const live = !!((ms?.playing && ms?.currentSoundId && !ms?.paused) || ms?.ambienceSoundId);
   trigger.classList.toggle('live', live);
-  const detail = trigger.querySelector('.vtt-session-tooltip-detail');
-  if (detail) {
-    const sound = _sounds.find(item => item.id === ms?.currentSoundId);
-    detail.textContent = live
-      ? (sound?.name ? `${sound.name}${ms?.ambienceSoundId ? ' · ambiance active' : ''}` : 'Lecture en cours')
-      : 'Rien en lecture';
-  }
 }
 
 // ── Refs Firestore (sons / playlists / état musique) ────────────────
@@ -1085,7 +1078,12 @@ function _disarmAutoplayWhenReady() {
 function _playbackStartMillis(startedAt) {
   if (typeof startedAt === 'number') return startedAt;
   if (startedAt instanceof Date) return startedAt.getTime();
-  return startedAt?.toMillis?.() ?? null;
+  const millis = startedAt?.toMillis?.();
+  if (Number.isFinite(millis)) return millis;
+  // Tolère aussi la forme sérialisée d'un Timestamp (cache/restauration).
+  const seconds = Number(startedAt?.seconds ?? startedAt?._seconds);
+  const nanos = Number(startedAt?.nanoseconds ?? startedAt?._nanoseconds ?? 0);
+  return Number.isFinite(seconds) ? (seconds * 1000) + (Number.isFinite(nanos) ? nanos / 1e6 : 0) : null;
 }
 
 // Position à restaurer après un rechargement. Les pistes bouclées reprennent
@@ -1095,7 +1093,38 @@ function _musicResumePosition(ms, duration, now = Date.now()) {
   if (!(startedAt >= 0) || !(duration > 0)) return 0;
   const elapsed = Math.max(0, (now - startedAt) / 1000);
   if (ms?.loop) return elapsed % duration;
-  return elapsed < duration - 0.3 ? elapsed : 0;
+  // Une piste non bouclée arrivée à son terme ne doit surtout pas repartir à
+  // zéro au prochain montage. La placer à la fin laisse `ended` faire avancer
+  // la playlist côté MJ, ou la maintient terminée pour un son isolé.
+  return Math.min(elapsed, Math.max(0, duration - 0.05));
+}
+
+function _musicTimelineKey(ms) {
+  const startedAt = _playbackStartMillis(ms?.startedAt);
+  if (!(startedAt >= 0) || !ms?.currentSoundId) return '';
+  return `${ms.currentSoundId}:${startedAt}:${ms.seekVersion || 0}:${ms.loop ? 1 : 0}`;
+}
+
+// Recale un lecteur sur l'horloge partagée. Cette fonction reste volontairement
+// idempotente : elle peut être rappelée lorsque le Timestamp serveur remplace la
+// sentinelle optimiste, ou quand les métadonnées deviennent enfin exploitables.
+function _restoreMusicTimeline(el, ms, force = false) {
+  if (!el || el.dataset.soundId !== ms?.currentSoundId) return false;
+  const duration = Number(el.duration);
+  const key = _musicTimelineKey(ms);
+  if (!key || !(duration > 0)) return false;
+
+  const target = _musicResumePosition(ms, duration);
+  const current = Number(el.currentTime) || 0;
+  const directDrift = Math.abs(current - target);
+  const drift = ms.loop
+    ? Math.min(directDrift, Math.max(0, duration - directDrift))
+    : directDrift;
+  if (force || el.dataset.musicTimeline !== key || drift > 1.5) {
+    try { el.currentTime = target; } catch { return false; }
+  }
+  el.dataset.musicTimeline = key;
+  return true;
 }
 
 // Autoplay bloqué (ex. après un rafraîchissement de page : le navigateur exige
@@ -1269,6 +1298,9 @@ function _syncMusicPlayback(ms) {
   // seulement en attente d'autorisation autoplay : on réessaie avec ce lecteur.
   if (_audioEl && _audioEl.dataset.soundId===ms.currentSoundId && !_audioEl.ended) {
     _audioEl.loop = ms.loop ?? false;
+    // Au retour du Timestamp résolu (ou après un remontage), le lecteur existe
+    // déjà : il doit quand même être recalé s'il était parti de zéro.
+    _restoreMusicTimeline(_audioEl, ms);
     if (_audioEl.paused) {
       _audioEl.play().then(_disarmAutoplayWhenReady).catch(err => {
         if (err.name === 'NotAllowedError') _armAutoplayResume();
@@ -1280,10 +1312,7 @@ function _syncMusicPlayback(ms) {
     const sv = ms.seekVersion || 0;
     if (sv !== _lastAppliedSeek) {
       _lastAppliedSeek = sv;
-      if (!ms.loop && ms.startedAt && _audioEl.duration) {
-        const pos = (Date.now() - (ms.startedAt?.toMillis?.() ?? Date.now())) / 1000;
-        if (pos >= 0 && pos < _audioEl.duration - 0.3) _audioEl.currentTime = pos;
-      }
+      _restoreMusicTimeline(_audioEl, ms, true);
     }
     if (panel?.dataset.open==='1') _reflectPlaybackUi();
     return;
@@ -1299,12 +1328,13 @@ function _syncMusicPlayback(ms) {
   _lastAppliedSeek = ms.seekVersion || 0; // la position initiale est déjà gérée via startedAt
 
   // Reprend à la position partagée, y compris au milieu d'une piste bouclée.
-  if (ms.startedAt) {
-    el.addEventListener('loadedmetadata', () => {
-      const resumeAt = _musicResumePosition(ms, el.duration);
-      if (resumeAt > 0.05) el.currentTime = resumeAt;
-    }, {once:true});
-  }
+  // Certains hébergeurs ne fournissent une durée exploitable qu'à `canplay` ou
+  // `durationchange`, donc on réessaie sur ces événements sans jamais repartir
+  // arbitrairement à zéro.
+  const restoreTimeline = () => _restoreMusicTimeline(el, _musicState);
+  el.addEventListener('loadedmetadata', restoreTimeline);
+  el.addEventListener('durationchange', restoreTimeline);
+  el.addEventListener('canplay', restoreTimeline, {once:true});
 
   // Auto-avance playlist (MJ uniquement pour éviter les doublons)
   if (ms.currentPlaylistId && STATE.isAdmin) {

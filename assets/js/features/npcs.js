@@ -520,11 +520,19 @@ function _npcPlayerChoices() {
 }
 
 function _npcExceptionFor(npcId, charId) {
-  return _affiPerso.find(a => a.npcId === npcId && a.charId === charId) || null;
+  const npcKey = String(npcId || '').trim();
+  const charKey = String(charId || '').trim();
+  if (!npcKey || !charKey) return null;
+  return _affiPerso.find(a =>
+    String(a?.npcId || '').trim() === npcKey
+    && String(a?.charId || '').trim() === charKey
+  ) || null;
 }
 
 function _npcFeelingFor(npcId, character) {
-  return (character?.relations || []).find(r => r?.npcId === npcId) || null;
+  const npcKey = String(npcId || '').trim();
+  if (!npcKey) return null;
+  return (character?.relations || []).find(r => String(r?.npcId || '').trim() === npcKey) || null;
 }
 
 function _npcExceptionLevel(n, exception, { player = false } = {}) {
@@ -1618,11 +1626,11 @@ function _renderNpcCrossRelations(n, admin) {
     ? [['notables', 'Notables'], ['exceptions', 'Exceptions'], ['feelings', 'Ressentis'], ['all', 'Tous']]
     : [['notables', 'Avec un lien'], ['all', 'Tous']];
   return `<section class="npc-rd-card npc-rd-cross" id="npc-rd-cross-relations" data-npc-id="${_esc(n.id)}">
-    <div class="npc-rd-cardhead"><div><h2>Regards croisés</h2><p>Ce que ${_esc(n.nom || 'ce PNJ')} pense de chaque personnage, et ce que chacun pense de lui.</p></div>${admin ? `<div class="npc-rd-card-actions"><button type="button" class="npc-rd-outline" data-action="openAffiniteTypesManager">${_npcUiIcon('tag')} Gérer les types</button><button type="button" class="npc-rd-outline" data-action="npcShowAllRelations">＋ Exception pour…</button></div>` : ''}</div>
+    <div class="npc-rd-cardhead"><div><h2>Regards croisés</h2><p>Ce que ${_esc(n.nom || 'ce PNJ')} pense de chaque personnage, et ce que chacun pense de lui.</p></div>${admin ? `<div class="npc-rd-card-actions"><button type="button" class="npc-rd-outline" data-action="openAffiniteTypesManager">${_npcUiIcon('tag')} Gérer les types</button><button type="button" class="npc-rd-outline" data-action="npcShowAllRelations" data-npc-id="${_esc(n.id)}">＋ Exception pour…</button></div>` : ''}</div>
     ${_renderNpcDistributions(n, all)}
     <div class="npc-rd-cross-tools"><label>${_npcUiIcon('search')}<input type="search" placeholder="Personnage ou joueur…" value="${_esc(_npcCrossSearch)}" data-input="npcCrossSearch"></label><div class="npc-rd-cross-filters">${filterChoices.map(([id, label]) => `<button type="button" class="${_npcCrossFilter === id ? 'is-on' : ''}" data-action="npcCrossFilter" data-filter="${id}">${label} <b>${id === 'notables' ? all.filter(r => r.exception || r.feeling).length : id === 'exceptions' ? all.filter(r => r.exception).length : id === 'feelings' ? all.filter(r => r.feeling).length : all.length}</b></button>`).join('')}</div><select data-change="npcCrossSort" aria-label="Trier les relations"><option value="name" ${_npcCrossSort === 'name' ? 'selected' : ''}>Nom</option><option value="player" ${_npcCrossSort === 'player' ? 'selected' : ''}>Joueur</option>${admin ? `<option value="discord" ${_npcCrossSort === 'discord' ? 'selected' : ''}>Désaccords d’abord</option>` : ''}</select></div>
     <div class="npc-rd-cross-table"><div class="npc-rd-cross-head"><span>Personnage</span><span>${_esc(n.nom || 'PNJ')} → perso</span><span>Perso → ${_esc(n.nom || 'PNJ')}</span><span></span></div>${rows.map(row => _renderNpcCrossRow(n, row, admin)).join('') || '<p class="npc-rd-empty">Aucune relation dans ce filtre.</p>'}</div>
-    ${quiet > 0 && _npcCrossFilter === 'notables' && !_npcCrossSearch ? `<div class="npc-rd-quiet"><span class="npc-rd-avatar-stack">${all.filter(row => !row.exception && !row.feeling).slice(0, 5).map(row => { const src = _charPortraitSrc(row.character, _playerProfileForChar(row.character.id, row.character.nom)); return src ? `<img src="${_esc(src)}" alt="">` : `<i>${_esc((row.character.nom || '?')[0])}</i>`; }).join('')}</span><span><b>${quiet}</b> autres personnages suivent la posture du groupe et n’ont rien noté.</span><button type="button" data-action="npcShowAllRelations">Afficher tous</button></div>` : ''}
+    ${quiet > 0 && _npcCrossFilter === 'notables' && !_npcCrossSearch ? `<div class="npc-rd-quiet"><span class="npc-rd-avatar-stack">${all.filter(row => !row.exception && !row.feeling).slice(0, 5).map(row => { const src = _charPortraitSrc(row.character, _playerProfileForChar(row.character.id, row.character.nom)); return src ? `<img src="${_esc(src)}" alt="">` : `<i>${_esc((row.character.nom || '?')[0])}</i>`; }).join('')}</span><span><b>${quiet}</b> autres personnages suivent la posture du groupe et n’ont rien noté.</span><button type="button" data-action="npcShowAllRelations" data-npc-id="${_esc(n.id)}">Afficher tous</button></div>` : ''}
   </section>`;
 }
 
@@ -1633,12 +1641,12 @@ function _renderNpcLevelChip(level, { inherited = false, secret = false } = {}) 
 
 function _renderNpcCrossRow(n, row, admin) {
   const { character: c, exception: e, feeling: f, exLevel, feelingLevel } = row;
-  const open = _npcCrossOpen === c.id;
+  const open = _npcCrossOpen === _npcCrossKey(n.id, c.id);
   const profile = _playerProfileForChar(c.id, c.nom);
   const src = _charPortraitSrc(c, profile);
   const exShown = exLevel == null ? _affiniteNiveau(n) : exLevel;
   return `<div class="npc-rd-cross-row${open ? ' is-open' : ''}">
-    <button type="button" class="npc-rd-cross-summary${admin ? ' is-clickable' : ''}" data-action="npcCrossOpen" data-char-id="${_esc(c.id)}" aria-expanded="${open}">
+    <button type="button" class="npc-rd-cross-summary${admin ? ' is-clickable' : ''}" data-action="npcCrossOpen" data-npc-id="${_esc(n.id)}" data-char-id="${_esc(c.id)}" aria-expanded="${open}">
       <span class="npc-rd-person">${src ? `<img src="${_esc(src)}" alt="">` : `<i>${_esc((c.nom || '?')[0])}</i>`}<b>${_esc(c.nom || '?')}<small>${_esc(c.ownerPseudo || c.ownerName || '')}</small></b></span>
       <span class="npc-rd-cross-cell">${_renderNpcLevelChip(exShown, { inherited: exLevel == null })}${_renderNpcTypeChip(e)}${e?.secret ? `<i class="npc-rd-secret" title="Exception cachée aux joueurs">${_npcUiIcon('lock')}</i>` : ''}${e?.notePublique ? `<em>${_esc(e.notePublique)}</em>` : ''}</span>
       <span class="npc-rd-cross-cell">${_renderNpcLevelChip(feelingLevel)}${f?.sentiment ? `<span class="npc-rd-feeling-label">« ${_esc(f.sentiment)} »</span>` : ''}${f?.note ? `<em>${_esc(f.note)}</em>` : ''}</span>
@@ -2769,6 +2777,7 @@ function _renderFlatList(filtered) {
 // ── Sélection & filtres ───────────────────────────────────────────────────────
 export function selectNpc(id, { syncRoute = true, replace = false } = {}) {
   if (!_npcs.some(item => item.id === id)) return;
+  if (_activeId !== id) _npcCrossOpen = '';
   _activeId = id;
   const npc = _npcs.find(item => item.id === id);
   if (npc) recordRecentNavigation({ type: 'npc', id, title: npc.nom || npc.name || '' });
@@ -5268,6 +5277,22 @@ function _npcLinkableCharacters() {
   for (const character of STATE.characters || []) {
     if (character?.id) byId.set(character.id, character);
   }
+  // Une présentation Joueurs liée constitue un repli fiable lorsque le cache
+  // characters a été amorcé partiellement. On ne crée qu'un stub d'affichage :
+  // aucune lecture supplémentaire et aucune présentation non liée n'est ajoutée.
+  for (const profile of _playerProfiles || []) {
+    const id = profile?.charId || profile?.characterId || profile?.persoId || profile?.linkedCharId || '';
+    if (!id || byId.has(id)) continue;
+    byId.set(id, {
+      id,
+      nom: profile.nom || profile.name || 'Personnage',
+      uid: profile.uid || profile.userId || '',
+      ownerPseudo: profile.joueur || profile.ownerPseudo || profile.displayName || '',
+      photo: profile.portraitUrl || profile.photo || profile.avatar || profile.avatarUrl || profile.imageUrl || '',
+      relations: [],
+      _profileFallback: true,
+    });
+  }
   return sortCharactersForDisplay([...byId.values()]);
 }
 
@@ -5847,12 +5872,25 @@ function _npcCrossSearchInput(el) {
 }
 
 function _npcCrossSortSet(el) { _npcCrossSort = el?.value || 'name'; _refreshActivePanel(); }
+function _npcCrossKey(npcId, charId) { return `${String(npcId || '').trim()}::${String(charId || '').trim()}`; }
 function _npcCrossOpenRow(btn) {
   if (!STATE.isAdmin || _npcIsPlayerView()) return;
-  _npcCrossOpen = _npcCrossOpen === btn?.dataset?.charId ? '' : btn?.dataset?.charId || '';
+  const npcId = btn?.dataset?.npcId || _activeId;
+  const charId = btn?.dataset?.charId || '';
+  if (!npcId || npcId !== _activeId || !_npcLinkCharacter(charId)) return;
+  const key = _npcCrossKey(npcId, charId);
+  _npcCrossOpen = _npcCrossOpen === key ? '' : key;
   _refreshActivePanel();
 }
-function _npcShowAllRelations() { _npcCrossFilter = 'all'; _npcCrossOpen = ''; _refreshActivePanel(); }
+function _npcShowAllRelations(btn) {
+  const npcId = btn?.dataset?.npcId || _activeId;
+  if (!npcId || npcId !== _activeId) return;
+  _npcCrossFilter = 'all';
+  _npcCrossSearch = '';
+  _npcCrossOpen = '';
+  _refreshActivePanel();
+  requestAnimationFrame(() => document.querySelector('#npc-rd-cross-relations .npc-rd-cross-summary')?.focus());
+}
 
 function _npcSetExceptionLevel(btn) {
   return _npcSaveException({
@@ -6159,7 +6197,7 @@ registerActions({
   npcCrossSearch:            (el) => _npcCrossSearchInput(el),
   npcCrossSort:              (el) => _npcCrossSortSet(el),
   npcCrossOpen:              (btn) => _npcCrossOpenRow(btn),
-  npcShowAllRelations:       () => _npcShowAllRelations(),
+  npcShowAllRelations:       (btn) => _npcShowAllRelations(btn),
   npcSetExceptionLevel:      (btn) => _npcSetExceptionLevel(btn),
   npcSetExceptionType:       (btn) => _npcSetExceptionType(btn),
   npcSetFeelingLevel:        (btn) => _npcSetFeelingLevel(btn),

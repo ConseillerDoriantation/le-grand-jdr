@@ -71,7 +71,7 @@ import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual, vttLowFx, setVttLowFx, _stripShadows } from './vtt-render.js';
 import { fogHasUnlimitedVision, fogVisionRadiusCells, vttCanvasPixelRatio, vttPinchCameraTransform } from './vtt-fog-performance.js';
 import { vttStructureLegendSvg } from './vtt-wall-utils.js';
-import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenFootprintMeta, tokenHiddenHealthRatio, tokenMovementMeta, tokenRelationTone, tokenResourceArcs, tokenVisibleHealthMeta } from './vtt-token-visual.js';
+import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenFootprintMeta, tokenHiddenHealthRatio, tokenMovementMeta, tokenNameParts, tokenOrdinal, tokenRelationTone, tokenResourceArcs, tokenVisibleHealthMeta } from './vtt-token-visual.js';
 import { TURN_EPOCH_ENABLED, TURN_FLAG_RESET, sessionTurnEpoch, normalizeTurnFlags, stampTurnPatch, turnFlagsStale, hasTurnFlags } from './vtt-turn-flags.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { attackRollHitsTarget, gridDistanceForRange, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
@@ -102,7 +102,11 @@ import {
   _live, _characterForToken, _touchBuffOf, _conditionDmgBonusOf,
   _scaledEnchantConditionFields, _vttPrimaryWeapon, _vttBestWeaponRange, _conditionCritRangeBonusOf, _armorSetCritRangeBonusOf,
 } from './vtt-effective.js';
-import { _renderInspector, _renderInspectorSoon, _vttInsTab, _vttInsFilterConditionPicker, _vttBuildJetsBody, _vttSkillFilter, _vttSkillFilterClear } from './vtt-inspector.js';
+import {
+  _renderInspector, _renderInspectorSoon, _vttInsTab, _vttInsFilterConditionPicker,
+  _vttInsTogglePicker, _vttInsToggleManage, _vttInsPurge,
+  _vttBuildJetsBody, _vttSkillFilter, _vttSkillFilterClear,
+} from './vtt-inspector.js';
 import {
   _renderLibSection, _resetMapLib, _libFolder, _vttLibToggle, _vttLibOpenFolder, _vttLibNewFolder,
   _vttLibDelFolder, _vttLibDelImg, _vttLibMoveRoot, _vttLibMoveMenu, _vttLibMoveTo, _vttLibPlace,
@@ -200,14 +204,14 @@ import {
 } from './vtt-presence.js';
 import {
   _renderMiniSheet, _vttToggleMiniSheet, _vttSelectMiniChar, _msCanEdit, _msCanEditVitals, _msFlushNoteDrafts,
-  _vttMsTab, _vttMsToggleCollapsed, _vttMsAttackSlot, _vttMsAddNote, _vttMsToggleNote,
+  _vttMsTab, _vttMsStyleToggle, _vttMsToggleCap, _vttMsToggleHistory, _vttMsAttackSlot, _vttMsAddNote, _vttMsToggleNote,
   _vttMsDeleteNote, _vttMsEquip, _vttMsUnequip, _vttMsUnequipAll, _vttMsEquipPicker,
-  _vttMsSlotChange, _vttMsDeleteItem, _vttMsRecycle, _vttMsSendPicker, _vttMsConfirmSend,
+  _vttMsSlotChange, _vttMsDeleteItem, _vttMsConsumeItem, _vttMsRecycle, _vttMsSendPicker, _vttMsConfirmSend,
   _vttMsInvSearch, _vttMsInvCat, _vttMsInvClear, _vttMsSortSearch, _vttMsSortCat,
   _vttMsSortClear, _vttToggleMsSort, _vttMsCompteAdd, _vttMsCompteDel, _vttMsCraft, _vttMsCraftAsk, _vttMsCraftCancel, _vttForgeOpen,
   _vttMsCraftSearch, _vttMsCraftClear,
   _vttMsSendGoldPicker, _vttMsConfirmSendGold,
-  _vttMsSac, _vttMsGoPurse, _vttMsPop, _vttMsToggleSpell, _vttMsKeyToggle,
+  _vttMsSac, _vttMsPop, _vttMsToggleSpell, _vttMsKeyToggle, _vttMsEscape, _vttMsFocusSearch,
 } from './vtt-mini-fiche.js';
 
 let _vttDelegSearch = '';
@@ -1903,7 +1907,7 @@ function _syncTokenResourceLabels(shape) {
   if (!shape) return;
   const hp=shape.getAttr('displayHpSnapshot');
   const value=shape.findOne('.move-value');
-  if (!value || shape.getAttr('movementValueActive')) return;
+  if (!value || shape.getAttr('movementValueActive') || shape.getAttr('plateValueDropped')) return;
   const down=shape.getAttr('isDownSnapshot');
   value.text(down ? (shape.getAttr('healthLabel')||'KO')
     : shape.getAttr('hiddenHealth') ? (shape.getAttr('healthLabel')||'Inconnu') : (hp==null?'?':String(hp)));
@@ -2004,13 +2008,30 @@ function _syncTokenMovementVisual() {
   VS.layers.token?.batchDraw();
 }
 
+function _tokenPeerNames(t) {
+  return Object.values(VS.tokens || {})
+    .map(entry=>entry?.data)
+    .filter(peer=>peer?.pageId===t?.pageId)
+    .map(_tokenOrdinalName);
+}
+
+function _tokenOrdinalName(t) {
+  return String(_live(t).displayName??t?.name??'?');
+}
+
+function _tokenOrdinalKey(t) {
+  if (!t) return '';
+  const name=_tokenOrdinalName(t);
+  return `${t.pageId||''}\u0000${tokenNameParts(name).base}`;
+}
+
 function _buildShape(t) {
   // Visuel pur (forme, barres, badges, nom, portrait) → vtt-render.js.
   // `ld` = données effectives (via _live) ; les handlers d'interaction ci-dessous
   // restent ici, attachés au groupe retourné.
   const ld = _live(t);
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
-  const g = _buildTokenVisual(t, ld, CONDITION_BY_ID);
+  const g = _buildTokenVisual(t, ld, CONDITION_BY_ID, _tokenPeerNames(t), _canControlToken(t));
   _applyTokenDetailToShape(g);
   g.on('mouseenter pointerenter',e=>_showTokenTooltip(VS.tokens[t.id]?.data||t,e.evt));
   g.on('mousemove pointermove',e=>{
@@ -2534,10 +2555,25 @@ function _patchShapeImpl(id) {
   // référencé — au calque actif → des tokens d'une autre page « apparaissent ».
   if (e.data.pageId !== VS.activePage?.id) return;
   const ld=_live(e.data); const g=e.shape;
+  const nextDisplayName=String(ld.displayName??e.data.name??'?');
+  const nextOrdinal=tokenOrdinal(nextDisplayName,_tokenPeerNames(e.data));
+  const nameMismatch=(g.getAttr('displayNameSnapshot')||'')!==nextDisplayName;
+  const ordinalMismatch=(g.getAttr('tokenOrdinal')??null)!==nextOrdinal;
   const previousHp=g.getAttr('displayHpSnapshot');
   const previousPm=g.getAttr('displayPmSnapshot');
   const currentHp=ld.displayHp==null?null:Number(ld.displayHp);
   const currentPm=ld.displayPm==null?null:Number(ld.displayPm);
+  const hiddenHealth=!STATE.isAdmin && e.data.type==='enemy';
+  const nextHealth=tokenVisibleHealthMeta(ld.displayHp, ld.displayHpMax, {
+    hidden:hiddenHealth,
+    actualDown:!!ld.isDown,
+  });
+  const nextHpMaxSnapshot=nextHealth.known ? nextHealth.maximum : null;
+  const nextMovementMaximum=_canControlToken(e.data) && Number.isFinite(Number(ld.displayMovement))
+    ? Math.max(0,(Number(ld.displayMovement)||0)+(Number(e.data.bonusMvt)||0)) : null;
+  const downMismatch=!!g.getAttr('isDownSnapshot')!==nextHealth.isDown;
+  const hpMaxMismatch=(g.getAttr('displayHpMaxSnapshot')??null)!==nextHpMaxSnapshot;
+  const movementMaximumMismatch=(g.getAttr('movementMaximumSnapshot')??null)!==nextMovementMaximum;
   const hpDelta=Number.isFinite(previousHp)&&Number.isFinite(currentHp)?currentHp-previousHp:0;
   const pmDelta=Number.isFinite(previousPm)&&Number.isFinite(currentPm)?currentPm-previousPm:0;
   const hasPmBar   = !!g.findOne('.pm-fill');
@@ -2559,10 +2595,10 @@ function _patchShapeImpl(id) {
   const currentEffectKeys=new Set(currentEffects.map(effect=>`${effect.kind}:${effect.key}`));
   const expiredEffects=(g.getAttr('activeEffectsSnapshot')||[])
     .filter(effect=>!currentEffectKeys.has(`${effect.kind}:${effect.key}`));
-  const hiddenHealth=!STATE.isAdmin && e.data.type==='enemy';
   const needsManaRing=!hiddenHealth && (ld.displayPm != null || ld.hasMana);
   if (needsManaRing !== hasPmBar || hasCaBuff !== needsCaBuff
-      || sizeMismatch || imageMismatch || effectsMismatch) {
+      || sizeMismatch || imageMismatch || effectsMismatch || nameMismatch || ordinalMismatch
+      || downMismatch || hpMaxMismatch || movementMaximumMismatch) {
     const shape = _buildShape(e.data);
     g.destroy();
     VS.tokens[id] = { ...e, shape };
@@ -2588,10 +2624,7 @@ function _patchShapeImpl(id) {
     return;
   }
   g.to({ x:e.data.col*CELL+sw*CELL/2, y:e.data.row*CELL+sh*CELL/2, duration:0.22, easing:window.Konva?.Easings?.EaseInOut });
-  const health = tokenVisibleHealthMeta(ld.displayHp, ld.displayHpMax, {
-    hidden:hiddenHealth,
-    actualDown:!!ld.isDown,
-  });
+  const health = nextHealth;
   // Pour un ennemi masqué, seul l'état réel peut afficher le marqueur de mort.
   const isDown = health.isDown;
   const hasMana=needsManaRing;
@@ -2669,11 +2702,12 @@ function _patchShapeImpl(id) {
     const tl = _buff.expiresAtRound != null && _round > 0 ? _buff.expiresAtRound - _round + 1 : _buff.totalDuration ?? '∞';
     g.findOne('.ca-buff-turns')?.text(String(tl));
   }
-  const nextName=String(ld.displayName??e.data.name??'?');
+  const nextName=nextDisplayName;
+  const nextNameParts=tokenNameParts(nextName);
   const detailedName=g.findOne('.lbl-detailed');
   const standardName=g.findOne('.lbl-standard');
-  detailedName?.text(nextName);
-  standardName?.text(nextName.split(/[ ']/)[0]||nextName);
+  detailedName?.text(nextNameParts.base);
+  standardName?.text(nextNameParts.first);
   detailedName?.fill(isDown?'#94a3b8':'#f1f5f9');
   standardName?.fill(isDown?'#94a3b8':'#f1f5f9');
   g.findOne('.turn-active')?.visible(!!VS.session?.combat?.active && VS.session?.combat?.activeTokenId===id);
@@ -12894,10 +12928,20 @@ function _initListeners() {
   // tokens existants.
   const makeTokensHandler = (inScope, { marksReady = false } = {}) => snap => {
     let estimateTargetsChanged = false;
+    const ordinalPeerKeys = new Set();
     snap.docChanges().forEach(ch => {
      try {
       const id=ch.doc.id;
       let data=normalizeTurnFlags({id,...ch.doc.data()}, _turnEpoch());
+      const previousData=VS.tokens[id]?.data;
+      if (ch.type==='added' || ch.type==='removed'
+          || (previousData && (_tokenOrdinalKey(previousData)!==_tokenOrdinalKey(data)
+            || _tokenOrdinalName(previousData)!==_tokenOrdinalName(data)))) {
+        const previousKey=_tokenOrdinalKey(previousData);
+        const nextKey=_tokenOrdinalKey(data);
+        if (previousKey) ordinalPeerKeys.add(previousKey);
+        if (ch.type!=='removed' && nextKey) ordinalPeerKeys.add(nextKey);
+      }
       // Hors périmètre (supprimé, ou sorti du flux : changement de scène…) :
       // on ne retire le token local que s'il relève encore de CE flux. S'il a
       // déjà été mis à jour par un autre flux, celui-ci fait foi.
@@ -12951,6 +12995,11 @@ function _initListeners() {
       }
      } catch (e) { _vttPanelError('Token', e, null); }
     });
+    if (ordinalPeerKeys.size) {
+      Object.entries(VS.tokens).forEach(([id, entry])=>{
+        if (entry?.shape && ordinalPeerKeys.has(_tokenOrdinalKey(entry.data))) _patchShape(id);
+      });
+    }
     _syncTokenStackVisuals();
     _vttRefreshChatPortraits();
     if (estimateTargetsChanged) _vttRefreshCombatHpEstimates();
@@ -14023,48 +14072,100 @@ let _sceneDraftImageId = '';
 let _sceneDraftReplaceId = '';
 let _sceneDraftQuery = '';
 let _sceneDraftFolderId = 'all';
+let _sceneDraftNameTouched = false;
+let _sceneDraftGridSource = 'blank';
 
-function _sceneGridGuess(image) {
+function _sceneGridGuess(image, probedRatio = 0) {
   const text = `${image?.name || ''} ${image?.sourcePath || ''} ${image?.url || ''}`;
   const found = text.match(/(?:^|[^\d])(\d{1,3})\s*[x×]\s*(\d{1,3})(?:[^\d]|$)/i);
-  if (found) return { cols:Math.max(8, Math.min(200, Number(found[1]))), rows:Math.max(8, Math.min(200, Number(found[2]))), detected:true };
+  const storedRatio = Number(image?.width) > 0 && Number(image?.height) > 0 ? Number(image.width) / Number(image.height) : 0;
+  const ratio = Number(probedRatio) > 0 ? Number(probedRatio) : storedRatio;
+  if (found) {
+    const first = Math.max(8, Math.min(200, Number(found[1])));
+    const second = Math.max(8, Math.min(200, Number(found[2])));
+    if (!ratio) return { cols:first, rows:second, detected:true };
+    return ratio >= 1
+      ? { cols:Math.max(first, second), rows:Math.min(first, second), detected:true }
+      : { cols:Math.min(first, second), rows:Math.max(first, second), detected:true };
+  }
+  if (ratio) return ratio >= 1
+    ? { cols:30, rows:Math.max(8, Math.round(30 / ratio)), detected:false }
+    : { cols:Math.max(8, Math.round(30 * ratio)), rows:30, detected:false };
   return { cols:30, rows:20, detected:false };
+}
+function _scenePrettyName(value = '') {
+  let decoded = String(value || '');
+  try { decoded = decodeURIComponent(decoded); } catch {}
+  return decoded
+    .replace(/\.[a-z0-9]{2,5}(?:\?.*)?$/i, '')
+    .replace(/\b\d{1,3}\s*[x×]\s*\d{1,3}\b/ig, '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/([a-zà-ÿ])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function _sceneDraftPreviewStyle(grid, url = '') {
+  const cols = Math.max(8, Number(grid?.cols) || 30), rows = Math.max(8, Number(grid?.rows) || 20);
+  const scale = Math.min(300 / cols, 150 / rows);
+  return `width:${Math.round(cols * scale)}px;height:${Math.round(rows * scale)}px;--scene-cols:${cols};--scene-rows:${rows};${url ? `background-image:url('${_esc(url)}')` : ''}`;
 }
 function _sceneDraftImages() {
   return (VS.mapLib?.images || []).filter(image => resolveMapImageUrl(image));
 }
+function _sceneDraftUsage(image) {
+  return Object.values(VS.pages || {}).filter(page => (page.backgroundImages || []).some(entry => (
+    (entry?.sourcePath && image?.sourcePath && entry.sourcePath === image.sourcePath) || resolveMapImageUrl(entry) === resolveMapImageUrl(image)
+  ))).length;
+}
+function _sceneDraftLibraryHtml(images, selected) {
+  const libraryFolders = VS.mapLib?.folders || [];
+  const card = image => {
+    const url = resolveMapImageUrl(image);
+    const guess = _sceneGridGuess(image);
+    const used = _sceneDraftUsage(image);
+    const title = _scenePrettyName(image.name || image.sourcePath) || 'Carte';
+    return `<button type="button" class="vtt-scene-map-choice${image.id === selected?.id ? ' active' : ''}" data-vtt-fn="_vttSceneDraftPick" data-vtt-args="${_esc(image.id)}" data-scene-map-folder="${_esc(image.folderId || 'root')}" data-scene-map-search="${_esc(`${image.name || ''} ${image.sourcePath || ''}`.toLowerCase())}" title="${_esc(image.sourcePath || image.name || title)}">
+      <span class="vtt-scene-map-image"><img src="${_esc(url)}" alt="" loading="lazy" decoding="async"></span><span class="vtt-scene-map-meta"><b>${_esc(title)}</b><small>${guess.cols} × ${guess.rows}${guess.detected ? ' · détecté' : ''}${used ? ` · ${used} scène${used > 1 ? 's' : ''}` : ''}</small></span>
+    </button>`;
+  };
+  return `<label class="vtt-scene-library-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><input type="search" placeholder="Rechercher une carte…" value="${_esc(_sceneDraftQuery)}" autocomplete="off" data-modal-initial-focus data-vtt-fn="_vttSceneDraftSearch" data-vtt-on="input" data-vtt-args="$value"></label>
+    <nav class="vtt-scene-library-folders" aria-label="Dossiers de cartes">
+      <button type="button" class="${_sceneDraftFolderId === 'all' ? 'active' : ''}" data-scene-library-folder="all" data-vtt-fn="_vttSceneDraftFolder" data-vtt-args="all">Toutes <b>${images.length}</b></button>
+      <button type="button" class="${_sceneDraftFolderId === 'root' ? 'active' : ''}" data-scene-library-folder="root" data-vtt-fn="_vttSceneDraftFolder" data-vtt-args="root">Sans dossier <b>${images.filter(image => !image.folderId).length}</b></button>
+      ${libraryFolders.map(item => `<button type="button" class="${_sceneDraftFolderId === item.id ? 'active' : ''}" data-scene-library-folder="${_esc(item.id)}" data-vtt-fn="_vttSceneDraftFolder" data-vtt-args="${_esc(item.id)}">${_esc(item.name || 'Dossier')} <b>${images.filter(image => image.folderId === item.id).length}</b></button>`).join('')}
+    </nav>
+    <div class="vtt-scene-library-grid">
+      <button type="button" class="vtt-scene-map-choice is-blank${selected ? '' : ' active'}" data-vtt-fn="_vttSceneDraftPick" data-vtt-args="" data-scene-draft-extra="blank"><span class="vtt-scene-map-image">Grille vide</span><span class="vtt-scene-map-meta"><b>Sans carte</b><small>Pour improviser</small></span></button>
+      <button type="button" class="vtt-scene-map-import vtt-lib-import" data-vtt-fn="_vttSceneDraftImportMenu" data-vtt-args="$event" data-scene-draft-extra="import"><span class="vtt-scene-map-image"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5h14v-5"/></svg></span><span class="vtt-scene-map-meta"><b>Importer…</b><small>URL ou dossier GitHub</small></span></button>
+      ${images.map(card).join('')}
+      <p class="vtt-scene-library-empty" hidden>Aucune carte ne correspond.</p>
+    </div>`;
+}
 function _sceneDraftBody({ folder = '', replacePage = null } = {}) {
   const images = _sceneDraftImages();
-  const libraryFolders = VS.mapLib?.folders || [];
   const folders = [...new Set(Object.values(VS.pages || {}).map(page => (page.folder || '').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr',{sensitivity:'base'}));
   const selected = images.find(image => image.id === _sceneDraftImageId) || null;
   const grid = selected ? _sceneGridGuess(selected) : { cols:replacePage?.cols || 30, rows:replacePage?.rows || 20, detected:false };
-  const name = replacePage?.name || selected?.name || '';
+  const name = replacePage?.name || (selected ? _scenePrettyName(selected.name || selected.sourcePath) : '');
   const previewUrl = selected ? resolveMapImageUrl(selected) : '';
-  const usage = image => Object.values(VS.pages || {}).filter(page => (page.backgroundImages || []).some(entry => entry?.sourcePath && entry.sourcePath === image.sourcePath || resolveMapImageUrl(entry) === resolveMapImageUrl(image))).length;
-  return `<div class="vtt-scene-create" data-replace-id="${replacePage?.id || ''}">
+  const currentFolder = replacePage?.folder ?? folder;
+  const folderChoices = [...new Set([currentFolder, ...folders].filter(Boolean))];
+  const liveName = VS.pages?.[VS.session?.activePageId]?.name || 'la scène actuelle';
+  _sceneDraftGridSource = selected ? (grid.detected ? 'name' : 'ratio') : 'blank';
+  return `<div class="vtt-scene-modal" data-replace-id="${replacePage?.id || ''}">
+    <header class="vtt-scene-modal-head"><div><h2>${replacePage ? `Carte de « ${_esc(replacePage.name || 'Scène')} »` : 'Nouvelle scène'}</h2><p>${replacePage ? 'Choisis une nouvelle carte · les tokens restent en place' : 'Choisis une carte : la scène est créée avec, en une fois'}</p></div><button type="button" data-action="close-modal" aria-label="Fermer" title="Fermer (Échap)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
     <section class="vtt-scene-library">
-      <header><div><span>Bibliothèque</span><h3>Choisir une carte</h3></div><button type="button" data-vtt-fn="_vttLibImportMenu" data-vtt-args="$event">＋ Importer</button></header>
-      <label><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg><input type="search" placeholder="Rechercher une carte…" data-vtt-fn="_vttSceneDraftSearch" data-vtt-on="input" data-vtt-args="$value"></label>
-      <nav class="vtt-scene-library-folders" aria-label="Dossiers de cartes">
-        <button type="button" class="active" data-scene-library-folder="all" data-vtt-fn="_vttSceneDraftFolder" data-vtt-args="all">Toutes <b>${images.length}</b></button>
-        <button type="button" data-scene-library-folder="root" data-vtt-fn="_vttSceneDraftFolder" data-vtt-args="root">Sans dossier <b>${images.filter(image => !image.folderId).length}</b></button>
-        ${libraryFolders.map(item => `<button type="button" data-scene-library-folder="${_esc(item.id)}" data-vtt-fn="_vttSceneDraftFolder" data-vtt-args="${_esc(item.id)}">${_esc(item.name || 'Dossier')} <b>${images.filter(image => image.folderId === item.id).length}</b></button>`).join('')}
-      </nav>
-      <div class="vtt-scene-library-grid">
-        <button type="button" class="vtt-scene-map-choice is-blank${selected ? '' : ' active'}" data-vtt-fn="_vttSceneDraftPick" data-vtt-args=""><span></span><b>Grille vide</b><small>Sans image</small></button>
-        ${images.map(image => { const url = resolveMapImageUrl(image); const guess = _sceneGridGuess(image); const dimensions = image.width && image.height ? `${image.width} × ${image.height} px` : (guess.detected ? `${guess.cols} × ${guess.rows} cases` : 'Grille calculée'); return `<button type="button" class="vtt-scene-map-choice${image.id === selected?.id ? ' active' : ''}" data-vtt-fn="_vttSceneDraftPick" data-vtt-args="${image.id}" data-scene-map-folder="${_esc(image.folderId || 'root')}" data-scene-map-search="${_esc(`${image.name || ''} ${image.sourcePath || ''}`.toLowerCase())}"><span style="background-image:url('${_esc(url)}')"></span><b>${_esc(image.name || 'Carte')}</b><small>${dimensions} · ${usage(image)} scène${usage(image) > 1 ? 's' : ''}</small></button>`; }).join('')}
-      </div>
+      ${_sceneDraftLibraryHtml(images, selected)}
     </section>
     <section class="vtt-scene-settings">
-      <header><span>Réglages</span><h3>${replacePage ? 'Changer la carte' : 'Nouvelle scène'}</h3></header>
-      <div class="vtt-scene-preview ${previewUrl ? '' : 'is-blank'}" id="vtt-scene-draft-preview" style="${previewUrl ? `background-image:url('${_esc(previewUrl)}')` : ''}"><i></i><small id="vtt-scene-grid-note">${selected && grid.detected ? 'Détectée dans le nom du fichier' : 'Calculée d’après le format'}</small></div>
-      <label class="vtt-scene-field"><span>Nom</span><input id="vtt-scene-draft-name" value="${_esc(name)}" placeholder="Nom de la scène"></label>
-      <label class="vtt-scene-field"><span>Dossier</span><input id="vtt-scene-draft-folder" value="${_esc(replacePage?.folder ?? folder)}" list="vtt-scene-folders" placeholder="Sans dossier"><datalist id="vtt-scene-folders">${folders.map(item => `<option value="${_esc(item)}">`).join('')}</datalist></label>
-      <div class="vtt-scene-grid-fields"><label><span>Colonnes</span><input type="number" min="8" max="200" id="vtt-scene-draft-cols" value="${grid.cols}"></label><button type="button" data-vtt-fn="_vttSceneDraftSwap" title="Inverser les dimensions">⇄</button><label><span>Lignes</span><input type="number" min="8" max="200" id="vtt-scene-draft-rows" value="${grid.rows}"></label></div>
-      ${replacePage ? '<p class="vtt-scene-keep">Les tokens et annotations restent en place.</p>' : `<fieldset><legend>Ensuite</legend><label><input type="radio" name="vtt-scene-next" value="preview" checked> Ouvrir en aperçu</label><label><input type="radio" name="vtt-scene-next" value="send"> Ouvrir et envoyer les joueurs</label><label><input type="radio" name="vtt-scene-next" value="closed"> Créer sans ouvrir</label></fieldset>`}
+      <div class="vtt-scene-preview-frame"><div class="vtt-scene-preview ${previewUrl ? '' : 'is-blank'}" id="vtt-scene-draft-preview" style="${_sceneDraftPreviewStyle(grid, previewUrl)}"><i></i></div></div>
+      <label class="vtt-scene-field"><span>Nom de la scène</span><input id="vtt-scene-draft-name" value="${_esc(name)}" placeholder="ex : Cuisines du manoir" autocomplete="off" data-vtt-fn="_vttSceneDraftName" data-vtt-on="input" data-vtt-args="$value"></label>
+      ${replacePage ? `<input type="hidden" id="vtt-scene-draft-folder" value="${_esc(currentFolder)}">` : `<div class="vtt-scene-field"><span>Dossier</span><input type="hidden" id="vtt-scene-draft-folder" value="${_esc(currentFolder)}"><div class="vtt-scene-page-folders"><button type="button" class="${currentFolder ? '' : 'active'}" data-scene-page-folder="" data-vtt-fn="_vttSceneDraftPageFolder" data-vtt-args="">Sans dossier</button>${folderChoices.map(item => `<button type="button" class="${currentFolder === item ? 'active' : ''}" data-scene-page-folder="${_esc(item)}" data-vtt-fn="_vttSceneDraftPageFolder" data-vtt-args="${encodeURIComponent(item)}">${_esc(item)}</button>`).join('')}</div></div>`}
+      <div class="vtt-scene-field"><span>Grille <em>· cases jouables</em></span><div class="vtt-scene-grid-fields"><label><input type="number" min="8" max="200" inputmode="numeric" id="vtt-scene-draft-cols" value="${grid.cols}" data-vtt-fn="_vttSceneDraftDimension" data-vtt-on="input" data-vtt-args="cols|$value"><small>larg.</small></label><button type="button" data-vtt-fn="_vttSceneDraftSwap" title="Permuter largeur et hauteur"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h11m0 0-3-3m3 3-3 3M17 17H6m0 0 3 3m-3-3 3-3"/></svg></button><label><input type="number" min="8" max="200" inputmode="numeric" id="vtt-scene-draft-rows" value="${grid.rows}" data-vtt-fn="_vttSceneDraftDimension" data-vtt-on="input" data-vtt-args="rows|$value"><small>haut.</small></label></div><div class="vtt-scene-grid-note${selected && grid.detected ? '' : ' is-calculated'}" id="vtt-scene-grid-note">${selected && grid.detected ? '✓ Détectée dans le nom du fichier' : selected ? 'Calculée d’après le format de l’image — ajuste si besoin' : 'Grille vide — dimensions libres'}</div></div>
+      ${replacePage ? '<p class="vtt-scene-keep">La nouvelle carte occupe toute la scène. Les tokens et annotations restent en place.</p>' : `<div class="vtt-scene-field"><span>Ensuite</span><div class="vtt-scene-next"><label><input type="radio" name="vtt-scene-next" value="preview" checked><i></i><b>Ouvrir en aperçu<small>Les joueurs restent sur « ${_esc(liveName)} »</small></b></label><label><input type="radio" name="vtt-scene-next" value="send"><i></i><b>Ouvrir et envoyer les joueurs<small>Ils arrivent directement sur la nouvelle scène</small></b></label><label><input type="radio" name="vtt-scene-next" value="closed"><i></i><b>Créer sans ouvrir<small>Elle rejoint la pellicule, prête pour plus tard</small></b></label></div></div>`}
     </section>
-  </div><div class="vtt-scene-create-actions"><button type="button" class="btn-secondary" data-action="close-modal">Annuler</button><button type="button" class="btn-primary" data-vtt-fn="_vttConfirmSceneFromLibrary">${replacePage ? 'Remplacer la carte' : 'Créer la scène'}</button></div>`;
+    <footer class="vtt-scene-modal-foot"><p>${replacePage ? 'La nouvelle carte occupe toute la scène.' : 'La carte est posée en pleine scène · tout reste modifiable ensuite.'}</p><button type="button" data-action="close-modal">Annuler</button><button type="button" class="is-primary" data-vtt-fn="_vttConfirmSceneFromLibrary"><svg viewBox="0 0 24 24" aria-hidden="true">${replacePage ? '<path d="M4 6h16v12H4zM8 14l3-3 2 2 2-2 3 3"/>' : '<path d="M12 5v14M5 12h14"/>'}</svg>${replacePage ? 'Remplacer la carte' : 'Créer la scène'}</button></footer>
+  </div>`;
 }
 function _vttAddPage(encodedFolder = '') {
   const scenePopover = document.getElementById('vtt-scene-popover');
@@ -14073,6 +14174,7 @@ function _vttAddPage(encodedFolder = '') {
   _sceneDraftImageId = '';
   _sceneDraftQuery = '';
   _sceneDraftFolderId = 'all';
+  _sceneDraftNameTouched = false;
   const folder = encodedFolder ? decodeURIComponent(encodedFolder) : '';
   openModal('Nouvelle scène', _sceneDraftBody({ folder }), { subtitle:'Choisis une carte et règle la scène en une seule étape', accent:'#7eb0ff', wide:true });
 }
@@ -14081,6 +14183,7 @@ function _vttReplacePageMap(pageId) {
   _sceneDraftReplaceId = pageId;
   _sceneDraftQuery = '';
   _sceneDraftFolderId = 'all';
+  _sceneDraftNameTouched = true;
   const current = (page.backgroundImages || [])[0];
   _sceneDraftImageId = _sceneDraftImages().find(image => image.id === current?.id || image.sourcePath && image.sourcePath === current?.sourcePath || resolveMapImageUrl(image) === resolveMapImageUrl(current))?.id || '';
   openModal('Changer la carte', _sceneDraftBody({ replacePage:page }), { subtitle:page.name || 'Scène', accent:'#7eb0ff', wide:true });
@@ -14093,13 +14196,107 @@ function _vttSceneDraftFolder(folderId = 'all') {
   _sceneDraftFolderId = folderId || 'all';
   _vttApplySceneDraftFilters();
 }
+function _vttRefreshSceneDraftLibrary() {
+  const host = document.querySelector('.vtt-scene-library');
+  if (!host) return;
+  const images = _sceneDraftImages();
+  const selected = images.find(image => image.id === _sceneDraftImageId) || null;
+  if (_sceneDraftImageId && !selected) _sceneDraftImageId = '';
+  host.innerHTML = _sceneDraftLibraryHtml(images, selected);
+  _vttApplySceneDraftFilters();
+}
+function _vttSceneDraftImportMenu(event) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  const anchor = event?.currentTarget || event?.target?.closest?.('.vtt-scene-map-import');
+  const rect = anchor?.getBoundingClientRect?.();
+  _showCtxMenu(event?.clientX || rect?.left || 0, event?.clientY || rect?.bottom || 0, [
+    { label:'🔗 Ajouter par URL', action:'_vttSceneDraftAddUrl' },
+    { label:'📥 Importer un dossier GitHub', action:'_vttSceneDraftImportGithub' },
+    '---',
+    { label:'📁 Nouveau dossier', action:'_vttSceneDraftNewLibraryFolder' },
+    { label:'🧹 Nettoyer les doublons', action:'_vttSceneDraftCleanLibrary' },
+  ]);
+}
+async function _vttSceneDraftAddUrl() {
+  let url = (await promptModal('Colle l’URL de la carte à ajouter à la bibliothèque :', {
+    title:'Ajouter une carte par URL', placeholder:'https://…/images/maps/carte.jpg', required:true,
+  }))?.trim();
+  if (!url) return;
+  url = normalizeImageUrl(url);
+  const rawName = (url.split('/').pop() || 'Carte').split('?')[0];
+  let decodedName = rawName;
+  try { decodedName = decodeURIComponent(rawName); } catch { /* garde le nom URL brut */ }
+  const entry = {
+    id:crypto.randomUUID(), url, name:_scenePrettyName(decodedName) || 'Carte',
+    folderId:_sceneDraftFolderId !== 'all' && _sceneDraftFolderId !== 'root' ? _sceneDraftFolderId : null,
+  };
+  VS.mapLib.images = [...(VS.mapLib.images || []), entry];
+  try {
+    await _saveMapLib();
+    _sceneDraftImageId = entry.id;
+    _vttRefreshSceneDraftLibrary();
+    _vttSceneDraftPick(entry.id);
+    showNotif('Carte ajoutée à la bibliothèque.', 'success');
+  } catch (error) {
+    VS.mapLib.images = (VS.mapLib.images || []).filter(image => image.id !== entry.id);
+    console.error('[vtt] ajout carte bibliothèque', error);
+    showNotif('Impossible d’ajouter cette carte.', 'error');
+  }
+}
+async function _vttSceneDraftImportGithub() {
+  await _vttLibImportGithub();
+  _vttRefreshSceneDraftLibrary();
+}
+async function _vttSceneDraftNewLibraryFolder() {
+  await _vttLibNewFolder();
+  _vttRefreshSceneDraftLibrary();
+}
+async function _vttSceneDraftCleanLibrary() {
+  await _vttLibCleanDuplicates();
+  _vttRefreshSceneDraftLibrary();
+}
 function _vttApplySceneDraftFilters() {
   document.querySelectorAll('[data-scene-library-folder]').forEach(button => button.classList.toggle('active', button.dataset.sceneLibraryFolder === _sceneDraftFolderId));
+  let visible = 0;
   document.querySelectorAll('.vtt-scene-map-choice[data-scene-map-search]').forEach(card => {
     const matchesQuery = !_sceneDraftQuery || String(card.dataset.sceneMapSearch || '').includes(_sceneDraftQuery);
     const matchesFolder = _sceneDraftFolderId === 'all' || card.dataset.sceneMapFolder === _sceneDraftFolderId;
     card.hidden = !(matchesQuery && matchesFolder);
+    if (!card.hidden) visible += 1;
   });
+  document.querySelectorAll('[data-scene-draft-extra]').forEach(card => { card.hidden = !!_sceneDraftQuery || _sceneDraftFolderId !== 'all'; });
+  const empty = document.querySelector('.vtt-scene-library-empty');
+  if (empty) empty.hidden = visible > 0 || (!_sceneDraftQuery && _sceneDraftFolderId === 'all');
+}
+function _vttSceneDraftName() { _sceneDraftNameTouched = true; }
+function _vttSceneDraftPageFolder(encoded = '') {
+  const value = encoded ? decodeURIComponent(encoded) : '';
+  const input = document.getElementById('vtt-scene-draft-folder');
+  if (input) input.value = value;
+  document.querySelectorAll('[data-scene-page-folder]').forEach(button => button.classList.toggle('active', button.dataset.scenePageFolder === value));
+}
+function _vttSceneDraftRefreshPreview(cols, rows, source = _sceneDraftGridSource) {
+  const c = Math.max(8, Math.min(200, Number(cols) || 8));
+  const r = Math.max(8, Math.min(200, Number(rows) || 8));
+  const preview = document.getElementById('vtt-scene-draft-preview');
+  if (preview) {
+    const scale = Math.min(300 / c, 150 / r);
+    preview.style.width = `${Math.round(c * scale)}px`;
+    preview.style.height = `${Math.round(r * scale)}px`;
+    preview.style.setProperty('--scene-cols', c);
+    preview.style.setProperty('--scene-rows', r);
+  }
+  const note = document.getElementById('vtt-scene-grid-note');
+  if (note) {
+    const messages = { name:'✓ Détectée dans le nom du fichier', ratio:'Calculée d’après le format de l’image — ajuste si besoin', manual:'Dimensions personnalisées', blank:'Grille vide — dimensions libres' };
+    note.textContent = messages[source] || messages.manual;
+    note.classList.toggle('is-calculated', source !== 'name');
+  }
+}
+function _vttSceneDraftDimension() {
+  _sceneDraftGridSource = 'manual';
+  _vttSceneDraftRefreshPreview(document.getElementById('vtt-scene-draft-cols')?.value, document.getElementById('vtt-scene-draft-rows')?.value, 'manual');
 }
 function _vttSceneDraftPick(imageId = '') {
   _sceneDraftImageId = imageId || '';
@@ -14109,23 +14306,28 @@ function _vttSceneDraftPick(imageId = '') {
   const url = image ? resolveMapImageUrl(image) : '';
   if (preview) { preview.style.backgroundImage = url ? `url("${url.replace(/"/g, '%22')}")` : ''; preview.classList.toggle('is-blank', !url); }
   const guessed = image ? _sceneGridGuess(image) : { cols:30, rows:20, detected:false };
-  const apply = (cols, rows, detected = false) => {
+  const apply = (cols, rows, source = 'ratio') => {
     const colsEl = document.getElementById('vtt-scene-draft-cols'), rowsEl = document.getElementById('vtt-scene-draft-rows');
     if (colsEl) colsEl.value = cols; if (rowsEl) rowsEl.value = rows;
-    const note = document.getElementById('vtt-scene-grid-note'); if (note) note.textContent = detected ? 'Détectée dans le nom du fichier' : 'Calculée d’après le format';
+    _sceneDraftGridSource = source;
+    _vttSceneDraftRefreshPreview(cols, rows, source);
   };
-  apply(guessed.cols, guessed.rows, guessed.detected);
-  if (image && !guessed.detected && url) {
+  apply(guessed.cols, guessed.rows, image ? (guessed.detected ? 'name' : 'ratio') : 'blank');
+  if (image && url) {
     const probe = new Image();
-    probe.onload = () => { const ratio = probe.naturalWidth / Math.max(1, probe.naturalHeight); apply(ratio >= 1 ? 30 : Math.max(8, Math.round(30 * ratio)), ratio >= 1 ? Math.max(8, Math.round(30 / ratio)) : 30); };
+    probe.onload = () => { const probed = _sceneGridGuess(image, probe.naturalWidth / Math.max(1, probe.naturalHeight)); apply(probed.cols, probed.rows, probed.detected ? 'name' : 'ratio'); };
     probe.src = url;
   }
   const nameEl = document.getElementById('vtt-scene-draft-name');
-  if (nameEl && image && (!nameEl.value.trim() || !_sceneDraftReplaceId)) nameEl.value = image.name || 'Nouvelle scène';
+  if (nameEl && image && !_sceneDraftReplaceId && !_sceneDraftNameTouched) nameEl.value = _scenePrettyName(image.name || image.sourcePath) || 'Nouvelle scène';
 }
 function _vttSceneDraftSwap() {
   const cols = document.getElementById('vtt-scene-draft-cols'), rows = document.getElementById('vtt-scene-draft-rows');
-  if (cols && rows) [cols.value, rows.value] = [rows.value, cols.value];
+  if (cols && rows) {
+    [cols.value, rows.value] = [rows.value, cols.value];
+    _sceneDraftGridSource = 'manual';
+    _vttSceneDraftRefreshPreview(cols.value, rows.value, 'manual');
+  }
 }
 async function _vttConfirmSceneFromLibrary() {
   const name = (document.getElementById('vtt-scene-draft-name')?.value || '').trim();
@@ -14729,16 +14931,18 @@ async function _vttToggleVisible(id) {
     console.error('[vtt] visibilité non modifiée', error);
   });
 }
-async function _vttClearBuffs(id) {
+export async function _vttClearBuffs(id, { confirm = true } = {}) {
   if (!STATE.isAdmin) return;
   const t=VS.tokens[id]?.data; if (!t) return;
   const previous = t.buffs || [];
   if (!previous.length) return;
-  const accepted = await confirmModal(
-    `Supprimer les ${previous.length} effet${previous.length > 1 ? 's' : ''} actif${previous.length > 1 ? 's' : ''} de ce token ?`,
-    { title: 'Purger les effets', confirmLabel: 'Purger', danger: true, icon: '🗑️' },
-  );
-  if (!accepted) return;
+  if (confirm) {
+    const accepted = await confirmModal(
+      `Supprimer les ${previous.length} effet${previous.length > 1 ? 's' : ''} actif${previous.length > 1 ? 's' : ''} de ce token ?`,
+      { title: 'Purger les effets', confirmLabel: 'Purger', danger: true, icon: '🗑️' },
+    );
+    if (!accepted) return;
+  }
   _vttPatchTokenOptimistically(id, { buffs: [] });
   try {
     await updateDoc(_tokRef(id),{buffs:[]});
@@ -15655,7 +15859,8 @@ function _vttRenderDelegateModalBody(tokenId, search = '') {
 function _vttOpenTokenDelegatesModal(tokenId) {
   const t = VS.tokens[tokenId]?.data; if (!t) return;
   const uid = STATE.user?.uid;
-  const isOwner = uid && t.ownerId === uid;
+  const ownerUid = t.ownerId || (t.characterId ? VS.characters[t.characterId]?.uid : null);
+  const isOwner = uid && ownerUid === uid;
   if (!isOwner && !STATE.isAdmin) {
     showNotif('Seul le propriétaire du token peut gérer les délégations.', 'error');
     return;
@@ -15684,7 +15889,8 @@ function _vttFilterDelegates(tokenId, value) {
 async function _vttToggleTokenDelegate(tokenId, targetUid) {
   const t = VS.tokens[tokenId]?.data; if (!t || !targetUid) return;
   const uid = STATE.user?.uid;
-  const isOwner = uid && t.ownerId === uid;
+  const ownerUid = t.ownerId || (t.characterId ? VS.characters[t.characterId]?.uid : null);
+  const isOwner = uid && ownerUid === uid;
   if (!isOwner && !STATE.isAdmin) return;
   const cur = _delegatesForCharacterToken(t);
   const wasOn = cur.includes(targetUid);
@@ -15693,7 +15899,8 @@ async function _vttToggleTokenDelegate(tokenId, targetUid) {
   try {
     const linkedTokens = (t.characterId
       ? Object.values(VS.tokens).map(e => e?.data).filter(token => token?.characterId === t.characterId)
-      : [t]).filter(token => STATE.isAdmin || token.ownerId === uid);
+      : [t]).filter(token => STATE.isAdmin
+        || (token.ownerId || (token.characterId ? VS.characters[token.characterId]?.uid : null)) === uid);
     const batch = writeBatch(db);
     rollback = {
       tokens: new Map(linkedTokens.map(token => [token, token.controlDelegates])),
@@ -15709,6 +15916,7 @@ async function _vttToggleTokenDelegate(tokenId, targetUid) {
     // involontairement une délégation que le propriétaire vient de retirer.
     linkedTokens.forEach(token => { token.controlDelegates = next; });
     if (t.characterId && VS.characters[t.characterId]) VS.characters[t.characterId].controlDelegates = next;
+    _renderInspectorSoon();
     await batch.commit();
     const host = document.getElementById('vtt-deleg-modal');
     if (host) host.innerHTML = _vttRenderDelegateModalBody(tokenId, _vttDelegSearch || '');
@@ -15718,6 +15926,7 @@ async function _vttToggleTokenDelegate(tokenId, targetUid) {
   } catch (err) {
     rollback?.tokens.forEach((delegates, token) => { token.controlDelegates = delegates; });
     if (rollback?.character) rollback.character.controlDelegates = rollback.characterDelegates;
+    _renderInspectorSoon();
     console.error('[VTT] toggle delegate', err);
     showNotif(`Erreur : ${err?.message || err}`, 'error');
   }
@@ -16441,6 +16650,8 @@ function _keyHandler(e) {
     }
     // b) Visée en cours → écouteur dédié (_aimCancel) s'en charge.
     if (_aimOpt || _aimSrcId) return;
+    // La mini-fiche ferme d'abord son popover, puis elle-même hors saisie.
+    if (_vttMsEscape(!typingTarget)) { e.preventDefault(); return; }
     // c) Fermer un panneau flottant / le HUD d'action (même si un de leurs champs a le focus).
     if (_vttEscapeCloseFloaters()) { e.preventDefault(); if (typeof e.target.blur === 'function') e.target.blur(); return; }
     // d) Focus dans un champ de saisie hors panneau (chat, notes…) → on se contente de blur.
@@ -16469,6 +16680,9 @@ function _keyHandler(e) {
   }
   if (!e.ctrlKey && !e.metaKey && !e.altKey && STATE.isAdmin && (e.key === 'h' || e.key === 'H') && _regiePlacement) {
     e.preventDefault(); _vttToggleRegiePlacementVisibility(); return;
+  }
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === '/' && _vttMsFocusSearch()) {
+    e.preventDefault(); return;
   }
   if (!e.ctrlKey && !e.metaKey && !e.altKey && STATE.isAdmin && e.key === '/') {
     e.preventDefault(); _distributionOpen = true; _vttApplyDistribution(); document.getElementById('vtt-distribution-search')?.focus(); return;
@@ -16872,8 +17086,6 @@ function _buildHtml() {
       ${mj ? '<div class="vtt-placement-bar" id="vtt-placement-bar" hidden></div>' : ''}
     </div>
     ${mj ? '<div class="vtt-scene-popover" id="vtt-scene-popover" hidden></div>' : ''}
-    <div class="vtt-mini-panel" id="vtt-mini-panel"></div>
-
     <!-- ── FICHE : dock flottant compact en bas à gauche (identité + onglets déployables + Jets) ── -->
     <div class="vtt-fiche-dock" id="vtt-fiche-dock">
       <div class="vtt-inspector" id="vtt-inspector">
@@ -16916,6 +17128,8 @@ function _buildHtml() {
       </div>
     </aside>
   </div>
+  <!-- Mini-fiche flottante : hors du flux de .vtt-body pour ne jamais redimensionner la carte. -->
+  <div class="vtt-mini-panel" id="vtt-mini-panel"></div>
 </div>`;
 }
 
@@ -17128,7 +17342,7 @@ async function _vttMountTable(content) {
   _mf.innerHTML = `
     <div class="vtt-music-panel" id="vtt-music-panel" data-open="0" style="display:none" role="dialog" aria-label="Sons et musique" aria-hidden="true"></div>
     <i class="vtt-session-pop-arrow" data-for="music" hidden aria-hidden="true"></i>
-    ${vttSessionDockButton({ key: 'music', id: 'vtt-music-trigger', action: '_vttToggleMusic', label: 'Musique', tipTitle: 'Sons & musique', tipDetail: 'Rien en lecture' })}`;
+    ${vttSessionDockButton({ key: 'music', id: 'vtt-music-trigger', action: '_vttToggleMusic', label: 'Musique' })}`;
   sessionTools.appendChild(_mf);
 
   const _lf = document.createElement('div');
@@ -17442,6 +17656,9 @@ export const VTT_ACTIONS = {
   _vttImportGithubRelease,
   _vttInsTab,
   _vttInsFilterConditionPicker,
+  _vttInsTogglePicker,
+  _vttInsToggleManage,
+  _vttInsPurge,
   _vttOpenSource,
   _vttRcolView,
   _vttSkillFilter,
@@ -17494,6 +17711,7 @@ export const VTT_ACTIONS = {
   _vttForgeOpen,
   _vttMsCraftSearch,
   _vttMsCraftClear,
+  _vttMsConsumeItem,
   _vttMsDeleteItem,
   _vttMsRecycle,
   _vttMsDeleteNote,
@@ -17509,7 +17727,6 @@ export const VTT_ACTIONS = {
   _vttMsSetPm,
   _vttMsSetGarde,
   _vttMsSac,
-  _vttMsGoPurse,
   _vttMsPop,
   _vttMsToggleSpell,
   _vttMsSlotChange,
@@ -17517,7 +17734,11 @@ export const VTT_ACTIONS = {
   _vttMsSortClear,
   _vttMsSortSearch,
   _vttMsTab,
-  _vttMsToggleCollapsed,
+  _vttMsEscape,
+  _vttMsFocusSearch,
+  _vttMsStyleToggle,
+  _vttMsToggleCap,
+  _vttMsToggleHistory,
   _vttMsToggleNote,
   _vttMsUnequip,
   _vttMsUnequipAll,
@@ -17557,6 +17778,14 @@ export const VTT_ACTIONS = {
   _vttReplacePageMap,
   _vttSceneDraftSearch,
   _vttSceneDraftFolder,
+  _vttSceneDraftImportMenu,
+  _vttSceneDraftAddUrl,
+  _vttSceneDraftImportGithub,
+  _vttSceneDraftNewLibraryFolder,
+  _vttSceneDraftCleanLibrary,
+  _vttSceneDraftName,
+  _vttSceneDraftPageFolder,
+  _vttSceneDraftDimension,
   _vttSceneDraftPick,
   _vttSceneDraftSwap,
   _vttConfirmSceneFromLibrary,

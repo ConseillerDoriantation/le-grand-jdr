@@ -2,7 +2,7 @@
 // VTT-MINI-FICHE.JS — Mini-fiche personnage (Table de Jeu Virtuelle)
 // ══════════════════════════════════════════════════════════════════════════════
 // Extrait de vtt.js (Phase 1 du découpage, voir docs/vtt-decomposition.md).
-// Popup 4 onglets (Combat / Équipement / Sorts / Inventaire / Notes) d'un perso
+// Panneau flottant à 5 onglets (Combat / Capacités / Sorts / Sac / Journal)
 // joueur. État partagé miniUid/miniCharId via VS ; affichage de sorts réutilisé
 // depuis vtt.js (helpers _vttSort*/_vttDisplayRunes, circulaires).
 // ══════════════════════════════════════════════════════════════════════════════
@@ -12,13 +12,13 @@ import { STATE } from '../../core/state.js';
 import { VS } from './vtt-state.js';
 import { _esc, _norm, loadingHtml } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
-import { openModal, closeModalDirect, confirmModal } from '../../shared/modal.js';
-import { getArmorSetData, syncEquipmentAfterInventoryMutation, _getTraits } from '../../shared/equipment-utils.js';
+import { openModal, confirmModal } from '../../shared/modal.js';
+import { buildInventoryEquipPatch, getArmorSetData, getCharFullDamageProfile, syncEquipmentAfterInventoryMutation, _getTraits } from '../../shared/equipment-utils.js';
 import { calcSpellDuration, calcSpellTargets, getProtectionRestoreMode, isLightSpell, lightSpellRadius } from '../../shared/spell-runes.js';
 import { ZONE_SHAPES, _zoneDims, _zoneCount } from '../../shared/spell-zones.js';
 import { getDamageTypeById, damageTypeEmitsLight } from '../../shared/damage-types.js';
 import { calcCA, calcDeckMax, calcPMMax, calcPVMax, calcPalier, calcVitesse, calcOr,
-         computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
+         computeEquipSkillBonus, computeEquipStatsBonus, getItemStatBonus, getMaitriseBonus, getMod,
          sortCharactersForDisplay, favoriteFirst } from '../../shared/char-stats.js';
 import { useGold } from '../../shared/economy.js';
 import { loadCollection, getDocData } from '../../data/firestore.js'; // lecture recettes/boutique (couche quota)
@@ -28,9 +28,9 @@ import { loadCraftSettings, getCraftSettings, craftRecipeMaterials } from '../..
 import { loadUpgradeSettings, getUpgradeSettings } from '../../shared/upgrade-settings.js';
 import { loadRarities, _rareteLabel } from '../../shared/rarity.js';
 import { loadWeaponFormats } from '../../shared/weapon-formats.js';
-import { normalizeWeaponDefaults } from '../../shared/weapon-family.js';
+import { normalizeWeaponDefaults, weaponHands } from '../../shared/weapon-family.js';
 import { normalizeDiceSkills, DICE_SKILLS_DEFAULT } from '../../shared/dice-skills.js';
-import { getArmorTypeOptions } from '../../shared/armor-set-settings.js';
+import { formatArmorSetEffect, getArmorSetDefinition, getArmorTypeOptions } from '../../shared/armor-set-settings.js';
 import { shopItemToInvEntry, getInventoryItemImage } from '../../shared/inventory-utils.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../../shared/inventory-history.js';
 import { recyclableTraits } from '../../shared/trait-recycling.js';
@@ -51,12 +51,15 @@ import {
 import { deckHasRoomFor, getDeckUsage, isAlwaysPreparedSpell, spellValidationState } from '../../shared/spell-deck.js';
 import { lsJson } from '../../shared/local-storage.js';
 import { characterPortraitSrc } from '../../shared/portraits.js';
+import { combatStyleRuleLabels, detectCombatStyle, splitStyleLabel } from '../../shared/combat-styles.js';
 
 let _miniTab = 'combat'; // onglet actif de la mini-fiche (état local)
-let _msSac   = 'obj';    // sous-onglet du Sac : 'obj' | 'craft' | 'bourse'
+let _msSac   = 'obj';    // sous-onglet du Sac : 'obj' | 'craft'
 let _msAttackSlot = null; // arme affichée dans Combat (principale / secondaire)
-let _miniCollapsed = false; // rail compact de la mini-fiche
 let _miniRosterUid = null; // joueur dont on affiche personnages possédés + délégués
+let _msStyleOpen = false;
+let _msOpenCap = null;
+let _msHistoryOpen = false;
 
 // ── Constantes & état local ─────────────────────────────────────────
 const _MS_STATS   = [
@@ -67,10 +70,10 @@ const _MS_STATS   = [
 let _msOpenNote   = null; // index de la note dépliée (onglet Notes)
 let _msOpenSpell  = null; // id/index du sort déplié (onglet Sorts)
 let _msInvQuery   = '', _msInvCat  = 'all';
-let _msSortQuery  = '', _msSortCat = 'all';
+let _msSortQuery  = '', _msSortCat = 'prep';
 let _msCraftQuery = '';   // filtre de recherche de l'onglet Craft
 
-// MINI-FICHE PERSONNAGE — 4 onglets
+// MINI-FICHE PERSONNAGE — V2
 // ═══════════════════════════════════════════════════════════════════
 
 // Slots canoniques — mêmes clés que la vraie fiche personnage (characters/combat.js
@@ -130,6 +133,29 @@ function _msEquipContributionHtml(item = {}, opts = {}) {
   return `<div class="vtt-ms-equip-contrib${compact ? ' is-compact' : ''}">${label}${statHtml}${traitHtml}${moreHtml}</div>`;
 }
 
+function _msRarityMeta(item = {}) {
+  const raw = String(item.rarete || item.rarity || '').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s-]+/g, '_');
+  const map = {
+    '1': ['Commun', '#9ca3af'], commun: ['Commun', '#9ca3af'], commune: ['Commun', '#9ca3af'],
+    '2': ['Peu commun', '#22c38e'], peu_commun: ['Peu commun', '#22c38e'], peu_commune: ['Peu commun', '#22c38e'],
+    '3': ['Rare', '#4f8cff'], rare: ['Rare', '#4f8cff'],
+    '4': ['Très rare', '#b47fff'], tres_rare: ['Très rare', '#b47fff'],
+    '5': ['Légendaire', '#f59e0b'], legendaire: ['Légendaire', '#f59e0b'],
+  };
+  const [label, color] = map[raw] || [_rareteLabel(item.rarete) || 'Commun', '#9ca3af'];
+  return { label, color };
+}
+
+function _msWeaponUsesTwoHands(item = {}) {
+  return weaponHands(item) === 2;
+}
+
+function _msSigned(value) {
+  const number = Number(value) || 0;
+  return `${number >= 0 ? '+' : ''}${number}`;
+}
+
 // Chips propres d'un objet (Sac) : bonus de stats + CA/VIT (vert/rouge) et
 // traits (violet). Mêmes données que _msEquipContributionHtml, style épuré.
 function _msItemChips(item = {}) {
@@ -159,6 +185,7 @@ function _msBuildEquipItem(slot, item, invIndex) {
     return { ...base,
       degats: item.degats||'', degatsStat: item.degatsStat||statAtk,
       toucherStat: statAtk, typeArme: item.typeArme||'',
+      sousType: item.sousType||'', mains: item.mains||item.maniement||'', rarete: item.rarete||'',
       portee: item.portee||'', particularite: item.particularite||item.effet||'',
       format: item.format||'' };
   }
@@ -237,9 +264,21 @@ const _MS_ICONS = {
   recycle:'<path d="M7 19H4.8a2 2 0 0 1-1.7-3l1.5-2.6"/><path d="m13.5 4.3 1.2-2a2 2 0 0 1 3.5 0l1.3 2.3"/><path d="M17 19h2.2a2 2 0 0 0 1.7-3l-1.3-2.2"/><path d="m8.5 4.3-3 5.2"/><path d="m14 22-3.2-5.5 6.2.1"/><path d="m3.3 10.5 5.2-1.4"/>',
   ring:   '<circle cx="12" cy="15" r="5.5"/><path d="M8.5 10 12 4l3.5 6"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  check:  '<path d="m5 12 4 4L19 6"/>',
   x:      '<path d="M18 6 6 18M6 6l12 12"/>',
   potion: '<path d="M9 3h6"/><path d="M10 3v5L5 17a3 3 0 0 0 2.6 4.5h8.8A3 3 0 0 0 19 17l-5-9V3"/>',
   misc:   '<rect x="4" y="7" width="16" height="13" rx="2"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/>',
+  capa:   '<path d="M12 3.5l2.5 5.2 5.7.8-4.1 4 1 5.6L12 16.4l-5.1 2.7 1-5.6-4.1-4 5.7-.8z"/>',
+  journal:'<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5"/>',
+  shield: '<path d="M12 3l7 3v5.5c0 4.3-3 7.7-7 9.5-4-1.8-7-5.2-7-9.5V6z"/>',
+  move:   '<path d="M13 4a1.6 1.6 0 1 1 0 .01M9 20l2.5-6 3 2.5V21M8 11l3-3 3.5 2 2.5 3.5M11.5 8 9.5 13"/>',
+  out:    '<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>',
+  down:   '<path d="M6 9l6 6 6-6"/>',
+  plus:   '<path d="M12 5v14M5 12h14"/>',
+  minus:  '<path d="M5 12h14"/>',
+  give:   '<path d="M4 12h12M12 7l5 5-5 5"/><path d="M20 5v14"/>',
+  coin:   '<circle cx="12" cy="12" r="8"/><path d="M9.5 9.5c0-1 1-1.8 2.5-1.8s2.5.7 2.5 1.8-1 1.7-2.5 1.7-2.5.7-2.5 1.8 1 1.8 2.5 1.8 2.5-.8 2.5-1.8M12 6.3v11.4"/>',
+  lock:   '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
 };
 function _msIco(name, cls = 'vtt-ms-ic') {
   return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${_MS_ICONS[name] || ''}</svg>`;
@@ -247,9 +286,23 @@ function _msIco(name, cls = 'vtt-ms-ic') {
 
 // ─── Handlers exposés ────────────────────────────────────────────
 
-function _vttMsTab(tab) { _miniTab = tab; _miniCollapsed = false; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
-function _vttMsToggleCollapsed() { _miniCollapsed = !_miniCollapsed; _msPop = null; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsTab(tab) { _miniTab = tab; _msPop = null; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 function _vttMsAttackSlot(slotId) { _msAttackSlot = slotId; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsStyleToggle() { _msStyleOpen = !_msStyleOpen; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsToggleCap(idx) { idx = parseInt(idx); _msOpenCap = _msOpenCap === idx ? null : idx; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsToggleHistory() { _msHistoryOpen = !_msHistoryOpen; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
+function _vttMsEscape(allowSheet = true) {
+  if (_msPop) { _msClosePop(); return true; }
+  if (allowSheet && VS.miniUid) { _vttToggleMiniSheet(VS.miniUid, VS.miniCharId); return true; }
+  return false;
+}
+function _vttMsFocusSearch() {
+  if (!VS.miniUid) return false;
+  const input = document.querySelector('#vtt-mini-panel .vtt-ms-fsearch-input');
+  if (!input) return false;
+  input.focus(); input.select();
+  return true;
+}
 
 // ── Filtres des onglets Sac / Sorts ──────────────────────────────
 // Barre commune : puces de catégorie + champ de recherche. `kind` = 'inv'|'sorts'.
@@ -279,20 +332,15 @@ function _msFilterBar(kind, chips, query) {
 // Applique le filtre Sac (catégorie + recherche) par show/hide, sans re-render.
 function _msApplyInvFilter() {
   const q = _norm(_msInvQuery);
-  const groups = document.querySelectorAll('#vtt-mini-panel .vtt-ms-inv-group');
+  const items = document.querySelectorAll('#vtt-mini-panel .vtt-ms-inv-item');
   let anyVisible = false;
-  groups.forEach(g => {
-    if (_msInvCat !== 'all' && g.dataset.cat !== _msInvCat) { g.style.display = 'none'; return; }
-    let n = 0;
-    g.querySelectorAll('.vtt-ms-inv-item').forEach(it => {
-      const m = !q || (it.dataset.name || '').includes(q);
-      it.style.display = m ? '' : 'none';
-      if (m) n++;
-    });
-    g.style.display = n ? '' : 'none';
-    if (n) anyVisible = true;
+  items.forEach(item => {
+    const familyOk = _msInvCat === 'all' || item.dataset.family === _msInvCat;
+    const visible = familyOk && (!q || (item.dataset.name || '').includes(q));
+    item.style.display = visible ? '' : 'none';
+    if (visible) anyVisible = true;
   });
-  _msToggleEmpty('inv', anyVisible || !groups.length);
+  _msToggleEmpty('inv', anyVisible || !items.length);
 }
 
 // Applique le filtre Sorts (catégorie / deck actif + recherche) sans re-render.
@@ -302,7 +350,7 @@ function _msApplySortFilter() {
   let anyVisible = false;
   cards.forEach(card => {
     const catOk = _msSortCat === 'all'
-      || (_msSortCat === '__deck' ? card.dataset.actif === '1' : card.dataset.cat === _msSortCat);
+      || (_msSortCat === 'prep' ? card.dataset.actif === '1' : card.dataset.type === _msSortCat);
     const m = catOk && (!q || (card.dataset.name || '').includes(q));
     card.style.display = m ? '' : 'none';
     if (m) anyVisible = true;
@@ -381,63 +429,31 @@ function _msRingHtml(c, size = 58) {
     <circle class="fill" cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${up ? '#f59e0b' : 'var(--arcane,#9d6fff)'}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(L * p).toFixed(1)} ${L.toFixed(1)}" transform="rotate(-90 ${size / 2} ${size / 2})"/>
   </svg>`;
 }
-function _msFactsHtml(c) {
-  const deckMax = calcDeckMax(c), du = getDeckUsage(c?.deck_sorts);
-  return `<div class="vtt-ms-facts">
-    <div class="vtt-ms-fact" title="Classe d'armure"><b>${calcCA(c)}</b><small>CA</small></div>
-    <div class="vtt-ms-fact" title="Vitesse"><b>${calcVitesse(c)}</b><small>Vit.</small></div>
-    <button class="vtt-ms-fact btn" data-vtt-fn="_vttMsTab" data-vtt-args="sorts" title="Sorts préparés"><b>${du.used}/${deckMax}</b><small>Deck</small></button>
-    <button class="vtt-ms-fact btn" data-vtt-fn="_vttMsGoPurse" title="Ouvrir la bourse"><b>${calcOr(c)}</b><small>Or</small></button>
-  </div>`;
-}
 function _msStatsFixedHtml(c) {
   return `<div class="vtt-ms-stats2">${_MS_STATS.map(s => {
     const base = (c?.stats || {})[s.key] || 8, bonus = (c?.statsBonus || {})[s.key] || 0;
     const total = Math.min(22, base + bonus), mod = getMod(c, s.key), col = _STAT_COLOR[s.abbr];
     const sgn = n => (n >= 0 ? '+' + n : '' + n);
-    return `<div class="vtt-ms-st" style="--sc:${col}" title="${s.abbr} ${total} · base ${base}${bonus ? ` ${sgn(bonus)} équipement` : ''}">${bonus ? `<i>${sgn(bonus)}</i>` : ''}<small>${s.abbr}</small><b>${sgn(mod)}</b><span>${total}</span></div>`;
+    return `<div class="vtt-ms-st" style="--sc:${col}" title="${s.abbr} ${total} · base ${base}${bonus ? ` ${sgn(bonus)} équipement` : ''}"><small>${s.abbr}</small><b class="${mod > 0 ? 'pos' : mod < 0 ? 'neg' : ''}">${sgn(mod)}</b><span>${total}${bonus ? `<i>${sgn(bonus)}</i>` : ''}</span></div>`;
   }).join('')}</div>`;
 }
 
-function _msCollapsedHtml(c) {
-  const img = characterPortraitSrc(c) || null;
-  const init = _esc((c?.nom || '?')[0].toUpperCase());
-  const niv = parseInt(c?.niveau) || 1;
-  const tabs = [
-    ['combat', 'combat', 'Combat'],
-    ['sorts', 'sorts', 'Sorts'],
-    ['sac', 'inv', 'Sac'],
-    ['notes', 'notes', 'Carnet'],
-  ];
-  return `<div class="vtt-ms-rail">
-    <button class="vtt-ms-rail-portrait" data-vtt-fn="_vttMsToggleCollapsed" title="Déployer la mini-fiche" aria-label="Déployer la mini-fiche">
-      <span class="vtt-ms-rail-ring">${_msRingHtml(c, 48)}${img ? `<img src="${_esc(img)}" alt="">` : `<b>${init}</b>`}</span>
-      <small>Niv. ${niv}</small>
-    </button>
-    <div class="vtt-ms-rail-fact"><b>${calcCA(c)}</b><small>CA</small></div>
-    <div class="vtt-ms-rail-fact"><b>${calcOr(c)}</b><small>Or</small></div>
-    <span class="vtt-ms-rail-sep" aria-hidden="true"></span>
-    <nav class="vtt-ms-rail-tabs" aria-label="Mini-fiche">
-      ${tabs.map(([key, icon, label]) => `<button class="${_miniTab === key ? 'active' : ''}" data-vtt-fn="_vttMsTab" data-vtt-args="${key}" title="Ouvrir ${label}" aria-label="Ouvrir ${label}">${_msIco(icon)}</button>`).join('')}
-    </nav>
-  </div>`;
-}
-
-// Sac : sous-onglets Objets / Recettes / Bourse (fusion des anciens onglets).
+// Sac : bourse toujours visible, puis Objets / Recettes.
 function _msTabSac(c, uid, canEdit) {
-  if (_msSac !== 'obj' && _msSac !== 'craft' && _msSac !== 'bourse') _msSac = 'obj';
+  if (_msSac !== 'obj' && _msSac !== 'craft') _msSac = 'obj';
   const n = (c?.inventaire || []).length;
   const known = _msCraftRecipes ? _msKnownRecipes(uid) : null;
+  const hasRecipes = !!known?.length;
   const craftBadge = known ? `${known.filter(r => _msRecipeIngrStatus(r, _msInvNameCounts(c)).allOk).length}/${known.length}` : '';
-  const seg = `<div class="vtt-ms-seg">${[['obj', 'Objets', n], ['craft', 'Recettes', craftBadge], ['bourse', 'Bourse', calcOr(c) + ' or']].map(([k, l, b]) =>
-    `<button class="${_msSac === k ? 'on' : ''}" data-vtt-fn="_vttMsSac" data-vtt-args="${k}">${l}${b !== '' ? ` <small>${b}</small>` : ''}</button>`).join('')}</div>`;
+  if (_msCraftRecipes === null) _msEnsureCraftRecipes();
+  if (!hasRecipes) _msSac = 'obj';
+  const seg = hasRecipes ? `<div class="vtt-ms-seg">${[['obj', 'Objets', n], ['craft', 'Recettes', craftBadge]].map(([k, l, b]) =>
+    `<button class="${_msSac === k ? 'on' : ''}" data-vtt-fn="_vttMsSac" data-vtt-args="${k}">${l}${b !== '' ? ` <small>${b}</small>` : ''}</button>`).join('')}</div>` : '';
   const body = _msSac === 'craft' ? _msTabCraft(c, uid, canEdit)
-    : _msSac === 'bourse' ? _msTabCompte(c, uid, canEdit)
     : _msTabInventaire(c, uid, canEdit);
-  return seg + body;
+  return _msTabCompte(c, uid, canEdit, { compact: true }) + seg + body;
 }
 function _vttMsSac(sub) { _msSac = sub; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
-function _vttMsGoPurse() { _miniTab = 'sac'; _msSac = 'bourse'; _miniCollapsed = false; if (VS.miniUid) _renderMiniSheet(VS.miniUid); }
 
 // ── Popover unique interne au panneau (remplace modales + <select>) ──
 // _msPop = { v:'char'|'xp'|'slot'|'equipto'|'send'|'gold', pid, arg }
@@ -445,13 +461,14 @@ let _msPop = null;
 let _msPopInit = false;
 function _msClosePop() { _msPop = null; document.getElementById('vtt-ms-pop')?.remove(); }
 function _vttMsPop(v, pid, arg = '') {
+  if (v === 'close') { _msClosePop(); return; }
   if (_msPop && _msPop.pid === pid) { _msClosePop(); return; }
   _msPop = { v, pid, arg };
   if (VS.miniUid) _renderMiniSheet(VS.miniUid);
 }
 function _msInitPop() {
   if (_msPopInit) return; _msPopInit = true;
-  document.addEventListener('mousedown', e => {
+  document.addEventListener('pointerdown', e => {
     if (!_msPop) return;
     const panel = document.getElementById('vtt-mini-panel');
     if (!panel || !panel.contains(e.target)) { _msClosePop(); return; }
@@ -460,7 +477,7 @@ function _msInitPop() {
     if (trig && trig.dataset.pid === _msPop.pid) return;   // le toggle du clic s'en charge
     _msClosePop();
   }, true);
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && _msPop) { e.stopPropagation(); _msClosePop(); } }, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && _msPop) { e.preventDefault(); e.stopImmediatePropagation(); _msClosePop(); } }, true);
 }
 function _msPopHtml(c, uid) {
   const p = _msPop; if (!p) return '';
@@ -484,23 +501,54 @@ function _msPopHtml(c, uid) {
     const cur = equip[slotId];
     const slotDef = _msSlots().find(s => s.id === slotId);
     const opts = inv.map((it, i) => ({ it, i })).filter(({ it, i }) => _msItemFitsSlot(it, slotId, equip, i));
-    h = `<div class="vtt-ms-pop-lbl">${_esc(slotDef?.label || 'Emplacement')}</div>`
-      + (opts.length
-        ? opts.map(({ it, i }) => {
-            const otherSlot = Object.keys(equip).find(s => s !== slotId && (equip[s]?.sourceInvIndex ?? -1) === i);
-            const otherLbl = otherSlot ? _msSlots().find(s => s.id === otherSlot)?.label : '';
-            const onCur = (cur?.sourceInvIndex ?? -2) === i;
-            return `<button class="vtt-ms-pop-it${onCur ? ' on' : ''}" data-vtt-fn="_vttMsEquip" data-vtt-args="${c.id}|${uid}|${slotId}|${i}"><span>${_esc(it.nom)}${(it.qte || 1) > 1 ? ` ×${it.qte}` : ''}</span>${otherLbl && !onCur ? `<em>équipé : ${_esc(otherLbl)}</em>` : ''}</button>`;
-          }).join('')
-        : '<div class="vtt-ms-pop-empty">Aucun objet compatible dans le sac.</div>')
-      + (cur?.nom ? `<div class="vtt-ms-pop-sep"></div><button class="vtt-ms-pop-it danger" data-vtt-fn="_vttMsUnequip" data-vtt-args="${c.id}|${uid}|${slotId}"><span>Retirer ${_esc(cur.nom)}</span></button>` : '');
+    const blocked = slotDef?.role === 'secondaryWeapon' && _msWeaponUsesTwoHands(equip[_msSlots().find(s => s.role === 'primaryWeapon')?.id]);
+    const tile = (item, fallback = 'equip') => {
+      const source = _msEquipSourceItem(item, inv);
+      const image = getInventoryItemImage(source, source?.itemId ? (_msCraftShop || []).find(x => x.id === source.itemId) : null);
+      return `<span class="vtt-ms-pop-option-tile">${image ? `<img src="${_esc(image)}" alt="">` : _msIco(fallback)}</span>`;
+    };
+    const rarityName = item => {
+      const rarity = _msRarityMeta(item);
+      return `<b style="--rar:${rarity.color}"><i>◆</i>${_esc(item?.nom || 'Objet')}</b>`;
+    };
+    const curSource = cur?.nom ? _msEquipSourceItem(cur, inv) : null;
+    h = `${curSource ? `<div class="vtt-ms-pop-current">
+        ${tile(curSource, slotDef?.icon || 'equip')}
+        <span class="vtt-ms-pop-option-body">${rarityName(curSource)}<small>Équipé</small></span>
+        <button type="button" class="vtt-ms-pop-remove" data-vtt-fn="_vttMsUnequip" data-vtt-args="${c.id}|${uid}|${slotId}">Retirer</button>
+      </div>` : ''}
+      ${blocked ? `<p class="vtt-ms-pop-hint">${_msIco('lock')}Arme principale à deux mains</p>` : ''}
+      ${opts.length ? `<div class="vtt-ms-pop-list">${opts.map(({ it, i }) => {
+        const otherSlot = Object.keys(equip).find(s => s !== slotId && (equip[s]?.sourceInvIndex ?? -1) === i);
+        const otherLbl = otherSlot ? _msSlots().find(s => s.id === otherSlot)?.label : '';
+        const detail = [
+          it.degats,
+          it.typeArme || it.typeArmure || it.slotBijou || it.template,
+          otherLbl ? `Équipé : ${otherLbl}` : '',
+        ].filter(Boolean).join(' · ');
+        return `<button type="button" class="vtt-ms-pop-option" data-vtt-fn="_vttMsEquip" data-vtt-args="${c.id}|${uid}|${slotId}|${i}" ${blocked ? 'disabled' : ''}>
+          ${tile(it, slotDef?.icon || 'equip')}
+          <span class="vtt-ms-pop-option-body">${rarityName(it)}<small>${_esc(detail || 'Compatible avec cet emplacement')}</small></span>
+        </button>`;
+      }).join('')}</div>` : '<p class="vtt-ms-pop-hint">Aucun objet compatible dans le sac.</p>'}`;
+  } else if (p.v === 'equipto') {
+    const invIndex = parseInt(p.arg);
+    const item = (c?.inventaire || [])[invIndex];
+    const slots = item ? _msSlots().filter(s => _msItemFitsSlot(item, s.id, {}, invIndex)) : [];
+    h = `<div class="vtt-ms-pop-lbl">Équiper ${_esc(item?.nom || 'l’objet')}</div>`
+      + (slots.length ? slots.map(s => `<button class="vtt-ms-pop-it" data-vtt-fn="_vttMsEquip" data-vtt-args="${c.id}|${uid}|${s.id}|${invIndex}"><span>${_esc(s.label)}</span><em>${_esc(s.role === 'primaryWeapon' ? 'arme principale' : s.role === 'secondaryWeapon' ? 'arme secondaire' : '')}</em></button>`).join('') : '<div class="vtt-ms-pop-empty">Aucun emplacement compatible.</div>');
   } else if (p.v === 'xp') {
     const niv = parseInt(c?.niveau) || 1, xp = parseInt(c?.exp) || 0, palier = calcPalier(niv), up = palier > 0 && xp >= palier;
     const canEdit = _msCanEdit(uid, c?.id);
-    h = `<div class="vtt-ms-pop-lbl">Expérience · niveau ${niv}</div>`
+    const pct = palier > 0 ? Math.min(100, Math.round(xp / palier * 100)) : 0;
+    h = `<div class="vtt-ms-xp-pop"><div><b>${xp.toLocaleString('fr-FR')}</b><span>/ ${palier.toLocaleString('fr-FR')} XP</span><em>Niv. ${niv}</em></div><i><b style="width:${pct}%"></b></i></div>`
       + (canEdit
         ? `<div class="vtt-ms-pop-form"><label>XP gagnée<input class="vtt-ms-pop-inp" id="vtt-ms-xp-add" type="number" min="1" placeholder="ex. 150 puis Entrée" data-vtt-fn="_vttMsAddXp" data-vtt-on="keydown-enter" data-vtt-args="${c.id}|${uid}|$value"></label>${up ? `<button class="vtt-ms-pop-btn amber" data-vtt-fn="_vttMsLevelUp" data-vtt-args="${c.id}|${uid}">Passer niveau ${niv + 1} · garde ${xp - palier} XP</button>` : `<div class="vtt-ms-pop-note">Encore ${palier - xp} XP avant le niveau ${niv + 1}.</div>`}</div>`
-        : `<div class="vtt-ms-pop-empty">${xp} / ${palier} XP</div>`);
+        : '');
+  } else if (p.v === 'gold' && (p.arg === 'in' || p.arg === 'out')) {
+    const positive = p.arg === 'in';
+    h = `<div class="vtt-ms-pop-lbl">${positive ? 'Ajouter une recette' : 'Ajouter une dépense'}</div>
+      <div class="vtt-ms-pop-form"><label>Libellé<input class="vtt-ms-pop-inp" id="vtt-ms-cpt-lib" type="text" maxlength="60" placeholder="${positive ? 'Vente, récompense…' : 'Auberge, achat…'}"></label><label>Montant<input class="vtt-ms-pop-inp" id="vtt-ms-cpt-amt" type="number" min="1" inputmode="numeric" placeholder="0"></label><button class="vtt-ms-pop-btn ${positive ? '' : 'danger'}" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|${positive ? 1 : -1}">${positive ? 'Ajouter' : 'Dépenser'}</button></div>`;
   } else if (p.v === 'gold') {
     const solde = calcOr(c);
     const targets = _msPresentTargets(c.id);
@@ -511,14 +559,18 @@ function _msPopHtml(c, uid) {
         : '<div class="vtt-ms-pop-empty">Aucun autre personnage sur la scène.</div>');
   } else if (p.v === 'send') {
     const inv = c?.inventaire || [];
-    const item = inv[parseInt(p.arg)];
+    const itemIndex = parseInt(p.arg);
+    const item = inv[itemIndex];
+    const available = item?.itemId ? inv.filter(entry => entry?.itemId === item.itemId).length : (item ? 1 : 0);
     const targets = _msPresentTargets(c.id);
     h = `<div class="vtt-ms-pop-lbl">Donner ${_esc(item?.nom || 'l\'objet')}</div>`
       + (targets.length
-        ? targets.map(t => `<button class="vtt-ms-pop-it" data-vtt-fn="_vttMsConfirmSend" data-vtt-args="${_esc(c.id)}|${_esc(uid)}|${_esc(p.arg)}|${_esc(t.charId)}">${_msTargetAvatar(t)}<span>${_esc(t.charNom)}</span><em>${_esc(t.pseudo)}</em></button>`).join('')
+        ? `${available > 1 ? `<div class="vtt-ms-pop-form"><label>Quantité disponible : ${available}<input class="vtt-ms-pop-inp" id="vtt-ms-give-qty" type="number" min="1" max="${available}" value="1" inputmode="numeric"></label></div>` : ''}`
+          + targets.map(t => `<button class="vtt-ms-pop-it" data-vtt-fn="_vttMsConfirmSend" data-vtt-args="${_esc(c.id)}|${_esc(uid)}|${_esc(p.arg)}|${_esc(t.charId)}">${_msTargetAvatar(t)}<span>${_esc(t.charNom)}</span><em>${_esc(t.pseudo)}</em></button>`).join('')
         : '<div class="vtt-ms-pop-empty">Aucun autre personnage sur la scène.</div>');
   }
-  return `<div class="vtt-ms-pop" id="vtt-ms-pop">${h}</div>`;
+  const title = p.v === 'xp' ? 'Expérience' : p.v === 'char' ? 'Personnages' : p.v === 'send' ? 'Donner un objet' : p.v === 'gold' ? 'Bourse' : p.v === 'equipto' ? 'Équipement' : p.v === 'slot' ? (_msSlots().find(s => s.id === p.arg)?.label || 'Emplacement') : 'Emplacement';
+  return `<div class="vtt-ms-pop" id="vtt-ms-pop"><header class="vtt-ms-pop-hd"><b>${title}</b><button type="button" data-vtt-fn="_vttMsPop" data-vtt-args="close|close" aria-label="Fermer">${_msIco('x')}</button></header><div class="vtt-ms-pop-bd">${h}</div></div>`;
 }
 function _msPlacePop() {
   const panel = document.getElementById('vtt-mini-panel');
@@ -528,10 +580,9 @@ function _msPlacePop() {
   if (!anchor) { _msClosePop(); return; }
   const ar = anchor.getBoundingClientRect(), pr = panel.getBoundingClientRect();
   const pw = pop.offsetWidth, ph = pop.offsetHeight;
-  let x = ar.left - pr.left;
-  let y = ar.bottom - pr.top + 6;
-  if (x + pw > pr.width - 8) x = Math.max(8, ar.right - pr.left - pw);
-  if (ar.bottom + ph + 10 > pr.bottom) y = Math.max(8, ar.top - pr.top - ph - 6);
+  const x = Math.max(8, Math.min(pr.width - pw - 8, ar.left - pr.left + ar.width / 2 - pw / 2));
+  let y = ar.bottom - pr.top + 8;
+  if (y + ph > pr.height - 8) y = Math.max(8, ar.top - pr.top - ph - 8);
   pop.style.left = x + 'px';
   pop.style.top = y + 'px';
 }
@@ -558,12 +609,10 @@ async function _vttMsEquip(charId, uid, slot, invIndex) {
   const c = VS.characters[charId]; if (!c) return;
   invIndex = parseInt(invIndex);
   const item = (c.inventaire||[])[invIndex]; if (!item) return;
-  const equip = { ...(c.equipement||{}) };
-  // Libère l'item s'il était déjà équipé ailleurs
-  Object.keys(equip).forEach(s => { if (s !== slot && equip[s]?.sourceInvIndex === invIndex) delete equip[s]; });
-  const built = _msBuildEquipItem(slot, item, invIndex); if (!built) return;
-  equip[slot] = built;
-  const bonus = computeEquipStatsBonus(equip);
+  const equipPatch = buildInventoryEquipPatch(c, invIndex, slot);
+  if (!equipPatch) { showNotif('Cet objet ne peut pas occuper cet emplacement.', 'info'); return; }
+  const equip = equipPatch.equipement;
+  const bonus = equipPatch.statsBonus;
   _msPop = null;
   c.equipement = equip; c.statsBonus = bonus;   // optimiste : reflet immédiat + ferme le popover
   _renderMiniSheet(uid);
@@ -597,7 +646,7 @@ function _vttMsSlotChange(sel, charId, uid, slotIdx) {
   else            _vttMsEquip(charId, uid, slot, parseInt(val));
 }
 
-// Ouvre une modale pour choisir le slot cible depuis l'inventaire
+// Ouvre le popover interne pour choisir le slot cible depuis l'inventaire.
 function _vttMsEquipPicker(charId, uid, invIndex) {
   if (!_msCanEdit(uid)) return;
   const c = VS.characters[charId]; if (!c) return;
@@ -608,12 +657,7 @@ function _vttMsEquipPicker(charId, uid, invIndex) {
   const slots = _msSlots().filter(s => _msItemFitsSlot(item, s.id, {}, invIndex));
   if (!slots.length) { showNotif('Aucun slot compatible pour cet objet', 'info'); return; }
   if (slots.length === 1) { _vttMsEquip(charId, uid, slots[0].id, invIndex); return; }
-  openModal(`⚔️ Équiper "${item.nom}"`, `
-    <div style="display:flex;flex-direction:column;gap:.4rem">
-      ${slots.map(s => `<button class="btn btn-outline"
-        data-vtt-fn="_vttCloseAnd" data-vtt-args="_vttMsEquip|${charId}|${uid}|${s.id}|${invIndex}">${_esc(s.icon)} ${_esc(s.label)}</button>`).join('')}
-      <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
-    </div>`);
+  _vttMsPop('equipto', `equip-${invIndex}`, String(invIndex));
 }
 
 // Déséquipe un item depuis l'inventaire (tous les slots où il est équipé)
@@ -657,7 +701,7 @@ async function _vttToggleMsSort(charId, uid, idx) {
   catch(e) { showNotif('Erreur sauvegarde', 'error'); }
 }
 
-// Modale pour choisir le destinataire d'un objet
+// Popover interne pour choisir le destinataire d'un objet.
 function _vttMsSendPicker(charId, uid, invIndex) {
   if (!_msCanEdit(uid)) return;
   invIndex = parseInt(invIndex);
@@ -665,56 +709,55 @@ function _vttMsSendPicker(charId, uid, invIndex) {
   const item = (c.inventaire||[])[invIndex]; if (!item) return;
   const targets = _msPresentTargets(charId);
   if (!targets.length) { showNotif('Aucun autre personnage sur la scène', 'info'); return; }
-  openModal(`📦 Envoyer "${item.nom||'objet'}"`, `
-    <div style="display:flex;flex-direction:column;gap:.5rem">
-      <p style="margin:0;font-size:.85rem;color:var(--text-dim)">Destinataire :</p>
-      ${targets.map(t => `<button class="btn btn-outline vtt-ms-transfer-target"
-        data-vtt-fn="_vttCloseAnd" data-vtt-args="_vttMsConfirmSend|${_esc(charId)}|${_esc(uid)}|${invIndex}|${_esc(t.charId)}">
-        ${_msTargetAvatar(t)}<span><b>${_esc(t.charNom)}</b><small>${_esc(t.pseudo)}</small></span></button>`).join('')}
-      <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
-    </div>`);
+  _vttMsPop('send', `send-${invIndex}`, String(invIndex));
 }
 
 // Effectue le transfert d'objet entre deux personnages
 async function _vttMsConfirmSend(senderCharId, senderUid, invIndex, recipCharId) {
-  _msPop = null;
+  if (!_msCanEdit(senderUid, senderCharId)) return;
   invIndex = parseInt(invIndex);
   const sender = VS.characters[senderCharId]; if (!sender) return;
   const recip  = VS.characters[recipCharId];  if (!recip)  return;
   const senderInv = [...(sender.inventaire||[])];
   const item = senderInv[invIndex]; if (!item) return;
-  senderInv.splice(invIndex, 1);
-  // Ajuste les sourceInvIndex dans l'équipement du sender
-  const senderEquip = { ...(sender.equipement||{}) };
-  Object.keys(senderEquip).forEach(s => {
-    const e = senderEquip[s]; if (!e) return;
-    if (e.sourceInvIndex === invIndex)    delete senderEquip[s];
-    else if (e.sourceInvIndex > invIndex) senderEquip[s] = { ...e, sourceInvIndex: e.sourceInvIndex - 1 };
-  });
-  const senderBonus = computeEquipStatsBonus(senderEquip);
-  const recipInv = [...(recip.inventaire||[]), { ...item }];
-  const senderHistory = inventoryHistoryPayload(sender, makeInventoryHistoryEntry('send', item, 1, {
+  const matches = item.itemId
+    ? senderInv.map((entry, index) => entry?.itemId === item.itemId ? index : -1).filter(index => index >= 0)
+    : [invIndex];
+  const requestedQty = Math.floor(Number(document.getElementById('vtt-ms-give-qty')?.value) || 1);
+  const qty = Math.max(1, Math.min(matches.length, requestedQty));
+  const removedIndices = matches.slice(0, qty);
+  const removed = removedIndices.map(index => ({ ...senderInv[index] }));
+  const nextSenderInv = senderInv.filter((_, index) => !removedIndices.includes(index));
+  const sync = syncEquipmentAfterInventoryMutation(sender, removedIndices);
+  const senderEquip = sync.equipement;
+  const senderBonus = sync.statsBonus;
+  const recipInv = [...(recip.inventaire||[]), ...removed];
+  const senderHistory = inventoryHistoryPayload(sender, makeInventoryHistoryEntry('send', item, qty, {
     actorUid: STATE.user?.uid || '',
     actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
     source: 'VTT',
     targetName: recip.nom || '',
   }));
-  const recipHistory = inventoryHistoryPayload(recip, makeInventoryHistoryEntry('receive', item, 1, {
+  const recipHistory = inventoryHistoryPayload(recip, makeInventoryHistoryEntry('receive', item, qty, {
     actorUid: STATE.user?.uid || '',
     actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
     source: sender.nom || 'VTT',
     targetName: sender.nom || '',
   }));
+  _msPop = null;
   try {
     const batch = writeBatch(db);
-    batch.update(_chrRef(senderCharId), { inventaire: senderInv, equipement: senderEquip, statsBonus: senderBonus, ...senderHistory });
+    batch.update(_chrRef(senderCharId), { inventaire: nextSenderInv, equipement: senderEquip, statsBonus: senderBonus, ...senderHistory });
     batch.update(_chrRef(recipCharId), { inventaire: recipInv, ...recipHistory });
     await batch.commit();
-    sender.inventaire = senderInv;
+    sender.inventaire = nextSenderInv;
+    sender.equipement = senderEquip;
+    sender.statsBonus = senderBonus;
     sender.inventoryHistory = senderHistory.inventoryHistory;
     recip.inventaire = recipInv;
     recip.inventoryHistory = recipHistory.inventoryHistory;
-    showNotif(`${item.nom||'Objet'} envoyé à ${recip.nom||'joueur'}`, 'success');
+    if (VS.miniUid) _renderMiniSheet(VS.miniUid);
+    showNotif(`${qty > 1 ? `${qty}× ` : ''}${item.nom||'Objet'} envoyé à ${recip.nom||'joueur'}`, 'success');
   } catch(e) {
     console.error('[vtt] send item', e);
     showNotif(e?.code === 'permission-denied'
@@ -740,13 +783,9 @@ async function _vttMsDeleteItem(charId, uid, invIndex) {
   const item = prevInv[invIndex]; if (!item) return;
 
   const inv = [...prevInv]; inv.splice(invIndex, 1);
-  const equip = { ...prevEquip };
-  Object.keys(equip).forEach(s => {
-    const e = equip[s]; if (!e) return;
-    if (e.sourceInvIndex === invIndex)    delete equip[s];
-    else if (e.sourceInvIndex > invIndex) equip[s] = { ...e, sourceInvIndex: e.sourceInvIndex - 1 };
-  });
-  const bonus = computeEquipStatsBonus(equip);
+  const sync = syncEquipmentAfterInventoryMutation(c, [invIndex]);
+  const equip = sync.equipement;
+  const bonus = sync.statsBonus;
   const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('delete', item, 1, {
     actorUid: STATE.user?.uid || '',
     actorName: STATE.user?.pseudo || STATE.user?.displayName || STATE.user?.email || '',
@@ -766,13 +805,43 @@ async function _vttMsDeleteItem(charId, uid, invIndex) {
     return;
   }
 
-  showNotif(`${item.nom || 'Objet'} supprimé`, 'info', { action: { label: 'Annuler', onClick: async () => {
+  showNotif(`${item.nom || 'Objet'} supprimé`, 'info', { duration: 4000, action: { label: 'Annuler', onClick: async () => {
     const cc = VS.characters[charId]; if (!cc) return;
     cc.inventaire = prevInv; cc.equipement = prevEquip; cc.statsBonus = prevBonus; cc.inventoryHistory = prevHist;
     _renderMiniSheet(uid);
     updateDoc(_chrRef(charId), { inventaire: prevInv, equipement: prevEquip, statsBonus: prevBonus, ...(prevHist !== undefined ? { inventoryHistory: prevHist } : {}) })
       .catch(err => { console.error('[vtt] undo delete', err); showNotif('Restauration impossible', 'error'); });
   } } });
+}
+
+// Consomme exactement une unité. L'inventaire suit la convention 1 entrée = 1
+// unité : retirer l'index choisi décrémente donc naturellement la pile affichée.
+async function _vttMsConsumeItem(charId, uid, invIndex) {
+  if (!_msCanEdit(uid, charId)) return;
+  invIndex = parseInt(invIndex);
+  const c = VS.characters[charId]; if (!c) return;
+  const prevInv = [...(c.inventaire || [])];
+  const item = prevInv[invIndex]; if (!item || _msCatItem(item) !== 'consommable') return;
+  const prevEquip = { ...(c.equipement || {}) };
+  const prevBonus = { ...(c.statsBonus || {}) };
+  const prevHist = Array.isArray(c.inventoryHistory) ? [...c.inventoryHistory] : c.inventoryHistory;
+  const inv = prevInv.filter((_, index) => index !== invIndex);
+  const sync = syncEquipmentAfterInventoryMutation(c, [invIndex]);
+  const historyPatch = inventoryHistoryPayload(c, makeInventoryHistoryEntry('consume', item, 1, {
+    actorUid: STATE.user?.uid || '',
+    actorName: STATE.profile?.pseudo || STATE.user?.displayName || c.nom || '',
+    source: 'VTT · mini-fiche',
+  }));
+  c.inventaire = inv; c.equipement = sync.equipement; c.statsBonus = sync.statsBonus; c.inventoryHistory = historyPatch.inventoryHistory;
+  _renderMiniSheet(uid);
+  try {
+    await updateDoc(_chrRef(charId), { inventaire: inv, equipement: sync.equipement, statsBonus: sync.statsBonus, ...historyPatch });
+    showNotif(`${item.nom || 'Objet'} consommé`, 'success');
+  } catch (error) {
+    console.error('[vtt] consume item', error);
+    c.inventaire = prevInv; c.equipement = prevEquip; c.statsBonus = prevBonus; c.inventoryHistory = prevHist;
+    _renderMiniSheet(uid); showNotif('Consommation impossible', 'error');
+  }
 }
 
 // Démonter (recyclage) : détruit un objet craftable pour récupérer une partie
@@ -900,57 +969,77 @@ async function _vttMsRecycle(charId, uid, invIndex) {
 // d'arme complets (traits non tronqués) et bonus de set. Les caracs, les
 // chiffres clés et l'XP sont dans la zone fixe ; l'équipement est ajouté ensuite.
 function _msTabCombat(c, uid, canEdit) {
-  const weaponSlots = _msSlots().filter(slot => slot.kind === 'weapon')
-    .map(slot => ({ slot, item: c?.equipement?.[slot.id] }))
-    .filter(entry => entry.item?.nom && entry.item?.degats);
+  const slots = _msSlots();
+  const weaponSlots = slots.filter(slot => slot.kind === 'weapon');
   const primaryId = getPrimaryWeaponSlotId();
-  if (!weaponSlots.some(entry => entry.slot.id === _msAttackSlot)) {
-    _msAttackSlot = weaponSlots.find(entry => entry.slot.id === primaryId)?.slot.id || weaponSlots[0]?.slot.id || primaryId;
-  }
-  const weapon = c?.equipement?.[_msAttackSlot];
-  const weaponSource = _msEquipSourceItem(weapon, c?.inventaire || []);
-  let attackDice = '—';
-  let attackTouch = '+0';
-  if (weapon?.nom) {
-    const wDmgStat = weapon.degatsStat || weapon.degatStat || 'force';
-    const wTchStat = weapon.toucherStat || weapon.statAttaque || 'force';
-    const setBonus = getArmorSetData(c).modifiers.toucherBonus || 0;
-    const maitrise = getMaitriseBonus(c, weapon);
-    const dmgMod   = getMod(c, wDmgStat);
-    const tchTotal = getMod(c, wTchStat) + maitrise + setBonus;
-    attackDice = `${weapon.degats||'—'}${dmgMod!==0?' '+(dmgMod>=0?'+'+dmgMod:dmgMod):''}`;
-    attackTouch = `${tchTotal>=0?'+'+tchTotal:tchTotal}`;
-  }
-  // Apports : traits ENTIERS (plus de `compact`).
-  const contrib = weapon?.nom ? _msEquipContributionHtml(weaponSource) : '';
-  const weaponExtra = `${contrib}${weapon?.particularite ? `<div class="vtt-ms-atk-note">${_esc(weapon.particularite)}</div>` : ''}`;
-
+  const primary = c?.equipement?.[primaryId];
   const setData = getArmorSetData(c);
-  const setHtml = setData?.active ? `<div class="vtt-ms-setbonus">${_msIco('equip')} Set ${_esc(setData.type)}</div>` : '';
+  const setTouch = Number(setData?.modifiers?.toucherBonus) || 0;
 
-  const weaponSwitch = weaponSlots.length > 1 ? `<div class="vtt-ms-atk-switch" aria-label="Arme affichée">
-    ${weaponSlots.map(({ slot }) => `<button type="button" class="${slot.id === _msAttackSlot ? 'on' : ''}"
-      data-vtt-fn="_vttMsAttackSlot" data-vtt-args="${_esc(slot.id)}">${slot.role === 'primaryWeapon' ? 'Principale' : 'Secondaire'}</button>`).join('')}
-  </div>` : '';
-  const weaponPickerPid = `attack-slot-${_msAttackSlot}`;
-  const weaponPicker = canEdit
-    ? `<button type="button" class="vtt-ms-atk-picker${_msPop?.v === 'slot' && _msPop.arg === _msAttackSlot ? ' sel' : ''}"
-        data-vtt-fn="_vttMsPop" data-vtt-args="slot|${_esc(weaponPickerPid)}|${_esc(_msAttackSlot)}" data-pid="${_esc(weaponPickerPid)}"
-        title="Changer l’arme équipée">${_msIco('combat')}<span>${weapon?.nom ? _esc(weapon.nom) : 'Mains nues'}</span><span class="vtt-ms-atk-picker-caret" aria-hidden="true">⌄</span></button>`
-    : `<b>${weapon?.nom ? _esc(weapon.nom) : 'Mains nues'}</b>`;
+  const weaponCards = weaponSlots.map((slot, index) => {
+    const blocked = slot.role === 'secondaryWeapon' && _msWeaponUsesTwoHands(primary);
+    const weapon = c?.equipement?.[slot.id];
+    const pid = `attack-slot-${slot.id}`;
+    if (blocked) {
+      return `<div class="vtt-ms-weapon blocked">
+        ${_msIco('lock')}<span><b>${_esc(slot.label)} occupée</b> · Arme principale à deux mains</span>
+      </div>`;
+    }
+    if (!weapon?.nom) {
+      return `<div class="vtt-ms-weapon empty">
+        <span class="vtt-ms-weapon-tile">${_msIco('combat')}</span>
+        <span class="vtt-ms-weapon-empty"><small>${_esc(slot.label)}</small><b>Emplacement libre</b><em>Aucune arme équipée</em></span>
+        ${canEdit ? `<button class="vtt-ms-change" data-vtt-fn="_vttMsPop" data-vtt-args="slot|${_esc(pid)}|${_esc(slot.id)}" data-pid="${_esc(pid)}">Changer</button>` : ''}
+      </div>`;
+    }
 
-  return `
-    <div class="vtt-ms-sect-label">Attaque</div>
-    <div class="vtt-ms-atk">
-      <div class="vtt-ms-atk-hd">${weaponPicker}${weaponSwitch}</div>
-      <div class="vtt-ms-atk-row">
-        <div class="vtt-ms-atk-cell"><small>Toucher</small><b>${attackTouch}</b></div>
-        <div class="vtt-ms-atk-cell"><small>Dégâts</small><b>${_esc(attackDice)}</b></div>
+    const source = _msEquipSourceItem(weapon, c?.inventaire || []);
+    const rarity = _msRarityMeta(source || weapon);
+    const dmgStat = weapon.degatsStat || weapon.degatStat || 'force';
+    const hitStat = weapon.toucherStat || weapon.statAttaque || 'force';
+    const hitMod = getMod(c, hitStat);
+    const damageMod = getMod(c, dmgStat);
+    const mastery = getMaitriseBonus(c, weapon);
+    const touchTotal = hitMod + mastery + setTouch;
+    const damage = `${weapon.degats || '—'}${damageMod ? ` ${_msSigned(damageMod)}` : ''}`;
+    const damageTypeId = weapon.damageTypeId || weapon.elementId || weapon.noyauTypeId || weapon.typeDegats || weapon.typeDegat || '';
+    const damageType = damageTypeId ? getDamageTypeById(VS.damageTypes || [], damageTypeId) : null;
+    const damageTypeLabel = damageType?.label || damageTypeId;
+    const hitDetail = `${String(hitStat).slice(0, 3).toUpperCase()} ${_msSigned(hitMod)} · Maîtrise ${_msSigned(mastery)}${setTouch ? ` · Set ${_msSigned(setTouch)}` : ''}`;
+    const damageDetail = `${weapon.degats || '—'}${damageMod ? ` · ${String(dmgStat).slice(0, 3).toUpperCase()} ${_msSigned(damageMod)}` : ' · sans modificateur'}`;
+    const meta = [weapon.typeArme || weapon.sousType, weapon.mains || weapon.format, weapon.portee].filter(Boolean).join(' · ');
+    return `<article class="vtt-ms-weapon" style="--rar:${rarity.color}">
+      <header>
+        <span class="vtt-ms-weapon-tile">${_msIco(index === 0 ? 'combat' : 'shield')}</span>
+        <span class="vtt-ms-weapon-id"><small>${_esc(slot.label)}</small><b>${rarity.label !== 'Commun' ? '<i>◆</i>' : ''}${_esc(weapon.nom)}</b><em>${_esc(meta)}</em></span>
+        ${canEdit ? `<button class="vtt-ms-change${_msPop?.v === 'slot' && _msPop.arg === slot.id ? ' sel' : ''}" data-vtt-fn="_vttMsPop" data-vtt-args="slot|${_esc(pid)}|${_esc(slot.id)}" data-pid="${_esc(pid)}">Changer</button>` : ''}
+      </header>
+      <div class="vtt-ms-weapon-values">
+        <div><small>Toucher</small><b>1d20 ${_msSigned(touchTotal)}</b><em>${_esc(hitDetail)}</em></div>
+        <div><small>Dégâts</small><b>${_esc(damage)}${damageTypeLabel ? ` <i>${_esc(damageTypeLabel)}</i>` : ''}</b><em>${_esc(damageDetail)}</em></div>
       </div>
-      ${weaponExtra}
-      ${weapon?.nom ? '' : '<div class="vtt-ms-atk-empty">Aucune arme équipée — choisis-en une dans Équipement.</div>'}
-    </div>
-    ${setHtml}`;
+      ${_msEquipContributionHtml(source)}
+      ${weapon.particularite ? `<p class="vtt-ms-atk-note">${_esc(weapon.particularite)}</p>` : ''}
+    </article>`;
+  }).join('');
+
+  const deckUsage = getDeckUsage(c?.deck_sorts);
+  const deckMax = calcDeckMax(c);
+  const defenses = `<div class="vtt-ms-defenses">
+    <div class="vtt-ms-defense" title="Classe d’armure calculée · équipement et ensemble inclus">${_msIco('shield')}<span><b>${calcCA(c)}</b><small>Armure</small></span></div>
+    <div class="vtt-ms-defense" title="${deckUsage.used} sort${deckUsage.used > 1 ? 's' : ''} préparé${deckUsage.used > 1 ? 's' : ''} sur ${deckMax}">${_msIco('sorts')}<span><b>${deckUsage.used}/${deckMax}</b><small>Deck</small></span></div>
+    <div class="vtt-ms-defense" title="Vitesse calculée · équipement et effets inclus">${_msIco('move')}<span><b>${calcVitesse(c)} m</b><small>Vitesse</small></span></div>
+  </div>`;
+  const activeStyle = detectCombatStyle(c, VS.combatStyles || [], VS.weaponFormats || []);
+  const styleParts = activeStyle ? splitStyleLabel(activeStyle.label || '') : null;
+  const styleRules = activeStyle ? combatStyleRuleLabels(activeStyle) : [];
+  const styleHtml = activeStyle ? `<div class="vtt-ms-style${_msStyleOpen ? ' open' : ''}" style="--style-c:${_esc(activeStyle.couleur || '#7eb0ff')}"><button data-vtt-fn="_vttMsStyleToggle"><span class="vtt-ms-style-icon">${_esc(styleParts?.icon || '✦')}</span><span><small>Style de combat</small><b>${_esc(styleParts?.name || activeStyle.label || 'Style actif')}</b><em>${styleRules.map(r => _esc(r.label)).join(' · ')}</em></span><i>›</i></button>${_msStyleOpen && activeStyle.description ? `<p>${_esc(activeStyle.description)}</p>` : ''}</div>` : '';
+
+  return `${defenses}
+    <section class="vtt-ms-section"><header><h4>Armes en main</h4></header>
+      <div class="vtt-ms-weapons">${weaponCards || '<div class="vtt-ms-empty">Aucun emplacement d’arme configuré.</div>'}</div>
+    </section>
+    ${styleHtml}${_msTabEquipement(c, uid, canEdit)}`;
 }
 
 function _msXpSection(c, uid, canEdit) {
@@ -1000,33 +1089,68 @@ function _msXpSection(c, uid, canEdit) {
 // clic ouvre un popover de choix d'objet (compatibles + Retirer). Plus de <select>.
 function _msTabEquipement(c, uid, canEdit) {
   const equip = c?.equipement || {}, inv = c?.inventaire || [];
-  const slots = _msSlots();
+  const slots = _msSlots().filter(slot => slot.kind !== 'weapon');
   const occupied = slots.filter(s => equip[s.id]?.nom);
-  // L'arme actuellement détaillée dans le bloc Attaque n'est pas répétée juste
-  // en dessous. Les autres armes restent visibles et donc équipables/modifiables.
-  const full = occupied.filter(s => s.id !== _msAttackSlot);
+  const full = occupied;
   const free = slots.filter(s => !equip[s.id]?.nom);
   const setData = getArmorSetData(c);
-  const sIco = s => _msIco(s.kind === 'weapon' ? 'combat' : s.kind === 'armor' ? 'equip' : 'ring');
+  const sIco = s => s?.icon ? _esc(s.icon) : _msIco(s.kind === 'weapon' ? 'combat' : s.kind === 'armor' ? 'equip' : 'ring');
   const pa = sid => canEdit ? `data-vtt-fn="_vttMsPop" data-vtt-args="slot|slot-${sid}|${sid}" data-pid="slot-${sid}"` : '';
   const on = sid => (_msPop?.v === 'slot' && _msPop.arg === sid) ? ' sel' : '';
 
   const fullHtml = full.map(s => {
     const it = equip[s.id];
-    const chips = _msEquipContributionHtml(_msEquipSourceItem(it, inv), { label: '' });
-    return `<button class="vtt-ms-eq${on(s.id)}" ${pa(s.id)}>
+    const source = _msEquipSourceItem(it, inv);
+    const chips = _msEquipContributionHtml(source, { label: '' });
+    const rarity = _msRarityMeta(source || it);
+    return `<button class="vtt-ms-eq${on(s.id)}" style="--rar:${rarity.color}" ${pa(s.id)}>
       <span class="vtt-ms-eq-ic">${sIco(s)}</span>
-      <span class="vtt-ms-eq-b"><small>${_esc(s.label)}</small><span class="vtt-ms-eq-nm">${_esc(it.nom)}</span>${chips}</span>
+      <span class="vtt-ms-eq-b"><small>${_esc(s.label)}</small><span class="vtt-ms-eq-nm">${rarity.label !== 'Commun' ? '<i>◆</i>' : ''}${_esc(it.nom)}</span>${chips}</span>
     </button>`;
   }).join('');
   const freeHtml = free.length
-    ? `<div class="vtt-ms-eq-free"><span>Libres</span>${free.map(s => `<button class="vtt-ms-efree${on(s.id)}" ${pa(s.id)} title="Équiper : ${_esc(s.label)}">${sIco(s)}${_esc(s.label)}</button>`).join('')}</div>`
+    ? `<div class="vtt-ms-eq-free"><span>Libres</span>${free.map(s => `<button class="vtt-ms-efree${on(s.id)}" ${pa(s.id)} title="Équiper : ${_esc(s.label)}">${canEdit ? _msIco('plus') : ''}${_esc(s.label)}</button>`).join('')}</div>`
     : '';
-  const setHtml = setData?.active ? `<div class="vtt-ms-setrow">${_msIco('equip')}<span>Set ${_esc(setData.type)}</span></div>` : '';
+  const setDef = setData?.fullType ? getArmorSetDefinition(setData.fullType) : null;
+  const setEffect = setDef ? formatArmorSetEffect({ ...setDef, modifiers: setData.modifiers }) : '';
+  const setHtml = setData?.isActive ? `<div class="vtt-ms-setrow"><small>Ensemble</small><b>${_esc(setData.fullType || setData.dominantType)}</b>${setEffect ? `<span>${_esc(setEffect)}</span>` : ''}</div>` : '';
 
-  return `<div class="vtt-ms-sect-label">Équipement <em>${occupied.length}/${slots.length}</em></div>
+  return `<section class="vtt-ms-section vtt-ms-equipment-section">
+    <header><h4>Équipement porté</h4><span>${occupied.length}/${slots.length}</span></header>
     <div class="vtt-ms-eqs">${fullHtml || (occupied.length ? '' : '<div class="vtt-ms-atk-empty">Rien d\'équipé.</div>')}</div>
-    ${freeHtml}${setHtml}`;
+    ${freeHtml}${setHtml}
+  </section>`;
+}
+
+function _msTabCapacites(c) {
+  const capKinds = { class: 'Classe', race: 'Race', histo: 'Historique', autre: 'Autre' };
+  const saveMasteries = new Set((c?.sauvegardes || c?.saveProficiencies || []).map(v => _norm(v)));
+  const saveBonuses = getArmorSetData(c)?.modifiers?.saveBonus || {};
+  const saves = _MS_STATS.map(stat => {
+    const mastered = saveMasteries.has(_norm(stat.key)) || saveMasteries.has(_norm(stat.abbr));
+    const value = getMod(c, stat.key) + (mastered ? 2 : 0) + (Number(saveBonuses[stat.key]) || 0);
+    return `<div class="vtt-ms-save${mastered ? ' mastered' : ''}" title="Sauvegarde ${stat.abbr}${mastered ? ' · maîtrisée' : ''}"><i></i><span>${stat.abbr}</span><b class="${value > 0 ? 'pos' : value < 0 ? 'neg' : ''}">${value >= 0 ? '+' : ''}${value}</b></div>`;
+  }).join('');
+  const profile = getCharFullDamageProfile(c) || { resistances: [], immunites: [], absorptions: [], faiblesses: [] };
+  const rels = [['resistances', '½', 'res'], ['immunites', '∅', 'imm'], ['absorptions', '+', 'abs'], ['faiblesses', '×2', 'vul']];
+  const damage = rels.flatMap(([key, value, cls]) => (profile[key] || []).map(id => {
+    const meta = getDamageTypeById(VS.damageTypes || [], id);
+    return `<span class="vtt-ms-res ${cls}">${_esc(meta?.icon || '◆')} ${_esc(meta?.label || id)} <b>${value}</b></span>`;
+  })).join('');
+  const statKey = { FOR:'force', DEX:'dexterite', CON:'constitution', INT:'intelligence', SAG:'sagesse', CHA:'charisme' };
+  const levels = c?.competences && !Array.isArray(c.competences) ? c.competences : {};
+  const skills = normalizeDiceSkills(VS.diceSkills?.length ? VS.diceSkills : DICE_SKILLS_DEFAULT).map(skill => {
+    const level = levels[skill.name] || 'aucun';
+    const base = statKey[skill.stat] ? getMod(c, statKey[skill.stat]) : 0;
+    const total = base + (computeEquipSkillBonus(c.equipement || {}, skill.name) || 0) + (level === 'forme' || level === 'expert' ? 2 : 0);
+    return { ...skill, level, total };
+  }).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'fr'));
+  const caps = Array.isArray(c?.capacites) ? c.capacites : [];
+  const langs = Array.isArray(c?.langues) ? c.langues : [];
+  return `<section class="vtt-ms-section"><header><h4>Sauvegardes</h4><span><i class="vtt-ms-save-dot"></i> maîtrisée</span></header><div class="vtt-ms-saves">${saves}</div>${damage ? `<div class="vtt-ms-res-row"><small>Dégâts</small>${damage}</div>` : ''}</section>
+    <section class="vtt-ms-section"><header><h4>Compétences</h4><span>formé · expert</span></header><div class="vtt-ms-skills">${skills.map(skill => `<div class="vtt-ms-skill"><span>${_esc(skill.name)}</span><i>${skill.level === 'expert' ? '◆◆' : skill.level === 'forme' ? '◆' : ''}</i><small style="color:${_STAT_COLOR[skill.stat] || 'var(--text-muted)'}">${_esc(skill.stat || '—')}</small><b class="${skill.total > 0 ? 'pos' : skill.total < 0 ? 'neg' : ''}">${skill.total >= 0 ? '+' : ''}${skill.total}</b></div>`).join('')}</div></section>
+    <section class="vtt-ms-section"><header><h4>Capacités</h4><span>${caps.length}</span></header><div class="vtt-ms-capas">${caps.length ? caps.map((cap, index) => { const open = _msOpenCap === index; const kind = capKinds[cap.kind] || cap.kind || 'Autre'; const detail = [cap.usage, cap.cost].filter(Boolean).join(' · '); return `<div class="vtt-ms-capa${open ? ' open' : ''}"><button data-vtt-fn="_vttMsToggleCap" data-vtt-args="${index}"><span><b>${_esc(cap.nom || 'Capacité')}</b><small><i>${_esc(kind)}</i>${_esc(detail)}</small></span><i>›</i></button>${open && cap.desc ? `<p>${_esc(cap.desc)}</p>` : ''}</div>`; }).join('') : '<div class="vtt-ms-empty">Aucune capacité.</div>'}</div></section>
+    ${langs.length ? `<p class="vtt-ms-languages"><small>Langues</small>${langs.map(lang => _esc(typeof lang === 'string' ? lang : `${lang.nom}${lang.niv ? ` (${lang.niv})` : ''}`)).join(' · ')}</p>` : ''}`;
 }
 
 // Méta runes (icône/couleur) — miroir de RUNE_META (spells.js) pour un rendu de
@@ -1200,12 +1324,17 @@ function _msSpellLine(s, i, c, uid, canEdit, deckCount, deckMax) {
   const runes = s.runes || [];
   const types = (Array.isArray(s.types) && s.types.length) ? s.types : (s.typeSoin ? ['defensif'] : (s.noyau ? ['offensif'] : []));
   const action = _vttSpellActionMode(s);
-  const ACT = { action: ['Act.', '#e8b84b'], action_bonus: ['Bonus', '#f97316'], reaction: ['Réac.', '#a78bfa'] };
+  const ACT = {
+    action: ['Action', '#4f8cff', 'action'],
+    action_bonus: ['Action bonus', '#f97316', 'bonus'],
+    reaction: ['Réaction', '#ec4899', 'reaction'],
+  };
   const acfg = ACT[action] || ACT.action;
   const vs = spellValidationState(s);
   const typeCol = types.includes('offensif') ? '#ff6b6b' : types.includes('defensif') ? '#22c38e' : '#b47fff';
   const chips = _vttSpellChips(s, c);
-  const fx = chips.slice(0, 2).map(ch => `<span class="vtt-ms-sp-fx" style="--fxc:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('');
+  const primary = chips[0] || null;
+  const concentration = !!(s.concentration || runes.includes('Concentration'));
   const alwaysPrepared = isAlwaysPreparedSpell(s);
   const validationAllows = STATE.isAdmin || vs === 'ok';
   const deckAllows = deckHasRoomFor(s, c.deck_sorts, deckMax);
@@ -1215,24 +1344,25 @@ function _msSpellLine(s, i, c, uid, canEdit, deckCount, deckMax) {
   const toggle = alwaysPrepared
     ? '<span class="vtt-ms-sp-tg always" title="Toujours prêt · aucun emplacement"></span>'
     : canEdit
-      ? `<button class="vtt-ms-sp-tg${s.actif ? ' on' : ''}${(!canActivate && !s.actif) ? ' lock' : ''}" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${lockTitle}"></button>`
-      : `<span class="vtt-ms-sp-tg${s.actif ? ' on' : ''}"></span>`;
+      ? `<button class="vtt-ms-sp-tg${s.actif ? ' on' : ''}${(!canActivate && !s.actif) ? ' lock' : ''}" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${lockTitle}" aria-pressed="${!!s.actif}">${_msIco(!validationAllows ? 'lock' : 'check')}</button>`
+      : `<span class="vtt-ms-sp-tg${s.actif ? ' on' : ''}">${s.actif ? _msIco('check') : ''}</span>`;
   const cost = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
-  const badges = `${alwaysPrepared ? '<span class="vtt-ms-sp-badge inf" title="Toujours prêt">∞</span>' : ''}${vs === 'pending' ? '<span class="vtt-ms-sp-badge wait">À valider</span>' : vs === 'no' ? '<span class="vtt-ms-sp-badge no">Refusé</span>' : ''}`;
+  const badges = `${concentration ? '<span class="vtt-ms-sp-badge conc" title="Concentration">C</span>' : ''}${alwaysPrepared ? '<span class="vtt-ms-sp-badge inf" title="Toujours prêt">∞</span>' : ''}${vs === 'pending' ? '<span class="vtt-ms-sp-badge wait">À valider</span>' : vs === 'no' ? '<span class="vtt-ms-sp-badge no">Refusé</span>' : ''}`;
   const open = String(_msOpenSpell) === String(s.id || i);
   let expand = '';
   if (open) {
     const counts = {}; _vttDisplayRunes(runes).forEach(r => { counts[r] = (counts[r] || 0) + 1; });
     const runeChips = Object.keys(counts).length ? `<div class="vtt-ms-sp-chips">${Object.entries(counts).map(([nom, n]) => { const m = _VTT_RUNE_META[nom] || { icon: '•', color: '#888' }; return `<span class="vtt-ms-sp-rune" style="--rc:${m.color}">${m.icon} ${_esc(nom)}${n > 1 ? ` ×${n}` : ''}</span>`; }).join('')}</div>` : '';
     const allChips = chips.length > 2 ? `<div class="vtt-ms-sp-chips">${chips.map(ch => `<span class="vtt-ms-sp-chip" style="color:${ch.color}">${ch.icon} ${_esc(ch.val)}</span>`).join('')}</div>` : '';
-    expand = `<div class="vtt-ms-sp-x">${allChips}${s.effet ? `<p>${_esc(s.effet)}</p>` : ''}${s.mjNotes ? `<div class="vtt-ms-sp-mjn"><b>MJ</b> ${_esc(s.mjNotes)}</div>` : ''}${runeChips}</div>`;
+    expand = `<div class="vtt-ms-sp-x">${allChips}${s.effet ? `<p>${_esc(s.effet)}</p>` : ''}${s.mjNotes ? `<div class="vtt-ms-sp-mjn"><b>Note du MJ</b>${_esc(s.mjNotes)}</div>` : ''}${runeChips}</div>`;
   }
-  return `<div class="vtt-ms-sp${open ? ' open' : ''}${s.actif ? '' : ' off'}" data-name="${_esc(_norm(s.nom || ''))}" data-cat="${_esc(s.catId || '__none')}" data-actif="${s.actif ? 1 : 0}">
+  const filterType = types.includes('offensif') ? 'off' : types.includes('defensif') ? 'def' : 'uti';
+  return `<div class="vtt-ms-sp${open ? ' open' : ''}${s.actif ? ' on' : ''}" style="--tc:${typeCol}" data-name="${_esc(_norm(s.nom || ''))}" data-cat="${_esc(s.catId || '__none')}" data-type="${filterType}" data-actif="${s.actif ? 1 : 0}">
     <div class="vtt-ms-sp-row" data-vtt-fn="_vttMsToggleSpell" data-vtt-args="${s.id || i}">
+      <span class="vtt-ms-sp-ico">${s.icon ? _esc(s.icon) : '✦'}</span>
+      <div class="vtt-ms-sp-b"><div class="vtt-ms-sp-nm"><span>${_esc(s.nom || 'Sans nom')}</span>${badges}</div><div class="vtt-ms-sp-meta"><span class="vtt-ms-sp-act ${acfg[2]}" style="--ac:${acfg[1]}">${acfg[0]}</span><span class="vtt-ms-sp-cost-label">${cost} ${_esc(spellCostRes(s).label)}</span></div></div>
+      <div class="vtt-ms-sp-main"${primary ? ` style="--fxc:${primary.color}" title="${_esc(primary.lbl || '')}"` : ''}><b>${primary ? `${primary.icon} ${_esc(primary.val)}` : '—'}</b></div>
       ${toggle}
-      <span class="vtt-ms-sp-ico" style="--tc:${typeCol}">${s.icon ? _esc(s.icon) : '✦'}</span>
-      <div class="vtt-ms-sp-b"><div class="vtt-ms-sp-nm"><span>${_esc(s.nom || 'Sans nom')}</span>${badges}</div><div class="vtt-ms-sp-meta"><span class="vtt-ms-sp-act" style="--ac:${acfg[1]}">${acfg[0]}</span>${fx}</div></div>
-      <div class="vtt-ms-sp-cost"><b>${cost}</b><small>${_esc(spellCostRes(s).label)}</small></div>
     </div>${expand}</div>`;
 }
 
@@ -1240,26 +1370,21 @@ function _msTabSorts(c, uid, canEdit) {
   const sorts = c?.deck_sorts || [];
   if (!sorts.length) return '<div class="vtt-ms-empty">Aucun sort</div>';
   const deckUsage = getDeckUsage(sorts);
-  const deckCount = deckUsage.used, deckFree = deckUsage.free, deckMax = calcDeckMax(c);
+  const deckCount = deckUsage.used, deckMax = calcDeckMax(c);
   const full = deckCount >= deckMax;
+  const setPm = Number(getArmorSetData(c)?.modifiers?.spellPmDelta) || 0;
   const pmTotal = sorts.filter(s => s.actif).reduce((sum, s) => {
     if (spellCostRes(s).id !== 'pm') return sum;
     const pm = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
-    return sum + Math.max(0, pm);
+    return sum + Math.max(0, pm + setPm);
   }, 0);
 
   // Jauge de Deck en segments (+ « toujours prêts » en pointillé).
-  const gauge = `<div class="vtt-ms-deck${full ? ' full' : ''}"><b>${deckCount}/${deckMax}</b><div class="vtt-ms-deck-g">${Array.from({ length: deckMax }, (_, k) => `<i class="${k < deckCount ? 'on' : ''}"></i>`).join('')}${Array.from({ length: deckFree }, () => '<i class="free" title="Toujours prêt"></i>').join('')}</div><small>${pmTotal} PM au total</small></div>`;
+  const gauge = `<div class="vtt-ms-deck${full ? ' full' : ''}"><div><b>${deckCount}/${deckMax} sorts préparés</b><small>${pmTotal} PM pour tout lancer${setPm ? ` · ensemble ${setPm > 0 ? '+' : ''}${setPm} PM` : ''}</small></div><div class="vtt-ms-deck-g">${Array.from({ length: deckMax }, (_, k) => `<i class="${k < deckCount ? 'on' : ''}"></i>`).join('')}</div></div>`;
 
-  // Barre de filtre (existante) : Tous · ⚡ Deck · catégories · Sans cat.
-  let filterBar = '';
-  if (sorts.length >= 4) {
-    const cats = (c?.sort_cats || []).filter(ct => sorts.some(s => s.catId === ct.id));
-    const chips = [{ key: 'all', label: 'Tous' }, { key: '__deck', label: `⚡ Deck (${deckUsage.active})` }, ...cats.map(ct => ({ key: ct.id, label: ct.nom || 'Catégorie', color: ct.couleur }))];
-    if (sorts.some(s => !s.catId)) chips.push({ key: '__none', label: 'Sans cat.' });
-    if (!chips.some(ch => ch.key === _msSortCat)) _msSortCat = 'all';
-    filterBar = _msFilterBar('sorts', chips, _msSortQuery);
-  } else { _msSortCat = 'all'; _msSortQuery = ''; }
+  const chips = [{ key: 'prep', label: 'Préparés' }, { key: 'all', label: 'Tous' }, { key: 'off', label: 'Offensifs' }, { key: 'def', label: 'Défensifs' }, { key: 'uti', label: 'Utilitaires' }];
+  if (!chips.some(ch => ch.key === _msSortCat)) _msSortCat = 'prep';
+  const filterBar = _msFilterBar('sorts', chips, _msSortQuery);
 
   return `${gauge}${filterBar}
     <div class="vtt-ms-spellgrid">${sorts.map((s, i) => _msSpellLine(s, i, c, uid, canEdit, deckCount, deckMax)).join('')}</div>
@@ -1306,12 +1431,10 @@ const _msParseDate = (d) => { const m = String(d || '').match(/(\d{1,2})\/(\d{1,
 
 // Bourse (refonte) : solde en grand, reçus/dépensés, ajout, don en popover,
 // historique FUSIONNÉ chronologique (au lieu de deux colonnes).
-function _msTabCompte(c, uid, canEdit) {
+function _msTabCompte(c, uid, canEdit, { compact = false } = {}) {
   const compte   = c?.compte || { recettes: [], depenses: [] };
   const recettes = compte.recettes || [];
   const depenses = compte.depenses || [];
-  const totalR = recettes.reduce((s, r) => s + (parseFloat(r?.montant) || 0), 0);
-  const totalD = depenses.reduce((s, d) => s + (parseFloat(d?.montant) || 0), 0);
   const solde  = calcOr(c);
 
   const merged = [
@@ -1321,8 +1444,9 @@ function _msTabCompte(c, uid, canEdit) {
    .sort((a, b) => (_msParseDate(b.date) - _msParseDate(a.date)) || (b._o - a._o));
 
   const purse = `<div class="vtt-ms-purse">
-    <div class="vtt-ms-purse-v"><b>${solde}<small>or</small></b><span><i>+${totalR}</i> reçus · <u>−${totalD}</u> dépensés</span></div>
-    ${canEdit && solde > 0 ? `<button class="vtt-ms-purse-give" data-vtt-fn="_vttMsPop" data-vtt-args="gold|gold" data-pid="gold">${_msIco('send')} Donner</button>` : ''}
+    <span class="vtt-ms-purse-ico">${_msIco('coin')}</span>
+    <div class="vtt-ms-purse-v"><b>${solde.toLocaleString('fr-FR')}</b><span>pièces d'or</span></div>
+    ${canEdit ? `<div class="vtt-ms-purse-actions"><button data-vtt-fn="_vttMsPop" data-vtt-args="gold|gold-in|in" data-pid="gold-in" title="Recette">${_msIco('plus')}</button><button data-vtt-fn="_vttMsPop" data-vtt-args="gold|gold-out|out" data-pid="gold-out" title="Dépense">${_msIco('minus')}</button>${solde > 0 ? `<button data-vtt-fn="_vttMsPop" data-vtt-args="gold|gold|give" data-pid="gold" title="Donner">${_msIco('give')}</button>` : ''}</div>` : ''}
   </div>`;
 
   const addForm = canEdit ? `<div class="vtt-ms-tx-add">
@@ -1334,8 +1458,9 @@ function _msTabCompte(c, uid, canEdit) {
       <button class="vtt-ms-tx-btn neg" data-vtt-fn="_vttMsCompteAdd" data-vtt-args="${c.id}|${uid}|-1">− Dépense</button>
     </div>` : '';
 
-  const hist = merged.length
-    ? merged.map(e => `<div class="vtt-ms-tx">
+  const visibleHistory = compact && !_msHistoryOpen ? merged.slice(0, 3) : merged;
+  const hist = visibleHistory.length
+    ? visibleHistory.map(e => `<div class="vtt-ms-tx">
         <small>${_esc(e.date || '')}</small>
         <span title="${_esc(e.libelle || '')}">${_esc(e.libelle || '—')}</span>
         <b class="${e.sign > 0 ? 'pos' : 'neg'}">${e.sign > 0 ? '+' : '−'}${e.montant || 0}</b>
@@ -1343,7 +1468,9 @@ function _msTabCompte(c, uid, canEdit) {
       </div>`).join('')
     : '<div class="vtt-ms-empty">Aucun mouvement.</div>';
 
-  return `${purse}${addForm}<div class="vtt-ms-sect-label">Historique <em>${merged.length}</em></div><div class="vtt-ms-txlist">${hist}</div>`;
+  const historyToggle = compact && merged.length > 3 ? `<button class="vtt-ms-history-toggle" data-vtt-fn="_vttMsToggleHistory">${_msHistoryOpen ? 'Réduire' : `Historique complet (${merged.length})`}</button>` : '';
+  const history = `<div class="vtt-ms-txlist">${hist}</div>${historyToggle}`;
+  return compact ? `<div class="vtt-ms-purse-block">${purse}${history}</div>` : `${purse}${addForm}<div class="vtt-ms-sect-label">Historique <em>${merged.length}</em></div>${history}`;
 }
 
 // Ajoute une recette (sign>0) ou dépense (sign<0). Réutilise useGold (vérifie le
@@ -1360,6 +1487,7 @@ async function _vttMsCompteAdd(charId, uid, sign) {
   const res = await useGold(charId, s * montant, reason, { charObj: c, refreshUI: false });
   if (!res.ok) { showNotif(res.error || 'Erreur', 'error'); return; }
   showNotif(`${s > 0 ? '+' : '−'}${montant} or — ${reason}`, 'success');
+  _msPop = null;
   if (VS.miniUid) _renderMiniSheet(VS.miniUid);
 }
 
@@ -1394,19 +1522,7 @@ function _vttMsSendGoldPicker(charId, uid) {
   if (solde <= 0) { showNotif('Solde vide', 'info'); return; }
   const targets = _msPresentTargets(charId);
   if (!targets.length) { showNotif('Aucun autre personnage sur la scène', 'info'); return; }
-  openModal('💰 Envoyer de l\'or', `
-    <div style="display:flex;flex-direction:column;gap:.55rem">
-      <div style="font-size:.8rem;color:var(--text-dim)">Solde : <strong style="color:var(--gold)">${solde} or</strong></div>
-      <div class="form-group" style="margin:0">
-        <label style="font-size:.75rem">Montant</label>
-        <input type="number" id="vtt-ms-gold-amt" class="input-field" min="1" max="${solde}" value="1" style="max-width:140px">
-      </div>
-      <p style="margin:.2rem 0 0;font-size:.85rem;color:var(--text-dim)">Destinataire :</p>
-      ${targets.map(t => `<button class="btn btn-outline vtt-ms-transfer-target"
-        data-vtt-fn="_vttMsConfirmSendGold" data-vtt-args="${_esc(charId)}|${_esc(uid)}|${_esc(t.charId)}">
-        ${_msTargetAvatar(t)}<span><b>${_esc(t.charNom)}</b><small>${_esc(t.pseudo)}</small></span></button>`).join('')}
-      <button class="btn btn-outline btn-sm" style="margin-top:.3rem" data-vtt-fn="closeModal">Annuler</button>
-    </div>`);
+  _vttMsPop('gold', 'gold', 'give');
 }
 
 // Effectue le transfert d'or entre deux persos (débit + crédit, rollback si échec).
@@ -1431,7 +1547,6 @@ async function _vttMsConfirmSendGold(senderCharId, senderUid, recipCharId) {
       ? "Envoi refusé : règle Firestore compte manquante (don d'or)" : (credit.error || 'Erreur — don annulé'), 'error');
     return;
   }
-  closeModalDirect();
   showNotif(`💰 ${montant} or envoyé à ${recip.nom || 'joueur'}`, 'success');
   if (VS.miniUid) _renderMiniSheet(VS.miniUid);
 }
@@ -1445,7 +1560,6 @@ function _msTabInventaire(c, uid, canEdit) {
   const catalog = new Map((_msCraftShop || []).map(it => [it.id, it]));
 
   const equip = c?.equipement||{};
-  const CAT_LABEL = { arme:'Armes', armure:'Armures', bijou:'Bijoux', consommable:'Consommables', divers:'Divers' };
   const cats = { arme:[], armure:[], bijou:[], consommable:[], divers:[] };
 
   // 1) Empilage par `itemId` UNIQUEMENT (objets boutique). Les entrées sans
@@ -1467,32 +1581,31 @@ function _msTabInventaire(c, uid, canEdit) {
   }
   const totalUnitsAll = Object.values(cats).flat().reduce((s, g) => s + g.indices.length, 0);
   const equippedCount = Object.values(equip).filter(e => e?.nom).length;
-  const presentCatCount = Object.values(cats).filter(g => g.length).length;
 
-  const _rarColor = (rar) => ({
-    commune:'#9ca3af', peu_commune:'#22c38e', rare:'#4f8cff',
-    tres_rare:'#b47fff', legendaire:'#f59e0b',
-  })[rar] || '#9ca3af';
+  const _rarColor = rar => _msRarityMeta({ rarete: rar }).color;
 
   // Barre de filtre dès 4 objets : recherche toujours dispo ; puces de catégorie
   // seulement s'il y en a plusieurs (inutiles sur une seule catégorie).
   const presentCats = Object.entries(cats).filter(([, g]) => g.length);
   let filterBar = '';
   if (inv.length >= 4) {
-    const chips = presentCats.length > 1
-      ? [{ key:'all', label:'Tous' }, ...presentCats.map(([cat]) => ({ key: cat, label: CAT_LABEL[cat] }))]
-      : [];
+    const chips = [
+      { key:'all', label:'Tout' },
+      { key:'consommable', label:'Consommables' },
+      { key:'equipement', label:'Équipement' },
+      { key:'divers', label:'Divers' },
+    ];
     if (!chips.some(ch => ch.key === _msInvCat)) _msInvCat = 'all';
     filterBar = _msFilterBar('inv', chips, _msInvQuery);
   } else { _msInvCat = 'all'; _msInvQuery = ''; }
 
-  let html = _msTabIntro('inv', 'Sac', `${totalUnitsAll}`, `${equippedCount} équipé${equippedCount > 1 ? 's' : ''} · ${presentCatCount} catégorie${presentCatCount > 1 ? 's' : ''}`)
-    + filterBar + '<div class="vtt-ms-inv">';
+  let html = _msTabIntro('inv', 'Sac', `${totalUnitsAll}`, `${equippedCount} équipé${equippedCount > 1 ? 's' : ''}`)
+    + filterBar
+    + `<button class="vtt-ms-carried-link" data-vtt-fn="_vttMsTab" data-vtt-args="combat">${equippedCount} objet${equippedCount > 1 ? 's' : ''} porté${equippedCount > 1 ? 's' : ''} · détail dans Combat ${_msIco('out')}</button>`
+    + '<div class="vtt-ms-inv">';
   for (const [cat, groups] of Object.entries(cats)) {
     if (!groups.length) continue;
-    const totalUnits = groups.reduce((s,g) => s + g.indices.length, 0);
-    html += `<div class="vtt-ms-inv-group" data-cat="${cat}">
-      <div class="vtt-ms-cat">${CAT_LABEL[cat]} <span>${totalUnits}</span></div>`;
+    const family = cat === 'consommable' ? 'consommable' : ['arme', 'armure', 'bijou'].includes(cat) ? 'equipement' : 'divers';
     const catIco = { arme: 'combat', armure: 'equip', bijou: 'ring', consommable: 'potion', divers: 'misc' }[cat] || 'inv';
     for (const g of groups) {
       const item = g.item;
@@ -1505,19 +1618,22 @@ function _msTabInventaire(c, uid, canEdit) {
       const detail = item.degats
         ? `${item.degats}${item.typeArme?' · '+item.typeArme:''}${item.portee?' · '+item.portee:''}`
         : (item.typeArmure ? `${item.typeArmure}${item.ca?' · CA +'+item.ca:''}` : '');
-      const eqEntry = isEq ? Object.entries(equip).find(([, e]) => e?.sourceInvIndex === equippedIdx) : null;
-      const eqLabel = eqEntry ? (_msSlots().find(sl => sl.id === eqEntry[0])?.label || 'Équipé') : '';
+      const stats = _msEquipStatBonuses(item).map(stat => `${stat.abbr} ${_msSigned(stat.value)}`);
+      const traits = _msEquipTraits(item).slice(0, 2);
+      const detailLine = [detail, ...stats, ...traits].filter(Boolean).join(' · ') || _msRarityMeta(item).label;
       const img = getInventoryItemImage(item, item.itemId ? catalog.get(item.itemId) : null);
       const isEquipCat = (cat === 'arme' || cat === 'armure' || cat === 'bijou');
-      html += `<div class="vtt-ms-inv-item vtt-ms-it${isEq?' eq':''}" data-name="${_esc(_norm(item.nom||''))}">
-        <span class="vtt-ms-it-img" style="--rc:${_rarColor(item.rarete)}">${img ? `<img src="${_esc(img)}" alt="" loading="lazy">` : _msIco(catIco)}</span>
+      const rarityColor = _rarColor(item.rarete);
+      html += `<div class="vtt-ms-inv-item vtt-ms-it${isEq?' eq':''}" data-name="${_esc(_norm(item.nom||''))}" data-family="${family}" style="--rar:${rarityColor}">
+        <span class="vtt-ms-it-img" style="--rc:${rarityColor}">${img ? `<img src="${_esc(img)}" alt="" loading="lazy">` : _msIco(catIco)}</span>
         <div class="vtt-ms-it-b">
-          <div class="vtt-ms-it-nm"><span title="${_esc(item.nom)}">${_esc(item.nom)}</span>${total>1?`<span class="vtt-ms-it-q">×${total}</span>`:''}${eqLabel?`<span class="vtt-ms-it-slot">${_esc(eqLabel)}</span>`:''}</div>
-          ${detail?`<div class="vtt-ms-it-d">${_esc(detail)}</div>`:''}
-          ${isEquipCat ? _msItemChips(item) : ''}
+          <div class="vtt-ms-it-nm"><i>◆</i><span title="${_esc(item.nom)}">${_esc(item.nom)}</span></div>
+          <div class="vtt-ms-it-d" title="${_esc(detailLine)}">${_esc(detailLine)}</div>
         </div>
+        ${total>1?`<span class="vtt-ms-it-q">×${total}</span>`:''}
         ${canEdit?`<div class="vtt-ms-it-acts">
-          ${isEquipCat && (!isEq || total > 1) ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsEquipPicker" data-vtt-args="${c.id}|${uid}|${idxToEquip}" title="Équiper" aria-label="Équiper">${_msIco('equip')}</button>` : ''}
+          ${cat === 'consommable' ? `<button class="vtt-ms-it-btn consume" data-vtt-fn="_vttMsConsumeItem" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Consommer" aria-label="Consommer">${_msIco('potion')}</button>` : ''}
+          ${isEquipCat && (!isEq || total > 1) ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsEquipPicker" data-vtt-args="${c.id}|${uid}|${idxToEquip}" data-pid="equip-${idxToEquip}" title="Équiper" aria-label="Équiper">${_msIco('equip')}</button>` : ''}
           ${isEq ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsUnequipAll" data-vtt-args="${c.id}|${uid}|${idxToUnequip}" title="Déséquiper" aria-label="Déséquiper">${_msIco('unlock')}</button>` : ''}
           <button class="vtt-ms-it-btn" data-vtt-fn="_vttMsPop" data-vtt-args="send|send-${firstIdx}|${firstIdx}" data-pid="send-${firstIdx}" title="Donner" aria-label="Donner">${_msIco('send')}</button>
           ${craftCategoryForItem(item) ? `<button class="vtt-ms-it-btn" data-vtt-fn="_vttMsRecycle" data-vtt-args="${c.id}|${uid}|${firstIdx}" title="Démonter (récupérer matériaux + traits)" aria-label="Démonter">${_msIco('recycle')}</button>` : ''}
@@ -1525,7 +1641,6 @@ function _msTabInventaire(c, uid, canEdit) {
         </div>`:''}
       </div>`;
     }
-    html += `</div>`; // .vtt-ms-inv-group
   }
   html += '</div>';
   html += `<div class="vtt-ms-filter-empty" data-kind="inv" style="display:none">Aucun objet ne correspond.</div>`;
@@ -1574,10 +1689,11 @@ async function _msEnsureCraftRecipes() {
   }
 }
 
-// Recettes connues du perso : MJ = toutes, joueur = celles partagées avec lui.
+// Recettes connues du personnage : même filtre pour le MJ afin que le segment
+// n'apparaisse pas sur une fiche qui ne connaît réellement aucune recette.
 function _msKnownRecipes(uid) {
   const list = _msCraftRecipes || [];
-  return STATE.isAdmin ? list : list.filter(r => (r.acces || []).includes(uid));
+  return list.filter(r => (r.acces || []).includes(uid));
 }
 
 // Compte les unités d'inventaire par nom normalisé (convention 1 entrée = 1 unité).
@@ -1606,7 +1722,7 @@ function _msTabCraft(c, uid, canEdit) {
   if (_msCraftRecipes === null) { _msEnsureCraftRecipes(); return loadingHtml('Chargement des recettes…', { compact: true }); }
 
   const forgeBtn = canEdit
-    ? `<button class="vtt-ms-craft-btn pri vtt-forge-entry" data-vtt-fn="_vttForgeOpen" data-vtt-args="${c.id}|${uid}">🔨 Forger un équipement</button>`
+    ? `<button class="vtt-ms-forge-link vtt-forge-entry" data-vtt-fn="_vttForgeOpen" data-vtt-args="${c.id}|${uid}">${_msIco('craft')} Forger un équipement</button>`
     : '';
 
   const known = _msKnownRecipes(uid);
@@ -2126,28 +2242,25 @@ function _msTabNotes(c, uid, canEdit) {
     const draft = _msNoteDrafts.get(`${c.id}|${i}`);
     return draft ? { ...note, titre: draft.titre, contenu: draft.contenu } : note;
   });
-  let html = `<div class="vtt-ms-notes">`;
-  if (canEdit) html += `<button class="vtt-ms-note-add" data-vtt-fn="_vttMsAddNote" data-vtt-args="${c.id}|${uid}">+ Nouvelle note</button>`;
-  if (!notes.length) return html + `<div class="vtt-ms-empty">${canEdit ? 'Carnet vide. Crée une note.' : 'Carnet vide.'}</div></div>`;
+  let html = `<div class="vtt-ms-notes"><div class="vtt-ms-notes-head"><span><b>Notes</b><small>${notes.length}</small></span>${canEdit ? `<button class="vtt-ms-note-add" data-vtt-fn="_vttMsAddNote" data-vtt-args="${c.id}|${uid}">${_msIco('plus')} Nouvelle</button>` : ''}</div>`;
+  if (!notes.length) return html + `<div class="vtt-ms-empty"><b>Aucune note</b><span>Garde ici ce que tu ne veux pas oublier.</span></div></div>`;
   notes.forEach((note, i) => {
     const open = _msOpenNote === i;
     const preview = _msNoteText(note.contenu).split('\n')[0] || '';
-    const body = open
-      ? (canEdit
-        ? `<div class="vtt-ms-note-body">
-            <input class="vtt-ms-note-title-inp" id="vtt-ms-nt-t-${i}" data-note-idx="${i}" value="${_esc(note.titre || '')}" placeholder="Titre" maxlength="80">
-            <textarea class="vtt-ms-note-area" id="vtt-ms-nt-x-${i}" data-note-idx="${i}" rows="6" placeholder="Écris ici…">${_esc(_msNoteText(note.contenu))}</textarea>
-            <div class="vtt-ms-note-ft"><span class="vtt-ms-note-status" id="vtt-ms-nt-s-${i}">Enregistrement automatique</span><button class="vtt-ms-note-del" data-vtt-fn="_vttMsDeleteNote" data-vtt-args="${c.id}|${uid}|${i}" title="Supprimer la note">${_msIco('trash')}</button></div>
-          </div>`
-        : `<div class="vtt-ms-note-body"><p class="vtt-ms-note-content">${_esc(_msNoteText(note.contenu)) || '—'}</p></div>`)
-      : (preview ? `<div class="vtt-ms-note-pv">${_esc(preview)}</div>` : '');
-    html += `<div class="vtt-ms-note-card${open ? ' open' : ''}">
-      <div class="vtt-ms-note-hd" data-vtt-fn="_vttMsToggleNote" data-vtt-args="${i}" role="button" tabindex="0" aria-expanded="${open}">
-        <b class="vtt-ms-note-title">${_esc(note.titre || 'Sans titre')}</b>
-        <small class="vtt-ms-note-date">${_esc(note.date || '')}</small>
-        <span class="vtt-ms-note-chev">${open ? '▲' : '▼'}</span>
-      </div>
-      ${body}
+    const tag = note.tag || note.categorie || note.category || 'Notes';
+    if (!open) {
+      html += `<button type="button" class="vtt-ms-note-card" data-vtt-fn="_vttMsToggleNote" data-vtt-args="${i}" aria-expanded="false">
+        <span class="vtt-ms-note-main"><b>${_esc(note.titre || 'Sans titre')}</b><small>${_esc(preview || 'Note vide')}</small></span>
+        <span class="vtt-ms-note-meta"><i>${_esc(tag)}</i><small class="vtt-ms-note-date">${_esc(note.date || '')}</small></span>
+      </button>`;
+      return;
+    }
+    html += `<div class="vtt-ms-note-card open">
+      ${canEdit
+        ? `<input class="vtt-ms-note-title-inp" id="vtt-ms-nt-t-${i}" data-note-idx="${i}" value="${_esc(note.titre || '')}" placeholder="Titre" maxlength="80" aria-label="Titre de la note">
+          <textarea class="vtt-ms-note-area" id="vtt-ms-nt-x-${i}" data-note-idx="${i}" rows="5" placeholder="Écris ici…" aria-label="Contenu de la note">${_esc(_msNoteText(note.contenu))}</textarea>
+          <div class="vtt-ms-note-ft"><span class="vtt-ms-note-status" id="vtt-ms-nt-s-${i}">Enregistrement automatique</span><button class="vtt-ms-note-del" data-vtt-fn="_vttMsDeleteNote" data-vtt-args="${c.id}|${uid}|${i}" title="Supprimer la note">${_msIco('trash')} Supprimer</button><button class="vtt-ms-note-close" data-vtt-fn="_vttMsToggleNote" data-vtt-args="${i}">Fermer</button></div>`
+        : `<b class="vtt-ms-note-title-ro">${_esc(note.titre || 'Sans titre')}</b><p class="vtt-ms-note-content">${_esc(_msNoteText(note.contenu)) || '—'}</p><div class="vtt-ms-note-ft"><span></span><button class="vtt-ms-note-close" data-vtt-fn="_vttMsToggleNote" data-vtt-args="${i}">Fermer</button></div>`}
     </div>`;
   });
   return html + '</div>';
@@ -2170,7 +2283,6 @@ function _bindMiniNotes(charId, uid) {
   const onInput = (el) => {
     const s = document.getElementById(`vtt-ms-nt-s-${idx}`);
     if (s) { s.textContent = 'Enregistrement…'; s.classList.remove('saved'); }
-    if (el === t) { const h = el.closest('.vtt-ms-note-card')?.querySelector('.vtt-ms-note-title'); if (h) h.textContent = el.value.trim() || 'Sans titre'; }
     const note = VS.characters[charId]?.notesList?.[idx] || {};
     _msNoteDrafts.set(key, {
       charId, uid, idx,
@@ -2275,7 +2387,7 @@ function _renderMiniSheetImpl(uid) {
   const panel = document.getElementById('vtt-mini-panel');
   if (!panel) return;
 
-  if (!uid) { _miniRosterUid = null; panel.classList.remove('open'); panel.innerHTML = ''; return; }
+  if (!uid) { _miniRosterUid = null; panel.classList.remove('open', 'closing'); panel.innerHTML = ''; return; }
   let pres = VS.presence[uid];
   const playerLabel = pres?.pseudo
     || (uid === STATE.user?.uid ? (STATE.user?.displayName || STATE.user?.email?.split('@')[0]) : '')
@@ -2312,51 +2424,46 @@ function _renderMiniSheetImpl(uid) {
   const img      = characterPortraitSrc(c) || null;
   const init     = (c?.nom || '?')[0].toUpperCase();
 
-  // Migration des anciennes clés d'onglet → 4 onglets (Combat / Sorts / Sac / Carnet).
+  // Migration des anciennes clés d'onglet vers la mini-fiche v2.
   if (_miniTab === 'equip') _miniTab = 'combat';
   else if (_miniTab === 'inv' || _miniTab === 'craft' || _miniTab === 'compte') {
-    _msSac = _miniTab === 'craft' ? 'craft' : _miniTab === 'compte' ? 'bourse' : 'obj';
+    _msSac = _miniTab === 'craft' ? 'craft' : 'obj';
     _miniTab = 'sac';
   }
+  if (_miniTab === 'notes') _miniTab = 'journal';
 
   const niv = parseInt(c?.niveau) || 1;
-  if (_miniCollapsed) {
-    panel.classList.add('open', 'is-collapsed');
-    panel.innerHTML = _msCollapsedHtml(c);
-    _syncMiniSheetLaunchers();
-    return;
-  }
-  panel.classList.remove('is-collapsed');
   const up  = _msXpUp(c);
   const deckMax = calcDeckMax(c), du = getDeckUsage(c?.deck_sorts);
-  const invN = (c?.inventaire || []).length, notesN = (c?.notesList || []).length;
-  const TABS = [['combat', 'Combat', ''], ['sorts', 'Sorts', `${du.used}/${deckMax}`], ['sac', 'Sac', invN], ['notes', 'Carnet', notesN]];
-  const tabBarHtml = `<div class="vtt-ms-tabbar">${TABS.map(([k, l, b]) =>
-    `<button class="vtt-ms-tab${_miniTab === k ? ' active' : ''}" data-vtt-fn="_vttMsTab" data-vtt-args="${k}"><span class="vtt-ms-tab-lbl">${l}</span>${b !== '' ? ` <small>${b}</small>` : ''}</button>`).join('')}</div>`;
+  const invN = (c?.inventaire || []).length;
+  const hasSpells = (c?.deck_sorts || []).length > 0;
+  const TABS = [['combat', 'Combat', 'combat', ''], ['capa', 'Capacités', 'capa', ''], ...(hasSpells ? [['sorts', 'Sorts', 'sorts', `${du.used}/${deckMax}`]] : []), ['sac', 'Sac', 'inv', invN], ['journal', 'Journal', 'journal', '']];
+  if (!TABS.some(([key]) => key === _miniTab)) _miniTab = 'combat';
+  const tabBarHtml = `<nav class="vtt-ms-tabbar" role="tablist" aria-label="Sections de la fiche">${TABS.map(([k, l, icon, badge]) =>
+    `<button class="vtt-ms-tab${_miniTab === k ? ' active' : ''}" data-vtt-fn="_vttMsTab" data-vtt-args="${k}" role="tab" aria-selected="${_miniTab === k}">${_msIco(icon)}<span class="vtt-ms-tab-lbl">${l}</span>${badge !== '' ? `<small>${badge}</small>` : ''}</button>`).join('')}</nav>`;
 
   const tabHtml =
       _miniTab === 'sorts' ? _msTabSorts(c, uid, canEdit)
+    : _miniTab === 'capa'  ? _msTabCapacites(c)
     : _miniTab === 'sac'   ? _msTabSac(c, uid, canEdit)
-    : _miniTab === 'notes' ? _msTabNotes(c, uid, canEdit)
-    :                        _msTabCombat(c, uid, canEdit) + _msTabEquipement(c, uid, canEdit);
+    : _miniTab === 'journal' ? _msTabNotes(c, uid, canEdit)
+    :                        _msTabCombat(c, uid, canEdit);
 
-  const roBanner = !canEdit ? '<div class="vtt-ms-ro">Fiche consultable en lecture seule.</div>' : '';
-  const subText = [c?.race, c?.classe, c?.titreActuel || c?.titre]
-    .filter(Boolean)
-    .map(_esc)
-    .join(' · ');
-  const online = !!pres;
-  const onlineDot = `<span class="vtt-ms-online-dot ${online ? 'is-online' : 'is-offline'}" title="Joueur ${online ? 'en ligne' : 'hors ligne'}" aria-label="Joueur ${online ? 'en ligne' : 'hors ligne'}"></span>`;
+  const roBanner = !canEdit ? `<div class="vtt-ms-ro">${_msIco('lock')}<span>Lecture seule · fiche partagée</span></div>` : '';
+  const identityText = [c?.classe, c?.race].filter(Boolean).map(_esc).join(' · ');
+  const titleText = c?.titreActuel || c?.titre || '';
 
   // Préserve le défilement + le focus/caret (recherches, notes, bourse).
   const ae = document.activeElement, fid = ae && panel.contains(ae) ? ae.id : null;
   const caret = fid && typeof ae.selectionStart === 'number' ? ae.selectionStart : null;
   const contentScroll = panel.querySelector('.vtt-ms-tab-content')?.scrollTop || 0;
 
-  const multiChar = chars.length > 1;
   const xp = parseInt(c?.exp) || 0;
   const xpMax = calcPalier(niv);
+  const aura = c?.auraColor || c?.couleurAura || c?.aura || '#7b87f5';
   panel.classList.add('open');
+  panel.classList.remove('closing');
+  panel.style.setProperty('--aura', aura);
   panel.innerHTML = `
     <div class="vtt-ms-resize" role="separator" aria-orientation="vertical" tabindex="0" title="Glisser pour redimensionner la mini-fiche" aria-label="Redimensionner la mini-fiche"></div>
     <div class="vtt-ms-header">
@@ -2366,17 +2473,16 @@ function _renderMiniSheetImpl(uid) {
         <span class="vtt-ms-niv">Niv. ${niv}${up ? ' ↑' : ''}</span>
       </button>
       <div class="vtt-ms-info">
-        <div class="vtt-ms-name">${onlineDot}<span>${_esc(c?.nom || 'Personnage')}</span>${multiChar ? `<button class="vtt-ms-name-sel" data-vtt-fn="_vttMsPop" data-vtt-args="char|char" data-pid="char" title="Changer de personnage">▾</button>` : ''}</div>
-        ${subText ? `<div class="vtt-ms-sub">${subText}</div>` : ''}
-        <div class="vtt-ms-xp-summary"><b>${xp.toLocaleString('fr-FR')}</b><span>/ ${xpMax.toLocaleString('fr-FR')} XP</span></div>
+        <div class="vtt-ms-name"><span>${_esc(c?.nom || 'Personnage')}</span><button class="vtt-ms-name-sel" data-vtt-fn="_vttMsPop" data-vtt-args="char|char" data-pid="char" title="Changer de personnage">▾</button></div>
+        ${(identityText || titleText) ? `<div class="vtt-ms-sub">${identityText}${identityText && titleText ? ' · ' : ''}${titleText ? `<i>${_esc(titleText)}</i>` : ''}</div>` : ''}
+        <div class="vtt-ms-xp-summary"><b>${xp.toLocaleString('fr-FR')}</b><span>/ ${xpMax.toLocaleString('fr-FR')} XP${STATE.isAdmin && playerLabel ? ` · Joueur : ${_esc(playerLabel)}` : ''}</span></div>
       </div>
       <div class="vtt-ms-head-actions">
-        <button class="vtt-ms-collapse" data-vtt-fn="_vttMsToggleCollapsed" title="Réduire la mini-fiche" aria-label="Réduire la mini-fiche">‹</button>
-        <button class="vtt-ms-close" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${uid}" title="Fermer · C" aria-label="Fermer la mini-fiche">×</button>
+        <button class="vtt-ms-full" data-vtt-fn="_vttOpenSource" data-vtt-args="char|${c.id}|${_miniTab === 'journal' ? 'journal' : _miniTab === 'capa' ? 'capacites' : _miniTab}" title="Ouvrir la fiche complète" aria-label="Ouvrir la fiche complète">${_msIco('out')}</button>
+        <button class="vtt-ms-close" data-vtt-fn="_vttToggleMiniSheet" data-vtt-args="${uid}|${c.id}" title="Fermer · C" aria-label="Fermer la mini-fiche">${_msIco('x')}</button>
       </div>
     </div>
     ${roBanner}
-    ${_msFactsHtml(c)}
     ${_msStatsFixedHtml(c)}
     ${tabBarHtml}
     <div class="vtt-ms-tab-content">${tabHtml}</div>
@@ -2385,12 +2491,34 @@ function _renderMiniSheetImpl(uid) {
   // Applique le filtre de l'onglet actif sur le DOM fraîchement rendu.
   if (_miniTab === 'sac' && _msSac === 'obj') _msApplyInvFilter();
   else if (_miniTab === 'sorts')              _msApplySortFilter();
-  else if (_miniTab === 'notes')              _bindMiniNotes(c.id, uid);
-  _msInitPop(); _msPlacePop();
+  else if (_miniTab === 'journal')            _bindMiniNotes(c.id, uid);
   _msInitResize(); _msApplyStoredWidth();
+  _syncMiniSheetGeometry();
+  _msInitPop(); _msPlacePop();
   const popInp = document.getElementById('vtt-ms-xp-add'); if (popInp && _msPop?.v === 'xp') popInp.focus();
   const content = panel.querySelector('.vtt-ms-tab-content'); if (content) content.scrollTop = contentScroll;
   if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); try { el.setSelectionRange(caret, caret); } catch { /* noop */ } } }
+}
+
+let _msGeometryInit = false;
+function _syncMiniSheetGeometry() {
+  const panel = document.getElementById('vtt-mini-panel');
+  const root = panel?.closest('.vtt-root');
+  if (!panel || !root || !panel.classList.contains('open')) return;
+  const rr = root.getBoundingClientRect();
+  const band = root.querySelector('.vtt-band');
+  const ribbon = root.querySelector('.vtt-ribbon:not([aria-hidden="true"])');
+  const dock = root.querySelector('.vtt-fiche-dock');
+  const topAnchor = ribbon?.getBoundingClientRect().bottom || band?.getBoundingClientRect().bottom || rr.top;
+  const bottomAnchor = dock?.getBoundingClientRect().top || rr.bottom;
+  const top = Math.max(8, Math.round(topAnchor - rr.top + 12));
+  const bottom = Math.max(8, Math.round(rr.bottom - bottomAnchor + 12));
+  panel.style.top = `${top}px`;
+  panel.style.bottom = `${bottom}px`;
+  if (!_msGeometryInit) {
+    _msGeometryInit = true;
+    window.addEventListener('resize', _syncMiniSheetGeometry, { passive: true });
+  }
 }
 
 function _syncMiniSheetLaunchers() {
@@ -2405,17 +2533,23 @@ function _syncMiniSheetLaunchers() {
 function _vttToggleMiniSheet(uid, charId = null) {
   const sameCharacter = VS.miniUid === uid && (!charId || VS.miniCharId === charId);
   if (sameCharacter) {
-    _miniCollapsed = false;
     _miniRosterUid = null;
     VS.miniUid = null; VS.miniCharId = null;
     const panel = document.getElementById('vtt-mini-panel');
-    if (panel) { panel.classList.remove('open'); panel.innerHTML = ''; }
+    if (panel) {
+      panel.classList.add('closing');
+      panel.classList.remove('open');
+      setTimeout(() => {
+        if (!VS.miniUid && panel.classList.contains('closing')) {
+          panel.classList.remove('closing'); panel.innerHTML = '';
+        }
+      }, 160);
+    }
   } else {
     // Sécurité : refuser l'ouverture de la fiche d'un autre joueur (contenu privé).
     if (!_msCanView(uid, charId)) { showNotif('Fiche réservée à son propriétaire.', 'info'); return; }
     _miniRosterUid = STATE.isAdmin ? uid : (STATE.user?.uid || uid);
     VS.miniUid = uid; VS.miniCharId = charId || null;
-    _miniCollapsed = false;
     _renderMiniSheet(uid);
   }
   _syncMiniSheetLaunchers();
@@ -2428,7 +2562,7 @@ function _vttSelectMiniChar(uid, charId) {
   VS.miniUid = VS.characters[charId]?.uid || uid;
   VS.miniCharId = charId;
   // Reset des filtres : l'inventaire/les sorts diffèrent d'un perso à l'autre.
-  _msInvQuery = ''; _msInvCat = 'all'; _msSortQuery = ''; _msSortCat = 'all'; _msCraftQuery = '';
+  _msInvQuery = ''; _msInvCat = 'all'; _msSortQuery = ''; _msSortCat = 'prep'; _msCraftQuery = '';
   _renderMiniSheet(VS.miniUid);
   _syncMiniSheetLaunchers();
 }
@@ -2448,8 +2582,8 @@ function _vttMsKeyToggle() {
   showNotif('Aucune fiche à afficher', 'info');
 }
 
-// Largeur réglable du panneau (340–560 px), mémorisée dans localStorage.
-const _MS_W_MIN = 340, _MS_W_MAX = 560;
+// Largeur réglable du panneau (340–520 px), mémorisée dans localStorage.
+const _MS_W_MIN = 340, _MS_W_MAX = 520;
 function _msApplyStoredWidth() {
   const panel = document.getElementById('vtt-mini-panel'); if (!panel) return;
   const root = panel.closest('.vtt-root'); if (!root) return;
@@ -2467,7 +2601,7 @@ function _msInitResize() {
   };
   document.addEventListener('pointerdown', e => {
     const handle = e.target.closest('.vtt-ms-resize');
-    if (!handle || window.matchMedia('(max-width: 900px)').matches) return;
+    if (!handle || window.matchMedia('(max-width: 700px)').matches) return;
     const panel = document.getElementById('vtt-mini-panel'); if (!panel) return;
     const root = panel.closest('.vtt-root'); if (!root) return;
     e.preventDefault(); dragging = true; activePanel = panel; activeRoot = root; panel.classList.add('resizing');
@@ -2499,6 +2633,8 @@ export {
   _msApplyInvFilter,
   _msApplySortFilter,
   _vttMsKeyToggle,
+  _vttMsEscape,
+  _vttMsFocusSearch,
   _msInitResize,
   _msApplyStoredWidth,
   _msBuildEquipItem,
@@ -2533,6 +2669,7 @@ export {
   _vttForgeOpen,
   _vttMsCraftSearch,
   _vttMsCraftClear,
+  _vttMsConsumeItem,
   _vttMsDeleteItem,
   _vttMsRecycle,
   _vttMsDeleteNote,
@@ -2542,7 +2679,6 @@ export {
   _vttMsInvClear,
   _vttMsInvSearch,
   _vttMsSac,
-  _vttMsGoPurse,
   _vttMsPop,
   _vttMsToggleSpell,
   _vttMsSendPicker,
@@ -2551,7 +2687,9 @@ export {
   _vttMsSortClear,
   _vttMsSortSearch,
   _vttMsTab,
-  _vttMsToggleCollapsed,
+  _vttMsStyleToggle,
+  _vttMsToggleCap,
+  _vttMsToggleHistory,
   _vttMsAttackSlot,
   _vttMsToggleNote,
   _vttMsUnequip,

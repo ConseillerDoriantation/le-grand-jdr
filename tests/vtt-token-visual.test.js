@@ -12,6 +12,10 @@ import {
   tokenFootprintMeta,
   tokenFootprintIntersectsZone,
   tokenMovementMeta,
+  tokenEffectTint,
+  tokenNameParts,
+  tokenOrdinal,
+  tokenPlateFit,
   tokenRelationTone,
   tokenHiddenHealthRatio,
   tokenResourceArcs,
@@ -20,8 +24,87 @@ import {
 import { characterPortraitSrc } from '../assets/js/shared/portraits.js';
 
 const vttSource = readFileSync(new URL('../assets/js/features/vtt/vtt.js', import.meta.url), 'utf8');
+const renderSource = readFileSync(new URL('../assets/js/features/vtt/vtt-render.js', import.meta.url), 'utf8');
 const effectiveSource = readFileSync(new URL('../assets/js/features/vtt/vtt-effective.js', import.meta.url), 'utf8');
 const vttCss = readFileSync(new URL('../assets/css/vtt.css', import.meta.url), 'utf8');
+
+test('les doublons conservent leur base, leur premier mot et leur ordinal', () => {
+  assert.deepEqual(tokenNameParts('Gobelin archer 3'), {
+    full:'Gobelin archer 3', base:'Gobelin archer', first:'Gobelin', ordinal:3,
+  });
+  assert.deepEqual(tokenNameParts("Aelys Vent-d'Or"), {
+    full:"Aelys Vent-d'Or", base:"Aelys Vent-d'Or", first:'Aelys', ordinal:null,
+  });
+  assert.equal(tokenOrdinal('Gobelin', ['Gobelin 2']), 1);
+  assert.equal(tokenOrdinal('Gobelin', ['Gobelin archer']), null);
+  assert.equal(tokenOrdinal('Gobelin 3', ['Gobelin']), 3);
+});
+
+test('la plaque replie le nom puis la valeur sans jamais dépasser sa case', () => {
+  const measure = text => String(text || '').length * 5;
+  const common = { names:['Gobelin archer', 'Gobelin'], value:'Critique', maxWidth:100, left:8, right:8, gap:4, measure };
+  const full = tokenPlateFit({ ...common, maxWidth:130 });
+  const first = tokenPlateFit(common);
+  const droppedFull = tokenPlateFit({ ...common, maxWidth:86, dropValue:true });
+  const truncated = tokenPlateFit({ ...common, maxWidth:43 });
+  assert.equal(full.name, 'Gobelin archer');
+  assert.equal(full.value, 'Critique');
+  assert.equal(first.name, 'Gobelin');
+  assert.equal(first.value, 'Critique');
+  assert.equal(droppedFull.name, 'Gobelin archer');
+  assert.equal(droppedFull.value, '');
+  assert.equal(droppedFull.dropped, true);
+  assert.match(truncated.name, /…$/);
+  [full, first, droppedFull, truncated].forEach(result => assert.ok(result.width <= (result === full ? 130 : result === droppedFull ? 86 : result === truncated ? 43 : 100)));
+});
+
+test('la teinte d’effet reste sombre même à partir d’un rouge vif', () => {
+  const tint = tokenEffectTint('#dc2626');
+  const rgb = tint.slice(1).match(/../g).map(value => parseInt(value, 16) / 255);
+  const linear = rgb.map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+  const luminance = .2126 * linear[0] + .7152 * linear[1] + .0722 * linear[2];
+  assert.ok(luminance < .08, `${tint} doit rester sombre`);
+});
+
+test('le médaillon v2 conserve la géométrie compacte du handoff', () => {
+  assert.match(renderSource, /radius=6\.1\*scale, gap=14\.6\*scale/);
+  assert.match(renderSource, /centerX=size>=2\?0:-6\.5, y=-ringRadius\+\.5/);
+  assert.match(renderSource, /fill:tokenEffectTint\(effect\.color\),stroke,strokeWidth:1\.4/);
+  assert.match(renderSource, /fontSize:8\.4\*scale[\s\S]*?fill:'#f8fafc'/);
+  assert.match(renderSource, /counters\.forEach\(node=>rail\.add\(node\)\)/);
+  assert.match(renderSource, /counterX=_caX\+_caW-2\.5\*scale, counterY=_caY\+_caH-3\.5\*scale/);
+  assert.match(renderSource, /radius:4\.6\*scale/);
+  assert.match(renderSource, /fontSize:6\.4\*scale/);
+});
+
+test('les plaques v2 restent dans l’emprise et ne réaffichent pas une valeur abandonnée', () => {
+  assert.match(renderSource, /measureText\(value\)\.width \+ \.75/);
+  assert.match(renderSource, /fontSize=8\.7\*scale, plateH=12\.5\*scale, maxW=footprintW-3/);
+  assert.match(renderSource, /plateY=Math\.min\(footprintH\/2-plateH-1,ringRadius-plateH\/2\+1\.5\*size\)/);
+  assert.match(renderSource, /const reserve=!value \? \[\] : level==='standard' \|\| isDown/);
+  assert.match(renderSource, /tokenPlateFit\(\{/);
+  assert.match(renderSource, /setAttr\('plateValueDropped',true\)/);
+  assert.match(vttSource, /shape\.getAttr\('plateValueDropped'\)/);
+  assert.doesNotMatch(renderSource, /token-footprint-size/);
+  assert.doesNotMatch(renderSource, /plate\.add\(new K\.Circle/);
+});
+
+test('les pairs d’un doublon sont repatchés à son ajout ou à sa suppression', () => {
+  assert.match(vttSource, /const ordinalPeerKeys = new Set\(\)/);
+  assert.match(vttSource, /ch\.type==='added' \|\| ch\.type==='removed'/);
+  assert.match(vttSource, /ordinalPeerKeys\.has\(_tokenOrdinalKey\(entry\.data\)\)/);
+  assert.match(vttSource, /ordinalMismatch/);
+});
+
+test('la plaque est reconstruite quand une réserve structurelle change', () => {
+  assert.match(renderSource, /setAttr\('movementMaximumSnapshot', movementMaximum\)/);
+  assert.match(renderSource, /canMoveInCombat && Number\.isFinite\(Number\(ld\.displayMovement\)\)/);
+  assert.match(vttSource, /_buildTokenVisual\(t, ld, CONDITION_BY_ID, _tokenPeerNames\(t\), _canControlToken\(t\)\)/);
+  assert.match(vttSource, /const downMismatch=/);
+  assert.match(vttSource, /const hpMaxMismatch=/);
+  assert.match(vttSource, /const movementMaximumMismatch=/);
+  assert.match(vttSource, /downMismatch \|\| hpMaxMismatch \|\| movementMaximumMismatch/);
+});
 
 test('le portrait actif de la fiche remplace immédiatement les anciennes images VTT', () => {
   assert.equal(characterPortraitSrc({ photo:'nouveau', photoURL:'ancien', avatar:'avatar' }), 'nouveau');

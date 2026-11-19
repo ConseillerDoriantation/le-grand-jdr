@@ -2422,9 +2422,13 @@ function AutoScrollPlugin() {
   function AutoScroll() {
     this.defaults = {
       scroll: true,
-      forceAutoScrollFallback: false,
-      scrollSensitivity: 30,
-      scrollSpeed: 10,
+      // Réglages adaptés aux longues pages de l'application : le défilement
+      // démarre avant que le pointeur ne quitte l'écran et suit aussi les
+      // conteneurs imbriqués. Les wrappers métier peuvent toujours surcharger
+      // ces valeurs pour un rail horizontal ou une petite modale.
+      forceAutoScrollFallback: true,
+      scrollSensitivity: 96,
+      scrollSpeed: 18,
       bubbleScroll: true
     };
 

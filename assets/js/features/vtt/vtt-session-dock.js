@@ -27,10 +27,13 @@ export function vttSessionDockIcon(name, cls = 'vtt-session-icon') {
 export function vttSessionDockButton({ key, id = '', action, label, tipTitle, tipDetail, primary = false, iconExtra = '', controls = '' }) {
   const idAttr = id ? ` id="${id}"` : '';
   const controlsId = controls || (key === 'emote' ? 'vtt-emote-picker' : `vtt-${key}-panel`);
+  const tooltip = tipTitle
+    ? `<span class="vtt-session-tooltip" role="tooltip"><b>${tipTitle}</b><span class="vtt-session-tooltip-detail">${tipDetail || ''}</span></span>`
+    : '';
   return `<button class="vtt-session-dock-btn vtt-${key}-trigger${primary ? ' primary' : ''}"${idAttr} data-dock-key="${key}" data-vtt-fn="${action}" aria-label="${label}" aria-expanded="false" aria-controls="${controlsId}">
     <span class="vtt-session-dock-icon">${vttSessionDockIcon(key)}${key === 'music' ? '<span class="vtt-session-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>' : ''}${iconExtra}</span>
     <small>${key === 'music' ? '<i class="vtt-session-live-dot" aria-hidden="true"></i>' : ''}<span>${label}</span></small>
-    <span class="vtt-session-tooltip" role="tooltip"><b>${tipTitle}</b><span class="vtt-session-tooltip-detail">${tipDetail}</span></span>
+    ${tooltip}
   </button>`;
 }
 

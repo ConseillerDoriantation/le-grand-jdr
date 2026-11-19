@@ -42,6 +42,14 @@ test('le dock conserve les dimensions, états et responsive du design', () => {
   assert.match(css, /@media \(max-width: 560px\)[\s\S]*?width:\s*50px/);
 });
 
+test('le bouton musique ne révèle jamais le titre au survol', () => {
+  assert.match(dock, /const tooltip = tipTitle[\s\S]*?\? `<span class="vtt-session-tooltip"/);
+  assert.match(vtt, /key: 'music'[\s\S]{0,140}label: 'Musique' \}\)/);
+  assert.doesNotMatch(vtt, /key: 'music'[\s\S]{0,180}tipTitle:/);
+  const refresh = music.match(/function _refreshMusicDockTrigger[\s\S]*?\n\}/)?.[0] || '';
+  assert.doesNotMatch(refresh, /tooltip|sound\.name|Rien en lecture|Lecture en cours/);
+});
+
 test('le repos montre l’aperçu des ressources et garde les commandes existantes', () => {
   assert.match(rest, /vtt-rest-charges/);
   assert.match(rest, /vtt-rest-meter/);
@@ -83,7 +91,12 @@ test('une musique active reprend après actualisation sans recréer son lecteur'
   assert.match(music, /_AUTOPLAY_RESUME_EVENTS = \['pointerdown', 'click', 'keydown', 'touchstart'\]/);
   assert.match(music, /Promise\.all\(attempts\)\.then\(_disarmAutoplayWhenReady\)/);
   assert.match(music, /if \(ms\?\.loop\) return elapsed % duration/);
-  assert.match(music, /const resumeAt = _musicResumePosition\(ms, el\.duration\)/);
+  assert.match(music, /return Math\.min\(elapsed, Math\.max\(0, duration - 0\.05\)\)/);
+  assert.match(music, /function _restoreMusicTimeline\(el, ms, force = false\)/);
+  assert.match(music, /_restoreMusicTimeline\(_audioEl, ms\)/);
+  assert.match(music, /el\.addEventListener\('loadedmetadata', restoreTimeline\)/);
+  assert.match(music, /el\.addEventListener\('durationchange', restoreTimeline\)/);
+  assert.match(music, /el\.addEventListener\('canplay', restoreTimeline/);
 });
 
 test('les commandes musicales répondent avant le retour Firestore', () => {

@@ -19,9 +19,14 @@ import { showNotif } from '../../shared/notifications.js';
 import { annotationNodePosition } from './vtt-annotation-utils.js';
 import {
   tokenActiveEffects,
+  TOKEN_EFFECT_TONE_RING,
+  tokenEffectTint,
   tokenEffectsSignature,
   tokenFootprintMeta,
   tokenHiddenHealthRatio,
+  tokenNameParts,
+  tokenOrdinal,
+  tokenPlateFit,
   tokenResourceArcs,
   tokenVisibleHealthMeta,
 } from './vtt-token-visual.js';
@@ -48,6 +53,28 @@ export function _zoneCellRects(K, zw, zh, shape, dir = 'down', style = {}) {
 import { vttCanvasPixelRatio, vttDefaultLowFx, vttIsPhoneViewport } from './vtt-fog-performance.js';
 
 const _tokenImageCache = new Map();
+const _tokenTextMeasureCache = new Map();
+let _tokenTextMeasureCtx = null;
+
+function _measureTokenText(text, weight, fontSize) {
+  const value = String(text || '');
+  const key = `${weight}|${fontSize}|${value}`;
+  if (_tokenTextMeasureCache.has(key)) return _tokenTextMeasureCache.get(key);
+  if (!_tokenTextMeasureCtx && typeof document !== 'undefined') {
+    _tokenTextMeasureCtx = document.createElement('canvas').getContext('2d');
+  }
+  let width;
+  if (_tokenTextMeasureCtx) {
+    _tokenTextMeasureCtx.font = `${weight} ${fontSize}px Inter, sans-serif`;
+    // Konva arrondit sa boîte de texte légèrement différemment du canvas 2D :
+    // une petite garde évite de couper la dernière lettre à largeur exacte.
+    width = _tokenTextMeasureCtx.measureText(value).width + .75;
+  } else {
+    width = value.length * fontSize * .56 + .75;
+  }
+  _tokenTextMeasureCache.set(key, width);
+  return width;
+}
 
 // ── Mode Performance (fluidité) ─────────────────────────────────────────────
 // TOUJOURS actif (décision produit) : ce mode ne coupe que du COSMÉTIQUE — ombres
@@ -156,7 +183,7 @@ function _tokenShieldPath(width, height) {
     + `C${width*.28} ${height*.93} 0 ${height*.8} 0 ${height*.52}V${height*.16}Z`;
 }
 
-export function _buildTokenVisual(t, ld, condById) {
+export function _buildTokenVisual(t, ld, condById, peerNames = [], canMoveInCombat = false) {
   const K  = window.Konva;
   const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
   const footprint = tokenFootprintMeta(sw, sh);
@@ -175,12 +202,17 @@ export function _buildTokenVisual(t, ld, condById) {
   // progression exacte ne révèle aucun PV MJ et rend chaque dégât visible.
   const healthRatio=isDown?0:(hiddenHealth&&!health.known?tokenHiddenHealthRatio(health.tone):health.ratio);
   const hasMana=!hiddenHealth && (ld.displayPm!=null || ld.hasMana);
+  const movementMaximum=canMoveInCombat && Number.isFinite(Number(ld.displayMovement))
+    ? Math.max(0,(Number(ld.displayMovement)||0)+(Number(t.bonusMvt)||0)) : null;
   const pmMax=Number(ld.displayPmMax);
   const pmRatio=ld.displayPm!=null && Number.isFinite(pmMax) && pmMax>0
     ? Math.min(1,Math.max(0,Number(ld.displayPm)/pmMax)) : 0;
   const arcs=tokenResourceArcs({hasMana,hpRatio:healthRatio,pmRatio,down:isDown});
   const round = VS.session?.combat?.round ?? 0;
   const effects = tokenActiveEffects(t, condById, round);
+  const displayName = String(ld.displayName ?? t.name ?? '?');
+  const nameParts = tokenNameParts(displayName);
+  const ordinal = tokenOrdinal(displayName, peerNames);
   const g = new K.Group({ x:t.col*CELL+sw*CELL/2, y:t.row*CELL+sh*CELL/2, id:`tok-${t.id}` });
   g.setAttr('tokenW', sw);
   g.setAttr('tokenH', sh);
@@ -195,9 +227,12 @@ export function _buildTokenVisual(t, ld, condById) {
   g.setAttr('displayHpMaxSnapshot', health.known ? health.maximum : null);
   g.setAttr('displayPmSnapshot', ld.displayPm == null ? null : Number(ld.displayPm));
   g.setAttr('displayPmMaxSnapshot', Number.isFinite(Number(ld.displayPmMax)) ? Number(ld.displayPmMax) : null);
+  g.setAttr('movementMaximumSnapshot', movementMaximum);
   g.setAttr('hiddenHealth', hiddenHealth);
   g.setAttr('hasManaRing', hasMana);
   g.setAttr('stackCount', 1);
+  g.setAttr('displayNameSnapshot', displayName);
+  g.setAttr('tokenOrdinal', ordinal);
 
   const footprintX=-footprintW/2+2, footprintY=-footprintH/2+2;
   const footprintInnerW=footprintW-4, footprintInnerH=footprintH-4;
@@ -206,17 +241,6 @@ export function _buildTokenVisual(t, ld, condById) {
       x:footprintX, y:footprintY, width:footprintInnerW, height:footprintInnerH,
       cornerRadius:6, fill:'rgba(15,23,42,.14)', stroke:'rgba(226,232,240,.35)',
       strokeWidth:1.2, dash:[6,4], listening:true, name:'token-hit token-footprint',
-    }));
-    const badgeX=footprintW/2-30, badgeY=footprintH/2-17;
-    g.add(new K.Rect({
-      x:badgeX, y:badgeY, width:26, height:13, cornerRadius:6.5,
-      fill:'rgba(5,8,14,.9)', stroke:'rgba(226,232,240,.3)', strokeWidth:1,
-      listening:false, name:'token-footprint-size token-noncompact',
-    }));
-    g.add(new K.Text({
-      x:badgeX, y:badgeY+2, width:26, height:9, text:footprint.label,
-      align:'center', fontSize:8, fontStyle:'bold', fill:'#cbd5e1',
-      fontFamily:'Inter,sans-serif', listening:false, name:'token-footprint-size token-noncompact',
     }));
   }
 
@@ -325,10 +349,11 @@ export function _buildTokenVisual(t, ld, condById) {
     fill:_buffed?'#c4b5fd':'#e2e8f0',fontFamily:'Inter,sans-serif',align:'center',
     listening:false,name:'ca-lbl token-noncompact'}));
   if (_buffed) {
-    g.add(new K.Circle({x:_caX+_caW-1,y:_caY+_caH-3*scale,radius:4.4*scale,fill:'#312e81',stroke:'#a5b4fc',strokeWidth:.9,
+    const counterX=_caX+_caW-2.5*scale, counterY=_caY+_caH-3.5*scale;
+    g.add(new K.Circle({x:counterX,y:counterY,radius:4.6*scale,fill:'#312e81',stroke:'#a5b4fc',strokeWidth:.9,
       listening:false,name:'token-noncompact'}));
-    g.add(new K.Text({x:_caX+_caW-1-4.4*scale,y:_caY+_caH-5.8*scale,width:8.8*scale,height:7*scale,
-      text:String(_toursLeft),fontSize:5.8*scale,fontStyle:'bold',fill:'#e0e7ff',fontFamily:'Inter,sans-serif',align:'center',
+    g.add(new K.Text({x:counterX-4.6*scale,y:counterY-3.2*scale,width:9.2*scale,height:7.2*scale,
+      text:String(_toursLeft),fontSize:6.4*scale,fontStyle:'bold',fill:'#e0e7ff',fontFamily:'Inter,sans-serif',align:'center',
       listening:false,name:'ca-buff-turns token-noncompact'}));
   }
 
@@ -337,21 +362,24 @@ export function _buildTokenVisual(t, ld, condById) {
       const rail=new K.Group({visible:level==='detailed',listening:false,name:`effect-${level}`});
       const overflow=effects.length>slots?effects.length-(slots-1):0;
       const shown=effects.slice(0,overflow?slots-1:slots);
-      const count=shown.length+(overflow?1:0), radius=5.8*scale, gap=15*scale;
-      const centerX=size>=2?0:-6, y=-ringRadius-.5, start=centerX-(count-1)*gap/2;
+      const count=shown.length+(overflow?1:0), radius=6.1*scale, gap=14.6*scale;
+      const centerX=size>=2?0:-6.5, y=-ringRadius+.5, start=centerX-(count-1)*gap/2;
+      const counters=[];
       shown.forEach((effect,index)=>{
         const x=start+index*gap;
-        const stroke=effect.tone==='negative'?'#fecaca':effect.tone==='positive'?'#bbf7d0':'#c7d2fe';
-        rail.add(new K.Circle({x,y,radius,fill:effect.color,stroke,strokeWidth:1.3,listening:false}));
+        const stroke=TOKEN_EFFECT_TONE_RING[effect.tone] || TOKEN_EFFECT_TONE_RING.neutral;
+        rail.add(new K.Circle({x,y,radius,fill:tokenEffectTint(effect.color),stroke,strokeWidth:1.4,listening:false}));
         rail.add(new K.Circle({x,y,radius:radius+1.2,fill:'transparent',stroke:'rgba(4,7,12,.85)',strokeWidth:1.2,listening:false}));
         rail.add(new K.Text({x:x-radius,y:y-radius*.6,width:radius*2,height:radius*1.3,text:effect.icon,
-          fontSize:7*scale,align:'center',verticalAlign:'middle',fontFamily:'Inter,sans-serif',listening:false}));
+          fontSize:8.4*scale,align:'center',verticalAlign:'middle',fill:'#f8fafc',fontFamily:'Inter,sans-serif',listening:false}));
         if(level==='detailed'&&effect.turnsLeft!=null){
-          const expiring=effect.turnsLeft===1, bx=x+radius*.78, by=y+radius*.78;
-          rail.add(new K.Circle({x:bx,y:by,radius:3.9*scale,fill:expiring?'#f97316':'#0f172a',
-            stroke:expiring?'#fed7aa':'#94a3b8',strokeWidth:.8,listening:false}));
-          rail.add(new K.Text({x:bx-4*scale,y:by-2.8*scale,width:8*scale,height:6*scale,text:String(effect.turnsLeft),
-            fontSize:5.6*scale,fontStyle:'bold',align:'center',fill:'#fff',listening:false}));
+          const expiring=effect.turnsLeft===1, bx=x+radius*.8, by=y+radius*.8;
+          counters.push(
+            new K.Circle({x:bx,y:by,radius:4.5*scale,fill:expiring?'#f97316':'#0f172a',
+              stroke:expiring?'#fed7aa':'#94a3b8',strokeWidth:.8,listening:false}),
+            new K.Text({x:bx-4.6*scale,y:by-3.3*scale,width:9.2*scale,height:7.2*scale,text:String(effect.turnsLeft),
+              fontSize:6.6*scale,fontStyle:'bold',align:'center',fill:'#fff',listening:false}),
+          );
         }
       });
       if(overflow){
@@ -360,6 +388,7 @@ export function _buildTokenVisual(t, ld, condById) {
         rail.add(new K.Text({x:x-radius,y:y-radius*.55,width:radius*2,height:radius*1.2,text:`+${overflow}`,
           fontSize:6.6*scale,fontStyle:'bold',align:'center',fill:'#fff',listening:false}));
       }
+      counters.forEach(node=>rail.add(node));
       g.add(rail);
     };
     addEffectRail('detailed',size>=2?5:3);
@@ -369,38 +398,55 @@ export function _buildTokenVisual(t, ld, condById) {
       stroke:'rgba(4,7,12,.9)',strokeWidth:1.5,visible:false,listening:false,name:'effect-compact'}));
   }
 
-  const fullName=String(ld.displayName??t.name??'?');
-  const firstName=fullName.split(/[ ']/)[0]||fullName;
-  const addNamePlate=(level,name,value)=>{
-    const fontSize=8.3*scale, plateH=12.5*scale;
-    // À fort niveau de détail, le cartouche peut dépasser légèrement de la case :
-    // un nom + « Critique/Blessé » doit rester lisible au lieu d'être réduit à
-    // deux fragments. Il reste non-interactif et ne gêne donc pas les tokens voisins.
-    const maxW=level==='detailed'
-      ? Math.max(footprintW-2,Math.min(132*scale,footprintW+72*scale))
-      : Math.max(footprintW-2,74*scale);
-    const reservedValue=value||(level==='standard'?'KO':'');
-    const valueW=reservedValue?Math.min(maxW*.42,Math.max(12*scale,String(reservedValue).length*fontSize*.58)):0;
-    const preferred=Math.max(34*scale,(name.length*fontSize*.56)+valueW+18*scale);
-    const plateW=Math.min(maxW,preferred), plateY=Math.min(footprintH/2-plateH,ringRadius-plateH/2+1.5*size);
+  g.setAttr('plateValueDropped', false);
+  const addNamePlate=(level,value)=>{
+    const fontSize=8.7*scale, plateH=12.5*scale, maxW=footprintW-3;
+    const chipFont=fontSize*.82, chipH=plateH-3.4*scale;
+    const chipW=ordinal==null ? 0 : Math.max(chipH,_measureTokenText(String(ordinal),800,chipFont)+4.6*scale);
+    const left=ordinal==null ? 4.2*scale : 1.6*scale+chipW+2.8*scale;
+    const right=4.2*scale, gap=3.8*scale;
+    const reserve=!value ? [] : level==='standard' || isDown
+      ? [value]
+      : hiddenHealth
+        ? ['En forme','Entamé','Blessé','Critique']
+        : [value,health.maximum == null ? '' : String(health.maximum),'KO',movementMaximum==null?'':`${movementMaximum}/${movementMaximum}`];
+    const fit=tokenPlateFit({
+      names:level==='standard'?[nameParts.first]:[nameParts.base,nameParts.first],
+      value,
+      reserve,
+      dropValue:level==='detailed'&&hiddenHealth&&!isDown,
+      maxWidth:maxW,left,right,gap,
+      measure:(text,weight)=>_measureTokenText(text,weight,fontSize),
+    });
+    if (level==='detailed'&&fit.dropped) g.setAttr('plateValueDropped',true);
+    const plateW=fit.width;
+    const plateY=Math.min(footprintH/2-plateH-1,ringRadius-plateH/2+1.5*size);
     const plate=new K.Group({x:-plateW/2,y:plateY,visible:level==='detailed',listening:false,
       name:`token-name token-name-${level}`});
     plate.add(new K.Rect({x:0,y:0,width:plateW,height:plateH,cornerRadius:plateH/2,fill:'rgba(6,9,15,.94)',
       stroke:`${typeColor}b3`,strokeWidth:1,name:level==='detailed'?'name-bg move-badge':'name-bg'}));
-    plate.add(new K.Circle({x:6.5*scale,y:plateH/2,radius:2.2*scale,fill:typeColor}));
-    plate.add(new K.Text({x:10*scale,y:0,width:Math.max(4,plateW-14*scale-valueW),height:plateH,text:name,
-      fontSize,fontStyle:'bold',fill:isDown?'#94a3b8':'#f1f5f9',ellipsis:true,wrap:'none',verticalAlign:'middle',
+    if(ordinal!=null){
+      const chipX=1.6*scale;
+      plate.add(new K.Rect({x:chipX,y:(plateH-chipH)/2,width:chipW,height:chipH,cornerRadius:chipH/2,
+        fill:typeColor,listening:false,name:'token-ordinal'}));
+      plate.add(new K.Text({x:chipX,y:0,width:chipW,height:plateH,text:String(ordinal),fontSize:chipFont,
+        fontStyle:'800',fill:'#06090f',align:'center',verticalAlign:'middle',fontFamily:'Inter,sans-serif',
+        listening:false,name:'token-ordinal-label'}));
+    }
+    const valueSpace=fit.value ? fit.valueWidth+gap : 0;
+    plate.add(new K.Text({x:left,y:0,width:Math.max(1,plateW-left-right-valueSpace),height:plateH,text:fit.name,
+      fontSize,fontStyle:'bold',fill:isDown?'#94a3b8':'#f1f5f9',wrap:'none',verticalAlign:'middle',
       fontFamily:'Inter,sans-serif',name:`lbl lbl-${level}`}));
-    if(value||level==='standard'){
-      plate.add(new K.Text({x:plateW-valueW-4*scale,y:0,width:valueW,height:plateH,text:String(value),fontSize,fontStyle:'bold',
-        fill:health.color,align:'right',verticalAlign:'middle',fontFamily:'Inter,sans-serif',
+    if(fit.value){
+      plate.add(new K.Text({x:plateW-right-fit.valueWidth,y:0,width:fit.valueWidth,height:plateH,text:fit.value,
+        fontSize,fontStyle:'800',fill:health.color,align:'right',verticalAlign:'middle',fontFamily:'Inter,sans-serif',
         name:level==='detailed'?'name-value move-value':'name-value standard-health-value'}));
     }
     g.add(plate);
   };
   const detailedValue=isDown?(size>1?'À terre':'KO'):(hiddenHealth?health.label:(health.known?String(health.current):'?'));
-  addNamePlate('detailed',fullName,detailedValue);
-  addNamePlate('standard',firstName,isDown?'KO':'');
+  addNamePlate('detailed',detailedValue);
+  addNamePlate('standard',isDown?'KO':'');
 
   const stackX=-footprintW/2+1.5, stackY=-6.5*scale;
   g.add(new K.Rect({ x:stackX, y:stackY, width:19*scale, height:13*scale, cornerRadius:6.5*scale,
