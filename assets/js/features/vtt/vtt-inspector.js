@@ -438,7 +438,7 @@ export function _renderInspectorImpl(t) {
       const manual = [['vitesse','Dépl.'],['ca','CA'],['portee','Portée']]
         .map(([key, label]) => [label, _manualBuffVal(t, key)]).filter(([, value]) => value);
       const footer = _canEditToken && manual.length
-        ? `<div class="vtt-stat-manual"><span>${_insIcon('reset')}Bonus manuel : ${manual.map(([label, value]) => `${label} ${value > 0 ? '+' : ''}${value}`).join(' · ')}</span><button data-vtt-fn="_vttTokenResetBonus" data-vtt-args="${t.id}">Réinitialiser</button></div>`
+        ? `<div class="vtt-stat-manual"><span>Bonus manuel : ${manual.map(([label, value]) => `${label} ${value > 0 ? '+' : ''}${value}`).join(' · ')}</span><button type="button" class="vtt-stat-reset" data-vtt-fn="_vttTokenResetBonus" data-vtt-args="${t.id}">${_insIcon('reset')}Réinitialiser</button></div>`
         : (_canEditToken ? '<p class="vtt-ins-help">− / + ajoutent un bonus manuel, conservé jusqu’à réinitialisation.</p>' : '');
       return `<div class="vtt-stat-lines">${rows}</div>${footer}`;
     })();

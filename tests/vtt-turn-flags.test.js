@@ -116,7 +116,9 @@ test('vtt.js et vtt-combat-turns.js passent par l\'époque confirmée et datent 
   assert.match(vtt, /patch = _stampTurn\(cur, patch\);/);
   assert.match(vtt, /const patch = _stampTurn\(token, \{\n\s*col: Number\(origin\.col\)/);
   assert.match(vtt, /patch:_stampTurn\(move\.token, patch\)/);
-  assert.match(vtt, /const patch = _stampTurn\(tok, \{ bonusMvt: bonus \}\);/);
+  assert.match(vtt, /const patch = _stampTurn\(tok, \{ bonusMvt: bonus, moveOrigin:_combatMoveOrigin\(tok\) \}\);/);
+  assert.match(vtt, /bonusMvt: 0,\n\s*moveOrigin: deleteField\(\),/);
+  assert.match(vtt, /bonusMvt: token\.bonusMvt,/);
   assert.match(vtt, /const stamped = _stampTurn\(src, patch\);/);
   // Combat : nouvelle époque écrite avec la session, appliquée après succès.
   assert.equal((turns.match(/const updates = _turnResetPatch\(tokData, epoch\);/g) || []).length, 2);

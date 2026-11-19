@@ -52,7 +52,7 @@ import { classifySpellStatKinds, shouldTrackSpellStats } from '../../shared/spel
 import { uploadCloudinary, hasCloudinaryConfig, openCloudinaryConfigModal, CLOUDINARY_ENABLED } from '../../shared/upload-cloudinary.js';
 import {
   fogInit, fogSetPgRef, fogSetSpellLightProvider, fogUpdate, fogUpdateSoon, fogRenderWalls,
-  fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogWallBlocksPath, fogUndo, fogRedo, fogCanUndo, fogCanRedo,
+  fogIsEditMode, fogToggleEditMode, fogSetEditTool, fogUndo, fogRedo, fogCanUndo, fogCanRedo,
 } from './vtt-fog.js';
 import { openModal, closeModalDirect, confirmModal, updateModalContent, promptModal, setModalCloseGuard } from '../../shared/modal.js';
 import { _esc, _norm, _searchIncludes, appSplashHtml, loadingHtml, normalizeImageUrl } from '../../shared/html.js';
@@ -70,13 +70,17 @@ import {
 import { CELL, CELL_M, TYPE_COLOR, hpColor, _STAT_KEY, _STAT_COLOR, _STAT_RGB, _VTT_RUNE_META, _MS_BONUS_BUFF } from './vtt-constants.js';
 import { _drawGrid, _loadKonva, _stageToWorld, _renderMapImages, _buildTokenVisual, _buildAnnotVisual, vttLowFx, setVttLowFx, _stripShadows } from './vtt-render.js';
 import { fogHasUnlimitedVision, fogVisionRadiusCells, vttCanvasPixelRatio, vttPinchCameraTransform } from './vtt-fog-performance.js';
-import { vttStructureLegendSvg } from './vtt-wall-utils.js';
+import { vttStructureLegendSvg, vttWallState } from './vtt-wall-utils.js';
 import { tokenActiveEffects, tokenDeltaMeta, tokenDetailLevel, tokenEffectsSignature, tokenFootprintIntersectsZone, tokenFootprintMeta, tokenHiddenHealthRatio, tokenMovementMeta, tokenNameParts, tokenOrdinal, tokenRelationTone, tokenResourceArcs, tokenVisibleHealthMeta } from './vtt-token-visual.js';
 import { TURN_EPOCH_ENABLED, TURN_FLAG_RESET, sessionTurnEpoch, normalizeTurnFlags, stampTurnPatch, turnFlagsStale, hasTurnFlags } from './vtt-turn-flags.js';
 import { isTemporarySummonToken, reserveSummonTokens, resolveInvocationManaChange } from './vtt-summon-utils.js';
 import { attackRollHitsTarget, gridDistanceForRange, receivesOffensiveDamageBonus } from './vtt-attack-rules.js';
 import { conditionConsumedByAttack, conditionDamageReductionApplies, conditionStatRollMode } from './vtt-condition-rules.js';
 import { planGroupGridStep } from './vtt-group-movement.js';
+import {
+  rangeApproach, rangeAttackCells, rangeContour, rangeLPaths,
+  rangeMoveCells, rangeStairs, rangeWallHit,
+} from './vtt-range-utils.js';
 import { invocableCharacterTokens, resolveCharacterControlToken } from './vtt-token-control.js';
 import { naturalWeaponCombatContext } from '../../shared/bestiary-combat.js';
 import { canControlCharacter, getCharacterDelegates } from '../../shared/character-state.js';
@@ -447,6 +451,9 @@ let _bestiaryCatalogPromise = null;
 let _bstTrackerLoaded = false;  // tracker joueur lu au moins une fois (cf. _saveBstTracker)
 // [VS.bstTracker → VS.bstTracker] (défaut dans vtt-state.js)
 let _attackSrc = null, _moveHL = [];   // VS.selected, VS.tool → VS ; VS.characters/VS.npcs/VS.bestiary → VS
+let _rangeState = null;
+let _rangeHoverKey = null;
+let _rangeTouchPreviewKey = null;
 // (état de scène : session, pages, tokens, activePage, stage, layers, characters,
 //  npcs, bestiary, selected, tool → VS / vtt-state.js)
 // Mode "action d'abord" (action-first) : l'action est choisie AVANT la cible.
@@ -1220,6 +1227,7 @@ function _cleanup() {
   _resetKeyboardMovement({ persist:true });
   void _flushVitalBursts();   // rafale ±PV/PM en attente : l'écrire avant de quitter
   void _msFlushNoteDrafts();  // note de la mini-fiche en cours de saisie, idem
+  _clearHL();                 // retire aussi légende/pastille DOM avant destruction du stage
   VS.unsubs.forEach(u => u?.());
   VS.unsubs = []; VS.stage?.destroy(); VS.stage = null; VS.layers = {};
   _tokenTooltip?.remove(); _tokenTooltip=null;
@@ -1883,11 +1891,12 @@ function _setReachableFootprint(id, mode='weapon', visible=true) {
   if (!footprint) return;
   const extended=mode==='extended';
   const friendly=mode==='friendly';
-  const stroke=friendly?'#4ade80':extended?'#a78bfa':'#fb7185';
+  const outside=mode==='outside';
+  const stroke=outside?'#94a3b8':friendly?'#4ade80':extended?'#a78bfa':'#fb7185';
   footprint.stroke(stroke);
   footprint.shadowColor(stroke);
-  footprint.fill(friendly?'rgba(34,197,94,.08)':extended?'rgba(167,139,250,.08)':'rgba(239,68,68,.08)');
-  footprint.dash(extended?[7,4]:[]);
+  footprint.fill(outside?'rgba(148,163,184,.035)':friendly?'rgba(34,197,94,.08)':extended?'rgba(167,139,250,.08)':'rgba(239,68,68,.08)');
+  footprint.dash(outside?[4,4]:extended?[7,4]:[]);
   footprint.visible(visible);
 }
 
@@ -2083,6 +2092,11 @@ function _buildShape(t) {
         VS.layers.token?.batchDraw();
         return;
       }
+      // Une portée ancrée sur l'ancienne case pendant le drag donne l'impression
+      // que le token n'a pas bougé, surtout lorsqu'il est relâché sur une pile.
+      // On la retire pendant le geste puis on la reconstruit depuis les données
+      // effectivement validées au dragend.
+      _clearHL();
       if (VS.selectedMulti.has(t.id) && VS.selectedMulti.size>1) {
         _multiDragOrigin={};
         for (const id of VS.selectedMulti) {
@@ -2142,6 +2156,7 @@ function _buildShape(t) {
             VS.tokens[id]?.shape?.position({ x: orig.x, y: orig.y });
           }
           VS.layers.token?.batchDraw();
+          if (VS.selected) _refreshRanges(VS.selected, VS.tokens[VS.selected]?.data);
         };
         const moves=[];
         for (const id of VS.selectedMulti) {
@@ -2153,19 +2168,12 @@ function _buildShape(t) {
           const nr=_clampTokenCell(Math.round((s.y()-d2.h*CELL/2)/CELL), d2.h, pg.rows);
           s.position({x:nc*CELL+d2.w*CELL/2,y:nr*CELL+d2.h*CELL/2});
           const distance=Math.abs(nc-tokenData.col)+Math.abs(nr-tokenData.row);
-          if (!STATE.isAdmin && VS.session?.combat?.active) {
-            const maxMvt=(_live(tokenData).displayMovement??6)+(tokenData.bonusMvt||0);
-            const rem=maxMvt-(tokenData.movedCells||0);
-            if (distance>rem) {
-              restoreGroup();
-              showNotif(rem<=0 ? 'Plus de mouvement ce tour !' : `Déplacement groupé trop loin (${rem} case${rem!==1?'s':''} restante${rem!==1?'s':''}).`, 'error');
-              _multiDragOrigin=null; return;
-            }
-          }
-          if (!STATE.isAdmin && distance && (VS.activePage?.walls||[]).length
-              && fogWallBlocksPath(tokenData.col, tokenData.row, nc, nr, VS.activePage.walls)) {
+          const destination=_movementDestination(tokenData,nc,nr);
+          if (!destination || destination.kind==='blocked') {
             restoreGroup();
-            showNotif('🧱 Un token du groupe est bloqué par un obstacle.', 'error');
+            showNotif(destination?.kind==='blocked'
+              ? '🧱 Un token du groupe est bloqué par un obstacle.'
+              : 'Déplacement groupé trop loin pour un token.', 'error');
             _multiDragOrigin=null; return;
           }
           // Quota : un token relâché sur sa propre case n'a rien à écrire.
@@ -2174,7 +2182,7 @@ function _buildShape(t) {
           if (VS.session?.combat?.active && distance) {
             movePatch.moveOrigin = _combatMoveOrigin(tokenData);
             if (!STATE.isAdmin) {
-              movePatch.movedCells=(tokenData.movedCells||0)+distance;
+              movePatch.movedCells=(tokenData.movedCells||0)+destination.cost;
               movePatch.movedThisTurn=true;
             }
           }
@@ -2210,25 +2218,14 @@ function _buildShape(t) {
       // Token seul
       const c=_clampTokenCell(Math.round((g.x()-sw*CELL/2)/CELL), sw, pg.cols);
       const r=_clampTokenCell(Math.round((g.y()-sh*CELL/2)/CELL), sh, pg.rows);
-      if (!STATE.isAdmin && VS.session?.combat?.active) {
-        const cur=VS.tokens[t.id]?.data;
-        if (cur) {
-          const d=Math.abs(c-cur.col)+Math.abs(r-cur.row);
-          const maxMvt=(_live(cur).displayMovement??6)+(cur.bonusMvt||0);
-          const rem=maxMvt-(cur.movedCells||0);
-          if (d > rem) {
-            showNotif(rem<=0 ? 'Plus de mouvement ce tour !' : `Trop loin ! (${rem} case${rem!==1?'s':''} restante${rem!==1?'s':''})`, 'error');
-            g.position({x:cur.col*CELL+sw*CELL/2,y:cur.row*CELL+sh*CELL/2}); VS.layers.token.batchDraw(); return;
-          }
-        }
-      }
-      // Blocage par les murs (joueurs seulement)
-      if (!STATE.isAdmin && (VS.activePage?.walls||[]).length) {
-        const cur=VS.tokens[t.id]?.data;
-        if (cur && fogWallBlocksPath(cur.col, cur.row, c, r, VS.activePage.walls)) {
-          showNotif('🧱 Chemin bloqué !', 'error');
-          g.position({x:cur.col*CELL+sw*CELL/2,y:cur.row*CELL+sh*CELL/2}); VS.layers.token.batchDraw(); return;
-        }
+      const dragCur=VS.tokens[t.id]?.data;
+      const dragDestination=dragCur ? _movementDestination(dragCur,c,r) : null;
+      if (dragCur && (!dragDestination || dragDestination.kind==='blocked')) {
+        showNotif(dragDestination?.kind==='blocked' ? '🧱 Chemin bloqué !' : 'Déplacement trop loin.', 'error');
+        g.position({x:dragCur.col*CELL+sw*CELL/2,y:dragCur.row*CELL+sh*CELL/2});
+        VS.layers.token.batchDraw();
+        _refreshRanges(t.id, dragCur);
+        return;
       }
       g.position({x:c*CELL+sw*CELL/2,y:r*CELL+sh*CELL/2}); VS.layers.token.batchDraw();
       const moveCur=VS.tokens[t.id]?.data;
@@ -2245,8 +2242,7 @@ function _buildShape(t) {
       }
       if (!STATE.isAdmin&&VS.session?.combat?.active && moveCur && (c !== moveCur.col || r !== moveCur.row)) {
         const cur=VS.tokens[t.id]?.data;
-        const d=Math.abs(c-(cur?.col??c))+Math.abs(r-(cur?.row??r));
-        patch.movedCells=(cur?.movedCells||0)+d;
+        patch.movedCells=(cur?.movedCells||0)+(dragDestination?.cost||0);
         patch.movedThisTurn=true;
       }
       patch=_stampTurn(moveCur, patch);
@@ -2263,6 +2259,7 @@ function _buildShape(t) {
         if (moveCur && previous) Object.assign(moveCur,previous);
         g.position({x:(moveCur?.col??c)*CELL+sw*CELL/2,y:(moveCur?.row??r)*CELL+sh*CELL/2});
         VS.layers.token?.batchDraw();
+        _refreshRanges(t.id, moveCur);
         showNotif('Erreur déplacement', 'error');
         return;
       }
@@ -2891,25 +2888,19 @@ function _startAim(srcId, opt) {
 function _showAimRange(srcId, opt) {
   _clearHL();
   const t = VS.tokens[srcId]?.data; if (!t || !VS.activePage || !VS.layers.grid) return;
-  const K = window.Konva;
   const portee = Math.max(1, parseInt(opt.portee) || 1);
   const sd = _tokenDims(t);
   const { cols, rows } = VS.activePage;
-  const reach = (dx, dy) => (portee === 1 ? Math.max(dx, dy) : dx + dy) <= portee;
   const friendly = opt.isHeal || opt.isEnchant || opt.isRegen;
-  const c3 = friendly ? '34,197,94' : '239,68,68';
-  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
-    if (c >= t.col && c < t.col + sd.w && r >= t.row && r < t.row + sd.h) continue;
-    const dx = Math.max(0, Math.max(c, t.col) - Math.min(c, t.col + sd.w - 1));
-    const dy = Math.max(0, Math.max(r, t.row) - Math.min(r, t.row + sd.h - 1));
-    if (!reach(dx, dy)) continue;
-    const rect = new K.Rect({ x:c*CELL+1.5, y:r*CELL+1.5, width:CELL-3, height:CELL-3, cornerRadius:5,
-      fill:`rgba(${c3},0.16)`, stroke:`rgba(${c3},0.60)`, strokeWidth:1.4, listening:false });
-    VS.layers.grid.add(rect); _moveHL.push(rect);
-  }
+  const cells = rangeAttackCells({ from:t, dims:sd, range:portee, cols, rows });
+  const contourCells=_rangeWithFootprint(cells,t,sd);
+  _rangeDrawCells(cells, friendly ? 'rgba(34,197,94,.07)' : 'rgba(239,68,68,.08)');
+  _rangeDrawContour(contourCells, 'rgba(5,8,14,.55)', 4.2);
+  _rangeDrawContour(contourCells, friendly ? '#4ade80' : '#f87171', 1.9);
   Object.values(VS.tokens || {}).forEach(entry => {
     const target=entry?.data;
     if (!target || target.id===srcId || target.pageId!==VS.activePage?.id) return;
+    if (!friendly && target.type!=='enemy') return;
     if (_tokenAttackDistance(t, target, portee) <= portee) {
       _setReachableFootprint(target.id, friendly?'friendly':'weapon', true);
     }
@@ -2982,75 +2973,489 @@ function _aimCancel() {
 }
 
 // ── Portée de mouvement ─────────────────────────────────────────────
-function _showMoveRange(t) {
-  _clearHL(); if (!VS.activePage) return;
-  const moveTokenId = t.id;
-  const K=window.Konva, ld=_live(t);
-  const inCombat = !!VS.session?.combat?.active;
-  const maxMvt = (ld.displayMovement??6) + (t.bonusMvt||0);
-  const mv = (inCombat && !STATE.isAdmin) ? Math.max(0, maxMvt - (t.movedCells||0)) : (ld.displayMovement??6);
-  const sw = ld.displayTokenW || 1, sh = ld.displayTokenH || 1;
-  const {cols,rows}=VS.activePage;
-  // Grandes créatures : le déplacement est basé sur TOUTE l'empreinte (hit-box),
-  // pas un point unique. On calcule la RÉUNION des empreintes atteignables → une
-  // région symétrique autour du corps (marche pour 2×2, 3×3, taille paire ou non).
-  // Chaque case de la région pointe vers la meilleure destination : celle où cette
-  // case est la plus « centrale » dans la nouvelle empreinte → cliquer y recentre
-  // la créature. Le coût reste |dc|+|dr| (translation rigide de la hit-box).
-  const cxG = (sw-1)/2, cyG = (sh-1)/2;   // centre géométrique (peut valoir .5)
-  const cellMap = new Map();              // "c,r" → { aC, aR, score }
-  for (let dc=-mv;dc<=mv;dc++) for (let dr=-mv;dr<=mv;dr++) {
-    if (Math.abs(dc)+Math.abs(dr)>mv || (!dc&&!dr)) continue;
-    const aC=t.col+dc, aR=t.row+dr;       // coin haut-gauche de destination
-    if (aC<0||aR<0||aC+sw>cols||aR+sh>rows) continue;
-    for (let fx=0;fx<sw;fx++) for (let fy=0;fy<sh;fy++) {
-      const cc=aC+fx, cr=aR+fy;
-      const score=Math.abs(cc-(aC+cxG))+Math.abs(cr-(aR+cyG));   // centralité dans l'empreinte
-      const key=cc+','+cr, prev=cellMap.get(key);
-      if (!prev || score<prev.score) cellMap.set(key,{aC,aR,score});
+const RANGE_PATH_MODE_KEY = 'vtt-range-contourner';
+const _rangePathMode = () => {
+  try { return localStorage.getItem(RANGE_PATH_MODE_KEY) === '1' ? 'path' : 'line'; }
+  catch { return 'line'; }
+};
+
+function _rangeWalls() {
+  return (VS.activePage?.walls || []).map(wall => ({ ...wall, ...vttWallState(wall) }));
+}
+
+function _rangeCellAtPointer() {
+  const pos = VS.stage?.getPointerPosition?.();
+  if (!pos) return null;
+  const world = _stageToWorld(pos);
+  return { c: Math.floor(world.x / CELL), r: Math.floor(world.y / CELL) };
+}
+
+function _rangeDrawCells(cells, fill, { hatch = false, track = _moveHL } = {}) {
+  const K = window.Konva;
+  const list = [...cells].map(key => key.split(',').map(Number));
+  if (!list.length) return null;
+  const shape = new K.Shape({
+    listening: false,
+    sceneFunc(ctx) {
+      ctx.setAttr('fillStyle', fill);
+      for (const [c, r] of list) {
+        const x = c * CELL + 1.5, y = r * CELL + 1.5, size = CELL - 3;
+        ctx.beginPath(); ctx.roundRect(x, y, size, size, 5); ctx.fill();
+        if (!hatch) continue;
+        ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, size, size, 5); ctx.clip();
+        ctx.setAttr('strokeStyle', 'rgba(148,163,184,.42)');
+        ctx.setAttr('lineWidth', 1);
+        for (let p = -size; p < size * 2; p += 7) {
+          ctx.beginPath(); ctx.moveTo(x + p, y + size); ctx.lineTo(x + p + size, y); ctx.stroke();
+        }
+        ctx.restore();
+      }
+    },
+  });
+  VS.layers.grid.add(shape); track.push(shape);
+  return shape;
+}
+
+function _rangeDrawContour(cells, stroke, width, dash = [], opacity = 1, track = _moveHL) {
+  const loops = rangeContour(cells);
+  if (!loops.length) return null;
+  const K = window.Konva;
+  const shape = new K.Shape({
+    listening: false,
+    sceneFunc(ctx) {
+      ctx.save();
+      ctx.setAttr('strokeStyle', stroke);
+      ctx.setAttr('lineWidth', width);
+      ctx.setAttr('globalAlpha', opacity);
+      ctx.setAttr('lineJoin', 'round');
+      ctx.setAttr('lineCap', 'round');
+      ctx.setLineDash(dash);
+      for (const loop of loops) {
+        if (!loop.length) continue;
+        ctx.beginPath(); ctx.moveTo(loop[0][0] * CELL, loop[0][1] * CELL);
+        for (let i = 1; i < loop.length; i++) ctx.lineTo(loop[i][0] * CELL, loop[i][1] * CELL);
+        ctx.closePath(); ctx.stroke();
+      }
+      ctx.restore();
+    },
+  });
+  VS.layers.grid.add(shape); track.push(shape);
+  return shape;
+}
+
+function _rangeWithFootprint(cells, from, dims) {
+  const union=new Set(cells);
+  for(let x=0;x<dims.w;x++) for(let y=0;y<dims.h;y++) union.add(`${from.col+x},${from.row+y}`);
+  return union;
+}
+
+function _rangeDisplayMap(cells, dims, kinds) {
+  const display = new Map();
+  for (const cell of cells.values()) {
+    if (!kinds.has(cell.kind)) continue;
+    for (let x = 0; x < dims.w; x++) for (let y = 0; y < dims.h; y++) {
+      const c = cell.c + x, r = cell.r + y, key = `${c},${r}`;
+      const score = Math.abs(x - (dims.w - 1) / 2) + Math.abs(y - (dims.h - 1) / 2);
+      const previous = display.get(key);
+      if (!previous || score < previous.score || (score === previous.score && cell.cost < previous.cell.cost)) {
+        display.set(key, { cell, score });
+      }
     }
   }
-  // Pas de check collision : le drag & drop laisse passer, l'affichage doit faire pareil.
-  for (const [key,dest] of cellMap) {
-    const [cc,cr]=key.split(',').map(Number);
-    const rect=new K.Rect({ x:cc*CELL+1.5,y:cr*CELL+1.5,width:CELL-3,height:CELL-3, cornerRadius:5,
-      fill:'rgba(79,140,255,0.20)', stroke:'rgba(79,140,255,0.55)', strokeWidth:1.4, listening:true });
-    // Survol : la case s'éclaire (retour tactile facon maquette).
-    rect.on('mouseenter', () => { rect.fill('rgba(79,140,255,0.42)'); rect.stroke('rgba(126,176,255,0.9)'); VS.layers.grid.batchDraw(); VS.stage && (VS.stage.container().style.cursor='pointer'); });
-    rect.on('mouseleave', () => { rect.fill('rgba(79,140,255,0.20)'); rect.stroke('rgba(79,140,255,0.55)'); VS.layers.grid.batchDraw(); VS.stage && (VS.stage.container().style.cursor=''); });
-    const tc=dest.aC, tr=dest.aR;
-    const moveSelectedHere = async e => {
-      // En mode placement de zone ou de ciblage multi-cibles : le sort est prioritaire
-      // on bascule placed pour zone et on annule le déplacement
-      if (_zoneCtx) {
-        e.cancelBubble = true;
-        _zoneClickAction();
-        return;
+  return display;
+}
+
+function _rangeHitNode(displayMap, onPick) {
+  const K = window.Konva;
+  if (!displayMap.size) return null;
+  const node = new K.Shape({
+    sceneFunc() {},
+    hitFunc(ctx, shape) {
+      ctx.beginPath();
+      for (const key of displayMap.keys()) {
+        const [c, r] = key.split(',').map(Number);
+        ctx.rect(c * CELL, r * CELL, CELL, CELL);
       }
-      if (_mtCtx) { e.cancelBubble = true; return; }
-      e.cancelBubble = true;
-      const moveToken = VS.tokens[moveTokenId]?.data;
-      if (!moveToken || !_canControlToken(moveToken)) {
-        _clearHL();
-        showNotif('Tu ne peux pas déplacer ce token.', 'info');
-        return;
-      }
-      // La portée appartient au token qui l'a générée. Une cible d'attaque peut
-      // temporairement remplacer VS.selected : elle ne doit jamais devenir le
-      // token déplacé quand le joueur clique ensuite sur une case bleue.
-      if (VS.selected !== moveTokenId) _select(moveTokenId);
-      await _moveTo(moveTokenId, tc, tr);
-    };
-    rect.on('click', e => { if (e.evt.button!==0) return; moveSelectedHere(e); });
-    rect.on('contextmenu', e => { e.evt.preventDefault(); moveSelectedHere(e); });
-    VS.layers.grid.add(rect); _moveHL.push(rect);
+      ctx.closePath(); ctx.fillStrokeShape(shape);
+    },
+    fill: '#000', listening: true,
+  });
+  node.on('click tap', async event => {
+    if (event.evt?.button != null && event.evt.button !== 0) return;
+    const point = _rangeCellAtPointer(); if (!point) return;
+    const record = displayMap.get(`${point.c},${point.r}`); if (!record) return;
+    event.cancelBubble = true;
+    await onPick(record.cell, event);
+  });
+  VS.layers.grid.add(node); _moveHL.push(node);
+  return node;
+}
+
+function _rangePathClear(path, walls, token = null) {
+  const dims=token?_tokenDims(token):{w:1,h:1};
+  for (let i = 1; i < path.length; i++) {
+    const [aC, aR] = path[i - 1], [bC, bR] = path[i];
+    for(let x=0;x<dims.w;x++) for(let y=0;y<dims.h;y++) {
+      if (rangeWallHit(aC+x+.5,aR+y+.5,bC+x+.5,bR+y+.5,walls)) return false;
+    }
   }
+  return true;
+}
+
+function _rangeFootprintWallHit(token,cell,walls) {
+  const dims=_tokenDims(token); let nearest=null;
+  for(let x=0;x<dims.w;x++) for(let y=0;y<dims.h;y++) {
+    const hit=rangeWallHit(token.col+x+.5,token.row+y+.5,cell.c+x+.5,cell.r+y+.5,walls);
+    if(hit&&(!nearest||hit.t<nearest.t)) nearest=hit;
+  }
+  return nearest;
+}
+
+function _rangeRoute(token, cell, walls) {
+  const candidates = [
+    rangeStairs(token.col, token.row, cell.c, cell.r),
+    ...rangeLPaths(token.col, token.row, cell.c, cell.r),
+  ];
+  const direct=candidates.find(path => _rangePathClear(path, walls, token));
+  if (direct) return direct;
+  if (cell.path && _rangePathClear(cell.path,walls,token)) return cell.path;
+  if (_rangeState) {
+    if (!_rangeState.fallbackPaths) {
+      _rangeState.fallbackPaths=rangeMoveCells({ token:{...token,..._tokenDims(token)}, cols:VS.activePage.cols, rows:VS.activePage.rows,
+        remaining:VS.activePage.cols*VS.activePage.rows, walls, mode:'path' });
+    }
+    const fallback=_rangeState.fallbackPaths.get(`${cell.c},${cell.r}`)?.path;
+    if (fallback) return fallback;
+  }
+  return candidates[0];
+}
+
+function _rangeRemovePreview() {
+  if (!_rangeState) return;
+  for (const node of _rangeState.previewNodes || []) node.destroy?.();
+  _rangeState.previewNodes = [];
+  _rangeState.pill?.remove(); _rangeState.pill = null;
+  _rangeState.ghost?.destroy?.(); _rangeState.ghost = null;
+  (_rangeState.attackNodes || []).forEach(node => node.visible?.(true));
+  (_rangeState.moveNodes || []).forEach(node => node.opacity?.(1));
+  _clearReachableFootprints();
+  _rangeState.restoreReachable?.();
+  VS.layers.grid?.batchDraw(); VS.layers.token?.batchDraw();
+}
+
+function _rangePlacePill(c, r, html, tone = '') {
+  const wrap = VS.stage?.container(); if (!wrap || !_rangeState) return;
+  const pill = document.createElement('div');
+  pill.className = `vtt-range-pill ${tone}`;
+  pill.innerHTML = html;
+  const scale = VS.stage.scaleX() || 1;
+  const rawX = VS.stage.x() + (c + .5) * CELL * scale;
+  const rawY = VS.stage.y() + r * CELL * scale - 6;
+  wrap.appendChild(pill);
+  const halfWidth = pill.offsetWidth / 2 + 6;
+  const minX = Math.min(halfWidth, wrap.clientWidth / 2);
+  const maxX = Math.max(minX, wrap.clientWidth - halfWidth);
+  pill.style.left = `${Math.min(Math.max(rawX, minX), maxX)}px`;
+  pill.style.top = `${Math.max(rawY, pill.offsetHeight + 8)}px`;
+  _rangeState.pill = pill;
+}
+
+function _rangeTokenAt(c, r, sourceId) {
+  const entries=Object.values(VS.tokens || {}).filter(candidate => {
+    const target=candidate?.data;
+    if (!target || target.id === sourceId || target.pageId !== VS.activePage?.id) return false;
+    if (!candidate.shape?.isVisible?.()) return false;
+    const dims = _tokenDims(target);
+    return c >= target.col && c < target.col + dims.w && r >= target.row && r < target.row + dims.h;
+  });
+  // Si plusieurs tokens partagent la case, conserver la cible hostile comme
+  // information tactique ; dans tous les cas le survol d'un token neutralise
+  // l'aperçu de déplacement de la case située dessous.
+  const entry=entries.find(candidate => candidate?.data?.type === 'enemy') || entries[0];
+  return entry?.data || null;
+}
+
+function _rangeOccupiedCells(exceptIds = []) {
+  const occupied = new Set();
+  Object.values(VS.tokens || {}).forEach(entry => {
+    const token = entry?.data; if (!token || exceptIds.includes(token.id) || token.pageId !== VS.activePage?.id) return;
+    if (!entry.shape?.isVisible?.()) return;
+    const dims = _tokenDims(token);
+    for (let x = 0; x < dims.w; x++) for (let y = 0; y < dims.h; y++) occupied.add(`${token.col + x},${token.row + y}`);
+  });
+  return occupied;
+}
+
+function _rangePreviewPath(token, cell, path, tone = '') {
+  const K = window.Konva, nodes = _rangeState.previewNodes;
+  const dims=_tokenDims(token), offX=dims.w/2, offY=dims.h/2;
+  const points = path.flatMap(([c, r]) => [(c + offX) * CELL, (r + offY) * CELL]);
+  const halo = new K.Line({ points, stroke: 'rgba(5,8,14,.6)', strokeWidth: 5.5, lineCap: 'round', lineJoin: 'round', listening: false });
+  const line = new K.Line({ points, stroke: tone === 'blocked' ? '#f87171' : tone === 'too-far' ? '#94a3b8' : '#bfdbfe', strokeWidth: 2.2,
+    dash: tone ? [5, 4] : [], lineCap: 'round', lineJoin: 'round', listening: false });
+  VS.layers.grid.add(halo, line); nodes.push(halo, line);
+  path.slice(1,-1).forEach(([c, r], index) => {
+    const course = index + 1 > _rangeState.remaining;
+    const dot = new K.Circle({ x: (c + offX) * CELL, y: (r + offY) * CELL, radius: course ? 3.5 : 3.7,
+      fill: course ? 'rgba(5,8,14,.75)' : '#dbeafe', stroke: course ? '#bfdbfe' : 'rgba(5,8,14,.7)',
+      strokeWidth: course ? 1.5 : 1, listening: false });
+    VS.layers.grid.add(dot); nodes.push(dot);
+  });
+  const entry = VS.tokens[token.id];
+  if (entry?.shape && !tone) {
+    const ghost = entry.shape.clone({ listening: false, opacity: .5 });
+    ['.token-name','.token-noncompact','.name-bg','.token-ordinal','.token-ordinal-label','.lbl','.name-value',
+      '.ca-bg','.ca-lbl','.ca-buff-turns','.effect-detailed','.effect-standard','.effect-compact',
+      '.stack-badge','.stack-count','.sel','.sel-spin','.atk','.target','.target-inner','.target-footprint',
+      '.reachable-footprint','.turn-active','.hp-track','.hp-fill','.pm-track','.pm-fill']
+      .forEach(selector => ghost.find(selector).forEach(node => node.visible(false)));
+    const dims = _tokenDims(token);
+    ghost.position({ x: cell.c * CELL + dims.w * CELL / 2, y: cell.r * CELL + dims.h * CELL / 2 });
+    VS.layers.grid.add(ghost); nodes.push(ghost); _rangeState.ghost = ghost;
+  }
+}
+
+function _rangeWeaponMeta(token) {
+  const options = _buildAttackOptions(token)
+    .map(option => ({ ...option, portee: Math.max(0, parseInt(option.portee) || 0) }))
+    .filter(option => !option.targetSelf && option.portee > 0);
+  const weapon = options.find(option => !option._itemAction && option.sortIdx === undefined && !option.targetSelf);
+  return { options, weapon, weaponRange: weapon?.portee || (options.length ? Math.min(...options.map(option => option.portee)) : 0),
+    extendedRange: options.length ? Math.max(...options.map(option => option.portee)) : 0 };
+}
+
+function _rangeReachableFrom(token, from, weaponRange, extendedRange = 0, extended = true) {
+  Object.values(VS.tokens || {}).forEach(entry => {
+    const target = entry?.data;
+    if (!target || target.id === token.id || target.pageId !== VS.activePage?.id || target.type !== 'enemy' || !entry.shape?.isVisible?.()) return;
+    const source = { ...token, col: from.col, row: from.row };
+    const weaponReach = weaponRange > 0 && _tokenAttackDistance(source, target, weaponRange) <= weaponRange;
+    const extraReach = extended && !weaponReach && extendedRange > weaponRange && _tokenAttackDistance(source, target, extendedRange) <= extendedRange;
+    if (weaponReach) _setReachableFootprint(target.id, 'weapon', true);
+    else if (extraReach) _setReachableFootprint(target.id, 'extended', true);
+  });
+}
+
+function _rangeHoverMove(cell) {
+  const state = _rangeState; if (!state) return;
+  _rangeRemovePreview();
+  const { token, walls, weaponRange } = state;
+  if (cell.kind === 'blocked') {
+    const path = _rangePathMode()==='line'
+      ? [[token.col,token.row],[cell.c,cell.r]]
+      : (cell.path || rangeStairs(token.col, token.row, cell.c, cell.r));
+    _rangePreviewPath(token, cell, path, _rangePathMode()==='path' ? 'too-far' : 'blocked');
+    if (_rangePathMode() === 'line') {
+      const hit = _rangeFootprintWallHit(token,cell,walls);
+      if (hit) {
+        const K = window.Konva;
+        const ring = new K.Circle({ x: hit.x * CELL, y: hit.y * CELL, radius: 8, fill: '#1b0b0e', stroke: '#f87171', strokeWidth: 1.5, listening: false });
+        const crossA = new K.Line({ points: [(hit.x * CELL)-4,(hit.y * CELL)-4,(hit.x * CELL)+4,(hit.y * CELL)+4], stroke:'#fecaca', strokeWidth:2, listening:false });
+        const crossB = new K.Line({ points: [(hit.x * CELL)+4,(hit.y * CELL)-4,(hit.x * CELL)-4,(hit.y * CELL)+4], stroke:'#fecaca', strokeWidth:2, listening:false });
+        VS.layers.grid.add(ring, crossA, crossB); state.previewNodes.push(ring, crossA, crossB);
+      }
+    }
+    _rangePlacePill(cell.c+(_tokenDims(token).w-1)/2, cell.r, _rangePathMode() === 'path'
+      ? (cell.cost != null ? `🧱 Trop loin par l’ouverture · <b>${cell.cost}</b> cases` : '🧱 Inaccessible')
+      : '🧱 Mur sur le trajet', 'warn');
+    VS.stage.container().style.cursor = 'not-allowed';
+    return;
+  }
+  const path = _rangeRoute(token, cell, walls);
+  _rangePreviewPath(token, cell, path);
+  (state.attackNodes || []).forEach(node => node.visible?.(false));
+  if (weaponRange > 0) {
+    const from={...token,col:cell.c,row:cell.r}, dims=_tokenDims(token);
+    const cells=rangeAttackCells({ from, dims, range:weaponRange,
+      cols:VS.activePage.cols, rows:VS.activePage.rows });
+    const contour=_rangeWithFootprint(cells,from,dims);
+    _rangeDrawContour(contour,'rgba(5,8,14,.55)',4.2,[],1,state.previewNodes);
+    _rangeDrawContour(contour,'#f87171',1.9,[],1,state.previewNodes);
+  }
+  _clearReachableFootprints();
+  _rangeReachableFrom(token, cell, weaponRange, 0, false);
+  const weaponTargets = Object.values(VS.tokens || {}).filter(entry => {
+    const target = entry?.data;
+    return target && target.id !== token.id && target.pageId === VS.activePage?.id
+      && target.type === 'enemy' && entry.shape?.isVisible?.()
+      && weaponRange > 0 && _tokenAttackDistance({ ...token, col: cell.c, row: cell.r }, target, weaponRange) <= weaponRange;
+  }).length;
+  const cost = Number(cell.cost) || path.length - 1;
+  const rest = Math.max(0, state.remaining + (cell.kind === 'course' ? state.courseExtra : 0) - cost);
+  const lead = cell.kind === 'course' ? '🏃 Course · ' : '';
+  _rangePlacePill(cell.c+(_tokenDims(token).w-1)/2, cell.r, `${lead}<b>${cost}</b> case${cost > 1 ? 's' : ''} · reste <b>${rest}</b> · ⚔ ${weaponTargets || 'aucune'} ${weaponTargets ? 'à portée' : 'cible'}`, cell.kind === 'course' ? 'course' : '');
+  VS.stage.container().style.cursor = 'pointer';
+}
+
+function _rangeHoverEnemy(target) {
+  const state = _rangeState; if (!state || !state.weaponRange) return;
+  // Revenir systématiquement aux portées du token sélectionné. Le survol d'une
+  // cible renseigne son accessibilité mais ne déplace ni les contours, ni un
+  // fantôme, ni la zone de mouvement vers une case d'approche.
+  _rangeRemovePreview();
+  const approach = rangeApproach({ token: state.token, target, cells: state.moveCells,
+    range: state.weaponRange, occupied: _rangeOccupiedCells([state.token.id, target.id]) });
+  if (approach?.now) {
+    _setReachableFootprint(target.id, 'weapon', true);
+    _rangePlacePill(target.col+(_tokenDims(target).w-1)/2, target.row, `⚔ À portée · ${_esc(state.weaponLabel || 'attaque')}`, 'hostile');
+    return;
+  }
+  if (!approach?.best) {
+    _setReachableFootprint(target.id,'outside',true);
+    _rangePlacePill(target.col+(_tokenDims(target).w-1)/2, target.row, 'Hors d’atteinte ce tour', 'hostile');
+    return;
+  }
+  const best = approach.best;
+  _setReachableFootprint(target.id, 'weapon', true);
+  _rangePlacePill(target.col+(_tokenDims(target).w-1)/2, target.row, best.kind === 'course'
+    ? `🏃 En courant · <b>${best.cost}</b> cases`
+    : `⚔ Atteignable · <b>${best.cost}</b> case${best.cost > 1 ? 's' : ''}`, 'hostile');
+}
+
+function _rangeBindHover() {
+  if (!VS.stage) return;
+  VS.stage.off('mousemove.vttRange touchmove.vttRange mouseleave.vttRange');
+  VS.stage.on('mousemove.vttRange touchmove.vttRange', () => {
+    const point = _rangeCellAtPointer(); if (!point || !_rangeState) return;
+    const key = `${point.c},${point.r}`;
+    const hoveredToken = _rangeTokenAt(point.c, point.r, _rangeState.token.id);
+    const hoverKey = hoveredToken ? `token:${hoveredToken.id}` : key;
+    if (_rangeHoverKey === hoverKey) return;
+    _rangeHoverKey = hoverKey;
+    if (hoveredToken) {
+      if (hoveredToken.type === 'enemy') _rangeHoverEnemy(hoveredToken);
+      else {
+        _rangeRemovePreview();
+        if (VS.stage) VS.stage.container().style.cursor = '';
+      }
+      return;
+    }
+    const blocked = _rangeState.blockedDisplay.get(key)?.cell;
+    const move = _rangeState.moveDisplay.get(key)?.cell || _rangeState.courseDisplay.get(key)?.cell;
+    if (blocked) _rangeHoverMove(blocked);
+    else if (move) _rangeHoverMove(move);
+    else { _rangeRemovePreview(); VS.stage.container().style.cursor = ''; }
+  });
+  VS.stage.on('mouseleave.vttRange', () => {
+    _rangeHoverKey = null;
+    _rangeRemovePreview();
+    if (VS.stage) VS.stage.container().style.cursor = '';
+  });
+}
+
+function _rangeLegend() {
+  const state = _rangeState, wrap = VS.stage?.container(); if (!state || !wrap) return;
+  const parts = [`<span><i class="vtt-range-swatch move"></i>Déplacement <b>${state.remaining}/${state.movementMaximum} c</b></span>`];
+  if (state.courseDisplay.size) parts.push(`<span><i class="vtt-range-swatch course"></i>Course <b>+${state.courseExtra} c</b></span>`);
+  if (state.weaponRange) parts.push(`<span><i class="vtt-range-swatch weapon"></i>${_esc(state.weaponLabel || 'Arme')} <b>${state.weaponRange} c</b></span>`);
+  if (state.extendedRange > state.weaponRange) parts.push(`<span><i class="vtt-range-swatch extended"></i>Sorts <b>${state.extendedRange} c</b></span>`);
+  if (state.blockedDisplay.size) parts.push('<span><i class="vtt-range-swatch blocked"></i>Bloqué</span>');
+  const legend = document.createElement('div'); legend.className = 'vtt-range-legend';
+  const routeActive = _rangePathMode() === 'path';
+  legend.innerHTML = `${parts.join('')}<button type="button" class="vtt-range-route ${routeActive ? 'active' : ''}" aria-pressed="${routeActive}" title="Le trajet contourne les murs et coûte sa longueur réelle">↪ Contourner</button>`;
+  legend.querySelector('button').addEventListener('click', event => {
+    event.stopPropagation();
+    const active = _rangePathMode() !== 'path';
+    try { localStorage.setItem(RANGE_PATH_MODE_KEY, active ? '1' : '0'); } catch {}
+    _refreshRanges(state.token.id, VS.tokens[state.token.id]?.data);
+  });
+  wrap.appendChild(legend); state.legend = legend;
+}
+
+function _rangeOriginMarker(token) {
+  const origin = _getCombatMoveOrigin(token), round = VS.session?.combat?.round ?? 0;
+  if (!origin || origin.round !== round || origin.pageId !== (token.pageId || VS.activePage?.id)) return;
+  const K = window.Konva, dims = _tokenDims(token);
+  const x = (origin.col + dims.w / 2) * CELL, y = (origin.row + dims.h / 2) * CELL;
+  const trail = new K.Line({ points:[x,y,(token.col+dims.w/2)*CELL,(token.row+dims.h/2)*CELL], stroke:'rgba(203,213,225,.35)', strokeWidth:1.6, dash:[2,5], listening:false });
+  const marker = new K.Group({ x, y, listening:true });
+  marker.add(new K.Circle({ radius:23, fill:'rgba(5,8,14,.4)', stroke:'rgba(203,213,225,.7)', strokeWidth:1.5, dash:[4,3] }));
+  marker.add(new K.Text({ x:-9,y:-10,width:18,height:20,text:'↶',fontSize:16,fontStyle:'bold',align:'center',fill:'rgba(226,232,240,.8)',listening:false }));
+  marker.on('mouseenter', () => {
+    _rangeRemovePreview();
+    _rangePreviewPath(token,{c:origin.col,r:origin.row},[[token.col,token.row],[origin.col,origin.row]]);
+    _rangePlacePill(origin.col+(dims.w-1)/2, origin.row, `↶ Revenir au départ · rend <b>${Math.max(0,(token.movedCells||0)-(origin.movedCells||0))}</b> c${token.bonusMvt > 0 ? ' · annule la Course' : ''}`);
+    VS.stage.container().style.cursor='pointer';
+  });
+  marker.on('mouseleave', () => { _rangeRemovePreview(); });
+  marker.on('click tap', event => { event.cancelBubble=true; void _vttUndoMove(token.id); });
+  VS.layers.grid.add(trail);
+  VS.layers.token.add(marker);
+  marker.moveToTop();
+  _moveHL.push(trail, marker);
+}
+
+function _showMoveRange(t) {
+  _clearHL(); if (!VS.activePage) return;
+  const moveTokenId = t.id, ld=_live(t);
+  const inCombat = !!VS.session?.combat?.active;
+  const baseMovement = Math.max(0, Number(ld.displayMovement) || 6);
+  const maxMvt = baseMovement + (Number(t.bonusMvt)||0);
+  const remaining = (inCombat && !STATE.isAdmin) ? Math.max(0, maxMvt - (Number(t.movedCells)||0)) : baseMovement;
+  const courseExtra = inCombat && !STATE.isAdmin && Number(t.bonusMvt || 0) === 0 ? baseMovement : 0;
+  const dims = _tokenDims(t);
+  const {cols,rows}=VS.activePage;
+  const walls = STATE.isAdmin ? [] : _rangeWalls();
+  const mode = _rangePathMode();
+  const moveCells = rangeMoveCells({ token:{...t,...dims}, cols, rows, remaining, courseExtra, walls, mode });
+  const moveDisplay = _rangeDisplayMap(moveCells, dims, new Set(['move']));
+  const courseDisplay = new Map([..._rangeDisplayMap(moveCells, dims, new Set(['course']))]
+    .filter(([key]) => !moveDisplay.has(key)));
+  const blockedDisplay = new Map([..._rangeDisplayMap(moveCells, dims, new Set(['blocked']))]
+    .filter(([key]) => !moveDisplay.has(key) && !courseDisplay.has(key)));
+  const moveKeys = new Set(moveDisplay.keys());
+  for (let x=0;x<dims.w;x++) for (let y=0;y<dims.h;y++) moveKeys.add(`${t.col+x},${t.row+y}`);
+  moveKeys.forEach(key => { courseDisplay.delete(key); blockedDisplay.delete(key); });
+  const courseKeys = new Set(courseDisplay.keys());
+  const blockedKeys = new Set(blockedDisplay.keys());
+  const weaponMeta = _rangeWeaponMeta(t);
+  _rangeState = { token:t, walls, mode, moveCells, moveDisplay, courseDisplay, blockedDisplay,
+    remaining, baseMovement, movementMaximum:maxMvt, courseExtra, ...weaponMeta,
+    weaponLabel:weaponMeta.weapon?.label || weaponMeta.weapon?.name || 'Arme', previewNodes:[] };
+  _rangeDrawCells(moveKeys, 'rgba(79,140,255,.17)');
+  _rangeDrawContour(moveKeys, '#7eb0ff', 1.6, [], .9);
+  if (courseKeys.size) {
+    const K=window.Konva;
+    const points=new K.Shape({ listening:false, sceneFunc(ctx){
+      ctx.setAttr('fillStyle','rgba(126,176,255,.42)');
+      for(const key of courseKeys){const[c,r]=key.split(',').map(Number);ctx.beginPath();ctx.arc((c+.5)*CELL,(r+.5)*CELL,1.9,0,Math.PI*2);ctx.fill();}
+    } });
+    VS.layers.grid.add(points);_moveHL.push(points);
+    _rangeDrawContour(new Set([...moveKeys,...courseKeys]), 'rgba(126,176,255,.5)', 2, [.1,5.5]);
+  }
+  if (blockedKeys.size) _rangeDrawCells(blockedKeys, 'rgba(148,163,184,.07)', { hatch:true });
+  const chooseMove = async (cell, event) => {
+    if (_zoneCtx) { event.cancelBubble=true; _zoneClickAction(); return; }
+    if (_mtCtx) { event.cancelBubble=true; return; }
+    const pointerType=event.evt?.pointerType || event.evt?.type;
+    const key=`${cell.c},${cell.r}`;
+    if (/touch/i.test(pointerType||'') && _rangeTouchPreviewKey!==key) {
+      _rangeTouchPreviewKey=key; _rangeHoverMove(cell); return;
+    }
+    const moveToken=VS.tokens[moveTokenId]?.data;
+    if (!moveToken || !_canControlToken(moveToken)) { _clearHL(); showNotif('Tu ne peux pas déplacer ce token.','info'); return; }
+    if (VS.selected!==moveTokenId) _select(moveTokenId);
+    if (cell.kind==='course') {
+      const ran=await _vttCourir(moveTokenId);
+      if (!ran) return;
+    }
+    await _moveTo(moveTokenId,cell.c,cell.r);
+  };
+  _rangeHitNode(new Map([...moveDisplay, ...courseDisplay]), chooseMove);
+  _rangeOriginMarker(t);
+  _rangeState.moveNodes=[..._moveHL];
+  _rangeBindHover();
+  _rangeLegend();
   // Les dessins restent visibles, mais ne capturent plus les clics destinés aux
   // cases bleues. Le token et les autres tokens restent au-dessus et interactifs.
   _setAnnotMovePassthrough(_moveHL.length > 0);
   VS.layers.grid.batchDraw();
 }
 export function _clearHL() {
+  VS.stage?.off('mousemove.vttRange touchmove.vttRange mouseleave.vttRange');
+  _rangeRemovePreview();
+  _rangeState?.legend?.remove();
+  _rangeState = null; _rangeHoverKey = null; _rangeTouchPreviewKey = null;
   _moveHL.forEach(r=>r.destroy());
   _moveHL=[];
   _setAnnotMovePassthrough(false);
@@ -3398,88 +3803,74 @@ function _toggleMultiSelect(id) {
 /** Surbrillance rouge des cases à portée d'attaque de t (sans clear — le caller nettoie). */
 function _showAttackRange(t) {
   if (!VS.activePage) return;
-  const K = window.Konva;
-  const options = _buildAttackOptions(t)
-    .map(o => ({ ...o, portee: Math.max(0, parseInt(o.portee) || 0) }))
-    .filter(o => !o.targetSelf && o.portee > 0);
+  const attackNodeStart=_moveHL.length;
+  const meta=_rangeState?.token?.id===t.id?_rangeState:_rangeWeaponMeta(t);
+  const { options, weapon, weaponRange, extendedRange } = meta;
   if (!options.length) return;
-  // Portée "naturelle" = celle de l'ARME du perso (option sans sortIdx et sans
-  // _itemAction). C'est ce que le joueur considère comme sa portée de base, même
-  // pour un grimoire portée 8. Fallback : plus courte portée si aucune arme
-  // identifiable (tokens enemy/sentinelle).
-  const weaponOpt = options.find(o => !o._itemAction && o.sortIdx === undefined && !o.targetSelf);
-  const weaponPortee = weaponOpt ? weaponOpt.portee : Math.min(...options.map(o => o.portee));
   const { cols, rows } = VS.activePage;
   const sd = _tokenDims(t);
-
-  // Métrique de distance par option : mêlée (portée=1) = Chebyshev, sinon Manhattan
-  const _reachByOpt = (dx, dy, portee) =>
-    (portee === 1 ? Math.max(dx, dy) : (dx + dy)) <= portee;
-
-  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
-    if (c >= t.col && c < t.col + sd.w && r >= t.row && r < t.row + sd.h) continue;
-    const dx = Math.max(0, Math.max(c, t.col) - Math.min(c, t.col + sd.w - 1));
-    const dy = Math.max(0, Math.max(r, t.row) - Math.min(r, t.row + sd.h - 1));
-
-    // Une case est ROUGE si elle est atteinte par l'arme principale.
-    // VIOLET pointillé si elle n'est atteinte que par des sorts/actions plus longues.
-    const reachedByWeapon = weaponOpt ? _reachByOpt(dx, dy, weaponPortee) : false;
-    let reachedByOther = false;
-    if (!reachedByWeapon) {
-      for (const o of options) {
-        if (o === weaponOpt) continue;
-        if (_reachByOpt(dx, dy, o.portee)) { reachedByOther = true; break; }
-      }
-    }
-    if (!reachedByWeapon && !reachedByOther) continue;
-
-    const isPrimary = reachedByWeapon;
-    const rect = isPrimary
-      // Portée principale (arme / attaque immédiate) — rouge plein
-      ? new K.Rect({ x:c*CELL+1.5, y:r*CELL+1.5, width:CELL-3, height:CELL-3, cornerRadius:5,
-          fill:'rgba(239,68,68,0.18)', stroke:'rgba(239,68,68,0.58)',
-          strokeWidth:1.4, listening:false })
-      // Portée étendue (sorts / actions longue distance uniquement) — violet pointillé
-      : new K.Rect({ x:c*CELL+1.5, y:r*CELL+1.5, width:CELL-3, height:CELL-3, cornerRadius:5,
-          fill:'rgba(167,139,250,0.10)', stroke:'rgba(167,139,250,0.5)',
-          strokeWidth:1.1, dash:[6,4], listening:false });
-    VS.layers.grid.add(rect); _moveHL.push(rect);
+  const weaponCells = weaponRange ? rangeAttackCells({ from:t, dims:sd, range:weaponRange, cols, rows }) : new Set();
+  const extendedAll = extendedRange > weaponRange
+    ? rangeAttackCells({ from:t, dims:sd, range:extendedRange, cols, rows }) : new Set();
+  const weaponContour=_rangeWithFootprint(weaponCells,t,sd);
+  const extendedContour=_rangeWithFootprint(extendedAll,t,sd);
+  const extendedCells = new Set([...extendedAll].filter(key => !weaponCells.has(key)));
+  const blueCells = new Set([
+    ...(_rangeState?.moveDisplay?.keys?.() || []),
+    ...(_rangeState?.courseDisplay?.keys?.() || []),
+  ]);
+  const weaponVeil = new Set([...weaponCells].filter(key => !blueCells.has(key)));
+  const extendedVeil = new Set([...extendedCells].filter(key => !blueCells.has(key)));
+  _rangeDrawCells(weaponVeil, 'rgba(239,68,68,.08)');
+  _rangeDrawContour(weaponContour, 'rgba(5,8,14,.55)', 4.2);
+  _rangeDrawContour(weaponContour, '#f87171', 1.9);
+  if (extendedCells.size) {
+    _rangeDrawCells(extendedVeil, 'rgba(167,139,250,.05)');
+    _rangeDrawContour(extendedContour, 'rgba(5,8,14,.55)', 4.2);
+    _rangeDrawContour(extendedContour, '#a78bfa', 1.6, [7,5]);
   }
-  // La cible atteignable est encadrée sur toute son empreinte. Le calcul reste
-  // bord à bord entre rectangles, donc les angles d'un 3×3 comptent réellement.
-  Object.values(VS.tokens || {}).forEach(entry => {
-    const target=entry?.data;
-    if (!target || target.id===t.id || target.pageId!==VS.activePage?.id) return;
-    const weaponReach = !!weaponOpt && _tokenAttackDistance(t, target, weaponPortee) <= weaponPortee;
-    const extendedReach = !weaponReach && options.some(o => _tokenAttackDistance(t, target, o.portee) <= o.portee);
-    if (weaponReach) _setReachableFootprint(target.id, 'weapon', true);
-    else if (extendedReach) _setReachableFootprint(target.id, 'extended', true);
-  });
+  _rangeReachableFrom(t, t, weaponRange, extendedRange, true);
+  if (_rangeState) {
+    Object.assign(_rangeState, { weaponRange, extendedRange, weaponLabel:weapon?.label || weapon?.name || 'Arme' });
+    _rangeState.attackNodes=_moveHL.slice(attackNodeStart);
+    _rangeState.restoreReachable = () => _rangeReachableFrom(t, t, weaponRange, extendedRange, true);
+  }
   VS.layers.grid.batchDraw();
   VS.layers.token?.batchDraw();
 }
+
+function _movementDestination(token, col, row, { includeCourse = false } = {}) {
+  if (!VS.activePage) return null;
+  if (col === token.col && row === token.row) return { c:col, r:row, cost:0, d:0, kind:'move', path:[[col,row]] };
+  if (STATE.isAdmin) {
+    const cost=Math.abs(col-token.col)+Math.abs(row-token.row);
+    return { c:col, r:row, cost, d:cost, kind:'move', path:rangeStairs(token.col,token.row,col,row) };
+  }
+  const combatLimited = !STATE.isAdmin && !!VS.session?.combat?.active;
+  const base = Math.max(0, Number(_live(token).displayMovement) || 6);
+  const maximum = base + (Number(token.bonusMvt) || 0);
+  const remaining = combatLimited
+    ? Math.max(0, maximum - (Number(token.movedCells) || 0))
+    : Math.max(VS.activePage.cols * VS.activePage.rows, 1);
+  const courseExtra = combatLimited && includeCourse && Number(token.bonusMvt || 0) === 0 ? base : 0;
+  const cells = rangeMoveCells({ token:{...token,..._tokenDims(token)}, cols:VS.activePage.cols, rows:VS.activePage.rows,
+    remaining, courseExtra, walls:STATE.isAdmin ? [] : _rangeWalls(), mode:_rangePathMode() });
+  return cells.get(`${col},${row}`) || null;
+}
+
 async function _moveTo(id, col, row) {
   const cur = VS.tokens[id]?.data;
   if (!cur || !_canControlToken(cur)) {
     showNotif('Tu ne peux pas déplacer ce token.', 'info');
     return false;
   }
-  // Blocage par les murs (joueurs seulement)
-  if (!STATE.isAdmin && (VS.activePage?.walls||[]).length) {
-    if (cur && fogWallBlocksPath(cur.col, cur.row, col, row, VS.activePage.walls)) {
-      showNotif('🧱 Chemin bloqué !', 'error');
-      return;
-    }
-  }
-  // Limite de mouvement en combat (joueurs seulement)
-  if (!STATE.isAdmin && VS.session?.combat?.active && cur) {
-    const d = Math.abs(col - cur.col) + Math.abs(row - cur.row);
-    const maxMvt = (_live(cur).displayMovement ?? 6) + (cur.bonusMvt || 0);
-    const rem = maxMvt - (cur.movedCells || 0);
-    if (d > rem) {
-      showNotif(rem <= 0 ? 'Plus de mouvement ce tour !' : `Trop loin ! (${rem} case${rem!==1?'s':''} restante${rem!==1?'s':''})`, 'error');
-      return;
-    }
+  const destination = _movementDestination(cur, col, row);
+  if (!destination || destination.kind === 'blocked') {
+    const base = Math.max(0, Number(_live(cur).displayMovement) || 6);
+    const rem = Math.max(0, base + (Number(cur.bonusMvt)||0) - (Number(cur.movedCells)||0));
+    if (destination?.kind === 'blocked') showNotif(_rangePathMode()==='path' ? '🧱 Inaccessible par les ouvertures.' : '🧱 Chemin bloqué !', 'error');
+    else showNotif(rem <= 0 ? 'Plus de mouvement ce tour !' : `Trop loin ! (${rem} case${rem!==1?'s':''} restante${rem!==1?'s':''})`, 'error');
+    return false;
   }
   let patch = {col, row};
   const moved = !!cur && (col !== cur.col || row !== cur.row);
@@ -3487,8 +3878,7 @@ async function _moveTo(id, col, row) {
     patch.moveOrigin = _combatMoveOrigin(cur);
   }
   if (!STATE.isAdmin && VS.session?.combat?.active && moved) {
-    const d = Math.abs(col - cur.col) + Math.abs(row - cur.row);
-    patch.movedCells = (cur.movedCells || 0) + d;
+    patch.movedCells = (cur.movedCells || 0) + destination.cost;
     patch.movedThisTurn = true;
   }
   patch = _stampTurn(cur, patch);
@@ -3554,6 +3944,7 @@ async function _vttUndoMove(id) {
     row: Number(origin.row) || 0,
     movedCells: Number(origin.movedCells) || 0,
     movedThisTurn: !!origin.movedThisTurn,
+    bonusMvt: 0,
     moveOrigin: deleteField(),
   });
   const previous = {
@@ -3561,6 +3952,7 @@ async function _vttUndoMove(id) {
     row: token.row,
     movedCells: token.movedCells,
     movedThisTurn: token.movedThisTurn,
+    bonusMvt: token.bonusMvt,
     moveOrigin: token.moveOrigin,
     ...(Object.hasOwn(patch, 'turnEpoch') ? { turnEpoch: token.turnEpoch } : {}),
   };
@@ -3568,6 +3960,7 @@ async function _vttUndoMove(id) {
   token.row = patch.row;
   token.movedCells = patch.movedCells;
   token.movedThisTurn = patch.movedThisTurn;
+  token.bonusMvt = 0;
   if (Object.hasOwn(patch, 'turnEpoch')) token.turnEpoch = patch.turnEpoch;
   delete token.moveOrigin;
   const dims = _tokenDims(token);
@@ -3581,7 +3974,9 @@ async function _vttUndoMove(id) {
   fogUpdateSoon(VS.activePage, VS.tokens, STATE.isAdmin);
   try {
     await updateDoc(_tokRef(id), patch);
-    showNotif('Déplacement annulé : position et mouvement restaurés.', 'success');
+    showNotif(previous.bonusMvt > 0
+      ? 'Déplacement et Course annulés : position et mouvement restaurés.'
+      : 'Déplacement annulé : position et mouvement restaurés.', 'success');
   } catch (error) {
     Object.assign(token, previous);
     entry.shape?.to({
@@ -12928,6 +13323,7 @@ function _initListeners() {
   // tokens existants.
   const makeTokensHandler = (inScope, { marksReady = false } = {}) => snap => {
     let estimateTargetsChanged = false;
+    let selectedTokenChanged = false;
     const ordinalPeerKeys = new Set();
     snap.docChanges().forEach(ch => {
      try {
@@ -12984,7 +13380,7 @@ function _initListeners() {
         } else {
           _patchShape(id);
         }
-        if (VS.selected===id) { _renderInspectorSoon(); _refreshRanges(id); }
+        if (VS.selected===id) { _renderInspectorSoon(); selectedTokenChanged = true; }
       } else {
         VS.tokens[id]={data,shape:null};
         if (VS.activePage&&data.pageId===VS.activePage.id&&(data.visible||STATE.isAdmin)) {
@@ -13002,6 +13398,14 @@ function _initListeners() {
     }
     _syncTokenStackVisuals();
     _vttRefreshChatPortraits();
+    // Attendre que tous les changements du snapshot soient appliqués avant de
+    // recalculer les portées. C'est indispensable quand le token sélectionné
+    // rejoint une case déjà occupée : la pile et les positions doivent former
+    // un état cohérent au moment du calcul.
+    if (selectedTokenChanged && VS.selected) {
+      VS.tokens[VS.selected]?.shape?.moveToTop();
+      _refreshRanges(VS.selected, VS.tokens[VS.selected]?.data);
+    }
     if (estimateTargetsChanged) _vttRefreshCombatHpEstimates();
     // Joueur : dès que son token apparaît/arrive sur la carte active, on affiche sa
     // fiche sans clic (gardé : seulement si rien n'est sélectionné).
@@ -13464,10 +13868,10 @@ function _vttRefreshToolPanels() {
 // ── Courir : double le mouvement de base pour ce tour ───────────────
 async function _vttCourir(id) {
   const tok = VS.tokens[id]?.data;
-  if (!tok || !VS.session?.combat?.active) return;
-  if (tok.bonusMvt > 0) { showNotif('Course déjà utilisée ce tour', 'error'); return; }
+  if (!tok || !VS.session?.combat?.active) return false;
+  if (tok.bonusMvt > 0) { showNotif('Course déjà utilisée ce tour', 'error'); return false; }
   const bonus = _live(tok).displayMovement ?? 6;
-  const patch = _stampTurn(tok, { bonusMvt: bonus });
+  const patch = _stampTurn(tok, { bonusMvt: bonus, moveOrigin:_combatMoveOrigin(tok) });
   const previous = Object.fromEntries(Object.keys(patch).map(key => [key, tok[key]]));
   _vttPatchTokenOptimistically(id, patch);
   try {
@@ -13476,9 +13880,11 @@ async function _vttCourir(id) {
     _vttPatchTokenOptimistically(id, previous);
     console.error('[vtt] course non appliquée', error);
     showNotif('Erreur', 'error');
-    return;
+    return false;
   }
+  if (VS.selected===id) _refreshRanges(id, tok);
   showNotif(`🏃 Course ! +${bonus} cases de mouvement`, 'success');
+  return true;
 }
 
 // ── Déplacement clavier (flèches + pavé numérique) ──────────────────
@@ -13639,21 +14045,12 @@ function _moveSelectedBy(dc, dr, selectionIds = null) {
   }
 
   for (const move of plan.moves) {
-    if (!STATE.isAdmin && (page.walls || []).length
-        && fogWallBlocksPath(move.token.col, move.token.row, move.col, move.row, page.walls)) {
-      showNotif(ids.length>1 ? '🧱 Un token du groupe est bloqué par un obstacle.' : '🧱 Passage bloqué par un obstacle.', 'error');
+    move.rangeDestination=_movementDestination(move.token,move.col,move.row);
+    if (!move.rangeDestination || move.rangeDestination.kind==='blocked') {
+      showNotif(move.rangeDestination?.kind==='blocked'
+        ? (ids.length>1 ? '🧱 Un token du groupe est bloqué par un obstacle.' : '🧱 Passage bloqué par un obstacle.')
+        : (ids.length>1 ? 'Déplacement groupé impossible pour un token.' : 'Plus de mouvement ce tour !'), 'error');
       return;
-    }
-    if (!STATE.isAdmin && VS.session?.combat?.active) {
-      const maximum=(_live(move.token).displayMovement??6)+(move.token.bonusMvt||0);
-      const remaining=maximum-(move.token.movedCells||0);
-      if (move.distance>remaining) {
-        const suffix=`${remaining} case${remaining!==1?'s':''} restante${remaining!==1?'s':''}`;
-        showNotif(ids.length>1
-          ? (remaining<=0 ? 'Un token du groupe n’a plus de mouvement ce tour.' : `Déplacement groupé impossible : ${suffix} pour un token.`)
-          : (remaining<=0 ? 'Plus de mouvement ce tour !' : `Trop loin ! (${suffix})`), 'error');
-        return;
-      }
     }
   }
 
@@ -13662,7 +14059,7 @@ function _moveSelectedBy(dc, dr, selectionIds = null) {
     const patch={ col:move.col, row:move.row };
     if (VS.session?.combat?.active) patch.moveOrigin=_combatMoveOrigin(move.token);
     if (!STATE.isAdmin && VS.session?.combat?.active) {
-      patch.movedCells=(move.token.movedCells||0)+move.distance;
+      patch.movedCells=(move.token.movedCells||0)+move.rangeDestination.cost;
       patch.movedThisTurn=true;
     }
     return { ...move, patch:_stampTurn(move.token, patch) };

@@ -22,7 +22,7 @@ import PAGES from './pages.js';
 import { _esc, _norm, _searchIncludes } from '../shared/html.js';
 import { consumeTargetEntity } from '../shared/entity-navigation.js';
 import { recordRecentNavigation } from '../shared/recent-navigation.js';
-import { getItemStatBonus, sortCharactersForDisplay, getMyCharacters, getModFromScore,
+import { getItemStatBonus, sortCharactersForDisplay, getModFromScore,
   computeEquipStatsBonus, computeEquipDerivedBonus, formatItemBonusText,
   calcPVMax, calcPMMax, calcCA, calcVitesse, calcDeckMax } from '../shared/char-stats.js';
 // Réutilisation DU moteur de sorts perso pour l'onglet Sorts des PNJ (rendu
@@ -505,7 +505,18 @@ function _npcMyCharacters() {
   const uid = STATE.isAdmin && _npcView === 'player'
     ? (_npcPreviewUid || _npcCharacterOwnerUid(_npcLinkableCharacters()[0]))
     : STATE.user?.uid;
-  return uid ? getMyCharacters(_npcLinkableCharacters(), uid) : [];
+  return uid ? sortCharactersForDisplay(_npcLinkableCharacters().filter(character => _npcCharacterAssignedToUid(character, uid))) : [];
+}
+
+function _npcCharacterAssignedToUid(character, uid) {
+  if (!character || !uid) return false;
+  if ([character.uid, character.ownerUid, character.userId, character.ownerId].includes(uid)) return true;
+  if (Array.isArray(character.controlDelegates) && character.controlDelegates.includes(uid)) return true;
+  const profile = _playerProfiles.find(item => {
+    const charId = item?.charId || item?.characterId || item?.persoId || item?.linkedCharId || '';
+    return charId === character.id;
+  });
+  return !!profile && [profile.uid, profile.userId, profile.ownerUid, profile.ownerId, profile.id].includes(uid);
 }
 
 function _npcPlayerChoices() {
@@ -532,6 +543,15 @@ function _npcExceptionFor(npcId, charId) {
 function _npcFeelingFor(npcId, character) {
   const npcKey = String(npcId || '').trim();
   if (!npcKey) return null;
+  const stored = _npcExceptionFor(npcKey, character?.id);
+  if (stored && ['feelingSent', 'feelingSentiment', 'feelingNote'].some(key => Object.hasOwn(stored, key))) {
+    return {
+      sent: stored.feelingSent || '',
+      sentiment: stored.feelingSentiment || '',
+      note: stored.feelingNote || '',
+      uid: stored.feelingUid || '',
+    };
+  }
   return (character?.relations || []).find(r => String(r?.npcId || '').trim() === npcKey) || null;
 }
 
@@ -575,7 +595,8 @@ function _npcAffiUiSignature() {
   const links = _affiPerso.map(link => [
     link.id || '', link.npcId || '', link.charId || '', link.niveau ?? null,
     !!link.secret, link.typeId || '', link.typeLabel || '',
-    link.notePublique || '', link.note || '',
+    link.notePublique || '', link.note || '', link.feelingSent || '',
+    link.feelingSentiment || '', link.feelingNote || '', link.feelingUid || '',
   ]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   const types = _affiniteTypes.map(type => [
     type.id || '', type.label || '', type.emoji || '', type.couleur || '', Number(type.order) || 0,
@@ -1238,7 +1259,7 @@ function _renderRelationChipPublic(a) {
 // Panneau des relations (colonne droite)
 function _renderRelationsPanel(n) {
   const persoList = _affiPerso.filter(a => a.npcId === n.id);
-  const myChars   = getMyCharacters(STATE.characters, STATE.user?.uid);
+  const myChars   = _npcMyCharacters();
   const myAffi    = persoList.filter(a => myChars.some(c => c.id === a.charId));
 
   if (STATE.isAdmin) {
@@ -1728,10 +1749,23 @@ function _renderNpcBastionPlayer(n) {
   return `<section class="npc-rd-bastion is-readonly"><header class="npc-rd-bastion-head"><div><h2>${_npcUiIcon('bastion')} Bastion</h2><p>Profil de recrutement</p></div><span class="npc-rd-bastion-state${canRecruit ? ' is-on' : ''}">${canRecruit ? 'Recrutable' : 'Bientôt recrutable'}</span></header>${activities.length ? `<div class="npc-rd-bastion-activities">${activities.map(label => `<span class="is-on">${_esc(label)}</span>`).join('')}</div>` : ''}<div class="npc-rd-bastion-fields">${n.passif ? `<div><span>Passif d’employé</span><p>${_esc(n.passif)}</p></div>` : ''}${n.salaireSuggere ? `<div class="npc-rd-bastion-salary"><span>Salaire</span><b>${parseInt(n.salaireSuggere, 10) || 0} <small>or / sem.</small></b></div>` : ''}</div><footer>${canRecruit ? 'Ce PNJ peut rejoindre le Bastion.' : 'Recrutable une fois Allié.'}</footer></section>`;
 }
 
+function _renderNpcPlayerHistory(n) {
+  const fullHistory = Array.isArray(n.affinite?.historique) ? n.affinite.historique : [];
+  if (!fullHistory.length) return '';
+  const expanded = _npcExpandedHistories.has(n.id);
+  const history = (expanded ? fullHistory : fullHistory.slice(-4)).slice().reverse();
+  return `<section class="npc-rd-card npc-rd-player-history">
+    <div class="npc-rd-cardhead"><div><h2>${_npcUiIcon('clock')} Historique des événements</h2><p>Les événements qui ont fait évoluer la relation du groupe.</p></div><span>${fullHistory.length}</span></div>
+    <div class="npc-rd-event-list">${history.map(entry => { const delta = Number(entry.delta) || 0; return `<div><span class="npc-rd-delta${delta < 0 ? ' is-neg' : delta > 0 ? ' is-pos' : ''}">${_formatRelationDelta(delta)}</span><span class="npc-rd-event-text">${_esc(entry.texte || entry.text || '')}</span><time>${_esc(entry.date || '')}</time></div>`; }).join('')}</div>
+    ${fullHistory.length > 4 ? `<button type="button" class="npc-rd-history-more" data-action="npcToggleRelationHistory" data-id="${_esc(n.id)}">${expanded ? 'Réduire' : `Tout afficher · ${fullHistory.length}`}</button>` : ''}
+  </section>`;
+}
+
 function _renderNpcPlayerSheet(n) {
   const myChars = _npcMyCharacters();
   const myRows = _npcCrossRows(n).filter(row => myChars.some(c => c.id === row.character.id));
   return `<section class="npc-rd-card npc-rd-known"><small>Ce que l’on sait de ${_esc(n.nom || 'ce PNJ')}</small><p>${_esc(n.description || 'Rien de particulier n’est encore connu.')}</p></section>
+    ${_renderNpcPlayerHistory(n)}
     <section class="npc-rd-card"><div class="npc-rd-cardhead"><div><h2>Toi et ${_esc(n.nom || 'ce PNJ')}</h2><p>Ton ressenti est visible par tout le groupe et par le MJ.</p></div></div>${myRows.length ? myRows.map(row => `<div class="npc-rd-player-relation"><div class="npc-rd-player-relhead"><b>${_esc(row.character.nom || '?')}</b><span>${_renderNpcLevelChip(_npcExceptionLevel(n, row.exception, { player: true }) ?? _affiniteNiveau(n), { inherited: _npcExceptionLevel(n, row.exception, { player: true }) == null })}</span></div>${_renderNpcCrossEditor(n, row.character, row.exception, row.feeling, false)}</div>`).join('') : '<p class="npc-rd-empty">Aucun personnage lié à ce compte.</p>'}</section>
     ${_renderNpcCrossRelations(n, false)}
     ${_renderNpcBastionPlayer(n)}`;
@@ -2508,7 +2542,7 @@ function _renderNpcPeopleDesk(n) {
 
 function _renderNpcSpecificRelationsDesk(n) {
   const persoList = _affiPerso.filter(a => a.npcId === n.id);
-  const myChars = getMyCharacters(STATE.characters, STATE.user?.uid);
+  const myChars = _npcMyCharacters();
   const myAffi = persoList.filter(a => myChars.some(c => c.id === a.charId));
 
   if (STATE.isAdmin) {
@@ -5941,6 +5975,7 @@ async function _npcSaveException(el) {
     || !!candidate.typeId
     || !!String(candidate.notePublique || '').trim()
     || !!String(candidate.note || '').trim()
+    || ['feelingSent', 'feelingSentiment', 'feelingNote'].some(key => Object.hasOwn(candidate, key))
   );
   const candidate = {
     ...(entry || { niveau: null, secret: false, typeId: null, typeLabel: '', notePublique: '', note: '' }),
@@ -5993,6 +6028,17 @@ async function _npcSaveException(el) {
 async function _npcRemoveException(btn) {
   const id = btn?.dataset?.id;
   if (!id) return;
+  const entry = _affiPerso.find(item => item.id === id);
+  if (entry && ['feelingSent', 'feelingSentiment', 'feelingNote'].some(key => Object.hasOwn(entry, key))) {
+    const patch = { niveau: null, secret: false, typeId: null, typeLabel: '', notePublique: '', note: '' };
+    const previous = { ...entry };
+    Object.assign(entry, patch);
+    if (!await trySave('npc_affinites', id, patch)) Object.assign(entry, previous);
+    else _npcFlashSaved();
+    _refreshNpcAffiUi({ list: true });
+    _npcCrossOpen = '';
+    return;
+  }
   await deleteAffinitePerso(id);
   _npcCrossOpen = '';
 }
@@ -6002,7 +6048,7 @@ async function _npcSaveFeeling(el) {
   const character = _npcLinkCharacter(charId);
   const n = _npcs.find(item => item.id === npcId);
   if (!character || !n || !field) return;
-  if (!STATE.isAdmin && _npcCharacterOwnerUid(character) !== STATE.user?.uid) return;
+  if (!STATE.isAdmin && !_npcCharacterAssignedToUid(character, STATE.user?.uid)) return;
   const choiceAction = !el?.tagName;
   const previousRelations = Array.isArray(character.relations) ? character.relations : [];
   const relations = previousRelations.slice();
@@ -6019,6 +6065,24 @@ async function _npcSaveFeeling(el) {
   } else if (index >= 0) relations[index] = next;
   else relations.push(next);
   character.relations = relations;
+  let entry = _npcExceptionFor(npcId, charId);
+  const affinityPatch = {
+    feelingSent: next.sent || '',
+    feelingSentiment: next.sentiment || '',
+    feelingNote: next.note || '',
+    feelingUid: STATE.user?.uid || '',
+  };
+  const previousEntry = entry ? { ...entry } : null;
+  if (entry) Object.assign(entry, affinityPatch);
+  else {
+    const id = `feeling_${encodeURIComponent(npcId)}_${encodeURIComponent(charId)}`;
+    entry = {
+      id, npcId, charId, charNom: character.nom || '', charPhoto: _charPortraitSrc(character),
+      niveau: null, secret: false, typeId: null, typeLabel: '', notePublique: '', note: '',
+      ...affinityPatch,
+    };
+    _affiPerso.push(entry);
+  }
   if (choiceAction) {
     const editorUpdated = _refreshNpcFeelingEditors(npcId, charId);
     const summaryUpdated = _refreshNpcCrossSummary(npcId, charId);
@@ -6026,8 +6090,13 @@ async function _npcSaveFeeling(el) {
   } else if (!_refreshNpcCrossSummary(npcId, charId)) {
     _refreshActivePanel();
   }
-  if (!await trySave('characters', charId, { relations })) {
+  const affinitySaved = previousEntry
+    ? await trySave('npc_affinites', entry.id, affinityPatch)
+    : await saveDoc('npc_affinites', entry.id, entry).then(() => true).catch(error => { notifySaveError(error); return false; });
+  if (!affinitySaved) {
     character.relations = previousRelations;
+    if (previousEntry) Object.assign(entry, previousEntry);
+    else _affiPerso = _affiPerso.filter(item => item !== entry);
     if (choiceAction) {
       const editorUpdated = _refreshNpcFeelingEditors(npcId, charId);
       const summaryUpdated = _refreshNpcCrossSummary(npcId, charId);
@@ -6037,6 +6106,12 @@ async function _npcSaveFeeling(el) {
     }
     return;
   }
+  // Compatibilité avec le journal personnage et les anciennes vues. Cette copie
+  // est secondaire : un ancien rattachement peut la refuser sans empêcher le
+  // ressenti canonique enregistré dans npc_affinites.
+  const canWriteLegacy = STATE.isAdmin || character.uid === STATE.user?.uid
+    || (Array.isArray(character.controlDelegates) && character.controlDelegates.includes(STATE.user?.uid));
+  if (canWriteLegacy) void saveDoc('characters', charId, { relations }).catch(() => {});
   _npcFlashSaved();
   if (_filterMine) _refreshList({ keepScroll: true });
 }
