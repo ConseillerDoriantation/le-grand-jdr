@@ -15,6 +15,21 @@ test('les routes PNJ utilisent les trois onglets et redirigent les anciennes val
   assert.match(source, /return `\$\{id\}\/\$\{safeTab\}`/);
 });
 
+test('la création d un PNJ reste unique malgré le snapshot local et les doubles clics', async () => {
+  const source = await readNpcs();
+  assert.match(source, /let _npcCreatePending = false/);
+  assert.match(source, /async function _npcCreate\([^)]*\)[\s\S]*if \(!STATE\.isAdmin \|\| _npcCreatePending\) return[\s\S]*_npcs\.some\(n => n\.id === entry\.id\)/);
+  assert.match(source, /finally \{ _npcCreatePending = false; \}/);
+});
+
+test('Nouveau PNJ ouvre directement une fiche sans formulaire intermédiaire', async () => {
+  const source = await readNpcs();
+  assert.match(source, /class="npc-rd-new" data-action="npcCreate">＋ Nouveau PNJ/);
+  assert.match(source, /event\.key\.toLowerCase\(\) === 'n'[\s\S]*_npcCreate\(\)/);
+  assert.match(source, /function _npcCreateFromSearch\(\)[\s\S]*return _npcCreate\(\{ nom \}\)/);
+  assert.doesNotMatch(source, /npcExpressCreate|_renderNpcExpressForm/);
+});
+
 test('une exception avec niveau null suit la posture du groupe', async () => {
   const source = await readNpcs();
   assert.match(source, /function _npcExceptionLevel[\s\S]*return raw === null \|\| raw === undefined \|\| raw === ''[\s\S]*\? null/);

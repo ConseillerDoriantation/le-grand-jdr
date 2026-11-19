@@ -18,6 +18,7 @@
 import { STATE } from '../core/state.js';
 import { registerActions } from '../core/actions.js';
 import { getDocData, getDocDataSilent, updateInCol, loadCollection, loadCollectionWhere, replaceDoc, saveDoc, addToCol, deleteFromCol, mutateInCol } from '../data/firestore.js';
+import { runDocsTransaction } from '../data/firestore-transactions.js';
 import { tryDoc } from '../shared/crud.js';
 import { watch, watchRecent, watchDoc } from '../shared/realtime.js';
 import { showNotif, notifySaveError } from '../shared/notifications.js';
@@ -47,7 +48,7 @@ import {
   sortBastionWallPosts,
   toggleBastionWallReaction,
 } from '../shared/bastion-wall.js';
-import { useGold } from '../shared/economy.js';
+import { buildGoldAccount, useGold } from '../shared/economy.js';
 import { inventoryHistoryPayload, makeInventoryHistoryEntry } from '../shared/inventory-history.js';
 import { shouldRestoreLegacyBastionCatalog } from '../shared/bastion-catalog.js';
 import { bastionEqualShare, bastionRoomProjects, roomFundingPlan, roomInvestmentAvailable, roomInvestmentContributors as investmentContributors } from '../shared/bastion-investments.js';
@@ -79,6 +80,7 @@ const STORE = {
   addingCustomRoom: false,
   investments: [],             // cagnotte ciblée par salle (1 doc / joueur / perso / salle)
   investmentInProgress: false,
+  transferInProgress: false,
   tab:            null,          // onglet actif : 'salles' | 'mur' | 'coffre' (résolu via _bsGetTab)
   roomSel:        null,          // slug de la salle sélectionnée (fiche de droite)
   roomFilter:     'all',         // 'all'|'built'|'funding'|'building'|'todo'
@@ -2221,6 +2223,7 @@ function _bastionRefreshTransfer(direction) {
 }
 
 async function _bastionDoTransfer(direction) {
+  if (STORE.transferInProgress) return;
   const isDeposit = direction === 'deposit';
   const charId = document.getElementById('bas-tx-char')?.value;
   const amount = parseInt(document.getElementById('bas-tx-montant')?.value) || 0;
@@ -2229,28 +2232,89 @@ async function _bastionDoTransfer(direction) {
   if (amount <= 0) { showNotif('Montant invalide.', 'error'); return; }
 
   const monOr = calcOr(char);
-  const bastionOr = STORE.bastion?.or || 0;
+  const bastionOr = Math.max(0, Number(STORE.bastion?.or) || 0);
   if (isDeposit && amount > monOr) { showNotif(`${char.nom||'?'} n'a que ${monOr} or.`, 'error'); return; }
   if (!isDeposit && amount > bastionOr) { showNotif(`Le trésor n'a que ${bastionOr} or.`, 'error'); return; }
 
+  STORE.transferInProgress = true;
+  const submit = document.querySelector('[data-action="_bastionDoTransfer"]');
+  if (submit) submit.disabled = true;
   try {
-    // 1. Mouvement côté perso (via le module economy unifié)
     const reason = isDeposit ? 'Or versé au Bastion' : 'Or retiré du Bastion';
     const delta  = isDeposit ? -amount : +amount;
-    const res = await useGold(char.id, delta, reason, { charObj: char });
-    if (!res.ok) { showNotif(res.error || 'Erreur transaction', 'error'); return; }
-
-    // 2. Mouvement côté bastion + historique
-    const b = { ...STORE.bastion };
-    b.or = Math.max(0, (b.or || 0) + (isDeposit ? amount : -amount));
     const verb = isDeposit ? 'verse' : 'retire';
     const ico  = isDeposit ? '💰' : '💸';
-    _addHistorique(b, isDeposit ? 'depot' : 'retrait', `${ico} ${char.nom || 'Un héros'} ${verb} ${amount} or${isDeposit ? ' au bastion' : ' du trésor'}`);
-    await _save(b);
+    const transferAt = Date.now();
+    const transferId = `gold_${transferAt}_${Math.random().toString(36).slice(2, 9)}`;
+    const result = await runDocsTransaction([
+      { col: 'bastion', id: 'main' },
+      { col: 'characters', id: char.id },
+    ], ([freshBastion, freshChar]) => {
+      if (!freshBastion || !freshChar) throw new Error('Données du transfert introuvables.');
+      const uid = STATE.user?.uid || '';
+      const canControl = STATE.isAdmin || freshChar.uid === uid
+        || (Array.isArray(freshChar.controlDelegates) && freshChar.controlDelegates.includes(uid));
+      if (!canControl) throw new Error('Ce personnage ne peut pas effectuer ce transfert.');
+
+      const currentCharacterGold = calcOr(freshChar);
+      const currentBastionGold = Math.max(0, Number(freshBastion.or) || 0);
+      if (isDeposit && amount > currentCharacterGold) throw new Error(`${freshChar.nom || 'Ce personnage'} n’a plus assez d’or.`);
+      if (!isDeposit && amount > currentBastionGold) throw new Error('Le trésor ne contient plus assez d’or.');
+
+      const nextBastionGold = currentBastionGold + (isDeposit ? amount : -amount);
+      const nextCompte = buildGoldAccount(freshChar, [{ delta, reason }], {
+        now: transferAt,
+        date: new Date(transferAt).toLocaleDateString('fr-FR'),
+      });
+      const transfer = {
+        id: transferId,
+        uid,
+        charId: char.id,
+        direction: isDeposit ? 'deposit' : 'withdraw',
+        amount,
+        bastionBefore: currentBastionGold,
+        bastionAfter: nextBastionGold,
+        characterBefore: currentCharacterGold,
+        characterAfter: calcOr({ ...freshChar, compte: nextCompte }),
+        at: transferAt,
+      };
+      const historyEntry = {
+        week: freshBastion.semaine,
+        type: isDeposit ? 'depot' : 'retrait',
+        msg: _repairBastionText(`${ico} ${freshChar.nom || 'Un héros'} ${verb} ${amount} or${isDeposit ? ' au bastion' : ' du trésor'}`),
+        ts: transferAt,
+        transferId,
+      };
+      const historique = [historyEntry, ...(freshBastion.historique || [])].slice(0, 30);
+      return {
+        writes: [
+          { col: 'bastion', id: 'main', data: { or: nextBastionGold, historique, lastGoldTransfer: transfer } },
+          { col: 'characters', id: char.id, data: { compte: nextCompte, bastionGoldTransfer: transfer } },
+        ],
+        result: { or: nextBastionGold, historique, compte: nextCompte, transfer },
+      };
+    });
+
+    // Retour immédiat sans attendre les deux snapshots temps réel.
+    char.compte = result.compte;
+    char.bastionGoldTransfer = result.transfer;
+    STORE.bastion = {
+      ...STORE.bastion,
+      or: result.or,
+      historique: result.historique,
+      lastGoldTransfer: result.transfer,
+    };
 
     closeModal();
+    _renderPage();
     showNotif(`✓ ${amount} or ${isDeposit ? 'versés' : 'retirés'}.`, 'success');
-  } catch (e) { notifySaveError(e); }
+  } catch (e) {
+    notifySaveError(e);
+    showNotif('Transfert annulé : aucun or n’a été déplacé.', 'error');
+  } finally {
+    STORE.transferInProgress = false;
+    if (submit?.isConnected) submit.disabled = false;
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

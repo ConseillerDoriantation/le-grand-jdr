@@ -304,6 +304,50 @@ function canControlAdventureCharacter(adventureId, charId) {
               .get("controlDelegates", []).hasAny([request.auth.uid])
           ));
 }
+// Transfert d'or Bastion ↔ personnage : les deux soldes doivent être écrits
+// dans la même transaction. Le marqueur identique sur les deux documents lie
+// les écritures et interdit qu'un crédit personnage survive sans débit du trésor.
+function bastionGoldTransferAllowed(adventureId, before, after) {
+  let transfer = after.get('lastGoldTransfer', {});
+  let charId = transfer.get('charId', '');
+  let charPath = /databases/$(database)/documents/adventures/$(adventureId)/characters/$(charId);
+  let beforeOr = before.get('or', 0);
+  let afterOr = after.get('or', 0);
+  let charTransfer = getAfter(charPath).data.get('bastionGoldTransfer', {});
+  return inAdventure(adventureId) &&
+    charId is string &&
+    charId != '' &&
+    exists(charPath) &&
+    existsAfter(charPath) &&
+    canControlAdventureCharacter(adventureId, charId) &&
+    after.diff(before).affectedKeys().hasOnly(['or', 'historique', 'lastGoldTransfer']) &&
+    transfer.get('id', '') is string &&
+    transfer.get('id', '') != '' &&
+    transfer.get('id', '') != before.get('lastGoldTransfer', {}).get('id', '') &&
+    transfer.get('uid', '') == request.auth.uid &&
+    transfer.get('amount', 0) is int &&
+    transfer.get('amount', 0) > 0 &&
+    transfer.get('amount', 0) <= 1000000 &&
+    transfer.get('bastionBefore', -1) == beforeOr &&
+    transfer.get('bastionAfter', -1) == afterOr &&
+    afterOr >= 0 &&
+    (
+      (transfer.get('direction', '') == 'deposit' && afterOr == beforeOr + transfer.amount) ||
+      (transfer.get('direction', '') == 'withdraw' && beforeOr >= transfer.amount && afterOr == beforeOr - transfer.amount)
+    ) &&
+    after.get('historique', []) is list &&
+    after.historique.size() > 0 &&
+    after.historique.size() <= 30 &&
+    after.historique[0].get('transferId', '') == transfer.id &&
+    getAfter(charPath).data.diff(get(charPath).data).affectedKeys()
+      .hasOnly(['compte', 'bastionGoldTransfer']) &&
+    getAfter(charPath).data.get('compte', {}) != get(charPath).data.get('compte', {}) &&
+    charTransfer.get('id', '') == transfer.id &&
+    charTransfer.get('uid', '') == request.auth.uid &&
+    charTransfer.get('charId', '') == charId &&
+    charTransfer.get('amount', 0) == transfer.amount &&
+    charTransfer.get('direction', '') == transfer.direction;
+}
 function canControlVttToken(adventureId, tokenId) {
   let tokenPath = /databases/$(database)/documents/adventures/$(adventureId)/vttTokens/$(tokenId);
   let token = get(tokenPath).data;
@@ -653,7 +697,12 @@ match /adventures/{adventureId} {
   match /recipes/{id}           { allow read: if premiumFeatureAllowed(adventureId); allow write: if premiumFeatureWriteAllowed(adventureId); }
   match /combat_styles/{id}     { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
   match /order/{id}             { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
-  match /bastion/{id}           { allow read: if inAdventure(adventureId); allow write: if isAdvAdmin(adventureId); }
+  match /bastion/{id} {
+    allow read: if inAdventure(adventureId);
+    allow create, delete: if isAdvAdmin(adventureId);
+    allow update: if isAdvAdmin(adventureId) ||
+      (id == 'main' && bastionGoldTransferAllowed(adventureId, resource.data, request.resource.data));
+  }
   // Cagnotte ciblée des salles : un document cumulé par joueur/personnage/salle.
   // Les joueurs ne peuvent qu'augmenter leur propre contribution ; sa dépense
   // effective reste pilotée par le document bastion/main réservé au MJ.

@@ -50,9 +50,6 @@
 .npc-rd-roster { position: sticky; top: 76px; height: calc(100vh - 94px); min-height: 520px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--rd-line); border-radius: 18px; background: rgba(10, 19, 31, .94); }
 .npc-rd-new { margin: 14px 14px 8px; min-height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 13px; border: 1px dashed rgba(79, 140, 255, .42); border-radius: 11px; color: #78a9ff; background: rgba(79, 140, 255, .055); font-size: .78rem; font-weight: 800; cursor: pointer; }
 .npc-rd-page kbd { min-width: 18px; padding: 2px 5px; border: 1px solid rgba(145, 164, 191, .18); border-radius: 4px; color: #6f829e; background: #111d2b; font-family: var(--font-body, sans-serif); font-size: 10px; font-weight: 600; line-height: 1; text-align: center; }
-.npc-rd-express { margin: 0 14px 8px; padding: 10px; display: grid; grid-template-columns: 1fr auto; gap: 7px; border: 1px solid rgba(79, 140, 255, .25); border-radius: 12px; background: #0d1827; }
-.npc-rd-express input { grid-column: 1 / -1; min-height: 34px; border: 1px solid var(--rd-line); border-radius: 8px; color: #eef4ff; background: #09121e; padding: 0 10px; font-size: .76rem; }
-.npc-rd-express button { grid-column: 2; min-height: 30px; border: 0; border-radius: 8px; color: #07101c; background: #70a2ff; font-weight: 800; cursor: pointer; }
 .npc-rd-search { margin: 6px 14px 8px; height: 38px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--rd-line); border-radius: 10px; color: #6f829e; background: #09131f; }
 .npc-rd-search input { min-width: 0; border: 0; outline: 0; color: #e5edf9; background: transparent; font-size: .76rem; }
 .npc-rd-selects { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 0 14px 9px; }

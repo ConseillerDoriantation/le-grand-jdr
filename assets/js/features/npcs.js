@@ -370,8 +370,7 @@ let _npcLink       = { npcId: null, charId: null, charNom: '', typeId: null };  
 let _aftFormState = { editingId: '', emoji: EMOJI_PRESET[0], couleur: TYPE_COLORS[0], label: '' };
 let _npcView = 'mj';
 let _npcPreviewUid = '';
-let _npcExpressOpen = false;
-let _npcExpressName = '';
+let _npcCreatePending = false;
 let _npcCollapsedGroups = new Set(lsJson.get('npc:collapsed-groups', []));
 let _npcCrossFilter = 'notables';
 let _npcCrossSearch = '';
@@ -844,8 +843,7 @@ function _renderNpcsShell(filtered, active) {
     </header>
     <div class="npc-rd-workspace">
       <aside class="npc-rd-roster" aria-label="Registre des PNJ">
-        ${STATE.isAdmin && _npcView === 'mj' ? `<button type="button" class="npc-rd-new" data-action="npcExpressToggle">＋ Nouveau PNJ <kbd>N</kbd></button>
-          ${_npcExpressOpen ? _renderNpcExpressForm() : ''}` : ''}
+        ${STATE.isAdmin && _npcView === 'mj' ? `<button type="button" class="npc-rd-new" data-action="npcCreate">＋ Nouveau PNJ <kbd>N</kbd></button>` : ''}
         <label class="npc-rd-search"><span>⌕</span><input id="npc-search" type="search" placeholder="Nom, rôle, lieu, organisation…" value="${_esc(_filterSearch)}" data-input="_npcSearch"><kbd>/</kbd></label>
         <div class="npc-rd-selects">
           <select aria-label="Organisation" data-change="npcSetOrgFilter">
@@ -876,14 +874,6 @@ function _npcKnownOrganizations() {
   const names = new Set(_organisations.map(o => o.name).filter(Boolean));
   _npcs.forEach(n => (n.organisations || []).forEach(o => o && names.add(o)));
   return [...names].sort((a, b) => a.localeCompare(b, 'fr'));
-}
-
-function _renderNpcExpressForm() {
-  return `<div class="npc-rd-express">
-    <input id="npc-express-name" type="text" placeholder="Nom du PNJ" value="${_esc(_npcExpressName)}" data-input="npcExpressName" data-keydown="npcExpressKey">
-    <input id="npc-express-role" type="text" placeholder="Rôle (facultatif)" data-keydown="npcExpressKey">
-    <button type="button" data-action="npcExpressCreate">Créer ↵</button>
-  </div>`;
 }
 
 function _renderPageKpis(filtered) {
@@ -5516,41 +5506,24 @@ function _bindCharPickOutside() {
 }
 
 // Création inline : crée un PNJ vierge et le sélectionne (plus besoin de modal).
-async function _npcCreate() {
-  if (!STATE.isAdmin) return;
+async function _npcCreate({ nom = 'Nouveau PNJ', role = '', organisations = null } = {}) {
+  if (!STATE.isAdmin || _npcCreatePending) return;
+  _npcCreatePending = true;
   try {
-    const data = {
-      nom: 'Nouveau PNJ',
-      role: '',
-      lieu: '',
-      organisations: [],
-      description: '',
-      imageUrl: '',
-      imageFull: '',
-      portraits: [],
-      activePortraitId: '',
-      embauchable: true,
-      activites: [],
-      niveau: 1,
-      pvBase: NPC_BASE_VITALS.pv,
-      pmBase: NPC_BASE_VITALS.pm,
-      hp: NPC_BASE_VITALS.pv,
-      pmCurrent: NPC_BASE_VITALS.pm,
-      stats: { ...NPC_BASE_STATS },
-      statsLevelUps: {},
-      equipement: {},
-      statsBonus: {},
-      actions: [],
-      deck_sorts: [],
-    };
+    const data = _npcBasePayload({
+      nom,
+      role,
+      organisations: organisations ?? (_activeOrgFilter ? [_activeOrgFilter] : []),
+    });
     const newId = await addToCol('npcs', data);
     const entry = { id: newId || `npc_${Date.now()}`, ...data };
-    if (!_npcs.find(n => n.id === entry.id)) _npcs.push(entry);
+    if (!_npcs.some(n => n.id === entry.id)) _npcs.push(entry);
     _activeId = entry.id;
     _syncNpcRoute();
     _renderPage(document.getElementById('main-content'));
     showNotif('PNJ créé — modifie-le directement dans la fiche.', 'success');
   } catch (e) { notifySaveError(e); }
+  finally { _npcCreatePending = false; }
 }
 
 function _refreshActivePanel() {
@@ -5687,19 +5660,10 @@ function _npcToggleMine() {
   _refreshList({ keepScroll: false });
 }
 
-function _npcExpressToggle(force = null) {
-  if (!STATE.isAdmin || _npcView !== 'mj') return;
-  _npcExpressOpen = force == null ? !_npcExpressOpen : !!force;
-  _renderPage(document.getElementById('main-content'));
-  if (_npcExpressOpen) requestAnimationFrame(() => document.getElementById('npc-express-name')?.focus());
-}
-
 function _npcCreateFromSearch() {
-  _npcExpressName = _filterSearch.trim();
+  const nom = _filterSearch.trim() || 'Nouveau PNJ';
   _filterSearch = '';
-  _npcExpressOpen = true;
-  _renderPage(document.getElementById('main-content'));
-  requestAnimationFrame(() => document.getElementById('npc-express-role')?.focus());
+  return _npcCreate({ nom });
 }
 
 export function _npcBasePayload({ nom = 'Nouveau PNJ', role = '', organisations = [] } = {}) {
@@ -5711,29 +5675,6 @@ export function _npcBasePayload({ nom = 'Nouveau PNJ', role = '', organisations 
     statsLevelUps: {}, equipement: {}, statsBonus: {}, actions: [], deck_sorts: [],
     affinite: { mode: 'groupe', niveau: 2, valeur: 0, note: '', historique: [] },
   };
-}
-
-async function _npcExpressCreate({ withoutRole = false } = {}) {
-  if (!STATE.isAdmin) return;
-  const nameInput = document.getElementById('npc-express-name');
-  const roleInput = document.getElementById('npc-express-role');
-  const nom = (nameInput?.value || _npcExpressName || '').trim();
-  const role = withoutRole ? '' : (roleInput?.value || '').trim();
-  if (!nom) { nameInput?.focus(); return; }
-  const data = _npcBasePayload({ nom, role, organisations: _activeOrgFilter ? [_activeOrgFilter] : [] });
-  try {
-    const id = await addToCol('npcs', data);
-    const entry = { id: id || `npc_${Date.now()}`, ...data, isNew: true };
-    _npcs.push(entry);
-    _activeId = entry.id;
-    _npcExpressName = '';
-    _filterSearch = '';
-    _syncNpcRoute();
-    _renderPage(document.getElementById('main-content'));
-    requestAnimationFrame(() => document.getElementById('npc-express-name')?.focus());
-    showNotif(`« ${nom} » créé.`, 'success');
-    _npcFlashSaved();
-  } catch (error) { notifySaveError(error); }
 }
 
 async function _npcSetAffiniteMode(btn) {
@@ -6191,27 +6132,9 @@ document.addEventListener('keydown', event => {
   if (!document.querySelector('.npc-rd-page')) return;
   const target = event.target;
   const typing = target?.matches?.('input, textarea, select, [contenteditable="true"]');
-  if (target?.id === 'npc-express-name' && event.key === 'Enter') {
-    event.preventDefault();
-    if (event.shiftKey) _npcExpressCreate({ withoutRole: true });
-    else document.getElementById('npc-express-role')?.focus();
-    return;
-  }
-  if (target?.id === 'npc-express-role' && event.key === 'Enter') {
-    event.preventDefault();
-    _npcExpressCreate();
-    return;
-  }
   if (target?.id === 'npc-rd-event-text' && event.key === 'Enter') {
     event.preventDefault();
     _npcAddRelationEvent({ dataset: { id: target.dataset.npcId } });
-    return;
-  }
-  if (event.key === 'Escape' && _npcExpressOpen) {
-    event.preventDefault();
-    _npcExpressOpen = false;
-    _npcExpressName = '';
-    _renderPage(document.getElementById('main-content'));
     return;
   }
   if (!typing && event.key === '/') {
@@ -6221,7 +6144,7 @@ document.addEventListener('keydown', event => {
   }
   if (!typing && event.key.toLowerCase() === 'n' && STATE.isAdmin && _npcView === 'mj') {
     event.preventDefault();
-    _npcExpressToggle(true);
+    _npcCreate();
     return;
   }
   if (!typing && /^[1-3]$/.test(event.key) && STATE.isAdmin && _npcView === 'mj') {
@@ -6250,9 +6173,6 @@ registerActions({
   npcToggleGroup:            (btn) => _npcToggleGroup(btn),
   npcToggleIncomplete:       () => _npcToggleIncomplete(),
   npcToggleMine:             () => _npcToggleMine(),
-  npcExpressToggle:          () => _npcExpressToggle(),
-  npcExpressName:            (el) => { _npcExpressName = el.value; },
-  npcExpressCreate:          () => _npcExpressCreate(),
   npcCreateFromSearch:       () => _npcCreateFromSearch(),
   npcInlineSave:             (el) => _npcInlineSave(el),
   npcPreviewDerived:         (el) => _npcPreviewDerived(el),
