@@ -28,11 +28,29 @@ test('une exception secrète est neutralisée dans la vue joueur', async () => {
   assert.match(source, /!admin && row\.exception\?\.secret[\s\S]*exception: null, exLevel: null/);
 });
 
-test('le ressenti est lu et écrit dans characters.relations via npcId', async () => {
+test('le ressenti utilise npc_affinites avec reprise de characters.relations', async () => {
   const source = await readNpcs();
-  assert.match(source, /function _npcFeelingFor[\s\S]*character\?\.relations[\s\S]*r\?\.npcId === npcId/);
-  assert.match(source, /async function _npcSaveFeeling[\s\S]*trySave\('characters', charId, \{ relations \}\)/);
+  assert.match(source, /function _npcFeelingFor[\s\S]*feelingSent[\s\S]*character\?\.relations[\s\S]*r\?\.npcId[\s\S]*=== npcKey/);
+  assert.match(source, /async function _npcSaveFeeling[\s\S]*trySave\('npc_affinites', entry\.id, affinityPatch\)/);
+  assert.match(source, /saveDoc\('characters', charId, \{ relations \}\)/);
   assert.match(source, /npcId, nom: n\.nom \|\| 'PNJ', img: n\.imageUrl/);
+});
+
+test('le journal des événements est visible mais non éditable côté joueur', async () => {
+  const source = await readNpcs();
+  const css = await readNpcCss();
+  const playerHistory = source.match(/function _renderNpcPlayerHistory[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(playerHistory, /Historique des événements/);
+  assert.match(source, /function _renderNpcPlayerSheet[\s\S]*_renderNpcPlayerHistory\(n\)/);
+  assert.doesNotMatch(playerHistory, /npcDeleteRelationEvent|editHistoriqueEntry/);
+  assert.match(css, /\.npc-rd-player-history \.npc-rd-event-list > div/);
+});
+
+test('les rattachements historiques et les délégations donnent accès au ressenti', async () => {
+  const source = await readNpcs();
+  assert.match(source, /function _npcCharacterAssignedToUid[\s\S]*character\.ownerUid[\s\S]*controlDelegates/);
+  assert.match(source, /profile\.uid, profile\.userId, profile\.ownerUid, profile\.ownerId, profile\.id/);
+  assert.match(source, /!STATE\.isAdmin && !_npcCharacterAssignedToUid\(character, STATE\.user\?\.uid\)/);
 });
 
 test('les cinq clés historiques de ressenti correspondent à la nouvelle échelle', async () => {
@@ -110,7 +128,7 @@ test('les écritures relationnelles partent au change via la couche Firestore ex
   assert.match(source, /data-change="npcSaveException"/);
   assert.match(source, /data-change="npcSaveFeeling"/);
   assert.match(source, /addToCol\('npc_affinites', data\)/);
-  assert.match(source, /trySave\('characters', charId, \{ relations \}\)/);
+  assert.match(source, /trySave\('npc_affinites', entry\.id, affinityPatch\)/);
 });
 
 test('une affinité locale ne provoque pas un second rendu au retour Firestore', async () => {
@@ -122,7 +140,7 @@ test('une affinité locale ne provoque pas un second rendu au retour Firestore',
   assert.match(source, /function _refreshNpcCrossSummary[\s\S]*current\.innerHTML = next\.innerHTML/);
   assert.match(source, /function _refreshNpcFeelingEditors[\s\S]*data-npc-id[\s\S]*replaceHtmlPreservingView\(editor/);
   assert.match(source, /Object\.assign\(entry, patch\);[\s\S]*summary: !choiceAction[\s\S]*trySave\('npc_affinites'/);
-  assert.match(source, /character\.relations = relations;[\s\S]*_refreshNpcFeelingEditors\(npcId, charId\)[\s\S]*trySave\('characters'/);
+  assert.match(source, /character\.relations = relations;[\s\S]*_refreshNpcFeelingEditors\(npcId, charId\)[\s\S]*trySave\('npc_affinites'/);
   assert.match(source, /async function _npcCreateLink[\s\S]*_refreshNpcAffiUi\(\{ list: true \}\)/);
 });
 

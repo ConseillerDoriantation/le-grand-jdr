@@ -398,6 +398,11 @@ button.npc-rd-typechip.is-pick.is-on { color: color-mix(in srgb, var(--tc) 50%, 
 .npc-rd-spells .cs-v3-deck, .npc-rd-spells .spells-wrap { background: transparent; }
 .npc-rd-known > small { color: #657993; font-size: .61rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }.npc-rd-known > p { margin: 11px 0 0; color: #cbd6e5; font: italic .92rem/1.7 Georgia, serif; }
 .npc-rd-player-relation { padding: 12px 0; border-top: 1px solid var(--rd-line); }.npc-rd-player-relation:first-of-type { border-top: 0; }.npc-rd-player-relhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.npc-rd-player-history .npc-rd-cardhead > span { min-width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px; color: #8fa8c9; background: #142237; font-size: .64rem; font-weight: 800; }
+.npc-rd-player-history .npc-rd-cardhead h2 { display: inline-flex; align-items: center; gap: 7px; }
+.npc-rd-player-history .npc-rd-cardhead .npc-rd-icon { width: 15px; height: 15px; color: #719ff0; }
+.npc-rd-player-history .npc-rd-event-list > div { grid-template-columns: 48px minmax(0, 1fr) auto; }
+.npc-rd-player-history .npc-rd-event-text { white-space: normal; line-height: 1.45; }
 
 @media (max-width: 1180px) {
   .npc-rd-workspace { grid-template-columns: 290px minmax(0, 1fr); padding-inline: 12px; }
