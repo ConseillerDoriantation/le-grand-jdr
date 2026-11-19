@@ -1065,6 +1065,38 @@ body .modal:has(.stats-mng) {
   gap: .68rem;
   align-items: stretch;
 }
+/* MVP désigné à la main par le MJ (filet hors calcul automatique). */
+.stats-mvp-override {
+  display: grid; gap: .5rem; padding: .7rem .8rem; border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--gold, #f4c430) 45%, var(--border, #2a3444));
+  background: color-mix(in srgb, var(--gold, #f4c430) 12%, var(--bg-card, #141c28));
+}
+.stats-mvp-override-eyebrow { color: var(--gold, #f4c430); text-transform: uppercase; letter-spacing: .05em; font-size: .64rem; font-weight: 800; }
+.stats-mvp-override-main { display: flex; align-items: center; gap: .6rem; }
+.stats-mvp-override-main > b { font-size: 1.05rem; }
+.stats-mvp-override-ctrls { display: flex; gap: .5rem; flex-wrap: wrap; }
+.stats-mvp-override-ctrls button,
+.stats-mvp-override-btn,
+.stats-mvp-pick-clear {
+  cursor: pointer; padding: .35rem .7rem; border-radius: 999px; font: 600 .74rem var(--font-body, Inter, sans-serif);
+  background: var(--surface-2, #1b2534); border: 1px solid var(--border, #2a3444); color: var(--text-soft, #c7d2e0);
+}
+.stats-mvp-override-ctrls button:hover,
+.stats-mvp-override-btn:hover,
+.stats-mvp-pick-clear:hover { border-color: var(--gold, #f4c430); color: var(--text, #e9eef6); }
+.stats-mvp-override-btn { justify-self: start; }
+.stats-mvp-auto-note { margin: .2rem 0 -.2rem; color: var(--text-dim, #8a9bb4); font-size: .66rem; }
+.stats-mvp-pick-list { display: grid; gap: .3rem; max-height: 50vh; overflow-y: auto; }
+.stats-mvp-pick {
+  display: flex; align-items: center; gap: .55rem; width: 100%; padding: .4rem .55rem; border-radius: 9px;
+  background: var(--surface-2, #1b2534); border: 1px solid var(--border, #2a3444); color: var(--text, #e9eef6);
+  font: 600 .82rem var(--font-body, Inter, sans-serif); cursor: pointer; text-align: left;
+}
+.stats-mvp-pick:hover { border-color: var(--gold, #f4c430); }
+.stats-mvp-pick.is-current { border-color: var(--gold, #f4c430); background: color-mix(in srgb, var(--gold, #f4c430) 12%, var(--surface-2, #1b2534)); }
+.stats-mvp-pick > span { flex: 1; min-width: 0; }
+.stats-mvp-pick > em { color: var(--gold, #f4c430); font-size: .62rem; font-weight: 800; text-transform: uppercase; }
+.stats-mvp-pick-clear { margin-top: .7rem; width: 100%; }
 .stats-mvp-stack {
   min-width: 0;
   position: relative;

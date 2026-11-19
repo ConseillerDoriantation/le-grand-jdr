@@ -52,6 +52,78 @@ let _statsPlayerSel = null;            // Set d'ids ciblés (null = tous les jou
 let _statsGroupSel = null;             // Set de groupes ciblés pour une mission (null = tous)
 let _statsGroupMissionId = '';         // mission associée au filtre groupes
 let _statsHiddenAwards = new Set();    // distinctions masquées localement par l'utilisateur
+let _statsMvpOverrides = {};           // { scopeKey: charId } — MVP désigné à la main par le MJ (settings/mvpOverrides)
+let _statsScopeRows = [];              // participants de la vue courante (pour le sélecteur de MVP manuel)
+
+// Clé d'override du MVP = le scope courant (séance/mission/acte) ou '__campaign__'.
+const _statsMvpScopeKey = (scope = _statsScope) => scope || '__campaign__';
+function _statsNormalizeMvpOverrides(doc) {
+  const raw = doc && typeof doc === 'object' ? doc.overrides : null;
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === 'string' && value) out[key] = value;
+  }
+  return out;
+}
+
+// Bandeau MVP manuel : carte « choisi par le MJ » si un override existe, sinon un
+// bouton MJ pour en désigner un. Rien pour un joueur sans override.
+function _statsMvpOverrideHtml(rows, overrideRow, scopeNoun) {
+  const admin = STATE.isAdmin;
+  if (overrideRow) {
+    return `<div class="stats-mvp-override">
+      <span class="stats-mvp-override-eyebrow">🏆 MVP de ${scopeNoun} · choisi par le MJ</span>
+      <div class="stats-mvp-override-main">${_statsAvatar(overrideRow.id, overrideRow.name, 44)}<b>${_esc(overrideRow.name)}</b></div>
+      ${admin ? `<div class="stats-mvp-override-ctrls">
+        <button type="button" data-action="_statsMvpOverridePick">Changer</button>
+        <button type="button" data-action="_statsMvpClearOverride">↩ Calcul auto</button>
+      </div>` : ''}
+    </div>`;
+  }
+  if (admin && Array.isArray(rows) && rows.length) {
+    return `<button type="button" class="stats-mvp-override-btn" data-action="_statsMvpOverridePick">🏆 Désigner le MVP de ${scopeNoun} à la main</button>`;
+  }
+  return '';
+}
+
+function _statsOpenMvpOverrideModal() {
+  if (!STATE.isAdmin) return;
+  const rows = _statsScopeRows || [];
+  const current = _statsMvpOverrides[_statsMvpScopeKey()] || '';
+  const list = rows.length
+    ? rows.map(r => `<button type="button" class="stats-mvp-pick${r.id === current ? ' is-current' : ''}" data-action="_statsMvpSetOverride" data-id="${_esc(r.id)}">${_statsAvatar(r.id, r.name, 28)}<span>${_esc(r.name)}</span>${r.id === current ? '<em>Actuel</em>' : ''}</button>`).join('')
+    : '<p class="stats-empty-inline">Aucun personnage dans cette vue.</p>';
+  openModal('🏆 Désigner le MVP', `<div class="stats-mvp-pick-list">${list}</div>${current ? '<button type="button" class="stats-mvp-pick-clear" data-action="_statsMvpClearOverride">↩ Rétablir le calcul automatique</button>' : ''}`,
+    { subtitle: 'Ton choix remplace le calcul pour cette vue. Les joueurs le voient.' });
+}
+
+async function _statsSaveMvpOverrides(next) {
+  try {
+    await saveDoc('settings', 'mvpOverrides', { overrides: next, updatedAt: Date.now() });
+    _statsMvpOverrides = next;
+    closeModalDirect();
+    _statsRender(_statsScope);
+    return true;
+  } catch (error) {
+    notifySaveError(error);
+    return false;
+  }
+}
+
+function _statsSetMvpOverride(charId) {
+  if (!STATE.isAdmin || !charId) return;
+  _statsSaveMvpOverrides({ ..._statsMvpOverrides, [_statsMvpScopeKey()]: charId });
+}
+
+function _statsClearMvpOverride() {
+  if (!STATE.isAdmin) return;
+  const key = _statsMvpScopeKey();
+  if (!(key in _statsMvpOverrides)) { closeModalDirect(); return; }
+  const next = { ..._statsMvpOverrides };
+  delete next[key];
+  _statsSaveMvpOverrides(next);
+}
 let _statsVisualSummary = null;        // données du dernier rendu pour export image
 let _statsVisualSummaryEnricher = null;// compléments lourds calculés uniquement lors de l'export
 let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par perso)
@@ -1531,6 +1603,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   // Filtre « joueurs ciblés » : recalcule toute la page sur le sous-ensemble choisi.
   const sel = _statsPlayerSel;
   const rows = (sel && sel.size) ? allRows.filter(r => sel.has(r.id)) : allRows;
+  _statsScopeRows = rows; // mémorisé pour le sélecteur de MVP manuel (hors rendu)
   const renderOverview = _statsTab === 'overview';
   const renderRanking = _statsTab === 'ranking';
   const renderPlayers = _statsTab === 'players';
@@ -2028,6 +2101,15 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     <section class="stats-context">
       ${contextItems.slice(0, 4).map(x => `<span>${_esc(x)}</span>`).join('')}
     </section>` : '';
+  // MVP désigné à la main par le MJ pour la vue courante (override du calcul).
+  const _mvpOverrideId = _statsMvpOverrides[_statsMvpScopeKey(_statsScope)] || '';
+  const _mvpOverrideRow = _mvpOverrideId
+    ? (rowsById.get(_mvpOverrideId) || rows.find(r => r.id === _mvpOverrideId) || null)
+    : null;
+  const _mvpScopeNoun = _statsScope
+    ? (_statsScope.startsWith('mission:') ? 'la mission' : _statsScope.startsWith('act:') ? "l'acte" : 'la séance')
+    : 'la campagne';
+  const mvpOverrideSec = renderOverview ? _statsMvpOverrideHtml(rows, _mvpOverrideRow, _mvpScopeNoun) : '';
   let mvpDetailSec = '';
   const mvpSec = renderOverview && mvps.length ? (() => {
     const mvpParts = (leader) => {
@@ -2598,6 +2680,8 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     </div>
     <div class="stats-spotlight-grid">
       <div class="stats-mvp-stack">
+        ${mvpOverrideSec}
+        ${_mvpOverrideRow ? '<p class="stats-mvp-auto-note">Classement automatique (indicatif) :</p>' : ''}
         ${mvpSec || '<div class="stats-empty-inline">Pas de MVP marquant pour cette vue — activité trop faible pour départager équitablement.</div>'}
         ${mvpDetailSec || ''}
       </div>
@@ -3854,10 +3938,13 @@ const PAGES = {
     const questsPromise = cachedQuests ? Promise.resolve(cachedQuests) : loadCollection('quests').catch(() => []);
     const storyPromise = cachedStory ? Promise.resolve(cachedStory) : loadCollection('story').catch(() => []);
     const rollupPromise = getDocDataSilent('statsRollups', 'main').catch(() => null);
+    // MVP désignés à la main par le MJ (1 doc léger, caché). Lecture membre.
+    const mvpOverridePromise = getDocData('settings', 'mvpOverrides').catch(() => null);
 
     const data = await loadStats();
     if (revision !== _statsLoadRevision || !document.getElementById('stats-root')) return;
     _statsData = data || {};
+    _statsMvpOverrides = _statsNormalizeMvpOverrides(await mvpOverridePromise);
     _statsQuests = Array.isArray(cachedQuests) ? cachedQuests : [];
     _statsStory = Array.isArray(cachedStory) ? cachedStory : [];
     _statsVttDetailCache = new Map();
@@ -4318,6 +4405,10 @@ registerActions({
     _statsMvpDetailId = btn.dataset.id || '';
     _statsRender(_statsScope);
   },
+  // MVP désigné à la main par le MJ (filet pour les séances que l'algo juge mal).
+  _statsMvpOverridePick: () => _statsOpenMvpOverrideModal(),
+  _statsMvpSetOverride: (btn) => _statsSetMvpOverride(btn.dataset.id),
+  _statsMvpClearOverride: () => _statsClearMvpOverride(),
   // Frise de séances : clic sur une chip → change la vue (sans relecture réseau).
   _statsSetScope: (btn) => { _statsRender(btn.dataset.scope || null); },
   // Barre de périmètre (3 selects) : Acte → Mission → Séance ; chaque niveau
