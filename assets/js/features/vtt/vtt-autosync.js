@@ -128,18 +128,41 @@ export async function _syncAutoTokens() {
 
   // Le MJ ne suit plus tous les tokens de toutes les scènes (quota) : avant de
   // créer un token « manquant », on vérifie côté serveur qu'aucun n'existe déjà
-  // pour cette entité (ex. ancien token sans `type` sur une scène non ouverte).
-  // 1 lecture par création — les créations sont rares (nouveau perso / PNJ).
+  // pour cette entité. Un ancien token sans `type` n'entre pas dans le listener
+  // joueurs/PNJ : il faut donc le migrer ici, sinon sa fiche disparaît entièrement
+  // de la Distribution bien que le document existe encore.
+  // 1 lecture par entité absente du cache — les créations/migrations sont rares.
+  const toRepair = [];
   if (toCreate.length) {
-    const checks = await Promise.all(toCreate.map(entry => getDocs(query(
-      _toksCol(),
-      where(entry.characterId ? 'characterId' : 'npcId', '==', entry.characterId || entry.npcId),
-      limit(1),
-    )).then(snap => snap.empty).catch(() => false)));
+    const checks = await Promise.all(toCreate.map(async entry => {
+      try {
+        const snap = await getDocs(query(
+          _toksCol(),
+          where(entry.characterId ? 'characterId' : 'npcId', '==', entry.characterId || entry.npcId),
+          limit(1),
+        ));
+        if (snap.empty) return true;
+
+        const existing = snap.docs[0];
+        const data = existing.data();
+        const expectedType = entry.characterId ? 'player' : 'npc';
+        const patch = {};
+        if (data.type !== expectedType) patch.type = expectedType;
+        if (entry.characterId && (data.ownerId || null) !== (entry.ownerId || null)) {
+          patch.ownerId = entry.ownerId || null;
+        }
+        if (Object.keys(patch).length) toRepair.push({ id: existing.id, patch });
+        return false;
+      } catch {
+        // Comportement conservateur : en cas de lecture refusée, ne jamais créer
+        // un doublon susceptible d'écraser la position du token historique.
+        return false;
+      }
+    }));
     for (let i = toCreate.length - 1; i >= 0; i -= 1) if (!checks[i]) toCreate.splice(i, 1);
   }
 
-  if (!toCreate.length && !toDelete.length && !toFixOwner.length) return;
+  if (!toCreate.length && !toDelete.length && !toFixOwner.length && !toRepair.length) return;
 
   const batch = writeBatch(db);
   for (const { detId, ...base } of toCreate) {
@@ -158,6 +181,7 @@ export async function _syncAutoTokens() {
   }
   for (const id of new Set(toDelete)) batch.delete(_tokRef(id));
   for (const { id, ownerId } of toFixOwner) batch.update(_tokRef(id), { ownerId });
+  for (const { id, patch } of toRepair) batch.update(_tokRef(id), patch);
   await batch.commit().catch(e => console.error('[vtt] auto-sync tokens:', e));
 }
 
