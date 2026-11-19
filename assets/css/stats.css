@@ -1197,6 +1197,32 @@ body .modal:has(.stats-mng) {
   gap: .68rem;
   align-items: stretch;
 }
+/* MVP désigné à la main par le MJ — bandeau sobre (aucune carte dans la carte).
+   Le bouton MJ vit dans l'en-tête de section et réutilise .stats-sec-tool. */
+.stats-sec-tools { display: flex; align-items: center; gap: .4rem; }
+.stats-mvp-chosen { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .7rem; padding: .1rem 0 .2rem; }
+.stats-mvp-chosen-tag { flex-basis: 100%; color: var(--gold, #f4c430); font-size: .64rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.stats-mvp-chosen-who { display: inline-flex; align-items: center; gap: .5rem; }
+.stats-mvp-chosen-who > b { font-size: 1.02rem; }
+.stats-mvp-chosen-reset,
+.stats-mvp-pick-clear {
+  cursor: pointer; padding: .28rem .65rem; border-radius: 999px; font: 600 .72rem var(--font-body, Inter, sans-serif);
+  background: var(--surface-2, #1b2534); border: 1px solid var(--border, #2a3444); color: var(--text-soft, #c7d2e0);
+}
+.stats-mvp-chosen-reset:hover,
+.stats-mvp-pick-clear:hover { border-color: var(--gold, #f4c430); color: var(--text, #e9eef6); }
+.stats-mvp-auto-note { margin: .1rem 0 -.2rem; color: var(--text-dim, #8a9bb4); font-size: .66rem; }
+.stats-mvp-pick-list { display: grid; gap: .3rem; max-height: 50vh; overflow-y: auto; }
+.stats-mvp-pick {
+  display: flex; align-items: center; gap: .55rem; width: 100%; padding: .4rem .55rem; border-radius: 9px;
+  background: var(--surface-2, #1b2534); border: 1px solid var(--border, #2a3444); color: var(--text, #e9eef6);
+  font: 600 .82rem var(--font-body, Inter, sans-serif); cursor: pointer; text-align: left;
+}
+.stats-mvp-pick:hover { border-color: var(--gold, #f4c430); }
+.stats-mvp-pick.is-current { border-color: var(--gold, #f4c430); background: color-mix(in srgb, var(--gold, #f4c430) 12%, var(--surface-2, #1b2534)); }
+.stats-mvp-pick > span { flex: 1; min-width: 0; }
+.stats-mvp-pick > em { color: var(--gold, #f4c430); font-size: .62rem; font-weight: 800; text-transform: uppercase; }
+.stats-mvp-pick-clear { margin-top: .7rem; width: 100%; }
 .stats-mvp-stack {
   min-width: 0;
   position: relative;
@@ -3074,7 +3100,7 @@ table.stats-tbl { width: 100%; border-collapse: collapse; font-variant-numeric: 
 .stats-root .stats-v2-summary-card > header .stats-sec-tool { width:30px; height:30px; border:1px solid var(--border); border-radius:8px; background:var(--surface-2); color:var(--text-muted); font-size:12px; cursor:pointer; }
 .stats-root .stats-v2-summary-card-body { min-width:0; padding:14px 20px 18px; }
 
-.stats-root .stats-v2-mvp-card .stats-mvp { gap:14px; padding:0; border:0; background:transparent; }
+.stats-root .stats-v2-mvp-card .stats-mvp { gap:14px; padding:0; border:0; background:transparent; box-shadow:none; border-radius:0; }
 .stats-root .stats-v2-mvp-card .stats-mvp-top { gap:14px; }
 .stats-root .stats-v2-mvp-card .stats-mvp-top > .char-avatar { width:58px !important; height:58px !important; box-shadow:0 0 0 2px color-mix(in srgb,var(--amber) 45%,transparent),0 0 24px color-mix(in srgb,var(--amber) 20%,transparent); }
 .stats-root .stats-v2-mvp-card .stats-mvp-name b { font-size:23px; }
@@ -3099,6 +3125,18 @@ table.stats-tbl { width: 100%; border-collapse: collapse; font-variant-numeric: 
 .stats-root .stats-v2-mvp-card .stats-mvp-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:2px; padding-top:14px; border-top:1px solid var(--border); }
 .stats-root .stats-v2-mvp-card .stats-mvp-runners { display:flex; flex:1 1 300px; gap:6px; flex-wrap:wrap; margin:0; padding:0; border:0; }
 .stats-root .stats-v2-mvp-card .stats-runner { flex:0 1 auto; min-height:32px; padding:0 10px 0 4px; border-radius:999px; }
+/* Candidats : à plat (pas de pastilles pleines → plus de « bloc dans le bloc »).
+   Seul l'actif reste doré ; survol discret. */
+.stats-root .stats-v2-mvp-card .stats-runner { background:transparent; }
+.stats-root .stats-v2-mvp-card .stats-runner:hover { background:var(--surface-2); }
+.stats-root .stats-v2-mvp-card .stats-runner.on { background:var(--gold-glow); }
+/* Masquage de personnages dans « Gérer les statistiques ». */
+.stats-mng-hide-note { margin:.2rem 0 .5rem; color:var(--text-dim); font-size:.74rem; line-height:1.45; }
+.stats-mng-hide-tools { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:.5rem; }
+.stats-mng-row.is-hidden-char { opacity:.6; }
+.stats-mng-row.is-hidden-char em { font-style:normal; color:var(--text-dim); }
+.stats-mng-hide { cursor:pointer; padding:.3rem .6rem; border-radius:7px; font:600 .74rem var(--font-body, Inter, sans-serif); background:var(--surface-2); border:1px solid var(--border-md); color:var(--text-soft); white-space:nowrap; }
+.stats-mng-hide:hover { border-color:var(--gold, #f4c430); color:var(--text); }
 .stats-root .stats-v2-mvp-card .stats-mvp-footer > button { flex:none; min-height:30px; padding:0 10px; border:1px solid var(--border-md); border-radius:8px; background:var(--surface-2); color:var(--text-muted); font-size:10.5px; font-weight:650; cursor:pointer; }
 .stats-root .stats-v2-mvp-card .stats-mvp-footer > button:hover { background:var(--surface-3); color:var(--text); }
 .stats-v2-mvp-help { display:grid; gap:14px; color:var(--text-soft); }

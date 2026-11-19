@@ -53,6 +53,98 @@ let _statsPlayerSel = null;            // Set d'ids ciblés (null = tous les jou
 let _statsGroupSel = null;             // Set de groupes ciblés pour une mission (null = tous)
 let _statsGroupMissionId = '';         // mission associée au filtre groupes
 let _statsHiddenAwards = new Set();    // distinctions masquées localement par l'utilisateur
+let _statsMvpOverrides = {};           // { scopeKey: charId } — MVP désigné à la main par le MJ (settings/mvpOverrides)
+let _statsScopeRows = [];              // participants de la vue courante (pour le sélecteur de MVP manuel)
+let _statsHiddenChars = new Set();     // charIds masqués des stats par le MJ (settings/statsHidden)
+
+function _statsNormalizeHiddenIds(doc) {
+  const raw = doc && typeof doc === 'object' ? doc.ids : null;
+  return new Set(Array.isArray(raw) ? raw.filter(id => typeof id === 'string' && id) : []);
+}
+const _STATS_DEAD_STATUSES = new Set(['dead', 'mort', 'morte', 'decede', 'decedee']);
+const _statsIsDeadChar = (id) => _STATS_DEAD_STATUSES.has(_norm((STATE.characters?.find(x => x.id === id)?.lifeStatus) || ''));
+// Retire les personnages masqués par le MJ. `includeHidden` sert aux rollups
+// (qui doivent toujours agréger TOUT le monde, sinon un perso ré-affiché perdrait
+// son historique compact).
+const _statsFilterHidden = (rows, includeHidden) =>
+  (includeHidden || !_statsHiddenChars.size) ? rows : rows.filter(r => !_statsHiddenChars.has(r.id));
+
+// Clé d'override du MVP = le scope courant (séance/mission/acte) ou '__campaign__'.
+const _statsMvpScopeKey = (scope = _statsScope) => scope || '__campaign__';
+function _statsNormalizeMvpOverrides(doc) {
+  const raw = doc && typeof doc === 'object' ? doc.overrides : null;
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === 'string' && value) out[key] = value;
+  }
+  return out;
+}
+
+function _statsOpenMvpOverrideModal() {
+  if (!STATE.isAdmin) return;
+  const rows = _statsScopeRows || [];
+  const current = _statsMvpOverrides[_statsMvpScopeKey()] || '';
+  const list = rows.length
+    ? rows.map(r => `<button type="button" class="stats-mvp-pick${r.id === current ? ' is-current' : ''}" data-action="_statsMvpSetOverride" data-id="${_esc(r.id)}">${_statsAvatar(r.id, r.name, 28)}<span>${_esc(r.name)}</span>${r.id === current ? '<em>Actuel</em>' : ''}</button>`).join('')
+    : '<p class="stats-empty-inline">Aucun personnage dans cette vue.</p>';
+  openModal('🏆 Désigner le MVP', `<div class="stats-mvp-pick-list">${list}</div>${current ? '<button type="button" class="stats-mvp-pick-clear" data-action="_statsMvpClearOverride">↩ Rétablir le calcul automatique</button>' : ''}`,
+    { subtitle: 'Ton choix remplace le calcul pour cette vue. Les joueurs le voient.' });
+}
+
+async function _statsSaveMvpOverrides(next) {
+  try {
+    await saveDoc('settings', 'mvpOverrides', { overrides: next, updatedAt: Date.now() });
+    _statsMvpOverrides = next;
+    closeModalDirect();
+    _statsRender(_statsScope);
+    return true;
+  } catch (error) {
+    notifySaveError(error);
+    return false;
+  }
+}
+
+function _statsSetMvpOverride(charId) {
+  if (!STATE.isAdmin || !charId) return;
+  _statsSaveMvpOverrides({ ..._statsMvpOverrides, [_statsMvpScopeKey()]: charId });
+}
+
+function _statsClearMvpOverride() {
+  if (!STATE.isAdmin) return;
+  const key = _statsMvpScopeKey();
+  if (!(key in _statsMvpOverrides)) { closeModalDirect(); return; }
+  const next = { ..._statsMvpOverrides };
+  delete next[key];
+  _statsSaveMvpOverrides(next);
+}
+
+// Personnages masqués des stats (morts, PNJ, abandons…). Filtre toutes les vues,
+// sans supprimer de données. Réversible. Stocké dans settings/statsHidden (MJ).
+async function _statsSaveHiddenChars() {
+  try {
+    await saveDoc('settings', 'statsHidden', { ids: [..._statsHiddenChars], updatedAt: Date.now() });
+    if (_statsManageIsOpen()) _statsOpenManageModal();
+    const y = window.scrollY;
+    _statsRender(_statsScope);
+    if (Math.abs(window.scrollY - y) > 1) window.scrollTo({ top: y, behavior: 'auto' });
+  } catch (error) { notifySaveError(error); }
+}
+function _statsToggleHideChar(id) {
+  if (!STATE.isAdmin || !id) return;
+  _statsHiddenChars.has(id) ? _statsHiddenChars.delete(id) : _statsHiddenChars.add(id);
+  _statsSaveHiddenChars();
+}
+function _statsHideDead() {
+  if (!STATE.isAdmin) return;
+  for (const id of Object.keys(_statsData?.chars || {})) if (_statsIsDeadChar(id)) _statsHiddenChars.add(id);
+  _statsSaveHiddenChars();
+}
+function _statsShowAllChars() {
+  if (!STATE.isAdmin) return;
+  _statsHiddenChars = new Set();
+  _statsSaveHiddenChars();
+}
 let _statsVisualSummary = null;        // données du dernier rendu pour export image
 let _statsVisualSummaryEnricher = null;// compléments lourds calculés uniquement lors de l'export
 let _statsCmpMetric = 'dmgDealt';      // métrique du graphique comparatif (par perso)
@@ -1205,10 +1297,10 @@ function _statsSumByDates(c, dates) {
 
 // Construit les lignes/cartes de stats pour un scope. `dateKeys` : null = campagne
 // (totaux) ; sinon tableau de dates → somme des séances (une ou une mission entière).
-function _statsRowsFor(dateKeys) {
+function _statsRowsFor(dateKeys, { includeHidden = false } = {}) {
   const num = _statsNum;
   const detailKey = dateKeys ? [...dateKeys].sort().join('|') : '*';
-  if (_statsRowsCache.has(detailKey)) return _statsRowsCache.get(detailKey);
+  if (_statsRowsCache.has(detailKey)) return _statsFilterHidden(_statsRowsCache.get(detailKey), includeHidden);
   let vttDetails = _statsVttDetailCache.get(detailKey);
   if (!vttDetails && _statsLegacyRollups) {
     const sources = dateKeys
@@ -1320,7 +1412,7 @@ function _statsRowsFor(dateKeys) {
     };
   }).filter(r => r.sRolls > 0 || r.combat.attacks > 0 || r.combat.attacksTaken > 0 || r.combat.dmgTaken > 0 || r.combat.heal > 0 || r.combat.spellsCast > 0 || r.emotes.length);
   _statsRowsCache.set(detailKey, rows);
-  return rows;
+  return _statsFilterHidden(rows, includeHidden);
 }
 
 const STATS_ROLLUP_VERSION = 3;
@@ -1366,8 +1458,8 @@ function _statsBuildLegacyRollups(logs) {
   _statsVttDetailCache = new Map();
   _statsRowsCache = new Map();
 
-  _statsRowsFor(null);
-  for (const key of _statsAllSessionKeys()) _statsRowsFor([key]);
+  _statsRowsFor(null, { includeHidden: true });
+  for (const key of _statsAllSessionKeys()) _statsRowsFor([key], { includeHidden: true });
 
   const scopes = {};
   for (const [key, detail] of _statsVttDetailCache) {
@@ -1774,6 +1866,7 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const allRows = _statsRowsFor(scopeDates);   // participants du scope courant
   // Filtre « joueurs ciblés » : recalcule toute la page sur le sous-ensemble choisi.
   const rows = (sel && sel.size) ? allRows.filter(r => sel.has(r.id)) : allRows;
+  _statsScopeRows = rows; // mémorisé pour le sélecteur de MVP manuel (hors rendu)
   const renderOverview = _statsTab === 'summary';
   const renderSessions = _statsTab === 'sessions';
   const renderRanking = _statsTab === 'characters';
@@ -2050,14 +2143,13 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const mvpUnitRows = [...mvpUnitsMap.values()]
     .map(dates => ({ date: dates.slice().sort()[0] || '', rows: _statsRowsFor(dates) }))
     .filter(unit => unit.rows.length > 0);
-  // Périmètre de calibrage STABLE : toute la mission (tous groupes), indépendant
-  // du filtre de groupe courant. Sans ça, sélectionner un groupe recalculerait les
-  // repères et changerait le score d'un même perso (ex. 80 en global vs 138 en groupe).
-  const calibrationScopeDates = isAct
-    ? selectedActDates
-    : (isMission ? selectedMissionDates : scopeDates);
+  // Périmètre de calibrage STABLE et GLOBAL : TOUTE la campagne, quelle que soit la
+  // vue (séance / mission / acte / groupe). On agrège par unité-mission sur l'ensemble
+  // des dates (allDates), pas sur le scope courant → le repère devient une constante
+  // et le score d'un même perso ne change plus selon la vue (fini « 105 en séance vs
+  // 135 en mission »). `mvpCalibrationRows` reste la fonction d'agrégation importée.
   const calibrationUnitsMap = new Map();
-  for (const date of calibrationScopeDates || []) {
+  for (const date of (allDates || [])) {
     const unitKey = _statsData?.sessions?.[date]?.missionId || `date:${date}`;
     const bucket = calibrationUnitsMap.get(unitKey);
     if (bucket) bucket.push(date); else calibrationUnitsMap.set(unitKey, [date]);
@@ -2303,6 +2395,26 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     <section class="stats-context">
       ${contextItems.slice(0, 4).map(x => `<span>${_esc(x)}</span>`).join('')}
     </section>` : '';
+  // MVP désigné à la main par le MJ pour la vue courante (override du calcul).
+  const _mvpOverrideId = _statsMvpOverrides[_statsMvpScopeKey(_statsScope)] || '';
+  const _mvpOverrideRow = _mvpOverrideId
+    ? (rowsById.get(_mvpOverrideId) || rows.find(r => r.id === _mvpOverrideId) || null)
+    : null;
+  const _mvpScopeNoun = _statsScope
+    ? (_statsScope.startsWith('mission:') ? 'la mission' : _statsScope.startsWith('act:') ? "l'acte" : 'la séance')
+    : 'la campagne';
+  // Bouton MJ dans l'EN-TÊTE de la section (pas de carte dans la carte), et bandeau
+  // sobre (sans bordure) quand un MVP est choisi à la main.
+  const mvpMjBtn = (renderOverview && STATE.isAdmin && rows.length)
+    ? `<button class="stats-sec-tool" data-action="_statsMvpOverridePick" title="Désigner le MVP de ${_mvpScopeNoun} à la main">🏆 MVP</button>`
+    : '';
+  const mvpChosenSec = (renderOverview && _mvpOverrideRow)
+    ? `<div class="stats-mvp-chosen">
+        <span class="stats-mvp-chosen-tag">🏆 MVP de ${_mvpScopeNoun} · choisi par le MJ</span>
+        <span class="stats-mvp-chosen-who">${_statsAvatar(_mvpOverrideRow.id, _mvpOverrideRow.name, 34)}<b>${_esc(_mvpOverrideRow.name)}</b></span>
+        ${STATE.isAdmin ? '<button class="stats-mvp-chosen-reset" data-action="_statsMvpClearOverride">↩ Calcul auto</button>' : ''}
+      </div>`
+    : '';
   let mvpDetailSec = '';
   const mvpSec = renderOverview && mvps.length ? (() => {
     const mvpParts = (leader) => {
@@ -2886,10 +2998,12 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
   const spotlightHtml = renderOverview ? `<section class="stats-surface" id="temps-forts">
     <div class="stats-surface-head">
       <div><span>R&eacute;sum&eacute; de performance</span><h3>Temps forts</h3></div>
-      ${awardTotal ? `<button class="stats-sec-tool" data-action="_statsAwardsConfig" title="Choisir les distinctions affich&eacute;es">&#9881;</button>` : ''}
+      <div class="stats-sec-tools">${mvpMjBtn}${awardTotal ? `<button class="stats-sec-tool" data-action="_statsAwardsConfig" title="Choisir les distinctions affich&eacute;es">&#9881;</button>` : ''}</div>
     </div>
     <div class="stats-spotlight-grid">
       <div class="stats-mvp-stack">
+        ${mvpChosenSec}
+        ${_mvpOverrideRow ? '<p class="stats-mvp-auto-note">Classement automatique (indicatif) :</p>' : ''}
         ${mvpSec || '<div class="stats-empty-inline">Pas de MVP marquant pour cette vue — activité trop faible pour départager équitablement.</div>'}
         ${mvpDetailSec || ''}
       </div>
@@ -3016,7 +3130,9 @@ function _statsRender(scope, { root = document.getElementById('stats-root'), bin
     ${favoriteColumn('Émotes favorites', emoteTally, { emote: true, color: '#e8b84b' })}
   </div>`, { className: 'stats-v2-favorites-card' });
   const highlightsRow = `<div class="stats-v2-summary-row stats-v2-summary-row--highlights">
-    ${summaryCard(dateKey ? 'Temps fort de la séance' : 'Temps fort', 'MVP d’impact', mvpSec || '<div class="stats-empty-inline">Pas de MVP pour cette vue : l’activité est trop faible pour départager équitablement.</div>', { className: 'stats-v2-mvp-card' })}
+    ${summaryCard(dateKey ? 'Temps fort de la séance' : 'Temps fort', 'MVP d’impact',
+      `${mvpChosenSec}${_mvpOverrideRow ? '<p class="stats-mvp-auto-note">Classement automatique (indicatif) :</p>' : ''}${mvpSec || '<div class="stats-empty-inline">Pas de MVP pour cette vue : l’activité est trop faible pour départager équitablement.</div>'}`,
+      { className: 'stats-v2-mvp-card', tool: mvpMjBtn })}
     ${summaryCard(dateKey ? 'Palmarès de la séance' : 'Palmarès', 'Distinctions', awardsHtml ? `<div class="stats-trophies stats-trophies--all">${awardsHtml}</div>` : '<div class="stats-empty-inline">Aucune distinction visible pour cette vue.</div>', { className: 'stats-v2-awards-card', tool: awardTotal ? '<button class="stats-sec-tool" data-action="_statsAwardsConfig" title="Choisir les distinctions affichées">⚙</button>' : '' })}
   </div>`;
   const campaignBottomRow = `<div class="stats-v2-summary-row stats-v2-summary-row--bottom">${recordsCard}${favoritesCard}</div>`;
@@ -3231,6 +3347,23 @@ function _statsOpenManageModal() {
     : dates.length
       ? `<div class="stats-mng-health is-ok"><span class="stats-mng-health-icon">✓</span><span><strong>Associations à jour</strong><small>Toutes les séances contenant des statistiques sont reliées à une mission.</small></span></div>`
       : `<div class="stats-mng-health is-empty"><span class="stats-mng-health-icon">0</span><span><strong>Aucune séance datée</strong><small>Les séances à relier apparaîtront ici dès que des statistiques auront été enregistrées.</small></span></div>`;
+  const hideableChars = Object.entries(_statsData?.chars || {})
+    .map(([id, c]) => ({ id, name: c?.name || (STATE.characters?.find(x => x.id === id)?.nom) || '?', dead: _statsIsDeadChar(id), hidden: _statsHiddenChars.has(id) }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }));
+  const deadVisible = hideableChars.filter(c => c.dead && !c.hidden).length;
+  const hideRow = (c) => `<div class="stats-mng-row${c.hidden ? ' is-hidden-char' : ''}">
+    <span class="stats-mng-lbl">${c.dead ? '💀' : '👤'} ${_esc(c.name)}${c.hidden ? ' — <em>masqué</em>' : ''}</span>
+    <button class="stats-mng-hide" data-action="_statsToggleHideChar" data-id="${_esc(c.id)}">${c.hidden ? '👁 Afficher' : '🚫 Masquer'}</button>
+  </div>`;
+  const hideSection = hideableChars.length ? `<div class="stats-mng-sec">
+    <div class="stats-mng-hd"><span>Masquer des personnages des stats</span><b>${_statsHiddenChars.size}</b></div>
+    <p class="stats-mng-hide-note">Un personnage masqué disparaît de toutes les vues (liste, MVP, classements) sans que ses données soient supprimées. Réversible quand tu veux.</p>
+    ${(deadVisible || _statsHiddenChars.size) ? `<div class="stats-mng-hide-tools">
+      ${deadVisible ? `<button class="stats-mng-link" data-action="_statsHideAllDead">💀 Masquer les ${deadVisible} mort${deadVisible > 1 ? 's' : ''}</button>` : ''}
+      ${_statsHiddenChars.size ? `<button class="stats-mng-link" data-action="_statsShowAllChars">👁 Tout réafficher</button>` : ''}
+    </div>` : ''}
+    ${hideableChars.map(hideRow).join('')}
+  </div>` : '';
   openModal('⚙ Gérer les statistiques', `
     <div class="stats-mng">
       ${healthHtml}
@@ -3245,6 +3378,7 @@ function _statsOpenManageModal() {
       </details>` : ''}
       ${missions.length ? `<div class="stats-mng-sec"><div class="stats-mng-hd">Supprimer toutes les stats d'une mission</div>${missions.map(missRow).join('')}</div>` : ''}
       ${(!missions.length && !dates.length) ? '<div class="stats-mng-sec" style="color:var(--text-dim);font-size:.85rem">Aucune donnée datée pour le moment.</div>' : ''}
+      ${hideSection}
       <div class="stats-mng-danger">
         <div class="stats-mng-hd">⚠ Suppression globale</div>
         <strong class="stats-mng-danger-title">${adventureName}</strong>
@@ -4216,10 +4350,16 @@ const PAGES = {
     const questsPromise = cachedQuests ? Promise.resolve(cachedQuests) : loadCollection('quests').catch(() => []);
     const storyPromise = cachedStory ? Promise.resolve(cachedStory) : loadCollection('story').catch(() => []);
     const rollupPromise = getDocDataSilent('statsRollups', 'main').catch(() => null);
+    // MVP désignés à la main + personnages masqués des stats par le MJ (docs légers,
+    // cachés, lecture membre).
+    const mvpOverridePromise = getDocData('settings', 'mvpOverrides').catch(() => null);
+    const hiddenCharsPromise = getDocData('settings', 'statsHidden').catch(() => null);
 
     const data = await loadStats();
     if (revision !== _statsLoadRevision || !document.getElementById('stats-root')) return;
     _statsData = data || {};
+    _statsMvpOverrides = _statsNormalizeMvpOverrides(await mvpOverridePromise);
+    _statsHiddenChars = _statsNormalizeHiddenIds(await hiddenCharsPromise);
     _statsQuests = Array.isArray(cachedQuests) ? cachedQuests : [];
     _statsStory = Array.isArray(cachedStory) ? cachedStory : [];
     _statsVttDetailCache = new Map();
@@ -4687,6 +4827,13 @@ registerActions({
     _statsMvpDetailId = btn.dataset.id || '';
     _statsRender(_statsScope);
   },
+  // MVP désigné à la main par le MJ (filet pour les séances que l'algo juge mal).
+  _statsMvpOverridePick: () => _statsOpenMvpOverrideModal(),
+  _statsMvpSetOverride: (btn) => _statsSetMvpOverride(btn.dataset.id),
+  _statsMvpClearOverride: () => _statsClearMvpOverride(),
+  _statsToggleHideChar: (btn) => _statsToggleHideChar(btn.dataset.id),
+  _statsHideAllDead: () => _statsHideDead(),
+  _statsShowAllChars: () => _statsShowAllChars(),
   // Frise de séances : clic sur une chip → change la vue (sans relecture réseau).
   _statsSetScope: (btn) => { _statsRender(btn.dataset.scope || null); },
   // Journal des séances : ouvre directement le récapitulatif de la séance.
