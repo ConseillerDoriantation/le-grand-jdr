@@ -61,8 +61,10 @@ import {
   _bindNotesDnd, _bindQuetesDnd,
   _csV3JournalSub, _csV3ToggleNote, _csV3AddNote, _csV3DeleteNote, _csV3CycleNoteCat,
   _csV3SaveOpenNote, _csV3CloseNote,
-  _csV3AddRelation, _csV3EditRelation,
-  _csV3RelSent, _csV3RelTargetType, _csV3RelPickNpc, _csV3RelPickChar, _csV3SaveRelation, _csV3DeleteRelation,
+  _csV3AddRelation, _csRelCloseAdd, _csRelSearch, _csRelAddSearch, _csRelLinkSearch,
+  _csRelClearSearch, _csRelReset, _csRelFilter, _csRelSort, _csRelToggle,
+  _csRelSetLevel, _csRelSuggestion, _csRelFieldInput, _csRelFieldBlur,
+  _csRelDelete, _csRelPick, _csRelRespond, _csRelPickFree, _csRelLink,
 } from './characters/journal.js';
 import {
   renderCharProfilV3,
@@ -2290,6 +2292,7 @@ async function _saveCombatMasteryName(el) {
 registerCharBlurActions({
   csV3SaveIdentityValue: (el) => _csV3SaveIdentityValue(el.dataset.id, el.dataset.key, el.value),
   csV3SaveQuote: (el) => { el.classList.toggle('is-empty', !el.value); _csV3SaveQuote(el.dataset.id, el.value); },
+  csRelFieldBlur: (el) => _csRelFieldBlur(el),
 });
 
 registerActions({
@@ -2381,7 +2384,24 @@ registerActions({
   csV3DeleteNote:          (btn)    => _csV3DeleteNote(Number(btn.dataset.idx)),
   addNote:                 ()       => addNote(),
   addQuete:                ()       => addQuete(),
-  csV3AddRelation:         (btn)    => _csV3AddRelation(btn.dataset.id),
+  csV3AddRelation:         ()       => _csV3AddRelation(),
+  csRelCloseAdd:           ()       => _csRelCloseAdd(),
+  csRelSearch:             (el)     => _csRelSearch(el),
+  csRelAddSearch:          (el)     => _csRelAddSearch(el),
+  csRelLinkSearch:         (el)     => _csRelLinkSearch(el),
+  csRelClearSearch:        ()       => _csRelClearSearch(),
+  csRelReset:              ()       => _csRelReset(),
+  csRelFilter:             (btn)    => _csRelFilter(btn),
+  csRelSort:               (btn)    => _csRelSort(btn),
+  csRelToggle:             (btn)    => _csRelToggle(btn),
+  csRelSetLevel:           (btn)    => _csRelSetLevel(btn),
+  csRelSuggestion:         (btn)    => _csRelSuggestion(btn),
+  csRelFieldInput:         (el)     => _csRelFieldInput(el),
+  csRelDelete:             (btn)    => _csRelDelete(btn),
+  csRelPick:               (btn)    => _csRelPick(btn),
+  csRelRespond:            (btn)    => _csRelRespond(btn),
+  csRelPickFree:           ()       => _csRelPickFree(),
+  csRelLink:               (btn)    => _csRelLink(btn),
   toggleQuete:             (btn)    => toggleQuete(Number(btn.dataset.idx)),
   deleteQuete:             (btn)    => deleteQuete(Number(btn.dataset.idx)),
   csV3ToggleNote:          (btn)    => _csV3ToggleNote(Number(btn.dataset.idx)),
@@ -2390,15 +2410,6 @@ registerActions({
   csV3CloseNote:           ()       => _csV3CloseNote(),
   deleteNote:              (btn)    => deleteNote(Number(btn.dataset.idx)),
   saveNote:                (btn)    => saveNote(Number(btn.dataset.idx)),
-  csV3EditRelation:        (btn)    => _csV3EditRelation(btn.dataset.id, Number(btn.dataset.idx)),
-  csV3DeleteRelation:      (btn)    => _csV3DeleteRelation(btn.dataset.id, Number(btn.dataset.idx)),
-  csV3RelSent:             (btn)    => _csV3RelSent(btn.dataset.sent),
-  csV3RelTargetType:       (btn)    => _csV3RelTargetType(btn),
-  csV3RelPickNpc:          (el)     => _csV3RelPickNpc(el),
-  csV3RelPickChar:         (el)     => _csV3RelPickChar(el),
-  csV3SaveRelation:        (btn)    => _csV3SaveRelation(btn.dataset.id, Number(btn.dataset.idx)),
-  closeRelModal:           ()       => closeModalDirect(),
-
   // Profil
   csV3RemoveProfilTag:      (btn)   => _csV3RemoveProfilTag(btn.dataset.id, btn.dataset.tag),
   csV3AddProfilTagFromInput:(btn)   => _csV3AddProfilTagFromInput(btn.dataset.id),

@@ -12,10 +12,9 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
-import { updateInCol, loadCollection } from '../../data/firestore.js';
+import { updateInCol } from '../../data/firestore.js';
 import { _esc } from '../../shared/html.js';
 import { showNotif } from '../../shared/notifications.js';
-import { getCharacterById } from '../../shared/character-state.js';
 import {
   openModal, closeModalDirect, confirmModal,
   setModalCloseGuard, clearModalCloseGuard,
@@ -24,11 +23,22 @@ import { makeSortable } from '../../shared/sortable-helper.js';
 import { quillEditorHtml, bindQuillEditors } from '../../shared/rich-text-quill.js';
 import { saveNote, scheduleNoteAutosave } from './tabs.js';
 import { richTextContentHtml } from '../../shared/rich-text.js';
+// Échelle partagée Relations / PNJ (clés historiques conservées) :
+// {k:'ennemi',lbl:'Hostile'}, {k:'mefiance',lbl:'Méfiant'}, {k:'neutre',lbl:'Neutre'},
+// {k:'allie',lbl:'Amical'}, {k:'lien',lbl:'Allié'}.
+import {
+  renderCharRelations, relationPendingCount, bindRelationKeyboard,
+  _csV3AddRelation, _csRelCloseAdd, _csRelSearch, _csRelAddSearch, _csRelLinkSearch,
+  _csRelClearSearch, _csRelReset, _csRelFilter, _csRelSort, _csRelToggle,
+  _csRelSetLevel, _csRelSuggestion, _csRelFieldInput, _csRelFieldBlur,
+  _csRelDelete, _csRelPick, _csRelRespond, _csRelPickFree, _csRelLink,
+} from './relations.js';
 
 // État module-local (préservé au re-render, comme dans characters.js)
 let _currentJournalSub = 'notes';
 let _openNote = null;
 let _closingNoteModal = false;
+bindRelationKeyboard();
 
 // Sous-onglet Journal courant — lu par le routeur d'onglets de characters.js.
 export function getCurrentJournalSub() { return _currentJournalSub; }
@@ -59,6 +69,7 @@ async function _csV3CycleNoteCat(idx) {
 
 function renderCharJournal(c, canEdit, sub = 'notes') {
   const subTab = ['notes','quetes','relations'].includes(sub) ? sub : 'notes';
+  const pendingCount = relationPendingCount(c, canEdit);
   const counts = {
     notes:     (c.notesList || []).length,
     quetes:    (c.quetes || []).length,
@@ -84,7 +95,7 @@ function renderCharJournal(c, canEdit, sub = 'notes') {
           <span class="journal-tab-icon">📜</span><span>Quêtes</span><span class="journal-tab-count">${counts.quetes}</span>
         </button>
         <button type="button" class="journal-tab ${subTab==='relations'?'on':''}" ${subTab==='relations'?'aria-current="page"':''} data-action="csV3JournalSub" data-sub="relations">
-          <span class="journal-tab-icon">👥</span><span>Relations</span><span class="journal-tab-count">${counts.relations}</span>
+          <span class="journal-tab-icon">👥</span><span>Relations</span><span class="journal-tab-count">${counts.relations}</span>${pendingCount ? `<span class="journal-tab-pending" title="${pendingCount} lien${pendingCount > 1 ? 's' : ''} sans réponse">${pendingCount}</span>` : ''}
         </button>
       </nav>
       ${actionHtml}
@@ -497,258 +508,17 @@ function _syncCharNotes(c) {
   if (inList && inList !== c) inList.notesList = c.notesList;
 }
 
-const _RELATION_PALETTE = {
-  '':       ['rgba(138,155,180,.06)','rgba(138,155,180,.16)','#8a9bb4'],
-  lien:     ['rgba(157,111,255,.14)','rgba(157,111,255,.4)','#c8aaff'],
-  allie:    ['rgba(34,195,142,.14)','rgba(34,195,142,.4)','#5dd5a8'],
-  neutre:   ['rgba(244,196,48,.14)','rgba(244,196,48,.4)','#f4c430'],
-  ennemi:   ['rgba(255,90,126,.14)','rgba(255,90,126,.4)','#ff8ca7'],
-  mefiance: ['rgba(255,149,68,.14)','rgba(255,149,68,.4)','#ffb070'],
-};
-function renderCharRelations(c, canEdit) {
-  const rels = c.relations || [];
-  if (!rels.length) {
-    return `<div class="q-empty">
-      👥 Aucune relation enregistrée.${canEdit?` Clique sur « ＋ Relation » pour noter les coéquipiers, alliés, ennemis et PNJ liés à ${_esc(c.nom||'ce personnage')} — avec leur rôle, leur sentiment et une note.`:''}
-    </div>`;
-  }
-  return `<div class="rel-grid">
-    ${rels.map((r, i) => {
-      const sent = _RELATION_PALETTE[r.sent ?? ''] || _RELATION_PALETTE[''];
-      // Cible = co-PJ : portrait et nom résolus en direct (jamais figés dans le doc).
-      // Fallback null explicite : un charId obsolète ne doit pas retomber sur le perso courant.
-      const linked = r.charId ? getCharacterById(r.charId, null) : null;
-      const nom = linked?.nom || r.nom || 'Sans nom';
-      const img = linked?.photo || r.img;
-      const ini = (r.ini || nom || '?')[0]?.toUpperCase() || '?';
-      return `<div class="rel-card" style="--rel-c:${sent[2]};--rel-bg:${sent[0]};--rel-bd:${sent[1]}">
-        ${img
-          ? `<div class="rel-avatar rel-avatar--img"><img src="${img}" alt=""></div>`
-          : `<div class="rel-avatar">${_esc(ini)}</div>`}
-        <div class="rel-body">
-          <div class="rel-name-row">
-            <span class="rel-name">${_esc(nom)}</span>
-            ${r.sentiment || r.sent ? `<span class="rel-sentiment">${_esc(r.sentiment || r.sent)}</span>` : ''}
-          </div>
-          ${r.role ? `<span class="rel-role">${_esc(r.role)}</span>` : ''}
-          ${r.note ? `<div class="rel-note">${_esc(r.note)}</div>` : ''}
-          ${canEdit ? `<div style="display:flex;gap:6px;margin-top:6px;justify-content:flex-end">
-            <button class="ledger-del" style="opacity:.6" data-action="csV3EditRelation" data-id="${c.id}" data-idx="${i}" title="Modifier">✎</button>
-            <button class="ledger-del" style="opacity:.6" data-action="csV3DeleteRelation" data-id="${c.id}" data-idx="${i}" title="Supprimer">🗑️</button>
-          </div>` : ''}
-        </div>
-      </div>`;
-    }).join('')}
-  </div>`;
-}
-
-const _REL_SENTS = [
-  { k:'',         lbl:'Pas d’avis' },
-  { k:'ennemi',   lbl:'Hostile' },
-  { k:'mefiance', lbl:'Méfiant' },
-  { k:'neutre',   lbl:'Neutre' },
-  { k:'allie',    lbl:'Amical' },
-  { k:'lien',     lbl:'Allié' },
-];
-const _REL_DEFAULT_LBL = { lien:'Allié', allie:'Amical', neutre:'Neutre', mefiance:'Méfiant', ennemi:'Hostile', '':'' };
-
-let _relNpcsCache = []; // PNJ chargés pour le sélecteur de relation (modale)
-let _relCharsCache = []; // Personnages du groupe (co-PJ) pour le sélecteur de relation
-async function _openRelationModal(charId, idx) {
-  const c = getCharacterById(charId); if (!c) return;
-  const isEdit = Number.isInteger(idx) && idx >= 0;
-  const r = isEdit ? (c.relations || [])[idx] : null;
-  if (isEdit && !r) return;
-  const curSent = r?.sent ?? 'neutre';
-  // PNJ liables : tous pour le MJ, seulement les non cachés (embauchable !== false)
-  // pour un joueur qui édite la fiche.
-  _relNpcsCache = (await loadCollection('npcs').catch(() => []))
-    .filter(n => STATE.isAdmin || n.embauchable !== false)
-    .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
-  const npcOpts = `<option value="">— Aucun (relation libre) —</option>` + _relNpcsCache.map(n =>
-    `<option value="${n.id}" ${r?.npcId === n.id ? 'selected' : ''}>${_esc(n.nom || 'PNJ')}${n.role ? ' — ' + _esc(n.role) : ''}${STATE.isAdmin && n.embauchable === false ? ' 🚫' : ''}</option>`).join('');
-  // Personnages du groupe (co-PJ) : lien déclaré entre joueurs. On prend tout le
-  // roster de l'aventure (STATE.characters, session-live → 0 lecture), pas seulement
-  // les persos contrôlés — un joueur déclare un lien vers le PJ d'un autre joueur.
-  _relCharsCache = (Array.isArray(STATE.characters) ? STATE.characters : [])
-    .filter(x => x && x.id && x.id !== charId)
-    .sort((a, b) => (a.nom || '').localeCompare(b.nom || '', 'fr', { sensitivity: 'base' }));
-  const charOpts = `<option value="">— Aucun —</option>` + _relCharsCache.map(x =>
-    `<option value="${x.id}" ${r?.charId === x.id ? 'selected' : ''}>${_esc(x.nom || 'Personnage')}${x.classe ? ' — ' + _esc(x.classe) : ''}</option>`).join('');
-  const linkedImg = r?.img || '';
-  const previewHtml = linkedImg
-    ? `<img src="${linkedImg}" alt="">`
-    : `<span>${_esc((r?.ini || r?.nom || '?')[0]?.toUpperCase() || '?')}</span>`;
-  // Une seule cible à la fois (PNJ / co-PJ / libre) — choisie par un segment.
-  const hasChars = _relCharsCache.length > 0;
-  const initialType = (r?.charId && hasChars) ? 'char' : (r?.npcId ? 'npc' : 'free');
-  const typeBtn = (type, label) => `<button type="button" class="rel-sent-btn rel-target-btn ${initialType === type ? 'is-active' : ''}" data-type="${type}" data-action="csV3RelTargetType">${label}</button>`;
-  const pane = (type, inner) => `<div class="rel-target-pane" data-pane="${type}" ${initialType === type ? '' : 'style="display:none"'}>${inner}</div>`;
-  openModal('', `
-    <div class="rel-modal">
-      <div class="rel-modal-head">
-        <div class="rel-modal-ico">👥</div>
-        <div class="rel-modal-head-txt">
-          <h2>${isEdit ? 'Modifier la relation' : 'Nouvelle relation'}</h2>
-          <small>Allié, ennemi, PNJ ou autre personnage du groupe lié à <b>${_esc(c.nom||'ce personnage')}</b>, et le lien qui les unit.</small>
-        </div>
-      </div>
-      <div class="rel-modal-body">
-        <div class="form-group">
-          <label>Cible de la relation</label>
-          <div class="rel-sent-seg" id="rel-target-seg">
-            ${hasChars ? typeBtn('char', '🛡️ Personnage du groupe') : ''}
-            ${typeBtn('npc', '👤 PNJ')}
-            ${typeBtn('free', '✍️ Libre')}
-          </div>
-          <input type="hidden" id="rel-target-type" value="${initialType}">
-        </div>
-        <div class="form-group">
-          <div class="rel-npc-pick">
-            <div class="rel-npc-preview" id="rel-npc-preview">${previewHtml}</div>
-            <div style="flex:1;min-width:0">
-              ${hasChars ? pane('char', `<select class="input-field" id="rel-charpick" data-change="csV3RelPickChar">${charOpts}</select>`) : ''}
-              ${pane('npc', `<select class="input-field" id="rel-npc" data-change="csV3RelPickNpc">${npcOpts}</select>`)}
-              ${pane('free', `<p class="rel-opt" style="margin:.25rem 0 0">Saisis le nom librement ci-dessous.</p>`)}
-            </div>
-          </div>
-          <input type="hidden" id="rel-npcid" value="${initialType === 'npc' ? _esc(r?.npcId||'') : ''}">
-          <input type="hidden" id="rel-charid" value="${initialType === 'char' ? _esc(r?.charId||'') : ''}">
-          <input type="hidden" id="rel-img" value="${linkedImg}">
-        </div>
-        <div class="form-group"><label>Nom</label>
-          <input class="input-field" id="rel-nom" value="${_esc(r?.nom||'')}" placeholder="Maître Aldric, Capitaine Vex…" autocomplete="off"></div>
-        <div class="form-group"><label>Rôle / lien <span class="rel-opt">(optionnel)</span></label>
-          <input class="input-field" id="rel-role" value="${_esc(r?.role||'')}" placeholder="Mentor, Frère, Marchand, Rival…" autocomplete="off"></div>
-        <div class="form-group"><label>Sentiment</label>
-          <div class="rel-sent-seg">
-            ${_REL_SENTS.map(s => `<button type="button" class="rel-sent-btn rel-sent-btn--${s.k} ${s.k===curSent?'is-active':''}" data-sent="${s.k}" data-action="csV3RelSent">${s.lbl}</button>`).join('')}
-          </div>
-          <input type="hidden" id="rel-sent" value="${curSent}">
-          <input type="text" class="input-field" id="rel-sentiment" value="${_esc(r?.sentiment||'')}" placeholder="Libellé affiché (ex : Ami fidèle, Pacte, Dette…)" style="margin-top:.4rem" autocomplete="off"></div>
-        <div class="form-group"><label>Note <span class="rel-opt">(optionnel)</span></label>
-          <textarea class="input-field" id="rel-note" rows="3" placeholder="Histoire, dette, secret, dernière rencontre…">${_esc(r?.note||'')}</textarea></div>
-      </div>
-      <div class="rel-modal-foot">
-        <button class="btn btn-outline btn-sm" data-action="closeRelModal">Annuler</button>
-        <div style="flex:1"></div>
-        <button class="btn btn-gold" data-action="csV3SaveRelation" data-id="${charId}" data-idx="${isEdit?idx:-1}">💾 Enregistrer</button>
-      </div>
-    </div>
-  `);
-  setTimeout(() => document.getElementById('rel-nom')?.focus(), 30);
-}
-
-function _csV3AddRelation(charId)       { _openRelationModal(charId, -1); }
-function _csV3EditRelation(charId, idx) { _openRelationModal(charId, idx); }
-
-function _csV3RelSent(sent) {
-  const inp = document.getElementById('rel-sent'); if (inp) inp.value = sent;
-  document.querySelectorAll('.rel-sent-btn').forEach(b => b.classList.toggle('is-active', b.dataset.sent === sent));
-  const lbl = document.getElementById('rel-sentiment');
-  if (lbl && !lbl.value.trim()) lbl.value = _REL_DEFAULT_LBL[sent] || sent;
-}
-
-// Sélection d'un PNJ existant : préremplit nom/rôle, l'aperçu et l'image (snapshot
-// du portrait cadré → reste cohérent côté joueur sans charger la collection npcs).
-function _csV3RelPickNpc(el) {
-  const n = el.value ? _relNpcsCache.find(x => x.id === el.value) : null;
-  document.getElementById('rel-npcid').value = n ? n.id : '';
-  document.getElementById('rel-img').value = n ? (n.imageUrl || '') : '';
-  const prev = document.getElementById('rel-npc-preview');
-  const nomEl = document.getElementById('rel-nom');
-  const roleEl = document.getElementById('rel-role');
-  if (n) {
-    // Une seule cible à la fois : lier un PNJ efface le lien « personnage du groupe ».
-    const cp = document.getElementById('rel-charpick'); if (cp) cp.value = '';
-    const ci = document.getElementById('rel-charid'); if (ci) ci.value = '';
-    if (nomEl) nomEl.value = n.nom || nomEl.value;
-    if (roleEl && n.role && !roleEl.value.trim()) roleEl.value = n.role;
-    if (prev) prev.innerHTML = n.imageUrl ? `<img src="${n.imageUrl}" alt="">` : `<span>${_esc((n.nom||'?')[0]?.toUpperCase()||'?')}</span>`;
-  } else if (prev) {
-    prev.innerHTML = `<span>${_esc((nomEl?.value || '?')[0]?.toUpperCase() || '?')}</span>`;
-  }
-}
-
-// Choix du type de cible : une seule cible active (co-PJ / PNJ / libre). Bascule
-// l'affichage du picker correspondant et efface les cibles des autres types.
-function _csV3RelTargetType(el) {
-  const type = el.dataset.type === 'char' ? 'char' : el.dataset.type === 'npc' ? 'npc' : 'free';
-  const tt = document.getElementById('rel-target-type'); if (tt) tt.value = type;
-  document.querySelectorAll('#rel-target-seg .rel-target-btn').forEach(b => b.classList.toggle('is-active', b.dataset.type === type));
-  document.querySelectorAll('.rel-target-pane').forEach(p => { p.style.display = p.dataset.pane === type ? '' : 'none'; });
-  if (type !== 'npc') { const s = document.getElementById('rel-npc'); if (s) s.value = ''; const i = document.getElementById('rel-npcid'); if (i) i.value = ''; }
-  if (type !== 'char') { const s = document.getElementById('rel-charpick'); if (s) s.value = ''; const i = document.getElementById('rel-charid'); if (i) i.value = ''; }
-  if (type === 'free') {
-    const img = document.getElementById('rel-img'); if (img) img.value = '';
-    const nomEl = document.getElementById('rel-nom');
-    const prev = document.getElementById('rel-npc-preview');
-    if (prev) prev.innerHTML = `<span>${_esc((nomEl?.value || '?')[0]?.toUpperCase() || '?')}</span>`;
-  }
-}
-
-// Sélection d'un co-PJ du groupe : préremplit nom + aperçu depuis sa fiche vivante.
-// On ne fige PAS son portrait dans la relation (résolu en direct via charId) → le
-// doc perso reste léger et l'avatar suit la fiche cible.
-function _csV3RelPickChar(el) {
-  const x = el.value ? _relCharsCache.find(o => o.id === el.value) : null;
-  const ci = document.getElementById('rel-charid'); if (ci) ci.value = x ? x.id : '';
-  const prev = document.getElementById('rel-npc-preview');
-  const nomEl = document.getElementById('rel-nom');
-  if (x) {
-    // Une seule cible : lier un co-PJ efface le lien PNJ et son image figée.
-    const npcSel = document.getElementById('rel-npc'); if (npcSel) npcSel.value = '';
-    const ni = document.getElementById('rel-npcid'); if (ni) ni.value = '';
-    const img = document.getElementById('rel-img'); if (img) img.value = '';
-    if (nomEl) nomEl.value = x.nom || nomEl.value;
-    if (prev) prev.innerHTML = x.photo ? `<img src="${x.photo}" alt="">` : `<span>${_esc((x.nom||'?')[0]?.toUpperCase()||'?')}</span>`;
-  } else if (prev) {
-    prev.innerHTML = `<span>${_esc((nomEl?.value || '?')[0]?.toUpperCase() || '?')}</span>`;
-  }
-}
-
-async function _csV3SaveRelation(charId, idx) {
-  const c = getCharacterById(charId); if (!c) return;
-  const nom = document.getElementById('rel-nom')?.value.trim();
-  if (!nom) { showNotif('Indique au moins un nom.', 'error'); return; }
-  const sent = document.getElementById('rel-sent')?.value ?? 'neutre';
-  const rel = {
-    nom,
-    role:      document.getElementById('rel-role')?.value.trim() || '',
-    sent,
-    sentiment: document.getElementById('rel-sentiment')?.value.trim() || (_REL_DEFAULT_LBL[sent] || ''),
-    note:      document.getElementById('rel-note')?.value.trim() || '',
-    npcId:     document.getElementById('rel-npcid')?.value || '',
-    charId:    document.getElementById('rel-charid')?.value || '',
-    img:       document.getElementById('rel-img')?.value || '',
-  };
-  const rels = Array.isArray(c.relations) ? c.relations.slice() : [];
-  if (Number.isInteger(idx) && idx >= 0 && rels[idx]) rels[idx] = { ...rels[idx], ...rel };
-  else rels.push(rel);
-  c.relations = rels;
-  try {
-    await updateInCol('characters', charId, { relations: rels });
-    closeModalDirect();
-    _csV3JournalSub('relations');
-  } catch (e) { console.error('[relation save]', e); showNotif('Erreur d\'enregistrement.', 'error'); }
-}
-
-async function _csV3DeleteRelation(charId, idx) {
-  const c = getCharacterById(charId);
-  if (!c?.relations?.[idx]) return;
-  const nom = c.relations[idx].nom || '?';
-  if (!await confirmModal(`Supprimer la relation <b>${_esc(nom)}</b> ?`, { title:'Confirmation', confirmLabel:'Supprimer', icon:'🗑️' })) return;
-  const rels = c.relations.slice(); rels.splice(idx, 1); c.relations = rels;
-  await updateInCol('characters', charId, { relations: rels });
-  _csV3JournalSub('relations');
-}
-
 export {
   renderCharJournal,
   _bindNotesDnd, _bindQuetesDnd,
   _csV3JournalSub, _csV3ToggleNote, _csV3AddNote, _csV3DeleteNote,
   _csV3SaveOpenNote, _csV3CloseNote,
-  _csV3AddRelation, _csV3EditRelation,
-  _csV3RelSent, _csV3RelTargetType, _csV3RelPickNpc, _csV3RelPickChar, _csV3SaveRelation, _csV3DeleteRelation,
   _csV3CycleNoteCat,
+};
+
+export {
+  _csV3AddRelation, _csRelCloseAdd, _csRelSearch, _csRelAddSearch, _csRelLinkSearch,
+  _csRelClearSearch, _csRelReset, _csRelFilter, _csRelSort, _csRelToggle,
+  _csRelSetLevel, _csRelSuggestion, _csRelFieldInput, _csRelFieldBlur,
+  _csRelDelete, _csRelPick, _csRelRespond, _csRelPickFree, _csRelLink,
 };

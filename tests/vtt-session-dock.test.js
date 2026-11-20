@@ -132,6 +132,16 @@ test('les catégories et les titres musicaux ont un tri précis par poignée', (
   assert.match(css, /\.vtt-music-panel \.vtt-sort-ghost/);
 });
 
+test('la création de playlist conserve son formulaire et sa mise en forme', () => {
+  assert.match(music, /class="vtt-pl-modal-form"/);
+  assert.match(music, /class="vtt-pl-modal-inp"/);
+  assert.match(music, /aria-pressed="\$\{c === color\}"/);
+  assert.match(css, /\.vtt-pl-modal-form\s*\{/);
+  assert.match(css, /\.vtt-pl-modal-inp:focus\s*\{/);
+  assert.match(css, /\.vtt-pl-color-btn\.sel\s*\{/);
+  assert.match(css, /\.vtt-pl-modal-submit\s*\{/);
+});
+
 test('le sélecteur d’émetteur des émotes affiche les portraits avec repli sur l’initiale', () => {
   assert.match(emotes, /const live = _live\(t\)/);
   assert.match(emotes, /live\?\.displayImage \|\| t\?\.imageUrl/);

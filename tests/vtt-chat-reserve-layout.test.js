@@ -105,6 +105,8 @@ test('la pellicule et la recherche rapide portent le nouveau flux de régie', ()
   assert.match(css, /\.vtt-scene-popover-grid \.vtt-scene-popover-open\s*\{[\s\S]*?background-position:\s*center;[\s\S]*?background-size:\s*cover/);
   assert.match(css, /\.vtt-scene-popover-grid \.vtt-scene-popover-open b\s*\{[\s\S]*?bottom:\s*0;[\s\S]*?align-items:\s*flex-end/);
   assert.match(css, /\.vtt-scene-popover-grid \.vtt-scene-popover-actions button\s*\{[\s\S]*?width:\s*21px;[\s\S]*?height:\s*20px;[\s\S]*?overflow:\s*hidden/);
+  assert.match(css, /\.vtt-scene-popover-empty button\s*\{[^}]*height:\s*29px;[^}]*display:\s*inline-flex;[^}]*white-space:\s*nowrap/);
+  assert.match(css, /\.vtt-scene-popover-empty button svg\s*\{[^}]*width:\s*12px;[^}]*height:\s*12px/);
   assert.match(vtt, /function _vttFinderOpen\(\)/);
   assert.match(vtt, /Scène, personnage, PNJ, créature, carte/);
   assert.match(vtt, /document\.getElementById\('vtt-finder'\)[\s\S]*_vttFinderClose\(\)/);
@@ -116,12 +118,15 @@ test('la pellicule et la recherche rapide portent le nouveau flux de régie', ()
   assert.match(vtt, /Ouvrir en aperçu[\s\S]*Ouvrir et envoyer les joueurs[\s\S]*Créer sans ouvrir/);
   assert.match(vtt, /function _sceneGridGuess\(image, probedRatio = 0\)[\s\S]*ratio >= 1/);
   assert.match(vtt, /function _vttSceneDraftDimension\(\)[\s\S]*_vttSceneDraftRefreshPreview/);
+  assert.match(vtt, /data-vtt-fn="_vttSceneDraftSearch" data-vtt-on="input" data-vtt-args="\$value"/);
+  assert.match(vtt, /function _vttApplySceneDraftFilters\(\)[\s\S]*?card\.hidden = !\(matchesQuery && matchesFolder\)/);
   assert.match(vtt, /function _vttSceneDraftImportMenu\(event\)[\s\S]*Importer un dossier GitHub/);
   assert.match(css, /\.modal:has\(\.vtt-scene-modal\)[^}]*width:min\(1000px/);
   assert.match(css, /\.vtt-scene-modal \{[^}]*grid-template-columns:minmax\(0,1fr\) 340px/);
   assert.match(css, /\.vtt-scene-modal \.vtt-scene-library-grid \{[^}]*repeat\(auto-fill,minmax\(132px,1fr\)\)/);
   assert.match(css, /\.vtt-scene-modal \.vtt-scene-library-grid \{[^}]*grid-auto-rows:132px/);
   assert.match(css, /\.vtt-scene-library-grid > \.vtt-scene-map-choice,[\s\S]*?height:132px;[\s\S]*?grid-template-rows:88px 44px/);
+  assert.match(css, /\.vtt-scene-library-grid > \[hidden\] \{ display:none !important; \}/);
   assert.match(css, /\.vtt-scene-modal-foot \{[^}]*grid-column:1\/-1/);
   assert.match(css, /\.vtt-finder\s*\{/);
   assert.match(css, /\.vtt-reel-card/);
