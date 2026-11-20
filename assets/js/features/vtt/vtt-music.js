@@ -91,8 +91,12 @@ const _mi = (n, cls = '') => `<svg class="i ${cls}"><use href="#i-${n}"></use></
 const _MS_WAVE = `<span class="wave"><i></i><i></i><i></i></span>`;
 
 function _vttPlColorSelect(btn) {
-  document.querySelectorAll('.vtt-pl-color-btn').forEach(b => b.classList.remove('sel'));
+  document.querySelectorAll('.vtt-pl-color-btn').forEach(b => {
+    b.classList.remove('sel');
+    b.setAttribute('aria-pressed', 'false');
+  });
   btn.classList.add('sel');
+  btn.setAttribute('aria-pressed', 'true');
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1575,18 +1579,19 @@ let _musicEditPlId = null;   // catégorie en cours d'édition (modal renommage)
 // Corps de modal commun à la création et au renommage (nom + sélecteur couleur).
 function _plModalBody(name, color, submitFn, submitLabel) {
   return `
-    <div style="display:flex;flex-direction:column;gap:.9rem">
-      <div>
+    <div class="vtt-pl-modal-form">
+      <div class="vtt-pl-modal-field">
         <label class="vtt-pl-modal-lbl">Nom</label>
         <input id="vtt-pl-name-inp" type="text" class="vtt-pl-modal-inp"
           placeholder="Ex : Donjon, Combat, Ambiance…" value="${_esc(name || '')}"
           data-vtt-fn="${submitFn}" data-vtt-on="keydown-enter">
       </div>
-      <div>
+      <div class="vtt-pl-modal-field">
         <label class="vtt-pl-modal-lbl">Couleur</label>
         <div class="vtt-pl-color-row">
           ${PL_COLORS.map(c=>`<button type="button" class="vtt-pl-color-btn${c===color?' sel':''}"
             data-color="${c}" style="background:${c}"
+            aria-label="Couleur ${c}" aria-pressed="${c === color}"
             data-vtt-fn="_vttPlColorSelect" data-vtt-args="$this">
           </button>`).join('')}
         </div>

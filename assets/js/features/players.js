@@ -204,13 +204,14 @@ function _playersRouteSub() {
   if (STORE.viewMode === 'gallery') return 'gallery';
   if (STORE.viewMode === 'relations') {
     const selected = STORE.relSelectedId ? `/${encodeURIComponent(STORE.relSelectedId)}` : '';
+    if (STORE.relSource === 'declared') return `relations/${STORE.relMode}${selected || '/_'}/declared`;
     return `relations/${STORE.relMode}${selected}`;
   }
   return STORE.activeId ? `register/${STORE.activeId}` : 'register';
 }
 
 function _restorePlayersRoute() {
-  const [view, first = '', second = ''] = getRouteSub('players').split('/');
+  const [view, first = '', second = '', third = ''] = getRouteSub('players').split('/');
   if (!_PLAYER_VIEWS.has(view)) return false;
   STORE.viewMode = view;
   STORE.mobileDetail = false;
@@ -219,7 +220,9 @@ function _restorePlayersRoute() {
     if (_PLAYER_DETAIL_TABS.has(second)) STORE.detailSection = second;
   } else if (view === 'relations') {
     STORE.relMode = first === 'players' ? 'players' : 'characters';
-    STORE.relSelectedId = second ? decodeURIComponent(second) : '';
+    STORE.relSelectedId = second && second !== '_' ? decodeURIComponent(second) : '';
+    STORE.relSource = third === 'declared' ? 'declared' : 'shared';
+    if (STORE.relSource === 'declared') STORE.relMode = 'characters';
     STORE.relTableId = null;
   }
   return true;
