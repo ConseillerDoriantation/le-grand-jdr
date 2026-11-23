@@ -187,8 +187,11 @@ function _spellsBlock(c) {
       const vm = spellVM(spell, pmDelta);
       const type = _spellType(spell);
       const free = Boolean(spell.alwaysPrepared);
-      const cost = free ? '∞' : (vm.pm != null && vm.resource !== 'none' ? `${vm.pm} ${vm.resLabel}` : '—');
-      return `<div class="qv-spl" style="--qv-element:${type.color}" title="${_esc(vm.effet || type.label)}"><i></i><span>${_esc(vm.nom)}</span><b class="${free ? 'free' : ''}">${_esc(cost)}</b></div>`;
+      const cost = free ? '∞' : (vm.pm != null && vm.resource !== 'none'
+        ? (vm.costReduced ? `${vm.pmBase}→${vm.pm} ${vm.resLabel}` : `${vm.pm} ${vm.resLabel}`)
+        : '—');
+      const costTitle = vm.costReduced ? ` · coût réduit de ${vm.costReduction} ${vm.resLabel}` : '';
+      return `<div class="qv-spl" style="--qv-element:${type.color}" title="${_esc((vm.effet || type.label) + costTitle)}"><i></i><span>${_esc(vm.nom)}</span><b class="${free ? 'free' : vm.costReduced ? 'reduced' : ''}">${_esc(cost)}</b></div>`;
     }).join('')}</div>` : '<div class="qv-none">Aucun sort préparé</div>'}
   </section>`;
 }

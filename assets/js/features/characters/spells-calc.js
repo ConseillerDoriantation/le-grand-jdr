@@ -1413,11 +1413,16 @@ export function spellVM(s, pmDelta = 0) {
   // Le delta de coût du set d'armure (configuré en PM) est mis à l'échelle vers
   // la ressource du sort : PM −2 → PV −2, Or −10 (proportionnel au coût du noyau).
   const delta = spellSetCostDelta(pmDelta, res.id);
+  const effective = base == null ? null : Math.max(0, base + delta);
+  const appliedDelta = base == null ? 0 : effective - base;
   return {
     icon:  s?.icon || s?.icone || '✨',
     nom:   s?.nom || 'Sort sans nom',
-    pm:    base == null ? null : Math.max(0, base + delta),
+    pm:    effective,
     pmBase: base,
+    costDelta: appliedDelta,
+    costReduced: appliedDelta < 0,
+    costReduction: Math.max(0, -appliedDelta),
     resource: res.id,          // 'pm' | 'pv' | 'or' | 'none'
     resLabel: res.label,       // 'PM' | 'PV' | 'Or' | '—'
     resIcon:  res.icon,

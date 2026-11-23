@@ -372,6 +372,16 @@ function _effectiveSortPm(s, pmDelta = 0) {
   return spellVM(s, pmDelta).pm ?? 0;
 }
 
+function _spellCostHtml(s, pmDelta = 0) {
+  const cost = spellVM(s, pmDelta);
+  const unit = _esc(cost.resLabel);
+  if (!cost.costReduced) {
+    return `<span class="cs-grim-cost" title="Coût : ${cost.pm ?? 0} ${_esc(spellCostRes(s).full)}"><b>${cost.pm ?? 0}</b> ${unit}</span>`;
+  }
+  const title = `Coût réduit de ${cost.costReduction} ${cost.resLabel} · base ${cost.pmBase} ${cost.resLabel}`;
+  return `<span class="cs-grim-cost is-reduced" title="${_esc(title)}"><s>${cost.pmBase}</s><b>${cost.pm}</b> ${unit}<em>−${cost.costReduction}</em></span>`;
+}
+
 // Empreinte de fabrication : noyaux + multiset de runes. Deux sorts portant la
 // même empreinte partagent la même composition, même si leur nom ou leur catégorie diffère.
 function _spellRecipeKey(s) {
@@ -1497,7 +1507,6 @@ function _renderSpellRow(s, i, c, canEdit, { pmDelta = 0, deckMax = Infinity, se
     : `<span class="cs-grim-fx is-dim">${_esc((s.effet || '').trim().slice(0, 90) || 'Effet narratif')}</span>`;
   const status = npcHost || vs === 'ok' ? ''
     : `<span class="cs-grim-pill is-${vs}">${vs === 'no' ? 'À corriger' : 'En attente MJ'}</span>`;
-  const pm = _effectiveSortPm(s, pmDelta);
   return `<div class="cs-grim-row${selected ? ' is-sel' : ''}${s.actif ? ' is-actif' : ''}${!npcHost && vs !== 'ok' ? ` is-${vs}` : ''}" data-sort-idx="${i}">
     ${canDrag ? `<span class="cs-grim-drag" title="Glisser pour déplacer le sort" aria-hidden="true">⠿</span>` : ''}
     <button type="button" class="cs-grim-pick" data-action="_sortsSelect" data-idx="${i}" aria-pressed="${selected}">
@@ -1508,7 +1517,7 @@ function _renderSpellRow(s, i, c, canEdit, { pmDelta = 0, deckMax = Infinity, se
       </span>
     </button>
     ${canEdit ? `<button type="button" class="cs-grim-edit" data-action="_sortsEditRow" data-idx="${i}" title="Modifier la composition" aria-label="Modifier ${_esc(s.nom || 'ce sort')}">✏️</button>` : ''}
-    <span class="cs-grim-cost" title="Coût : ${pm} ${_esc(spellCostRes(s).full)}"><b>${pm}</b> ${_esc(_sortResLabel(s))}</span>
+    ${_spellCostHtml(s, pmDelta)}
     ${_renderSpellDeckBtn(s, i, c, canEdit, deckMax)}
   </div>`;
 }

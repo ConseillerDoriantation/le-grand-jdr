@@ -86,7 +86,7 @@ async function _syncPlayerNiveau(charId, niveau) {
   await updateInCol('players', matches[0].id, { niveau });
 }
 
-export function inlineEditNum(charId, field, el, min=0, max=99999) {
+export function inlineEditNum(charId, field, el, min=0, max=99999, onSaved = null) {
   const cur = el.textContent.replace(/[^\d-]/g,'').trim();
   const input = document.createElement('input');
   input.type = 'number';
@@ -112,7 +112,8 @@ export function inlineEditNum(charId, field, el, min=0, max=99999) {
     if (field === 'niveau') await _syncPlayerNiveau(charId, val);
     el.textContent = field==='niveau' ? `Niv. ${val}` : field==='or' ? `💰 ${val} or` : val;
     input.replaceWith(el);
-    if (['niveau','pvBase','pmBase','exp','gardeMax','garde'].includes(field)) charSession.renderSheet(c, charSession.getCurrentCharTab());
+    if (typeof onSaved === 'function') onSaved(c, field, val);
+    else if (['niveau','pvBase','pmBase','exp','gardeMax','garde'].includes(field)) charSession.renderSheet(c, charSession.getCurrentCharTab());
     else showNotif('Mis à jour !','success');
   };
   input.addEventListener('blur', save);

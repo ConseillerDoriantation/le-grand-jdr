@@ -14,7 +14,11 @@ const cases = n => `${n} case${n > 1 ? 's' : ''}`;
 
 /** Faits clés : coût, activation, portée, zone (ou cibles), durée. */
 export function spellFacts(s, c, pmDelta = 0) {
-  const facts = [{ k: 'Coût', v: `${spellVM(s, pmDelta).pm ?? 0} ${spellCostRes(s).label}` }];
+  const cost = spellVM(s, pmDelta);
+  const costValue = cost.costReduced
+    ? `${cost.pm} ${cost.resLabel} · réduction −${cost.costReduction} (base ${cost.pmBase})`
+    : `${cost.pm ?? 0} ${spellCostRes(s).label}`;
+  const facts = [{ k: 'Coût', v: costValue }];
   try {
     const { action, concentration } = _getSortAction(s);
     facts.push({ k: 'Activation', v: `${ACTION_LBL[action] || 'Action'}${concentration ? ' · concentration' : ''}` });
