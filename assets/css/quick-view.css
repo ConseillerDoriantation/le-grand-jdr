@@ -97,6 +97,7 @@
 .qv-spl span{min-width:0;overflow:hidden;font-weight:500;text-overflow:ellipsis;white-space:nowrap}
 .qv-spl b{color:var(--gold-2);font:600 .7rem var(--font-mono);white-space:nowrap}
 .qv-spl b.free{color:var(--emerald)}
+.qv-spl b.reduced{color:var(--emerald)}
 .qv-m{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:6px 11px;border-radius:var(--r-sm);font-size:.8rem}
 .qv-m:nth-child(odd){background:var(--surface-2)}
 .qv-m>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

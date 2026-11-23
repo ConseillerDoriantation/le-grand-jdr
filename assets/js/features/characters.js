@@ -1271,7 +1271,7 @@ function _paintIdentityPopover(c, btn = null) {
   requestAnimationFrame(() => {
     const popover = layer.querySelector('.ids-pop');
     if (!popover) return;
-    const anchorSel = { aura: '.ids-aura-button', status: '.ids-life', builds: '.ids-build', portraits: '.ids-portrait' }[ui.popover];
+    const anchorSel = { aura: '.ids-aura-button', status: '.ids-life', builds: '.ids-build', portraits: '.ids-portrait', xp: '.ids-level' }[ui.popover];
     const anchor = (anchorSel && side.querySelector(anchorSel)) || btn || side.querySelector('.ids-portrait');
     if (!anchor) return;
     const rect = anchor.getBoundingClientRect();
@@ -1458,6 +1458,47 @@ function _closeIdentityPopover() {
   _removeIdentityPopover();
 }
 
+// Met à jour les valeurs du popover XP sans remplacer son nœud DOM. Cela
+// conserve sa position, l'input de gain éventuel et supprime tout clignotement
+// pendant les clics répétés sur le niveau manuel.
+function _syncIdentityXpPopover(c) {
+  const popover = document.querySelector('#identity-popover-layer .ids-pop-xp');
+  if (!popover || _identityStateFor(c).popover !== 'xp') return;
+  const level = Number(c.niveau) || 1;
+  const xpCur = Number(c.exp) || 0;
+  const xpPalier = calcPalier(level);
+  const xpPct = pct(xpCur, xpPalier);
+  const ready = xpPalier > 0 && xpCur >= xpPalier;
+  const head = popover.querySelector('.ids-xp-pop-head');
+  if (head?.children[0]) head.children[0].textContent = `Niveau ${level}`;
+  if (head?.children[1]) head.children[1].textContent = `${xpPct}%`;
+  popover.querySelector('.ids-xp-track i')?.style.setProperty('width', `${xpPct}%`);
+  const current = popover.querySelector('.ids-xp-current');
+  if (current) current.textContent = _identityNumber(xpCur);
+  const threshold = popover.querySelector('.ids-xp-current-line > span');
+  if (threshold) threshold.textContent = `/ ${_identityNumber(xpPalier)} XP`;
+  const manualValue = popover.querySelector('.ids-level-value');
+  if (manualValue) manualValue.textContent = String(level);
+
+  let levelUp = popover.querySelector('.ids-levelup');
+  if (!ready) {
+    levelUp?.remove();
+    return;
+  }
+  if (!levelUp) {
+    const manual = popover.querySelector('.ids-manual-level');
+    manual?.insertAdjacentHTML('beforebegin', `<button class="ids-levelup" data-action="identityLevelUp" data-id="${c.id}"></button>`);
+    levelUp = popover.querySelector('.ids-levelup');
+  }
+  if (levelUp) levelUp.innerHTML = `Niveau ${level + 1}<small>Garde ${xpCur - xpPalier} XP</small>`;
+}
+
+function _refreshIdentityProgression(c) {
+  if (!c) return;
+  _rerenderIdentity(c);
+  _syncIdentityXpPopover(c);
+}
+
 async function _adjustIdentityLevel(btn) {
   const c = getCharacterById(btn.dataset.id);
   if (!c || !STATE.isAdmin) return;
@@ -1465,18 +1506,27 @@ async function _adjustIdentityLevel(btn) {
   if (next === Number(c.niveau || 1)) return;
   const previous = c.niveau;
   c.niveau = next;
+  // Retour visuel optimiste et ciblé : le popover existant reste physiquement
+  // en place tandis que la colonne recalcule ses valeurs dépendantes du niveau.
+  _refreshIdentityProgression(c);
   try {
     await updateInCol('characters', c.id, { niveau: next });
   } catch (error) {
-    c.niveau = previous;
+    // Un clic plus récent peut déjà avoir avancé le niveau : ne pas l'écraser.
+    if (Number(c.niveau) === next) c.niveau = previous;
+    _refreshIdentityProgression(c);
     notifySaveError(error);
   }
-  renderCharSheet(c, charSession.getCurrentCharTab() || 'combat');
 }
 
 async function _identityLevelUp(btn) {
-  _identityUi.popover = null;
-  await levelUpChar(btn.dataset.id);
+  const c = await levelUpChar(btn.dataset.id, { render: false });
+  _refreshIdentityProgression(c);
+}
+
+async function _identityAddXp(btn) {
+  const c = await addXpDelta(btn.dataset.id, { render: false });
+  _refreshIdentityProgression(c);
 }
 
 function renderCharSheet(c, keepTab) {
@@ -2330,7 +2380,14 @@ registerActions({
     inlineEditText(btn.dataset.id, btn.dataset.field, el);
   },
   inlineEditChip:          (btn)    => inlineEditChip(btn.dataset.id, btn.dataset.field, btn, btn.dataset.label),
-  inlineEditNum:           (btn)    => inlineEditNum(btn.dataset.id, btn.dataset.field, btn, Number(btn.dataset.min || 1), Number(btn.dataset.max || 999)),
+  inlineEditNum:           (btn)    => inlineEditNum(
+    btn.dataset.id,
+    btn.dataset.field,
+    btn,
+    Number(btn.dataset.min || 1),
+    Number(btn.dataset.max || 999),
+    btn.closest('.ids-pop-xp') ? c => _refreshIdentityProgression(c) : null,
+  ),
   inlineEditStat:          (btn)    => inlineEditStat(btn.dataset.id, btn.dataset.key, btn),
   inlineEditStatFromCard:  (btn, e) => inlineEditStatFromCard(e, btn.dataset.id, btn.dataset.key, btn),
   allocateStat:            (btn)    => allocateStat(btn.dataset.id, btn.dataset.key, Number(btn.dataset.delta)),
@@ -2338,7 +2395,7 @@ registerActions({
   // Stats vitales
   adjustStat:              (btn)    => adjustStat(btn.dataset.field, Number(btn.dataset.delta), btn.dataset.id),
   editVital:               (btn)    => editVitalCurrent(btn.dataset.field, btn, btn.dataset.id),
-  addXpDelta:              (btn)    => addXpDelta(btn.dataset.id),
+  addXpDelta:              (btn)    => _identityAddXp(btn),
 
   // Actions identité
   openCharacterPortraitViewer: (btn) => _openCharacterPortraitViewer(btn),

@@ -42,7 +42,7 @@ import { isCharacterGrantedToUid, resolveCharacterControlToken } from './vtt-tok
 import { _effectDisplay, _vttSortDmgFormula,
          _vttSortSoinFormula, _vttAmpDispCircleSize, _vttSpellActionMode, _vttDisplayRunes,
          } from './vtt-spell-display.js'; // formules de sorts (leaf — mini-fiche découplée de vtt.js)
-import { spellCostRes, _calcSortMana } from '../characters/spells-calc.js'; // ressource de coût + régén PM
+import { spellCostRes, spellVM, _calcSortMana } from '../characters/spells-calc.js'; // ressource de coût + régén PM
 import { _renderPresenceCol } from './vtt-presence.js'; // circ. (toggle mini → refresh colonne)
 import {
   equipmentSlotAcceptsItem, getEquipmentSlot, getEquipmentSlots,
@@ -1346,7 +1346,10 @@ function _msSpellLine(s, i, c, uid, canEdit, deckCount, deckMax) {
     : canEdit
       ? `<button class="vtt-ms-sp-tg${s.actif ? ' on' : ''}${(!canActivate && !s.actif) ? ' lock' : ''}" data-vtt-fn="_vttToggleMsSort" data-vtt-args="${c.id}|${uid}|${i}" title="${lockTitle}" aria-pressed="${!!s.actif}">${_msIco(!validationAllows ? 'lock' : 'check')}</button>`
       : `<span class="vtt-ms-sp-tg${s.actif ? ' on' : ''}">${s.actif ? _msIco('check') : ''}</span>`;
-  const cost = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
+  const cost = spellVM(s, Number(getArmorSetData(c)?.modifiers?.spellPmDelta) || 0);
+  const costHtml = cost.costReduced
+    ? `<s>${cost.pmBase}</s> <b>${cost.pm}</b> ${_esc(cost.resLabel)} <em>−${cost.costReduction}</em>`
+    : `${cost.pm ?? 0} ${_esc(cost.resLabel)}`;
   const badges = `${concentration ? '<span class="vtt-ms-sp-badge conc" title="Concentration">C</span>' : ''}${alwaysPrepared ? '<span class="vtt-ms-sp-badge inf" title="Toujours prêt">∞</span>' : ''}${vs === 'pending' ? '<span class="vtt-ms-sp-badge wait">À valider</span>' : vs === 'no' ? '<span class="vtt-ms-sp-badge no">Refusé</span>' : ''}`;
   const open = String(_msOpenSpell) === String(s.id || i);
   let expand = '';
@@ -1360,7 +1363,7 @@ function _msSpellLine(s, i, c, uid, canEdit, deckCount, deckMax) {
   return `<div class="vtt-ms-sp${open ? ' open' : ''}${s.actif ? ' on' : ''}" style="--tc:${typeCol}" data-name="${_esc(_norm(s.nom || ''))}" data-cat="${_esc(s.catId || '__none')}" data-type="${filterType}" data-actif="${s.actif ? 1 : 0}">
     <div class="vtt-ms-sp-row" data-vtt-fn="_vttMsToggleSpell" data-vtt-args="${s.id || i}">
       <span class="vtt-ms-sp-ico">${s.icon ? _esc(s.icon) : '✦'}</span>
-      <div class="vtt-ms-sp-b"><div class="vtt-ms-sp-nm"><span>${_esc(s.nom || 'Sans nom')}</span>${badges}</div><div class="vtt-ms-sp-meta"><span class="vtt-ms-sp-act ${acfg[2]}" style="--ac:${acfg[1]}">${acfg[0]}</span><span class="vtt-ms-sp-cost-label">${cost} ${_esc(spellCostRes(s).label)}</span></div></div>
+      <div class="vtt-ms-sp-b"><div class="vtt-ms-sp-nm"><span>${_esc(s.nom || 'Sans nom')}</span>${badges}</div><div class="vtt-ms-sp-meta"><span class="vtt-ms-sp-act ${acfg[2]}" style="--ac:${acfg[1]}">${acfg[0]}</span><span class="vtt-ms-sp-cost-label${cost.costReduced ? ' reduced' : ''}" title="${cost.costReduced ? `Coût de base ${cost.pmBase} ${_esc(cost.resLabel)}` : 'Coût du sort'}">${costHtml}</span></div></div>
       <div class="vtt-ms-sp-main"${primary ? ` style="--fxc:${primary.color}" title="${_esc(primary.lbl || '')}"` : ''}><b>${primary ? `${primary.icon} ${_esc(primary.val)}` : '—'}</b></div>
       ${toggle}
     </div>${expand}</div>`;
@@ -1375,8 +1378,7 @@ function _msTabSorts(c, uid, canEdit) {
   const setPm = Number(getArmorSetData(c)?.modifiers?.spellPmDelta) || 0;
   const pmTotal = sorts.filter(s => s.actif).reduce((sum, s) => {
     if (spellCostRes(s).id !== 'pm') return sum;
-    const pm = Number.isFinite(parseInt(s.pmOverride)) ? parseInt(s.pmOverride) : (parseInt(s.pm) || 0);
-    return sum + Math.max(0, pm + setPm);
+    return sum + (spellVM(s, setPm).pm ?? 0);
   }, 0);
 
   // Jauge de Deck en segments (+ « toujours prêts » en pointillé).

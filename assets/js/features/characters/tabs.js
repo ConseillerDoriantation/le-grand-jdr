@@ -910,7 +910,7 @@ export async function allocStatPoint(charId, key, delta) {
 
 // Passe au niveau supérieur en consommant un palier d'XP ; l'excédent est
 // conservé pour le niveau d'après. Répétable si l'excédent dépasse encore.
-export async function levelUpChar(charId) {
+export async function levelUpChar(charId, { render = true } = {}) {
   const c = getCharacterById(charId);
   if (!c) return;
   const niv    = parseInt(c.niveau) || 1;
@@ -923,7 +923,8 @@ export async function levelUpChar(charId) {
   c.niveau = newNiv;
   c.exp    = newXp;
   showNotif(`🎉 Niveau ${newNiv} atteint !`, 'success');
-  charSession.renderSheet(c, charSession.getCurrentCharTab());
+  if (render) charSession.renderSheet(c, charSession.getCurrentCharTab());
+  return c;
 }
 
 export async function addXpFromInput(charId) {
@@ -975,7 +976,7 @@ export async function saveXpDirect(charId, input) {
   if (await trySave('characters', charId, {exp: val})) showNotif('XP mis à jour !', 'success');
 }
 
-export async function addXpDelta(charId) {
+export async function addXpDelta(charId, { render = true } = {}) {
   const input = document.getElementById(`xp-add-input-${charId}`);
   if (!input) return;
   const delta = parseInt(input.value);
@@ -987,7 +988,8 @@ export async function addXpDelta(charId) {
   input.value = '';
   if (await trySave('characters', charId, {exp: newXp})) showNotif(`+${delta} XP !`, 'success');
   // Rafraîchit la fiche pour que la barre/% et le total reflètent le nouvel XP.
-  charSession.renderSheet?.(c, charSession.getCurrentCharTab());
+  if (render) charSession.renderSheet?.(c, charSession.getCurrentCharTab());
+  return c;
 }
 
 // ══════════════════════════════════════════════

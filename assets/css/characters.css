@@ -23572,8 +23572,11 @@ body:has(.cs-v3 .iv.is-narrow.is-sheet-open) :is(.global-back-top, #chat-widget)
   .cs-grim-edit { opacity:.5; }
   .cs-grim-row:hover .cs-grim-edit, .cs-grim-edit:focus-visible { opacity:1; }
 }
-.cs-grim-cost { flex:none; min-width:52px; text-align:right; color:var(--text-muted); font-size:13px; font-variant-numeric:tabular-nums; }
+.cs-grim-cost { flex:none; min-width:52px; display:inline-flex; align-items:baseline; justify-content:flex-end; gap:3px; text-align:right; color:var(--text-muted); font-size:13px; font-variant-numeric:tabular-nums; }
 .cs-grim-cost b { color:var(--text); font-size:14px; font-weight:700; }
+.cs-grim-cost.is-reduced b { color:var(--emerald); }
+.cs-grim-cost.is-reduced s { color:var(--text-dim); font-size:11px; }
+.cs-grim-cost.is-reduced em { padding:1px 4px; border-radius:999px; background:color-mix(in srgb, var(--emerald) 14%, transparent); color:var(--emerald); font-size:9px; font-style:normal; font-weight:800; }
 .cs-grim-tg { flex:none; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-width:108px; min-height:40px; padding:0 12px; border-radius:12px; border:1px solid var(--border-strong); background:transparent; color:var(--text-soft); font:inherit; font-size:12.5px; font-weight:600; white-space:nowrap; cursor:pointer; }
 button.cs-grim-tg:hover { background:var(--surface-3); color:var(--text); }
 .cs-grim-tg.is-on, button.cs-grim-tg.is-on:hover { color:var(--emerald); border-color:color-mix(in srgb, var(--emerald) 55%, transparent); background:color-mix(in srgb, var(--emerald) 14%, transparent); }

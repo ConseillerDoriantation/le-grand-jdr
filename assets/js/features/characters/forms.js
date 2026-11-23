@@ -1,5 +1,6 @@
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
+import { setTargetCharacter } from '../../shared/character-navigation.js';
 import { registerActions } from '../../core/actions.js';
 import { addToCol, updateInCol, deleteFromCol, loadCollectionWhere, loadCollection } from '../../data/firestore.js';
 import { trySave } from '../../shared/crud.js';
@@ -580,9 +581,12 @@ async function _createCharForOwner(uid, ownerPseudo) {
       statsBonus:{},
       equipement:{}, inventaire:[], deck_sorts:[], quetes:[], notes:'',
     };
-    await addToCol('characters', data);
+    const characterId = await addToCol('characters', data);
+    // `addToCol` alimente déjà le cache local : transmettre son identifiant à
+    // la page suffit pour ouvrir la nouvelle fiche, sans lecture Firestore.
+    setTargetCharacter(characterId);
     showNotif('Personnage créé !','success');
-    PAGES.characters();
+    await PAGES.characters();
   } catch (e) { notifySaveError(e); }
 }
 

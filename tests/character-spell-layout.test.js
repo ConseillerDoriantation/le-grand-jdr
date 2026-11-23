@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 
 const css = readFileSync(new URL('../assets/css/characters.css', import.meta.url), 'utf8');
 const spellsJs = readFileSync(new URL('../assets/js/features/characters/spells.js', import.meta.url), 'utf8');
+const spellsCalc = readFileSync(new URL('../assets/js/features/characters/spells-calc.js', import.meta.url), 'utf8');
+const spellFacts = readFileSync(new URL('../assets/js/features/characters/spell-facts.js', import.meta.url), 'utf8');
 
 const fnBody = (name) => spellsJs.match(new RegExp(`function ${name}\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\}`))?.[1] || '';
 
@@ -61,4 +63,14 @@ test('le modificateur choisi dans la fiche est synchronisé et lu avant le défa
   assert.match(spellsJs, /function _syncSpellStatProxy\(el\)[\s\S]*target\.value = el\.value;[\s\S]*_updateSortPreview\(\);/);
   assert.match(spellsJs, /_syncSpellStatProxy:\s*\(el\)\s*=>\s*_syncSpellStatProxy\(el\)/);
   assert.match(spellsJs, /degatsStat:\s*_readSpellStatOverride\('s-degats-stat', 's-degats-stat-soin'\)/);
+});
+
+test('une réduction de ressource affiche le coût de base, le coût final et son économie', () => {
+  assert.match(spellsCalc, /costReduced: appliedDelta < 0/);
+  assert.match(spellsCalc, /costReduction: Math\.max\(0, -appliedDelta\)/);
+  assert.match(spellsJs, /function _spellCostHtml/);
+  assert.match(spellsJs, /class="cs-grim-cost is-reduced"/);
+  assert.match(spellsJs, /<s>\$\{cost\.pmBase\}<\/s><b>\$\{cost\.pm\}<\/b>/);
+  assert.match(spellFacts, /réduction −\$\{cost\.costReduction\} \(base \$\{cost\.pmBase\}\)/);
+  assert.match(css, /\.cs-grim-cost\.is-reduced em/);
 });

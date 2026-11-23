@@ -72,6 +72,25 @@ test('le total d XP se modifie directement en cliquant sur sa valeur', () => {
   assert.match(css, /\.cs-v3 \.ids-xp-current:hover/);
 });
 
+test('le niveau manuel reste ouvert pendant les clics répétés sur plus ou moins', () => {
+  const sync = source.slice(source.indexOf('function _syncIdentityXpPopover'), source.indexOf('async function _adjustIdentityLevel'));
+  const adjust = source.slice(source.indexOf('async function _adjustIdentityLevel'), source.indexOf('async function _identityLevelUp'));
+  assert.match(sync, /querySelector\('#identity-popover-layer \.ids-pop-xp'\)/);
+  assert.match(sync, /\.ids-xp-track i/);
+  assert.match(sync, /\.ids-level-value/);
+  assert.match(adjust, /_refreshIdentityProgression\(c\)/);
+  assert.doesNotMatch(adjust, /renderCharSheet|_paintIdentityPopover|_removeIdentityPopover/);
+  assert.match(source, /xp: '\.ids-level'/);
+});
+
+test('toutes les modifications de progression conservent le même popover', () => {
+  const refresh = source.slice(source.indexOf('function _refreshIdentityProgression'), source.indexOf('function renderCharSheet'));
+  assert.match(refresh, /levelUpChar\(btn\.dataset\.id, \{ render: false \}\)/);
+  assert.match(refresh, /addXpDelta\(btn\.dataset\.id, \{ render: false \}\)/);
+  assert.doesNotMatch(refresh, /_identityUi\.popover = null|_removeIdentityPopover|_paintIdentityPopover/);
+  assert.match(source, /btn\.closest\('\.ids-pop-xp'\) \? c => _refreshIdentityProgression\(c\) : null/);
+});
+
 test('PV PM et chiffres clés suivent l’ordre visuel de la maquette', () => {
   assert.match(sidebar, /ids-vital-head[^]*ids-vital-value[^]*ids-step/);
   assert.match(sidebar, /Base <b>\$\{key === 'pv'/);
