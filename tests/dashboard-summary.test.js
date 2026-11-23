@@ -27,13 +27,29 @@ const AGENDA = { sessions: [
   { questId: 'g1', date: '2026-10-17', slot: 'a' },
 ] };
 
-test('résumé v2 : seuls les groupes actifs et leurs champs utiles sont conservés', () => {
+test('résumé v2 : le statut du groupe prime sur celui de la mission', () => {
   const groups = activeGroupsFromSources(STORY, QUESTS);
-  assert.deepEqual(groups, [{
+  assert.deepEqual(groups.find(group => group.id === 'g1'), {
     id: 'g1', title: 'Les Braises', missionId: 'm1', missionTitle: 'La Forge',
     act: 'Acte II', location: 'Kharn', participants: [{ uid: 'u1', charId: 'c1', nom: 'Ysolde' }],
-  }]);
+  });
+  assert.deepEqual(groups.find(group => group.id === 'g2'), {
+    id: 'g2', title: 'Les Anciens', missionId: 'm2', missionTitle: 'Le Pont',
+    act: '', location: '', participants: [],
+  });
+  assert.equal(groups.some(group => group.id === 'g3'), false);
   assert.doesNotMatch(JSON.stringify(groups), /data:image/);
+});
+
+test('résumé v2 : la vignette de mission est optionnelle et jamais remplacée par imageUrl', () => {
+  const thumb = 'data:image/jpeg;base64,dGVzdA==';
+  const groups = activeGroupsFromSources(STORY, QUESTS, new Map([['m1', thumb]]));
+  const group = groups.find(item => item.id === 'g1');
+  assert.equal(group.missionThumb, thumb);
+  assert.equal(group.imageUrl, undefined);
+  const withoutThumb = buildDashboardSummary({ story: STORY, quests: QUESTS, agenda: AGENDA });
+  assert.equal(isUsableSummary(withoutThumb), true);
+  assert.equal(withoutThumb.groups.find(item => item.id === 'g1').missionThumb, undefined);
 });
 
 test('résumé v2 : les séances sont compactes et récupèrent les participants du groupe', () => {
@@ -68,25 +84,31 @@ test('résumé v2 : comparaison stable sans réécriture pour le timestamp', () 
   assert.equal(sameSummary(summary, { ...summary, groups: [] }), false);
 });
 
-test('dashboard v3 : quatre blocs, ordre joueur sans groupe et panneau latéral sticky', () => {
+test('dashboard v4 : bannière, compagnie MJ et ordre joueur conformes au handoff', () => {
   const pages = read('assets/js/features/pages.js');
   const css = read('assets/css/dashboard.css');
   const dashboard = pages.match(/async dashboard\(\) \{([\s\S]*?)\n  \},\n\n  \/\/ ─── CHARACTERS/)?.[1] || '';
-  for (const label of ['Prochaine séance', 'Personnages', 'Groupes actifs', 'Groupes ouverts', 'Mur du Bastion']) assert.match(dashboard, new RegExp(label));
-  // La séance est un bandeau pleine largeur rendu AVANT la grille ; sous la
-  // grille, l'ordre joueur sans groupe reste « groupes puis personnages ».
+  for (const label of ['Prochaine séance', 'La compagnie', 'Groupes ouverts', 'Mur du Bastion']) assert.match(dashboard, new RegExp(label));
   assert.match(dashboard, /const sessionBanner = sessionSection\(sessionList, groupList\)/);
-  assert.match(dashboard, /hasJoinedGroup[\s\S]*\[groupSection, characterSection\]/);
-  assert.match(dashboard, /\$\{sessionBanner\}<div class="db-grid/);
-  assert.match(css, /grid-template-columns:minmax\(0,1\.62fr\) minmax\(300px,1fr\)/);
-  assert.match(css, /\.db-wall\{position:sticky/);
+  assert.match(dashboard, /hasJoinedGroup \? \[characterSection, groupSection\] : \[groupSection, characterSection\]/);
+  assert.match(dashboard, /\$\{top\}\$\{sessionBanner\}\$\{gmRosterSection\(groupList\)\}/);
+  assert.match(dashboard, /dash-roster-view/);
+  assert.match(dashboard, /id="db-roster-body"/);
+  assert.match(dashboard, /members\.slice\(0, 6\)/);
+  assert.match(dashboard, /_dashRosterFreeToggle/);
+  assert.match(dashboard, /characterPortraitContent\(char/);
+  assert.match(dashboard, /calcPalier\(level\)/);
+  assert.match(dashboard, /groupJoined\(group\)/);
+  assert.match(dashboard, /anciens résumés peuvent ne pas contenir participantUids/);
+  assert.match(css, /grid-template-columns:minmax\(0,1\.65fr\) minmax\(300px,1fr\)/);
+  assert.match(css, /\.db-roster-grid\{[^}]*repeat\(auto-fill,minmax\(236px,1fr\)\)/);
+  assert.match(css, /\.db-hero\{[^}]*background:#0a0f18/);
   assert.match(css, /@container \(max-width:900px\)/);
   assert.match(css, /\.db :where\(button\)\{[^}]*background:none;border:0[^}]*text-align:left/);
-  assert.match(css, /\.db-tr\{[^}]*grid-template-columns:minmax\(0,1fr\) 210px 132px/);
-  assert.match(css, /\.db-tr>\.db-bars\{width:210px/);
+  assert.match(css, /prefers-reduced-motion:reduce/);
 });
 
-test('dashboard v3 : aucune lecture lourde ni repli complet côté joueur', () => {
+test('dashboard v4 : aucune lecture lourde ni repli complet côté joueur', () => {
   const pages = read('assets/js/features/pages.js');
   const dashboard = pages.match(/async dashboard\(\) \{([\s\S]*?)\n  \},\n\n  \/\/ ─── CHARACTERS/)?.[1] || '';
   assert.doesNotMatch(dashboard, /loadStats|availabilities|bastion['"],\s*['"]main|achievements|collection|dash-bastion-wall-legacy|session-center/);
@@ -101,4 +123,10 @@ test('mainteneur v2 : story et quests restent passifs, agenda est un document co
   assert.doesNotMatch(maintainer, /loadCollection\(/);
   assert.match(maintainer, /subscribeDoc\('agenda_session', 'next'/);
   assert.match(maintainer, /Array\.isArray\(next\.groups\)[\s\S]*Array\.isArray\(next\.sessions\)/);
+  assert.match(maintainer, /canvas\.width = 48[\s\S]*canvas\.height = 36/);
+  assert.match(maintainer, /toDataURL\('image\/jpeg', \.6\)/);
+  assert.match(maintainer, /_imageFingerprint/);
+  assert.match(maintainer, /quest\.statut \|\| 'active'/);
+  assert.match(maintainer, /generation !== _thumbGeneration/);
+  assert.match(maintainer, /setTimeout\(\(\) => finish\(''\), 5000\)/);
 });

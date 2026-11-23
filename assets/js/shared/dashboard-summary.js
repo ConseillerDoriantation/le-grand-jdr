@@ -1,6 +1,6 @@
 // Résumé compact du tableau de bord, écrit par le client MJ et lu par les joueurs.
 // Il ne contient que les séances et groupes nécessaires à l'accueil : aucune
-// image/base64, aucun haut-fait, aucune collection complète.
+// image complète/base64 lourde, aucun haut-fait, aucune collection complète.
 
 import { agendaSessionsFromDoc } from './agenda-sessions.js';
 
@@ -20,20 +20,18 @@ function _participant(value = {}) {
   };
 }
 
-export function activeGroupsFromSources(story = [], quests = []) {
+export function activeGroupsFromSources(story = [], quests = [], thumbs = new Map()) {
   const missions = new Map(_list(story).map(item => [String(item?.id || ''), item]));
-  const closed = new Set(
-    _list(story)
-      .filter(item => item?.statut === 'Terminée' || item?.statut === 'Échouée')
-      .map(item => String(item?.id || '')),
-  );
 
   return _list(quests)
     .filter(quest => quest?.id && quest?.missionId
-      && (quest.statut || 'active') === 'active'
-      && !closed.has(String(quest.missionId)))
+      // Le groupe possède son propre cycle de vie. Une mission peut être
+      // terminée globalement alors qu'un autre groupe est encore en train de
+      // la jouer : seul le statut du groupe décide s'il reste au tableau.
+      && (quest.statut || 'active') === 'active')
     .map(quest => {
       const mission = missions.get(String(quest.missionId)) || {};
+      const missionThumb = thumbs instanceof Map ? _text(thumbs.get(String(quest.missionId))) : '';
       return {
         id: String(quest.id),
         title: _text(quest.titre || quest.nom || 'Groupe'),
@@ -42,6 +40,7 @@ export function activeGroupsFromSources(story = [], quests = []) {
         act: _text(quest.acte || mission.acte),
         location: _text(quest.lieu || mission.lieu),
         participants: _list(quest.participants).map(_participant).filter(p => p.uid || p.charId || p.nom),
+        ...(missionThumb ? { missionThumb } : {}),
       };
     })
     .sort((a, b) => a.title.localeCompare(b.title, 'fr'));
@@ -71,10 +70,10 @@ export function compactDashboardSessions(agenda = null, quests = []) {
 
 // Une source non fournie conserve la partie déjà stockée. Cela permet au
 // mainteneur passif de recevoir story, quests et agenda dans n'importe quel ordre.
-export function buildDashboardSummary({ story, quests, agenda } = {}, previous = null) {
+export function buildDashboardSummary({ story, quests, agenda, thumbs } = {}, previous = null) {
   const next = { v: DASHBOARD_SUMMARY_VERSION };
   if (Array.isArray(story) && Array.isArray(quests)) {
-    next.groups = activeGroupsFromSources(story, quests);
+    next.groups = activeGroupsFromSources(story, quests, thumbs);
   } else if (Array.isArray(previous?.groups)) {
     next.groups = previous.groups;
   }
