@@ -3395,7 +3395,7 @@ let _dashUi = null;
 
 const PAGES = {
 
-  // ─── DASHBOARD V3 ───────────────────────────────────────────────────────────
+  // ─── DASHBOARD V4 ───────────────────────────────────────────────────────────
   async dashboard() {
     const content = document.getElementById('main-content');
     content.innerHTML = `<div class="db" id="dash-root">${appSplashHtml()}</div>`;
@@ -3411,6 +3411,14 @@ const PAGES = {
     let { bastion, investments: bastionInvestments } = bastionSignalSnapshot();
     let pickGroupId = '';
     let paintQueued = false;
+    let dashboardMounted = false;
+    let dashboardAnimTimer = null;
+    let rosterFilter = 'all';
+    let rosterQuery = '';
+    let rosterSort = { key: 'nom', dir: 1 };
+    let rosterView = 'groups';
+    let rosterFreeExpanded = false;
+    try { rosterView = localStorage.getItem('dash-roster-view') === 'table' ? 'table' : 'groups'; } catch { /* stockage privé */ }
     const groupOverrides = new Map();
     const uidAliases = _uidAliasesForCurrentUser();
     const aliasSet = new Set(uidAliases);
@@ -3427,6 +3435,13 @@ const PAGES = {
       edit: '<path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/>',
       'arrow-right': '<path d="M3 8h10M9 4l4 4-4 4"/>',
       'refresh-cw': '<path d="M13 5V2l-2 2a5.5 5.5 0 10.8 7.3M3 11v3l2-2"/>',
+      search: '<circle cx="7" cy="7" r="4.3"/><path d="M10.2 10.2L14 14"/>',
+      columns: '<rect x="2" y="3" width="5" height="10" rx="1"/><rect x="9" y="3" width="5" height="10" rx="1"/>',
+      rows: '<path d="M3 4h10M3 8h10M3 12h10"/>',
+      external: '<path d="M8.5 3H13v4.5M13 3L7 9"/><path d="M11 9.5V13H3V5h3.5"/>',
+      heart: '<path d="M8 13S2.5 10 2.5 5.8A2.8 2.8 0 018 4a2.8 2.8 0 015.5 1.8C13.5 10 8 13 8 13z"/>',
+      message: '<path d="M2.5 3.5h11v8h-6L4 14v-2.5H2.5z"/>',
+      alert: '<path d="M8 2l6 11H2z"/><path d="M8 6v3M8 11.3h.01"/>',
     };
     const icon = (id, size = 13) => `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[id] || ''}</svg>`;
     const wallSeenAt = () => {
@@ -3456,6 +3471,8 @@ const PAGES = {
       const base = parseIso(todayIso());
       const days = Math.round((date - base) / 86_400_000);
       return {
+        date,
+        days,
         day: String(date.getDate()).padStart(2, '0'),
         month: new Intl.DateTimeFormat('fr-FR', { month: 'short' }).format(date).replace('.', ''),
         weekday: new Intl.DateTimeFormat('fr-FR', { weekday: 'long' }).format(date),
@@ -3510,9 +3527,15 @@ const PAGES = {
       const order = { m: 0, a: 1, s: 2 };
       _sessionsMemo = base
         .filter(session => isAgendaSessionUpcoming(session, todayIso()))
-        .filter(session => STATE.isAdmin
-          || !session.participantUids?.length
-          || session.participantUids.some(uid => aliasSet.has(uid)))
+        .filter(session => {
+          if (STATE.isAdmin) return true;
+          if (session.participantUids?.some(uid => aliasSet.has(uid))) return true;
+          // Les anciens résumés peuvent ne pas contenir participantUids. Dans
+          // ce cas, on se rabat sur les participants du groupe au lieu de
+          // montrer au joueur les séances de toute l'aventure.
+          const group = groups().find(item => item.id === session.questId);
+          return !!group && groupJoined(group);
+        })
         .sort((a, b) => String(a.date).localeCompare(String(b.date))
           || (order[a.slot] ?? 9) - (order[b.slot] ?? 9));
       return _sessionsMemo;
@@ -3524,7 +3547,7 @@ const PAGES = {
       || allChars.find(char => char.uid === participant?.uid)
       || { nom: participant?.nom || 'Personnage', uid: participant?.uid || '' };
     const avatar = (entity, className = '', live = false) => {
-      const sizes = { sm: 24, lg: 46, xl: 56 };
+      const sizes = { sm: 24, md: 34, lg: 46, xl: 56 };
       const sizeClass = className.split(/\s+/).find(value => sizes[value]);
       return characterAvatarHtml(entity, {
         size: sizes[sizeClass] || 32,
@@ -3556,52 +3579,108 @@ const PAGES = {
       </span>`;
     };
 
+    const groupColor = id => {
+      const palette = ['#ff9544', '#9d6fff', '#7dd3fc', '#f4c430', '#bca0ff', '#4f8cff'];
+      let hash = 0;
+      for (const ch of String(id || 'groupe')) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
+      return palette[Math.abs(hash) % palette.length];
+    };
+    const charVitals = char => {
+      const pvMax = calcPVMax(char) || Number(char.pvBase) || 10;
+      const pmMax = calcPMMax(char) || Number(char.pmBase) || 10;
+      const pv = Number(char.hp ?? char.pvActuel ?? pvMax);
+      const pm = Number(char.pmActuel ?? pmMax);
+      return {
+        pv, pvMax, pm, pmMax,
+        pvPct: pvMax > 0 ? Math.max(0, Math.min(100, Math.round(pv / pvMax * 100))) : 0,
+        pmPct: pmMax > 0 ? Math.max(0, Math.min(100, Math.round(pm / pmMax * 100))) : 0,
+      };
+    };
+    const hpColor = pct => pct < 30 ? 'var(--crimson)' : pct < 55 ? 'var(--amber)' : 'var(--emerald)';
+    const missionImage = group => {
+      const cachedStory = STATE.isAdmin ? story : (getCachedCollection('story') || []);
+      const mission = cachedStory.find(item => String(item?.id || '') === String(group?.missionId || ''));
+      if (mission?.imageUrl) return { url: mission.imageUrl, soft: false };
+      return group?.missionThumb ? { url: group.missionThumb, soft: true } : { url: '', soft: false };
+    };
+    const cssUrl = value => String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const portraitCard = (char, index, total, { mine = false, gm = false, overflow = 0 } = {}) => {
+      const middle = (total - 1) / 2;
+      const delta = index - middle;
+      const rotation = (delta * 3.2).toFixed(2);
+      const drop = (Math.abs(delta) ** 2 * 2.4).toFixed(1);
+      if (overflow) return `<span class="db-cast-card more" style="--k:${index};--r:${rotation}deg;--y:${drop}px">+${overflow}</span>`;
+      const vitals = charVitals(char);
+      const color = /^#[0-9a-f]{6}$/i.test(char.auraColor || '') ? char.auraColor : characterColor(char);
+      const title = `${char.nom || 'Personnage'}${char.classe ? ` · ${char.classe}` : ''} · niv. ${char.niveau || 1}`;
+      return `<button type="button" class="db-cast-card${mine ? ' me' : ''}" style="--k:${index};--r:${rotation}deg;--y:${drop}px;--ac:${color}" data-action="_dashQuickChar" data-id="${_esc(char.id)}" title="${_esc(title)}" aria-label="Ouvrir l’aperçu de ${_esc(char.nom || 'ce personnage')}">
+        ${characterPortraitContent(char, { fallbackClass: 'ini' })}${mine ? '<span class="tag">Toi</span>' : ''}${gm && liveUids().has(char.uid) ? '<span class="live"></span>' : ''}
+        ${gm && vitals.pvPct < 30 ? `<span class="hurt"><u style="width:${vitals.pvPct}%"></u></span>` : ''}<b>${_esc(char.nom || 'Personnage')}</b>
+      </button>`;
+    };
+    const cast = (chars, { ownOnly = false } = {}) => {
+      const mineIds = new Set(controlledChars().map(char => char.id));
+      const visible = chars.length > 6 ? chars.slice(0, 5) : chars.slice(0, 6);
+      const overflow = Math.max(0, chars.length - visible.length);
+      const cards = [...visible.map((char, index) => portraitCard(char, index, visible.length + (overflow ? 1 : 0), {
+        mine: !ownOnly && !STATE.isAdmin && mineIds.has(char.id) && chars.some(item => !mineIds.has(item.id)),
+        gm: STATE.isAdmin,
+      }))];
+      if (overflow) cards.push(portraitCard({}, cards.length, cards.length + 1, { overflow }));
+      const onlineCount = STATE.isAdmin ? chars.filter(char => liveUids().has(char.uid)).length : 0;
+      return `<div class="db-cast"><div class="db-cast-k">${ownOnly ? (chars.length > 1 ? 'Tes personnages attendent' : 'Ton personnage attend') : `La compagnie · ${chars.length}`}${STATE.isAdmin && onlineCount ? `<em>${onlineCount} en ligne</em>` : ''}</div><div class="db-cast-row">${cards.join('')}</div></div>`;
+    };
+
     const sessionSection = (list, groupList) => {
-      if (!list.length) return `<section class="db-ses"><div class="db-none">
-        <div><b>Aucune séance prévue${STATE.isAdmin ? '' : ' pour tes groupes'}</b><p>${STATE.isAdmin ? 'Planifie une date pour un groupe de la Trame.' : 'Rejoins un groupe ci-dessous ou indique tes disponibilités au MJ.'}</p></div>
-        <button type="button" class="db-btn" data-navigate="agenda">${icon('calendar')} ${STATE.isAdmin ? 'Planifier une séance' : 'Mes disponibilités'}</button>
-        <button type="button" class="db-go" data-navigate="vtt">${icon('play', 15)} Entrer dans la table</button>
-      </div></section>`;
       const first = list[0];
+      if (!first) {
+        const own = controlledChars();
+        const hasGroup = groupList.some(groupJoined);
+        const copy = STATE.isAdmin
+          ? 'Planifie une date pour un groupe de la Trame : elle apparaîtra ici pour toute la compagnie.'
+          : hasGroup
+            ? "Le MJ n'a pas encore fixé de date. Indique tes disponibilités pour l'aider à choisir."
+            : 'Rejoins un groupe ci-dessous pour être convoqué à la prochaine séance.';
+        return `<section class="db-hero empty noart${own.length ? '' : ' solo'} rise" style="--i:1;--gc:${groupColor(groupList[0]?.id)}"><div class="db-hero-art dots"></div><div class="db-hero-main"><div class="db-hero-info"><div class="db-hero-k">${STATE.isAdmin ? 'Agenda' : 'Prochaine séance'}</div><h1>Aucune séance prévue</h1><p class="db-hero-p">${_esc(copy)}</p><div class="db-hero-act">${STATE.isAdmin ? `<button type="button" class="db-go" data-navigate="agenda">${icon('calendar')}Planifier une séance</button>` : `<button type="button" class="db-go" data-navigate="vtt">${icon('play', 15)}Entrer dans la table</button>`}<button type="button" class="db-glass" data-navigate="${STATE.isAdmin ? 'vtt' : 'agenda'}">${STATE.isAdmin ? `${icon('play', 15)}Entrer dans la table` : `${icon('calendar')}Mes disponibilités`}</button></div></div>${own.length ? cast(own, { ownOnly: true }) : ''}</div></section>`;
+      }
       const group = groupList.find(item => item.id === first.questId) || {};
+      const color = groupColor(group.id);
       const date = dateInfo(first.date);
       const slot = slotMeta(first.slot);
       const participants = (group.participants || []).map(charForParticipant);
-      return `<section class="db-ses"><div class="db-ses-in">
-        <div class="db-cal"><span>${_esc(date.month)}</span><b>${date.day}</b><small>${_esc(date.weekday)}</small></div>
-        <div class="db-ses-t"><span class="db-ses-k">Prochaine séance${date.when ? ` <em>${_esc(date.when)}</em>` : ''}</span>
-          <h1>${_esc(group.missionTitle || 'Séance de l’aventure')}</h1>
-          <div class="db-ses-m"><span>${icon('clock')}${_esc(slot.label)} · ${_esc(slot.hours)}</span>${group.location ? `<span>${icon('map-pin')}${_esc(group.location)}</span>` : ''}${group.title ? `<span>${icon('flag')}${_esc(group.title)}${group.act ? ` · ${_esc(group.act)}` : ''}</span>` : ''}</div>
-          <div class="db-ses-p">${participants.length ? `<span class="db-stack">${participants.slice(0, 6).map(char => avatar(char, 'sm', liveUids().has(char.uid))).join('')}</span>` : ''}${participants.length} personnage${participants.length > 1 ? 's' : ''}</div>
-        </div>
-        <div class="db-ses-a"><button type="button" class="db-go" data-navigate="vtt">${icon('play', 15)} Entrer dans la table</button><button type="button" class="db-link" data-navigate="story">Voir la mission ${icon('arrow-right')}</button></div>
-      </div>${list.length > 1 ? `<div class="db-more">${list.slice(1).map(item => {
-        const itemGroup = groupList.find(groupItem => groupItem.id === item.questId) || {};
-        const itemDate = dateInfo(item.date);
-        const itemChars = (itemGroup.participants || []).map(charForParticipant);
-        return `<button type="button" class="db-mr" data-navigate="agenda"><b>${_esc(itemDate.short)}</b><span>${_esc(itemGroup.title || 'Groupe')} <em>· ${_esc(itemGroup.missionTitle || 'Mission')}</em></span>${itemChars.length ? `<span class="db-stack">${itemChars.slice(0, 5).map(char => avatar(char, 'sm', liveUids().has(char.uid))).join('')}</span>` : ''}</button>`;
-      }).join('')}</div>` : ''}</section>`;
+      const image = missionImage(group);
+      const hour = slot.label === 'Soir' ? '19 h' : slot.label === 'Après-midi' ? '14 h' : '9 h';
+      const when = date.days === 0 ? `${slot.label === 'Soir' ? 'Ce soir' : slot.label === 'Après-midi' ? 'Cet après-midi' : 'Ce matin'} · ${hour}` : date.days === 1 ? 'Demain' : date.days > 1 ? `Dans ${date.days} jours` : date.short;
+      const hurt = STATE.isAdmin ? participants.filter(char => charVitals(char).pvPct < 30) : [];
+      const facts = [
+        [icon('calendar', 15), 'Date', date.days === 0 ? "Aujourd'hui" : new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).format(date.date)],
+        [icon('clock', 15), 'Créneau', `${slot.label} · ${slot.hours}`],
+        ...(group.location ? [[icon('map-pin', 15), 'Lieu', group.location]] : []),
+      ];
+      const next = list.slice(1, 4);
+      return `<section class="db-hero${image.url ? '' : ' noart'}${date.days === 0 ? ' today' : ''} rise" style="--i:1;--gc:${color}">
+        ${image.url ? `<div class="db-hero-art${image.soft ? ' soft' : ''}" style="background-image:url('${_esc(cssUrl(image.url))}')"></div>` : '<div class="db-hero-art dots"></div>'}
+        <div class="db-hero-main"><div class="db-hero-info"><div class="db-hero-k"><span class="db-hero-when"><i></i>${_esc(when)}</span><span>${date.days === 0 ? 'Séance du jour' : 'Prochaine séance'}</span></div>
+          <h1>${_esc(group.missionTitle || 'Séance de l’aventure')}</h1><div class="db-hero-sub">${icon('flag', 14)}<b>${_esc(group.title || 'Groupe')}</b>${group.act ? `<span>· ${_esc(group.act)}</span>` : ''}</div>
+          <div class="db-facts">${facts.map(([pic, label, value]) => `<div class="db-fact">${pic}<span><small>${label}</small><b>${_esc(value)}</b></span></div>`).join('')}${hurt.length ? `<div class="db-fact alert">${icon('alert', 15)}<span><small>À soigner avant</small><b>${hurt.map(char => { const v = charVitals(char); return `${_esc(char.nom || '?')} ${v.pv}/${v.pvMax}`; }).join(' · ')}</b></span></div>` : ''}</div>
+          <div class="db-hero-act"><button type="button" class="db-go" data-navigate="vtt">${icon('play', 15)}Entrer dans la table</button><button type="button" class="db-glass" data-navigate="story">Voir la mission ${icon('arrow-right')}</button></div></div>${cast(participants)}</div>
+        ${next.length ? `<div class="db-hero-next"><span class="db-next-k">Ensuite</span>${next.map(item => { const itemGroup = groupList.find(g => g.id === item.questId) || {}; const itemDate = dateInfo(item.date); const itemChars = (itemGroup.participants || []).map(charForParticipant); return `<button type="button" class="db-next" style="--gc:${groupColor(itemGroup.id)}" data-navigate="agenda"><span class="db-next-date"><small>${_esc(new Intl.DateTimeFormat('fr-FR', { weekday: 'short' }).format(itemDate.date))}</small><b>${itemDate.date?.getDate() || '--'}</b><small>${_esc(itemDate.month)}</small></span><span class="db-next-title"><b>${_esc(itemGroup.title || 'Groupe')}</b><span>${_esc(itemGroup.missionTitle || 'Mission')} · ${_esc(slotMeta(item.slot).label.toLowerCase())}</span></span>${itemChars.length ? `<span class="db-stack">${itemChars.slice(0, 4).map(char => avatar(char, 'sm')).join('')}</span>` : ''}</button>`; }).join('')}</div>` : ''}
+      </section>`;
     };
 
     const playerCharactersSection = groupList => {
       const chars = controlledChars();
       const card = char => {
-        const pvMax = calcPVMax(char) || char.pvBase || 10;
-        const low = pvMax > 0 && (char.hp ?? char.pvActuel ?? pvMax) / pvMax < .3;
+        const vitals = charVitals(char);
         const group = groupForChar(char, groupList);
-        return `<button type="button" class="db-ch" data-action="_dashQuickChar" data-id="${_esc(char.id)}"><span class="db-ch-h">${avatar(char, 'lg')}<span><b>${_esc(char.nom || '?')}</b><small>${_esc([char.classe, char.race].filter(Boolean).join(' · '))}</small></span><span class="db-lv">Niv. ${char.niveau || 1}</span></span>${bars(char)}<span class="db-ch-f"><span class="db-chip">${icon('shield')} CA <b>${calcCA(char) || 10}</b></span><span class="db-chip">${icon('coin')} <b>${calcOr(char) || 0}</b> or</span>${group ? `<span class="db-chip grp">${icon('flag')}${_esc(group.title)}</span>` : ''}${low ? '<span class="db-chip warn">PV bas</span>' : ''}</span></button>`;
+        const level = Number(char.niveau) || 1;
+        const xp = Number(char.exp ?? char.xp) || 0;
+        const threshold = calcPalier(level) || 1;
+        const xpPct = Math.max(0, Math.min(100, Math.round(xp / threshold * 100)));
+        const color = /^#[0-9a-f]{6}$/i.test(char.auraColor || '') ? char.auraColor : characterColor(char);
+        return `<button type="button" class="db-hero-char rise" style="--ac:${color}" data-action="_dashQuickChar" data-id="${_esc(char.id)}"><span class="db-hero-char-in"><span class="db-hero-char-portrait">${characterPortraitContent(char, { fallbackClass: 'ini' })}<span class="db-hero-char-level">Niv. ${level}</span></span><span class="db-hero-char-body"><span class="db-hero-char-name"><b>${_esc(char.nom || '?')}</b><small>${_esc([char.classe, char.race].filter(Boolean).join(' · '))}</small></span>${bars(char)}<span class="db-xp"><span>Niveau ${level + 1} dans <b>${Math.max(0, threshold - xp).toLocaleString('fr-FR')} XP</b></span><i><u style="width:${xpPct}%"></u></i></span><span class="db-chips"><span class="db-chip">${icon('shield')}CA <b>${calcCA(char) || 10}</b></span><span class="db-chip">${icon('coin')}<b>${calcOr(char) || 0}</b> or</span>${group ? `<span class="db-chip grp" style="--gc:${groupColor(group.id)}">${icon('flag')}${_esc(group.title)}</span>` : '<span class="db-chip">Sans groupe</span>'}${vitals.pvPct < 30 ? '<span class="db-chip warn">PV bas</span>' : ''}</span></span></span></button>`;
       };
-      return `<section class="db-sec"><div class="db-sh"><h2>${chars.length > 1 ? 'Mes personnages' : 'Mon personnage'}</h2>${chars.length > 1 ? `<span class="n">${chars.length}</span>` : ''}</div><div class="db-chars">${chars.length ? chars.map(card).join('') : `<button type="button" class="db-new" data-navigate="characters">${icon('plus')} Créer mon personnage</button>`}</div></section>`;
-    };
-
-    const gmCharactersSection = groupList => {
-      const online = liveUids();
-      return `<section class="db-sec"><div class="db-sh"><h2>Personnages</h2><span class="n">${allChars.length}</span><span class="sp"></span><button type="button" class="db-link" data-navigate="characters">Toutes les fiches ${icon('arrow-right')}</button></div><div class="db-card">${allChars.length ? allChars.map(char => {
-        const group = groupForChar(char, groupList);
-        const connected = online.has(char.uid);
-        const owner = char.ownerPseudo || char.joueur || char.playerName || 'Joueur';
-        return `<button type="button" class="db-tr" data-action="_dashQuickChar" data-id="${_esc(char.id)}"><span class="db-who">${avatar(char, '', connected)}<span><b>${_esc(char.nom || '?')}</b><small>${connected ? '<em>Connecté</em> · ' : ''}${_esc(owner)}${char.classe ? ` · ${_esc(char.classe)} niv. ${char.niveau || 1}` : ''}</small></span></span>${bars(char)}${group ? `<span class="db-chip grp">${_esc(group.title)}</span>` : '<span class="db-chip">Sans groupe</span>'}</button>`;
-      }).join('') : '<div class="db-empty"><b>Aucun personnage</b>Les fiches de l’aventure apparaîtront ici.</div>'}</div></section>`;
+      return `<section class="db-sec rise" style="--i:2"><div class="db-sh"><h2>${chars.length > 1 ? 'Mes personnages' : 'Mon personnage'}</h2>${chars.length > 1 ? `<span class="n">${chars.length}</span>` : ''}<span class="rule"></span>${chars.length ? `<button type="button" class="db-link" data-navigate="characters">Fiches ${icon('arrow-right')}</button>` : ''}</div><div class="db-hero-chars">${chars.length ? chars.map(card).join('') : `<button type="button" class="db-hero-char-new" data-navigate="characters"><i>${icon('plus', 18)}</i><b>Ton héros t’attend</b><span>Crée ta fiche pour rejoindre un groupe et être convoqué aux séances.</span></button>`}</div></section>`;
     };
 
     const groupsSection = groupList => {
@@ -3619,10 +3698,72 @@ const PAGES = {
             ? `<button type="button" class="db-btn ghost" data-action="_dashToggleQuest" data-id="${_esc(group.id)}">Quitter</button>`
             : available.length
               ? `<button type="button" class="db-btn pri" data-action="_dashToggleQuest" data-id="${_esc(group.id)}">Rejoindre</button>`
-              : `<button type="button" class="db-btn" disabled>Aucun personnage libre</button>`;
-        return `<article class="db-g${joined ? ' in' : ''}"><div class="db-g-k"><span>${_esc([group.act, group.missionTitle].filter(Boolean).join(' · ') || 'Mission')}</span><em>${joined ? 'Rejoint' : STATE.isAdmin ? `${members.length} membre${members.length > 1 ? 's' : ''}` : 'Ouvert'}</em></div><h3>${_esc(group.title || 'Groupe')}</h3><p>${icon('calendar')}${session ? `Séance ${_esc(dateInfo(session.date).short.toLowerCase())}` : 'Pas encore de date'}</p>${picker}<div class="db-g-f">${members.length ? `<span class="db-stack">${members.slice(0, 5).map(char => avatar(char, 'sm', liveUids().has(char.uid))).join('')}</span>` : ''}<small>${members.length ? `${members.length} membre${members.length > 1 ? 's' : ''}` : 'Aucun membre'}</small>${action}</div></article>`;
+              : controlledChars().length
+                ? `<button type="button" class="db-btn" disabled>Aucun personnage libre</button>`
+                : `<button type="button" class="db-btn" disabled>Crée d’abord une fiche</button>`;
+        return `<article class="db-g${joined ? ' in' : ''}" style="--gc:${groupColor(group.id)}"><div class="db-g-k"><span>${_esc([group.act, group.missionTitle].filter(Boolean).join(' · ') || 'Mission')}</span><em>${joined ? 'Rejoint' : 'Ouvert'}</em></div><h3>${_esc(group.title || 'Groupe')}</h3><p>${icon('calendar')}${session ? `Séance ${_esc(dateInfo(session.date).short.toLowerCase())}` : 'Pas encore de date'}</p>${picker}<div class="db-g-f">${members.length ? `<span class="db-stack">${members.slice(0, 4).map(char => avatar(char, 'sm', liveUids().has(char.uid))).join('')}</span>` : ''}<small>${members.length ? `${members.length} membre${members.length > 1 ? 's' : ''}` : 'Aucun membre'}</small>${action}</div></article>`;
       };
-      return `<section class="db-sec"><div class="db-sh"><h2>${STATE.isAdmin ? 'Groupes actifs' : 'Groupes ouverts'}</h2><span class="n">${STATE.isAdmin ? groupList.length : openCount}</span><span class="sp"></span><button type="button" class="db-link" data-navigate="story">Trame ${icon('arrow-right')}</button></div><div class="db-groups">${sorted.length ? sorted.map(card).join('') : '<div class="db-card db-empty"><b>Aucun groupe actif</b>Les groupes ouverts de la Trame apparaîtront ici.</div>'}</div></section>`;
+      return `<section class="db-sec rise" style="--i:3"><div class="db-sh"><h2>Groupes ouverts</h2><span class="n">${openCount}</span><span class="rule"></span><button type="button" class="db-link" data-navigate="story">Trame ${icon('arrow-right')}</button></div><div class="db-groups">${sorted.length ? sorted.map(card).join('') : '<div class="db-card db-empty"><b>Aucun groupe actif</b>Les groupes ouverts de la Trame apparaîtront ici.</div>'}</div></section>`;
+    };
+
+    const rosterMatches = (char, groupList) => {
+      const vitals = charVitals(char);
+      if (rosterFilter === 'online' && !liveUids().has(char.uid)) return false;
+      if (rosterFilter === 'low' && vitals.pvPct >= 30) return false;
+      if (rosterFilter === 'free' && groupForChar(char, groupList)) return false;
+      if (rosterQuery.trim()) {
+        const query = _norm(rosterQuery.trim());
+        const haystack = [char.nom, char.ownerPseudo, char.joueur, char.playerName, char.classe, char.race].map(_norm);
+        if (!haystack.some(value => value.includes(query))) return false;
+      }
+      return true;
+    };
+    const rosterMember = char => {
+      const vitals = charVitals(char);
+      const owner = char.ownerPseudo || char.joueur || char.playerName || 'Joueur';
+      const ko = vitals.pv <= 0;
+      const title = `${char.nom || '?'} · ${[char.classe, char.race].filter(Boolean).join(' ')} · niv. ${char.niveau || 1} · PV ${vitals.pv}/${vitals.pvMax} · PM ${vitals.pm}/${vitals.pmMax} · CA ${calcCA(char) || 10} · ${calcOr(char) || 0} or`;
+      return `<button type="button" class="db-roster-member${vitals.pvPct < 30 ? ' low' : ''}${ko ? ' ko' : ''}" data-action="_dashQuickChar" data-id="${_esc(char.id)}" title="${_esc(title)}">${avatar(char, 'md', liveUids().has(char.uid))}<span class="db-roster-member-name"><b>${_esc(char.nom || '?')}</b><small>${liveUids().has(char.uid) ? '<em>En ligne</em> · ' : ''}${_esc(owner)} · niv. ${char.niveau || 1}</small></span><span class="db-roster-vitals"><b>${ko ? 'K.O.' : `${vitals.pv}<span>/${vitals.pvMax}</span>`}</b><small>PM ${vitals.pm}/${vitals.pmMax}</small></span><span class="db-roster-hp"><u style="width:${vitals.pvPct}%;--c:${hpColor(vitals.pvPct)}"></u></span></button>`;
+    };
+    const rosterTable = (list, groupList) => {
+      const getters = {
+        nom: char => char.nom || '', owner: char => char.ownerPseudo || char.joueur || char.playerName || '', level: char => Number(char.niveau) || 1,
+        pv: char => charVitals(char).pvPct, pm: char => charVitals(char).pmPct, ca: char => calcCA(char) || 10, gold: char => calcOr(char) || 0,
+        group: char => groupForChar(char, groupList)?.title || '~',
+      };
+      const rows = [...list].sort((a, b) => { const av = getters[rosterSort.key](a); const bv = getters[rosterSort.key](b); const value = (typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv), 'fr')) * rosterSort.dir; return value || String(a.nom || '').localeCompare(String(b.nom || ''), 'fr'); });
+      const heads = [['nom', 'Personnage', ''], ['owner', 'Joueur', 'hide-760'], ['level', 'Niv.', 'num'], ['pv', 'PV', ''], ['pm', 'PM', 'hide-560'], ['ca', 'CA', 'num hide-560'], ['gold', 'Or', 'num hide-760'], ['group', 'Groupe', 'hide-560']];
+      return `<div class="db-roster-table-wrap db-card"><table class="db-roster-table"><thead><tr>${heads.map(([key, label, cls]) => `<th class="${cls}${rosterSort.key === key ? ' active' : ''}" data-action="_dashRosterSort" data-sort="${key}" aria-sort="${rosterSort.key === key ? (rosterSort.dir > 0 ? 'ascending' : 'descending') : 'none'}">${label}${rosterSort.key === key ? (rosterSort.dir > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead><tbody>${rows.map(char => { const v = charVitals(char); const group = groupForChar(char, groupList); const owner = char.ownerPseudo || char.joueur || char.playerName || 'Joueur'; return `<tr class="${v.pvPct < 30 ? 'low' : ''}" data-action="_dashQuickChar" data-id="${_esc(char.id)}"><td><span class="db-table-who">${avatar(char, 'md')}<span><b>${_esc(char.nom || '?')}</b><small>${_esc([char.classe, char.race].filter(Boolean).join(' · '))}</small></span></span></td><td class="hide-760">${liveUids().has(char.uid) ? '<i class="db-online-dot"></i>' : ''}${_esc(owner)}</td><td class="num">${char.niveau || 1}</td><td><span class="db-table-pv"><i><u style="width:${v.pvPct}%;--c:${hpColor(v.pvPct)}"></u></i><b>${v.pv <= 0 ? 'K.O.' : `${v.pv}/${v.pvMax}`}</b></span></td><td class="hide-560 mono">${v.pm}/${v.pmMax}</td><td class="num hide-560">${calcCA(char) || 10}</td><td class="num hide-760">${calcOr(char) || 0}</td><td class="hide-560">${group ? `<span class="db-group-label" style="--gc:${groupColor(group.id)}"><i></i>${_esc(group.title)}</span>` : '<span class="db-dim">Sans groupe</span>'}</td></tr>`; }).join('')}</tbody></table></div>`;
+    };
+    const rosterBody = groupList => {
+      const filtering = rosterFilter !== 'all' || rosterQuery.trim();
+      const list = allChars.filter(char => rosterMatches(char, groupList));
+      if (!list.length) return `<div class="db-roster-empty">Aucun personnage ne correspond.<button type="button" class="db-btn" data-action="_dashRosterClear">Tout afficher</button></div>`;
+      if (rosterView === 'table') return rosterTable(list, groupList);
+      const sessionList = sessions();
+      const dateOf = group => sessionList.find(item => item.questId === group.id)?.date || '9999-99-99';
+      const columns = [...groupList].sort((a, b) => dateOf(a).localeCompare(dateOf(b)) || String(a.title).localeCompare(String(b.title), 'fr')).map(group => ({ group, members: list.filter(char => groupForChar(char, groupList)?.id === group.id).sort((a, b) => String(a.nom).localeCompare(String(b.nom), 'fr')) })).filter(column => !filtering || column.members.length);
+      const free = list.filter(char => !groupForChar(char, groupList));
+      if (free.length) columns.push({ group: null, members: free });
+      return `<div class="db-roster-grid">${columns.map(({ group, members }) => {
+        const session = group ? sessionList.find(item => item.questId === group.id) : null;
+        const sessionDate = session ? dateInfo(session.date) : null;
+        const dateLabel = sessionDate?.days === 0 ? `Aujourd’hui · ${slotMeta(session.slot).label.toLowerCase()}` : sessionDate?.short;
+        const live = members.filter(char => liveUids().has(char.uid)).length;
+        const total = group ? (group.participants || []).length : members.length;
+        const compactFree = !group && members.length > 6;
+        const shownMembers = compactFree && !rosterFreeExpanded ? members.slice(0, 6) : members;
+        const remaining = Math.max(0, members.length - shownMembers.length);
+        const more = compactFree
+          ? `<button type="button" class="db-roster-more" data-action="_dashRosterFreeToggle" aria-expanded="${rosterFreeExpanded}">${rosterFreeExpanded ? 'Réduire la liste' : `Afficher les ${remaining} autres`}${icon(rosterFreeExpanded ? 'arrow-right' : 'plus', 12)}</button>`
+          : '';
+        return `<article class="db-roster-column${group ? '' : ' free'}" style="--gc:${group ? groupColor(group.id) : 'var(--text-dim)'}"><header><div class="db-roster-title"><b>${_esc(group?.title || 'Sans groupe')}</b><span>${total}</span>${group ? `<button type="button" data-navigate="story" title="Gérer dans la Trame" aria-label="Gérer ${_esc(group.title)} dans la Trame">${icon('external')}</button>` : ''}</div><p>${_esc(group ? [group.act, group.missionTitle].filter(Boolean).join(' · ') : 'Pas encore dans un groupe de la Trame')}</p>${group ? `<div class="db-roster-meta"><span class="${session ? '' : 'none'}">${icon('calendar')}${session ? _esc(dateLabel) : 'Sans date'}</span>${live ? `<em><i></i>${live} en ligne</em>` : ''}</div>` : ''}</header><div>${shownMembers.length ? shownMembers.map(rosterMember).join('') : '<div class="db-roster-column-empty">Aucun membre · ouvert aux joueurs</div>'}${more}</div></article>`;
+      }).join('')}</div>`;
+    };
+    const gmRosterSection = groupList => {
+      const counts = { all: allChars.length, online: allChars.filter(char => liveUids().has(char.uid)).length, low: allChars.filter(char => charVitals(char).pvPct < 30).length, free: allChars.filter(char => !groupForChar(char, groupList)).length };
+      const filters = [['all', 'Tous', ''], ['online', 'En ligne', 'var(--emerald)'], ['low', 'PV bas', 'var(--crimson)'], ['free', 'Sans groupe', '']];
+      return `<section class="db-sec rise" style="--i:2"><div class="db-sh"><h2>La compagnie</h2><span class="n">${allChars.length}</span><span class="rule"></span><button type="button" class="db-link" data-navigate="characters">Toutes les fiches ${icon('arrow-right')}</button></div><div class="db-roster-tools"><div class="db-roster-filters" role="group" aria-label="Filtrer la compagnie">${filters.map(([key, label, color]) => `<button type="button" class="${rosterFilter === key ? 'on' : ''}" data-action="_dashRosterFilter" data-filter="${key}" aria-pressed="${rosterFilter === key}">${color ? `<i style="--c:${color}"></i>` : ''}${label}<em>${counts[key]}</em></button>`).join('')}</div><label class="db-roster-search">${icon('search', 14)}<input id="db-roster-query" type="search" placeholder="Personnage, joueur, classe…" value="${_esc(rosterQuery)}" autocomplete="off" data-input="_dashRosterSearch" aria-label="Chercher dans la compagnie"></label><span class="sp"></span><div class="db-roster-view" role="group" aria-label="Affichage"><button type="button" class="${rosterView === 'groups' ? 'on' : ''}" data-action="_dashRosterView" data-view="groups" aria-pressed="${rosterView === 'groups'}">${icon('columns', 14)}Groupes</button><button type="button" class="${rosterView === 'table' ? 'on' : ''}" data-action="_dashRosterView" data-view="table" aria-pressed="${rosterView === 'table'}">${icon('rows', 14)}Tableau</button></div></div><div id="db-roster-body">${rosterBody(groupList)}</div></section>`;
     };
 
     const wallSection = () => {
@@ -3636,8 +3777,8 @@ const PAGES = {
         const isUnread = post.ts > seenAt && post.uid !== STATE.user?.uid;
         // Vente du Marché : l'objet et son prix, même sans message.
         const sale = post.type === 'offre' && Array.isArray(post.listing?.items) && post.listing.items.length
-          ? `${post.listing.mode === 'auction' ? '⚖ Enchère : ' : '🪙 '}${post.listing.name || 'Objet'} · ${Number(post.listing.bid?.amount || post.listing.price || 0).toLocaleString('fr-FR')} or` : '';
-        return `<button type="button" class="db-w${isUnread ? ' unread' : ''}" data-navigate="bastion" data-nav-sub="post:${_esc(post.id)}">${avatar(char)}<span class="db-w-b"><span class="db-w-h"><b>${_esc(post.charName || post.author || char.nom || 'Personnage')}</b><span class="db-ty" style="--t:${_esc(type.color)}">${_esc(type.label)}</span>${post.pinned ? '<span class="db-pin">Épinglé</span>' : ''}<span>· ${timeAgo(post.ts)}</span></span><p>${sale ? `<b>${_esc(sale)}</b>${post.text ? ' — ' : ''}` : ''}${_esc(post.text || (sale ? '' : 'Nouvelle publication'))}</p><span class="db-w-s">${reactions} réaction${reactions > 1 ? 's' : ''} · ${replies} réponse${replies > 1 ? 's' : ''}</span></span></button>`;
+          ? { name: post.listing.name || 'Objet', price: Number(post.listing.bid?.amount || post.listing.price || 0) } : null;
+        return `<button type="button" class="db-w${isUnread ? ' unread' : ''}" data-navigate="bastion" data-nav-sub="post:${_esc(post.id)}">${avatar(char, 'md')}<span class="db-w-b"><span class="db-w-h"><b>${_esc(post.charName || post.author || char.nom || 'Personnage')}</b><span class="db-ty" style="--t:${_esc(type.color)}">${_esc(type.label)}</span>${post.pinned ? '<span class="db-pin">Épinglé</span>' : ''}<span>· ${timeAgo(post.ts)}</span></span>${sale ? `<span class="db-wall-listing">${icon('coin')}<b>${_esc(sale.name)}</b><em>${sale.price.toLocaleString('fr-FR')} or</em></span>` : ''}<p>${_esc(post.text || (sale ? '' : 'Nouvelle publication'))}</p><span class="db-w-s"><span>${icon('heart', 12)}${reactions}</span><span>${icon('message', 12)}${replies}</span></span></span></button>`;
       };
       return `<section class="db-sec db-wall"><div class="db-sh"><h2>Mur du Bastion</h2>${unread ? `<span class="new">${unread} nouveau${unread > 1 ? 'x' : ''}</span>` : ''}<span class="sp"></span><button type="button" class="db-link" data-navigate="bastion">Ouvrir ${icon('arrow-right')}</button></div><div class="db-card">${shown.length ? shown.map(card).join('') : '<div class="db-empty"><b>Le mur est prêt</b>Publiez la première nouvelle du Bastion.</div>'}<div class="db-wf"><button type="button" class="db-btn" data-navigate="bastion">${icon('edit')} Publier</button>${unread ? '<button type="button" class="db-btn ghost" data-action="_dashMarkWallRead">Tout marquer lu</button>' : ''}</div></div></section>`;
     };
@@ -3657,11 +3798,12 @@ const PAGES = {
           const color = /^#[0-9a-f]{6}$/i.test(char.auraColor || '') ? char.auraColor : characterColor(char);
           return `<i style="--segment:${color};width:${project.cost ? Math.min(100, row.amount / project.cost * 100) : 0}%"></i>`;
         }).join('');
-        return `<div class="db-bs-project" style="--room:${_esc(project.def.color || '#7eb0ff')}"><span class="db-bs-icon">${_esc(project.def.emoji || '🏠')}</span><span><b>${_esc(project.name)} ${project.def.unlimited ? project.target : ['','I','II','III'][project.target] || project.target}</b><small>Il manque ${project.remaining} or</small><span class="db-bs-bar">${segments}</span></span></div>`;
+        const funded = Math.max(0, Number(project.cost || 0) - Number(project.remaining || 0));
+        return `<div class="db-bs-project" style="--room:${_esc(project.def.color || '#7eb0ff')}"><span class="db-bs-icon">${_esc(project.def.emoji || '🏠')}</span><span><span class="db-bs-head"><b>${_esc(project.name)} ${project.def.unlimited ? project.target : ['','I','II','III'][project.target] || project.target}</b><small>${funded.toLocaleString('fr-FR')} / ${Number(project.cost || 0).toLocaleString('fr-FR')} or</small></span><span class="db-bs-bar">${segments}</span><span class="db-bs-meta"><span>Il manque <b>${Number(project.remaining || 0).toLocaleString('fr-FR')} or</b></span>${rows.length ? `<span class="db-stack">${rows.slice(0, 5).map(row => avatar(allChars.find(item => item.id === row.charId) || { nom: row.name }, 'sm')).join('')}</span>` : ''}</span></span></div>`;
       };
       const closest = projects[0];
       const note = closest?.next?.bonus ? String(closest.next.bonus) : '';
-      return `<section class="db-sec db-bastion"><div class="db-sh"><h2>🏰 Bastion</h2><span class="sp"></span><button type="button" class="db-link" data-navigate="bastion" data-nav-sub="salles">Voir les salles ${icon('arrow-right')}</button></div><div class="db-card db-bs-card">${projects.length ? projects.slice(0, 2).map(projectRow).join('') : '<div class="db-empty"><b>Aucun chantier ouvert</b>Une cotisation depuis les salles fera apparaître l’objectif commun ici.</div>'}${closest ? `<div class="db-bs-footer"><span>${_esc(note.length > 76 ? `${note.slice(0, 74)}…` : note)}</span>${closest.remaining > 0 ? `<button type="button" class="db-btn pri" data-navigate="bastion" data-nav-sub="room:${_esc(closest.slug)}">Cotiser ${Math.min(50, closest.remaining)} or</button>` : `<button type="button" class="db-btn pri" data-navigate="bastion" data-nav-sub="room:${_esc(closest.slug)}">Financé</button>`}</div>` : ''}${buildings.length ? `<div class="db-bs-building">${buildings.map(room => `<b>${_esc(room.emoji || '🏗')} ${_esc(room.nom)}</b> ouvre dans ${Number(bastion.salles[room.slug].weeksLeftToBuild)} période${Number(bastion.salles[room.slug].weeksLeftToBuild) > 1 ? 's' : ''}`).join(' · ')}</div>` : ''}</div></section>`;
+      return `<section class="db-sec db-bastion"><div class="db-sh"><h2>Bastion</h2><span class="rule"></span><button type="button" class="db-link" data-navigate="bastion" data-nav-sub="salles">Salles ${icon('arrow-right')}</button></div><div class="db-card db-bs-card">${projects.length ? projects.slice(0, 2).map(projectRow).join('') : '<div class="db-empty"><b>Aucun chantier ouvert</b>Une cotisation depuis les salles fera apparaître l’objectif commun ici.</div>'}${closest ? `<div class="db-bs-footer"><span>${_esc(note.length > 76 ? `${note.slice(0, 74)}…` : note)}</span>${closest.remaining > 0 ? `<button type="button" class="db-btn pri" data-navigate="bastion" data-nav-sub="room:${_esc(closest.slug)}">Cotiser ${Math.min(50, closest.remaining)} or</button>` : `<button type="button" class="db-btn pri" data-navigate="bastion" data-nav-sub="room:${_esc(closest.slug)}">Financé</button>`}</div>` : ''}${buildings.length ? `<div class="db-bs-building">${buildings.map(room => `<b>${_esc(room.emoji || '🏗')} ${_esc(room.nom)}</b> ouvre dans ${Number(bastion.salles[room.slug].weeksLeftToBuild)} période${Number(bastion.salles[room.slug].weeksLeftToBuild) > 1 ? 's' : ''}`).join(' · ')}</div>` : ''}</div></section>`;
     };
 
     function paint() {
@@ -3669,27 +3811,46 @@ const PAGES = {
       _ctrlMemo = null; _liveMemo = null; _groupsMemo = null; _sessionsMemo = null; // données fraîches pour ce paint
       const root = document.getElementById('dash-root');
       if (!root || STATE.currentPage !== 'dashboard') return;
+      const activeSearch = document.activeElement?.id === 'db-roster-query';
+      const searchCaret = activeSearch ? document.activeElement.selectionStart : null;
       STATE.characters = allChars;
       setDashboardPartyChars(allChars);
       setDashboardQuests(quests);
       const groupList = groups();
       const sessionList = sessions();
       const hasJoinedGroup = groupList.some(groupJoined);
-      const characterSection = STATE.isAdmin ? gmCharactersSection(groupList) : playerCharactersSection(groupList);
-      const groupSection = groupsSection(groupList);
-      // La séance occupe toute la largeur en tête ; les autres sections se
-      // répartissent dans la grille 2 colonnes dessous (évite le couloir étroit).
       const sessionBanner = sessionSection(sessionList, groupList);
-      const main = STATE.isAdmin || hasJoinedGroup
-        ? [characterSection, groupSection]
-        : [groupSection, characterSection];
       const pseudo = STATE.profile?.pseudo || STATE.profile?.displayName || STATE.user?.displayName || String(STATE.user?.email || '').split('@')[0] || 'aventurier';
       const adventure = STATE.adventure?.nom || 'Aventure';
       const initials = adventure.split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toUpperCase() || 'A';
-      const online = liveUids().size;
+      const live = liveUids();
+      const onlineChars = [...live].map(uid => allChars.find(char => char.uid === uid)).filter(Boolean);
       const wall = isFeatureEnabled('bastion') ? wallSection() : '';
       const bastionCard = isFeatureEnabled('bastion') ? bastionSection() : '';
-      root.innerHTML = `<div class="db-top"><button type="button" class="db-adv" data-action="openAdventureSwitcher"><span class="sig">${_esc(initials)}</span><b>${_esc(adventure)}</b><small>${icon('refresh-cw')}Changer</small></button><span class="db-hello">${STATE.isAdmin ? `<span class="db-on"><i></i>${online} joueur${online > 1 ? 's' : ''} connecté${online > 1 ? 's' : ''}</span>` : ''}<span>Bonsoir, <b>${_esc(pseudo)}</b>${STATE.isAdmin ? ' · Maître de jeu' : ''}</span></span></div>${sessionBanner}<div class="db-grid${wall || bastionCard ? '' : ' solo'}"><div class="db-col">${main.join('')}</div>${wall || bastionCard ? `<div class="db-col">${bastionCard}${wall}</div>` : ''}</div>`;
+      const hour = new Date().getHours();
+      const greeting = hour >= 5 && hour < 18 ? 'Bonjour' : 'Bonsoir';
+      const top = `<div class="db-top rise" style="--i:0"><button type="button" class="db-adv" data-action="openAdventureSwitcher"><span class="sig">${_esc(initials)}</span><span><b>${_esc(adventure)}</b><small>${icon('refresh-cw')}Changer</small></span></button><span class="db-me">${STATE.isAdmin ? `<span class="db-online-stack">${onlineChars.slice(0, 5).map(char => avatar(char, 'sm', true)).join('')}</span><span class="db-online"><i></i>${live.size} en ligne</span>` : ''}<span>${greeting}, <b>${_esc(pseudo)}</b></span>${STATE.isAdmin ? '<span class="db-role">Maître de jeu</span>' : ''}</span></div>`;
+      let body = '';
+      if (STATE.isAdmin) {
+        body = `${top}${sessionBanner}${gmRosterSection(groupList)}${wall || bastionCard ? `<div class="db-grid two">${wall}${bastionCard}</div>` : ''}`;
+      } else {
+        const characterSection = playerCharactersSection(groupList);
+        const groupSection = groupsSection(groupList);
+        const main = hasJoinedGroup ? [characterSection, groupSection] : [groupSection, characterSection];
+        body = `${top}${sessionBanner}<div class="db-grid${wall || bastionCard ? '' : ' solo'}"><div class="db-col">${main.join('')}</div>${wall || bastionCard ? `<div class="db-col">${wall}${bastionCard}</div>` : ''}</div>`;
+      }
+      root.innerHTML = body;
+      if (!dashboardMounted) {
+        dashboardMounted = true;
+        root.classList.add('anim');
+        clearTimeout(dashboardAnimTimer);
+        dashboardAnimTimer = setTimeout(() => root.classList.remove('anim'), 1800);
+      }
+      if (activeSearch) {
+        const search = root.querySelector('#db-roster-query');
+        search?.focus({ preventScroll: true });
+        if (search && searchCaret !== null) search.setSelectionRange(searchCaret, searchCaret);
+      }
     }
 
     const replaceParticipants = (groupId, participants) => {
@@ -3710,6 +3871,41 @@ const PAGES = {
     };
     _dashUi = {
       characterIds: () => (STATE.isAdmin ? allChars : controlledChars()).map(char => char.id),
+      setRosterFilter(value) {
+        rosterFilter = ['all', 'online', 'low', 'free'].includes(value) ? value : 'all';
+        rosterFreeExpanded = false;
+        schedulePaint();
+      },
+      setRosterView(value) {
+        rosterView = value === 'table' ? 'table' : 'groups';
+        try { localStorage.setItem('dash-roster-view', rosterView); } catch { /* stockage privé */ }
+        schedulePaint();
+      },
+      searchRoster(input) {
+        rosterQuery = input?.value || '';
+        const body = document.getElementById('db-roster-body');
+        if (body) body.innerHTML = rosterBody(groups());
+      },
+      sortRoster(key) {
+        const allowed = ['nom', 'owner', 'level', 'pv', 'pm', 'ca', 'gold', 'group'];
+        if (!allowed.includes(key)) return;
+        rosterSort = rosterSort.key === key
+          ? { key, dir: -rosterSort.dir }
+          : { key, dir: ['level', 'ca', 'gold'].includes(key) ? -1 : 1 };
+        const body = document.getElementById('db-roster-body');
+        if (body) body.innerHTML = rosterBody(groups());
+      },
+      clearRoster() {
+        rosterFilter = 'all';
+        rosterQuery = '';
+        rosterFreeExpanded = false;
+        schedulePaint();
+      },
+      toggleFreeRoster() {
+        rosterFreeExpanded = !rosterFreeExpanded;
+        const body = document.getElementById('db-roster-body');
+        if (body) body.innerHTML = rosterBody(groups());
+      },
       async toggleQuest(groupId) {
         const groupList = groups();
         const group = groupList.find(item => item.id === groupId);
@@ -3756,6 +3952,25 @@ const PAGES = {
       },
     };
     const uiRef = _dashUi;
+
+    const dashboardKeydown = event => {
+      if (STATE.currentPage !== 'dashboard' || !STATE.isAdmin) return;
+      const search = document.getElementById('db-roster-query');
+      if (event.key === '/' && !/input|textarea|select/i.test(document.activeElement?.tagName || '')) {
+        event.preventDefault();
+        search?.focus();
+      } else if (event.key === 'Escape' && document.activeElement === search && rosterQuery) {
+        rosterQuery = '';
+        search.value = '';
+        const body = document.getElementById('db-roster-body');
+        if (body) body.innerHTML = rosterBody(groups());
+      }
+    };
+    document.addEventListener('keydown', dashboardKeydown);
+    document.addEventListener('app:page-changed', () => {
+      document.removeEventListener('keydown', dashboardKeydown);
+      clearTimeout(dashboardAnimTimer);
+    }, { once: true });
 
     paint();
     watch('dash-characters', 'characters', data => { allChars = sortCharactersForDisplay(data || []); schedulePaint(); });
@@ -4550,6 +4765,12 @@ registerActions({
   _dashToggleQuest:      (btn) => _dashToggleQuest(btn),
   _dashPickQuestChar:    (btn) => _dashPickQuestChar(btn),
   _dashMarkWallRead:     ()    => _dashUi?.markWallRead?.(),
+  _dashRosterFilter:     (btn) => _dashUi?.setRosterFilter?.(btn.dataset.filter),
+  _dashRosterView:       (btn) => _dashUi?.setRosterView?.(btn.dataset.view),
+  _dashRosterSearch:     (input) => _dashUi?.searchRoster?.(input),
+  _dashRosterSort:       (btn) => _dashUi?.sortRoster?.(btn.dataset.sort),
+  _dashRosterClear:      () => _dashUi?.clearRoster?.(),
+  _dashRosterFreeToggle: () => _dashUi?.toggleFreeRoster?.(),
   openAdventureSwitcher: ()    => openAdventureSwitcher(),
   _adminRepairQuestParticipants: () => _adminRepairQuestParticipants(),
   _adminRepairVttData:           () => _adminRepairVttData(),
