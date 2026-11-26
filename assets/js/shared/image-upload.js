@@ -112,7 +112,7 @@ export function bindImageUploadDropZone(dropEl, {
   });
   obs.observe(document.body, { childList: true, subtree: true });
 
-  return { destroy };
+  return { destroy, open: () => picker.open() };
 }
 
 // ── Utilitaire : simple upload JPEG/PNG sans crop ────────────────────────────

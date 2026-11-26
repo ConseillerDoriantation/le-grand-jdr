@@ -4147,6 +4147,11 @@ const PAGES = {
     const total        = items.length;
     const activeFilter = achState.filter ?? 'all';
     const activeView   = achState.view   ?? 'galerie';
+    const activeGroup  = ['mission', 'month'].includes(achState.group) ? achState.group : 'none';
+    const activeDensity = ['s', 'l'].includes(achState.density) ? achState.density : 'm';
+    const activeOrder = achState.galleryOrder === 'desc' ? 'desc' : 'asc';
+    const dated = items.map(item => Date.parse(item.date || '')).filter(Number.isFinite).sort((a, b) => a - b);
+    const monthSpan = dated.length ? Math.max(1, (new Date(dated.at(-1)).getFullYear() - new Date(dated[0]).getFullYear()) * 12 + new Date(dated.at(-1)).getMonth() - new Date(dated[0]).getMonth() + 1) : 0;
 
     content.innerHTML = `<div class="hall-root">
     <section class="hall-command" aria-label="Navigation des hauts-faits">
@@ -4154,7 +4159,7 @@ const PAGES = {
         <div class="hall-command-head">
           <div class="hall-command-title">
             <h1>Hauts-Faits</h1>
-            <small>Galerie de campagne · ${total} ${total > 1 ? 'souvenirs' : 'souvenir'}</small>
+            <small>Galerie de campagne · ${total} ${total > 1 ? 'souvenirs' : 'souvenir'}${monthSpan ? ` · ${monthSpan} mois d'aventure` : ''}</small>
           </div>
           <span class="hall-command-spacer"></span>
           ${STATE.isAdmin ? `<div class="hall-command-tools">
@@ -4164,11 +4169,11 @@ const PAGES = {
             </button>
             <button class="hall-tool-btn" data-action="openAchievementCategoriesAdmin" title="Gérer les catégories" aria-label="Gérer les catégories de hauts-faits">
               <svg aria-hidden="true"><use href="./assets/img/icons.svg#icon-cog"/></svg>
-              <span>Catégories</span>
             </button>
             <button class="hall-tool-btn hall-tool-btn--primary" data-action="openAchievementModal" title="Ajouter un haut-fait" aria-label="Ajouter un haut-fait">
               <span class="hall-tool-plus" aria-hidden="true">+</span>
               <span>Nouveau</span>
+              <kbd>N</kbd>
             </button>
           </div>` : ''}
         </div>
@@ -4193,25 +4198,64 @@ const PAGES = {
         </button>`;
         }).join('')}
           </div>
+          <div id="ach-controls-extra" class="ach-controls-extra" aria-label="Filtres avancés"></div>
+          <span class="hall-command-controls-spacer" aria-hidden="true"></span>
           <div class="hall-command-search">
             <label class="search-wrap" for="ach-search-input">
               <svg aria-hidden="true"><use href="./assets/img/icons.svg#icon-search"/></svg>
               <input type="search" placeholder="Rechercher un souvenir…" id="ach-search-input" aria-label="Rechercher dans les hauts-faits"
                 value="${_esc(achState.search || '')}"
                 data-input="_achSetSearch">
+              <kbd>/</kbd>
             </label>
           </div>
         </div>
-        <div class="view-toggle" role="tablist" aria-label="Mode d'affichage des hauts-faits">
-          <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie" data-nav-page="achievements" data-nav-sub="galerie" role="tab" aria-selected="${activeView === 'galerie'}">▦ Galerie</button>
-          <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline" data-nav-page="achievements" data-nav-sub="timeline" role="tab" aria-selected="${activeView === 'timeline'}">⋮ Chronologie</button>
-          <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions" data-nav-page="achievements" data-nav-sub="missions" role="tab" aria-selected="${activeView === 'missions'}">🎯 Missions</button>
+        <div class="hall-command-foot">
+          <div class="view-toggle" role="tablist" aria-label="Mode d'affichage des hauts-faits">
+            <button class="view-tab${activeView === 'galerie' ? ' active' : ''}" data-action="_achSetView" data-val="galerie" data-nav-page="achievements" data-nav-sub="galerie" role="tab" aria-selected="${activeView === 'galerie'}">▦ Galerie</button>
+            <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline" data-nav-page="achievements" data-nav-sub="timeline" role="tab" aria-selected="${activeView === 'timeline'}">⋮ Chronologie</button>
+            <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions" data-nav-page="achievements" data-nav-sub="missions" role="tab" aria-selected="${activeView === 'missions'}">◎ Missions</button>
+          </div>
+          <div class="ach-view-options" aria-label="Options de la fresque">
+            <div class="ach-option-group" role="group" aria-label="Chapitres">
+              <span>Chapitres</span>
+              <button class="${activeGroup === 'mission' ? 'active' : ''}" data-action="_achSetGroup" data-ach-group="mission">Missions</button>
+              <button class="${activeGroup === 'month' ? 'active' : ''}" data-action="_achSetGroup" data-ach-group="month">Mois</button>
+              <button class="${activeGroup === 'none' ? 'active' : ''}" data-action="_achSetGroup" data-ach-group="none">Aucun</button>
+            </div>
+            <div class="ach-option-group ach-density" role="group" aria-label="Taille des vignettes">
+              <span>Taille</span>
+              <button class="${activeDensity === 's' ? 'active' : ''}" data-action="_achSetDensity" data-ach-density="s" title="Vignettes compactes" aria-label="Vignettes compactes"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h3v3H2zM6.5 2h3v3h-3zM11 2h3v3h-3zM2 6.5h3v3H2zM6.5 6.5h3v3h-3zM11 6.5h3v3h-3zM2 11h3v3H2zM6.5 11h3v3h-3zM11 11h3v3h-3z"/></svg></button>
+              <button class="${activeDensity === 'm' ? 'active' : ''}" data-action="_achSetDensity" data-ach-density="m" title="Vignettes confort" aria-label="Vignettes confort"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/></svg></button>
+              <button class="${activeDensity === 'l' ? 'active' : ''}" data-action="_achSetDensity" data-ach-density="l" title="Grandes vignettes" aria-label="Grandes vignettes"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/></svg></button>
+            </div>
+            <button class="ach-order-btn${activeOrder === 'desc' ? ' active' : ''}" data-action="_achSetGalleryOrder" data-ach-order="${activeOrder === 'desc' ? 'asc' : 'desc'}" aria-pressed="${activeOrder === 'desc'}" title="Inverser l'ordre">${activeOrder === 'desc' ? '↓ Plus récents d’abord' : '↑ Plus anciens d’abord'}</button>
+          </div>
         </div>
       </div>
     </section>
+    <div class="ach-mini" aria-hidden="true">
+      <div class="ach-mini-in">
+        <strong class="ach-mini-title">Hauts-Faits</strong>
+        <button type="button" class="ach-mini-crumb" data-action="_achMiniCrumb" title="Revenir au début de cette section">
+          <span class="ach-mini-art">✦</span>
+          <span class="ach-mini-copy"><small class="ach-mini-kicker">Fresque</small><b class="ach-mini-label">Fresque de campagne</b></span>
+          <span class="ach-mini-pos"></span>
+        </button>
+        <div class="ach-mini-filters" id="ach-mini-filters"></div>
+        <label class="ach-mini-search" aria-label="Rechercher dans les hauts-faits">
+          <svg aria-hidden="true"><use href="./assets/img/icons.svg#icon-search"/></svg>
+          <input type="search" id="ach-mini-search-input" value="${_esc(achState.search || '')}" placeholder="Rechercher…" data-input="_achSetSearch">
+          <kbd>/</kbd>
+        </label>
+        ${STATE.isAdmin ? '<button type="button" class="ach-mini-new" data-action="openAchievementModal"><span>+</span> Nouveau</button>' : ''}
+        <button type="button" class="ach-mini-top" data-action="_achScrollTop" title="Revenir en haut" aria-label="Revenir en haut">↑</button>
+      </div>
+    </div>
     <div class="hall-content">
       <div id="ach-content">${appSplashHtml('')}</div>
     </div>
+    ${STATE.isAdmin ? '<button type="button" class="ach-mobile-fab" data-action="openAchievementModal" aria-label="Créer un haut-fait"><span>+</span></button>' : ''}
     </div>`;
   },
 

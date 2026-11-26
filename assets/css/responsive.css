@@ -522,25 +522,6 @@
     text-align: left;
   }
 
-  /* ── 5. Hauts-Faits : grille 2 colonnes propre ── */
-  .ach-justified {
-    display: grid !important;
-    grid-template-columns: repeat(2, 1fr) !important;
-    gap: 8px !important;
-    overflow: hidden;
-  }
-  .ach-row { display: contents !important; }
-  .ach-item {
-    width: auto !important;
-    height: auto !important;
-    aspect-ratio: 4 / 3;
-    flex-shrink: unset;
-    min-width: 0; /* empêche le débordement dans la grille */
-  }
-  /* Masquer tout — image seule, tap pour le détail */
-  .ach-meta,
-  .ach-cat-badge,
-  .ach-date-badge { display: none !important; }
 }
 
 /* ═══════════════════════════════════════════════════════════
