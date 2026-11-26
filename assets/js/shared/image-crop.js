@@ -18,7 +18,7 @@
 //   undefined → aucun changement (conserver l'image existante)
 // ══════════════════════════════════════════════════════════════════════════════
 
-import { bindImageUploadDropZone } from './image-upload.js';
+import { bindImageUploadDropZone, readImageFileAsDataUrl } from './image-upload.js';
 
 // ── Helpers internes ─────────────────────────────────────────────────────────
 
@@ -759,6 +759,11 @@ export function attachDropAndResize({
 
   return {
     destroy() { upload.destroy(); },
+    open() { upload.open?.(); },
+    async loadFile(file) {
+      const dataUrl = await readImageFileAsDataUrl(file);
+      if (dataUrl) await handle(file, dataUrl);
+    },
     reset() {
       resized = null;
       result = 'cleared';

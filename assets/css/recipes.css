@@ -44,11 +44,16 @@ body .modal:has(.rc-modal) > #modal-body { padding: 0 !important; height: auto !
 #rcList { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border-md); background: var(--surface-sunken); }
 #rcDetail { container-type: inline-size; min-height: 0; overflow: auto; padding: 18px 22px 26px; display: flex; flex-direction: column; gap: 18px; }
 
-.rc-lh { display: flex; gap: 8px; padding: 12px 12px 8px; }
+.rc-lh { display: flex; align-items: center; gap: 7px; padding: 12px 12px 8px; }
 .rc-search { flex: 1; position: relative; min-width: 0; }
 .rc-search input { width: 100%; background: var(--surface-2); border: 1px solid var(--border-md); border-radius: var(--r-full); padding: 8px 12px 8px 32px; color: var(--text); font: 400 .82rem var(--font-body); outline: none; }
 .rc-search input:focus { border-color: var(--border-bright); }
 .rc-search span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: .74rem; opacity: .5; pointer-events: none; }
+.rc-lh-actions { flex: none; display: flex; gap: 4px; }
+.rc-list-tool { width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border-radius: 8px; border: 1px solid var(--border-md); background: var(--surface-2); color: var(--text-muted); cursor: pointer; }
+.rc-list-tool:hover { color: var(--text); border-color: var(--border-bright); background: var(--surface-3); }
+.rc-list-tool.primary { color: var(--gold-2); border-color: color-mix(in srgb, var(--gold) 42%, var(--border-md)); background: var(--gold-glow, rgba(79, 140, 255, .1)); }
+.rc-list-tool svg, .rc-edit-ing svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .rc-filters { display: flex; align-items: center; gap: 8px; padding: 0 12px 10px; flex-wrap: wrap; }
 .rc-tf { display: flex; padding: 2px; border-radius: var(--r-full); background: var(--surface-2); border: 1px solid var(--border); }
 .rc-tf button { border: 0; background: none; color: var(--text-muted); font: 600 .7rem var(--font-body); min-width: 30px; height: 26px; padding: 0 9px; border-radius: var(--r-full); cursor: pointer; }
@@ -123,7 +128,8 @@ body .modal:has(.rc-modal) > #modal-body { padding: 0 !important; height: auto !
 .rc-col h4 span, .rc-know h4 span { color: var(--text-dim); letter-spacing: 0; font-weight: 600; }
 .rc-arrow { align-self: center; text-align: center; font-size: 1.3rem; color: var(--text-dim); }
 .rc-ings { display: flex; flex-direction: column; gap: 4px; }
-.rc-ing { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: var(--r-sm); background: var(--surface-sunken); border: 1px solid var(--border); }
+.rc-ing-group { display: flex; flex-direction: column; gap: 4px; }
+.rc-ing { display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: var(--r-sm); background: var(--surface-sunken); border: 1px solid var(--border); }
 .rc-ing-n { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
 .rc-ing-n b { font-size: .82rem; font-weight: 600; overflow-wrap: anywhere; text-wrap: pretty; }
 .rc-ing-n small { font-size: .68rem; color: var(--text-muted); }
@@ -132,6 +138,8 @@ body .modal:has(.rc-modal) > #modal-body { padding: 0 !important; height: auto !
 .rc-step button:hover { background: var(--surface-3); color: var(--text); }
 .rc-step button:disabled { opacity: .3; cursor: default; background: none; }
 .rc-step b { min-width: 26px; text-align: center; font-size: .82rem; font-variant-numeric: tabular-nums; }
+.rc-edit-ing { flex: none; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border-radius: 6px; border: 0; background: none; color: var(--text-muted); cursor: pointer; }
+.rc-edit-ing:hover, .rc-edit-ing.on { color: var(--gold-2); background: var(--gold-glow, rgba(79, 140, 255, .14)); }
 .rc-x { flex: none; width: 26px; height: 26px; border-radius: 7px; border: 0; background: none; color: var(--text-dim); cursor: pointer; font-size: 1rem; }
 .rc-x:hover { color: var(--crimson-light); background: rgba(255, 90, 126, .1); }
 .rc-ph { font-size: .78rem; color: var(--text-dim); padding: 6px 2px; }

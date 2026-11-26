@@ -6,7 +6,7 @@
 //   { type, nom, duree, effet, description, ingredients:[{nom,quantite}], acces:[uid,...], shopItemId? }
 //   type : 'cuisine' | 'potion' | 'arme' | 'armure' | 'bijou'
 // ══════════════════════════════════════════════════════════════════════════════
-import { loadCollection, addToCol, updateInCol, deleteFromCol } from '../data/firestore.js';
+import { loadCollection, addToCol, updateInCol, deleteFromCol, batchSaveInCol } from '../data/firestore.js';
 import { confirmDelete, trySave } from '../shared/crud.js';
 import { openModal, closeModal, closeModalDirect, pushModal, confirmModal } from "../shared/modal.js";
 import { registerActions } from '../core/actions.js';
@@ -393,6 +393,191 @@ function _rcUndoToast(msg, onUndo) {
   showNotif(msg, 'success', { duration: 5000, action: { label: '↶ Annuler', onClick: onUndo } });
 }
 
+function _rcIngredientComboIndex(kind = '') {
+  const match = /^ing:(\d+)$/.exec(String(kind));
+  return match ? Number(match[1]) : -1;
+}
+const _rcIsIngredientCombo = kind => kind === 'ing' || _rcIngredientComboIndex(kind) >= 0;
+
+function _rcImportRows(payload) {
+  const source = payload?.recipes ?? payload?.data?.recipes ?? payload;
+  if (Array.isArray(source)) return source;
+  if (!source || typeof source !== 'object') return [];
+  if ('nom' in source || 'ingredients' in source || 'type' in source) return [source];
+  return Object.entries(source).map(([id, value]) => value && typeof value === 'object' ? { id, ...value } : null).filter(Boolean);
+}
+
+function _rcImportShopRows(payload) {
+  return Array.isArray(payload?.shopRecipes) ? payload.shopRecipes.filter(row => row && typeof row === 'object') : [];
+}
+
+function _rcRelatedShopNames(payload) {
+  return new Map((Array.isArray(payload?.shopItems) ? payload.shopItems : [])
+    .filter(item => item?.id && item?.nom)
+    .map(item => [item.id, item.nom]));
+}
+
+function _rcResolveShopId(id, name) {
+  if (id && _findShopItem(id)) return id;
+  const wanted = _norm(name || '');
+  return wanted ? (STORE.shopItems.find(item => _norm(item.nom) === wanted)?.id || '') : '';
+}
+
+function _rcNormalizeImportedRecipe(source = {}, relatedNames = new Map()) {
+  const copy = JSON.parse(JSON.stringify(source || {}));
+  delete copy.id;
+  Object.keys(copy).forEach(key => { if (key.startsWith('_')) delete copy[key]; });
+
+  const ingredients = Array.isArray(copy.ingredients) ? copy.ingredients : [];
+  copy.ingredients = ingredients.map(raw => {
+    const item = typeof raw === 'string' ? { nom: raw } : (raw && typeof raw === 'object' ? raw : {});
+    const nom = String(item.nom || item.name || '').trim();
+    const originalId = item.shopItemId || item.itemId;
+    const shopItemId = _rcResolveShopId(originalId, item.shopItemName || relatedNames.get(originalId) || nom);
+    const linked = _findShopItem(shopItemId);
+    return {
+      ...item,
+      nom: linked?.nom || nom || 'Ingrédient',
+      quantite: Math.max(1, Number.parseInt(item.quantite ?? item.qty ?? item.quantity, 10) || 1),
+      shopItemId,
+    };
+  });
+  copy.type = TABS.some(tab => tab.id === copy.type && tab.id !== 'all') ? copy.type : 'potion';
+  copy.nom = String(copy.nom || copy.name || '').trim();
+  const access = Array.isArray(copy.acces) ? copy.acces : (Array.isArray(copy.access) ? copy.access : []);
+  copy.acces = [...new Set(access.filter(uid => typeof uid === 'string' && uid))];
+  copy.quantiteProduite = Math.max(1, Number.parseInt(copy.quantiteProduite, 10) || 1);
+  const originalResultId = copy.shopItemId;
+  copy.shopItemId = _rcResolveShopId(originalResultId, copy.shopItemName || relatedNames.get(originalResultId) || copy.resultatNom || copy.resultName || (originalResultId ? copy.nom : ''));
+  return copy;
+}
+
+function _rcExportRecipe(source = {}) {
+  const copy = JSON.parse(JSON.stringify(source || {}));
+  Object.keys(copy).forEach(key => { if (key.startsWith('_')) delete copy[key]; });
+  copy.ingredients = (Array.isArray(copy.ingredients) ? copy.ingredients : []).map(ingredient => ({
+    ...ingredient,
+    ...(ingredient.shopItemId ? { shopItemName: _findShopItem(ingredient.shopItemId)?.nom || ingredient.shopItemName || '' } : {}),
+  }));
+  if (copy.shopItemId) copy.shopItemName = _findShopItem(copy.shopItemId)?.nom || copy.shopItemName || '';
+  return copy;
+}
+
+function _rcExportBundle() {
+  const recipes = STORE.all.map(_rcExportRecipe);
+  const shopRecipes = STORE.shopItems.map(item => {
+    const recipe = _shopToRecipe(item);
+    if (!recipe) return null;
+    return {
+      shopItemId: item.id,
+      shopItemName: item.nom || '',
+      recipeMeta: JSON.parse(JSON.stringify(item.recipeMeta || {})),
+      acces: [...(item.acces || [])],
+      recipe: _rcExportRecipe(recipe),
+    };
+  }).filter(Boolean);
+  const relatedIds = new Set();
+  [...recipes, ...shopRecipes.map(row => row.recipe)].forEach(recipe => {
+    if (recipe.shopItemId) relatedIds.add(recipe.shopItemId);
+    (recipe.ingredients || []).forEach(ingredient => { if (ingredient.shopItemId) relatedIds.add(ingredient.shopItemId); });
+  });
+  const shopItems = STORE.shopItems.filter(item => relatedIds.has(item.id)).map(item => ({
+    id: item.id,
+    nom: item.nom || '',
+    categorieId: item.categorieId || '',
+    categorie: _rcShopCatLabel(item),
+    template: item.template || '',
+    sousType: item.sousType || '',
+  }));
+  return {
+    format: 'le-grand-jdr-recipes',
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    adventure: { id: STATE.adventure?.id || '', nom: STATE.adventure?.nom || STATE.adventure?.name || '' },
+    recipes,
+    shopRecipes,
+    shopItems,
+  };
+}
+
+function _rcExportFile() {
+  const bundle = _rcExportBundle();
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const date = new Date().toISOString().slice(0, 10);
+  link.href = url;
+  link.download = `recettes-${date}.json`;
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 500);
+  showNotif(`${bundle.recipes.length + bundle.shopRecipes.length} recette${bundle.recipes.length + bundle.shopRecipes.length > 1 ? 's exportées' : ' exportée'}.`, 'success');
+}
+
+async function _rcImportFile(file, input) {
+  if (!file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    const rows = _rcImportRows(payload).filter(row => row && typeof row === 'object');
+    const shopRows = _rcImportShopRows(payload);
+    if (!rows.length && !shopRows.length) throw new Error('Aucune recette trouvée dans ce fichier.');
+    if (rows.length + shopRows.length > 450) throw new Error('Le fichier contient plus de 450 recettes. Séparez-le en plusieurs imports.');
+    const relatedNames = _rcRelatedShopNames(payload);
+    const recipes = rows.map(row => _rcNormalizeImportedRecipe(row, relatedNames));
+    const shopImports = shopRows.map(row => {
+      const shopItemId = _rcResolveShopId(row.shopItemId, row.shopItemName || relatedNames.get(row.shopItemId));
+      const normalizedRecipe = _rcNormalizeImportedRecipe(row.recipe || { ...row.recipeMeta, nom: row.shopItemName, shopItemId: row.shopItemId, acces: row.acces }, relatedNames);
+      const recipeMeta = { ...(row.recipeMeta || {}) };
+      ['ingredients', 'atelierReq', 'tempsCraft', 'effet', 'description', 'duree', 'quantiteProduite'].forEach(key => {
+        if (key in normalizedRecipe) recipeMeta[key] = normalizedRecipe[key];
+      });
+      return { row, shopItemId, normalizedRecipe, recipeMeta };
+    });
+    const unresolved = shopImports.filter(entry => !entry.shopItemId).map(entry => entry.normalizedRecipe);
+    const allImportedRecipes = [...recipes, ...unresolved];
+    const inspectedRecipes = [...allImportedRecipes, ...shopImports.filter(entry => entry.shopItemId).map(entry => _rcNormalizeImportedRecipe(entry.row.recipe || {}, relatedNames))];
+    const linked = inspectedRecipes.reduce((total, recipe) => total + recipe.ingredients.filter(ingredient => ingredient.shopItemId).length, 0);
+    const free = inspectedRecipes.reduce((total, recipe) => total + recipe.ingredients.filter(ingredient => !ingredient.shopItemId).length, 0);
+    const total = rows.length + shopRows.length;
+    const ok = await confirmModal(
+      `<b>${total} recette${total > 1 ? 's' : ''}</b> à importer.<br>${linked} ingrédient${linked > 1 ? 's' : ''} relié${linked > 1 ? 's' : ''} à la boutique${free ? ` · ${free} conservé${free > 1 ? 's' : ''} comme libre${free > 1 ? 's' : ''}` : ''}.`,
+      { title: 'Importer des recettes', confirmLabel: 'Importer', danger: false, icon: '⇩' },
+    );
+    if (!ok) return;
+
+    const imported = allImportedRecipes.map((recipe, index) => ({
+      id: globalThis.crypto?.randomUUID?.() || `recipe_${Date.now().toString(36)}_${index}_${Math.random().toString(36).slice(2, 8)}`,
+      ...recipe,
+    }));
+    const shopWrites = shopImports.filter(entry => entry.shopItemId).map(({ row, shopItemId, recipeMeta }) => ({
+      col: 'shop',
+      id: shopItemId,
+      data: { recipeMeta, acces: Array.isArray(row.acces) ? row.acces : [] },
+    }));
+    await batchSaveInCol([
+      ...imported.map(({ id, ...data }) => ({ col: 'recipes', id, data })),
+      ...shopWrites,
+    ]);
+    STORE.all.push(...imported);
+    shopWrites.forEach(write => {
+      const item = _findShopItem(write.id);
+      if (item) Object.assign(item, write.data);
+    });
+    STORE.all.sort((a, b) => String(a.nom || '').localeCompare(String(b.nom || ''), 'fr', { sensitivity: 'base' }));
+    RC.sel = imported[0]?.id || RC.sel;
+    RC.pane = imported.length === 1 ? 'detail' : 'list';
+    RC.q = '';
+    _rcRender();
+    showNotif(`${total} recette${total > 1 ? 's importées' : ' importée'} avec succès.`, 'success');
+  } catch (error) {
+    if (error instanceof SyntaxError) showNotif('Fichier JSON invalide.', 'error');
+    else if (error?.code) notifySaveError(error, "L'import des recettes a échoué.");
+    else showNotif(error?.message || "L'import des recettes a échoué.", 'error');
+  } finally {
+    if (input) input.value = '';
+  }
+}
+
 // ── Liste ──────────────────────────────────────────────────────────────────
 function _rcVisible() {
   const mj = _rcIsMJ();
@@ -421,7 +606,11 @@ function _rcListHtml() {
   }).join('');
   return `<div class="rc-lh">
     <label class="rc-search"><span aria-hidden="true">🔍</span><input id="rcQ" type="search" placeholder="${mj ? 'Recette, ingrédient, objet…' : 'Chercher une recette…'}" value="${_esc(RC.q)}" autocomplete="off"></label>
-    ${mj ? `<button class="rc-btn pri" data-a="new" title="Nouvelle recette (N)">+ Nouvelle</button>` : ''}
+    ${mj ? `<span class="rc-lh-actions">
+      <button class="rc-list-tool" data-a="export" title="Exporter toutes les recettes" aria-label="Exporter toutes les recettes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V9m-4 4 4-4 4 4M5 5h14"/></svg></button>
+      <button class="rc-list-tool" data-a="import" title="Importer des recettes" aria-label="Importer des recettes"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 19h14"/></svg></button>
+      <button class="rc-list-tool primary" data-a="new" title="Nouvelle recette (N)" aria-label="Nouvelle recette"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+    </span><input id="rcImportFile" type="file" accept="application/json,.json" hidden>` : ''}
   </div>
   <div class="rc-filters">
     <div class="rc-tf" role="group" aria-label="Type"><button class="${RC.type === 'all' ? 'on' : ''}" data-a="type" data-t="all">Toutes</button>${types.map(t => `<button class="${RC.type === t.id ? 'on' : ''}" data-a="type" data-t="${t.id}" title="${_esc(t.label)}">${t.emoji}</button>`).join('')}</div>
@@ -436,12 +625,14 @@ function _rcListHtml() {
 function _rcCbOptions(kind) {
   const r = _rcRec(); if (!r) return [];
   const q = _norm(RC.cbQ);
-  const used = new Set(kind === 'ing' ? (r.ingredients || []).map(g => g.shopItemId).filter(Boolean) : []);
+  const ingredientCombo = _rcIsIngredientCombo(kind);
+  const editedIndex = _rcIngredientComboIndex(kind);
+  const used = new Set(ingredientCombo ? (r.ingredients || []).map((g, index) => index === editedIndex ? '' : g.shopItemId).filter(Boolean) : []);
   let L = STORE.shopItems.filter(s => !used.has(s.id) && (!q || _norm(`${s.nom} ${_rcShopCatLabel(s)}`).includes(q)));
-  const pri = s => { const comp = _rcIngredientish(s) ? 0 : 1; return kind === 'ing' ? comp : 1 - comp; };
+  const pri = s => { const comp = _rcIngredientish(s) ? 0 : 1; return ingredientCombo ? comp : 1 - comp; };
   L.sort((a, b) => pri(a) - pri(b) || String(a.nom || '').localeCompare(String(b.nom || ''), 'fr'));
   const opts = L.slice(0, 8).map(s => ({ id: s.id, label: s.nom, sub: `${_rcShopCatLabel(s)} · ${s.prix || 0} or` }));
-  if (kind === 'ing' && RC.cbQ.trim() && !STORE.shopItems.some(s => _norm(s.nom) === q)) opts.push({ free: RC.cbQ.trim(), label: `Ajouter « ${RC.cbQ.trim()} » sans lien boutique`, sub: 'Ingrédient libre · non vérifiable dans les inventaires' });
+  if (ingredientCombo && RC.cbQ.trim() && !STORE.shopItems.some(s => _norm(s.nom) === q)) opts.push({ free: RC.cbQ.trim(), label: `Utiliser « ${RC.cbQ.trim()} » sans lien boutique`, sub: 'Ingrédient libre · non vérifiable dans les inventaires' });
   return opts;
 }
 function _rcCbHtml(kind, ph) {
@@ -470,10 +661,13 @@ function _rcDetailMJ(r) {
   <div class="rc-eq">
     <section class="rc-col">
       <h4>Ingrédients <span>${(r.ingredients || []).length}</span></h4>
-      <div class="rc-ings">${(r.ingredients || []).map((g, i) => { const s = _findShopItem(g.shopItemId); return `<div class="rc-ing">
+      <div class="rc-ings">${(r.ingredients || []).map((g, i) => { const s = _findShopItem(g.shopItemId), editKey = `ing:${i}`, editing = RC.cb === editKey; return `<div class="rc-ing-group">
+        <div class="rc-ing">
         <span class="rc-step"><button data-a="qty" data-i="${i}" data-d="-1" ${g.quantite <= 1 ? 'disabled' : ''} aria-label="Moins">−</button><b>${g.quantite}</b><button data-a="qty" data-i="${i}" data-d="1" aria-label="Plus">+</button></span>
         <span class="rc-ing-n"><b>${_esc(g.nom)}</b><small>${s ? `${_esc(_rcShopCatLabel(s))} · ${s.prix || 0} or` : '<span class="rc-warn">Libre · non lié à la boutique</span>'}</small></span>
-        <button class="rc-x" data-a="rmIng" data-i="${i}" title="Retirer">×</button></div>`; }).join('') || '<div class="rc-ph">Ajoutez les composants de la boutique nécessaires.</div>'}</div>
+        <button class="rc-edit-ing${editing ? ' on' : ''}" data-a="editIng" data-i="${i}" title="${s ? 'Changer l’objet lié' : 'Relier à un objet de la boutique'}" aria-label="${s ? 'Changer l’objet lié' : 'Relier à un objet de la boutique'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-.8 4 4-.8L18.5 7.9l-3.4-3.4L4 16ZM13.8 5.8l3.4 3.4"/></svg></button>
+        <button class="rc-x" data-a="rmIng" data-i="${i}" title="Retirer">×</button></div>
+        ${editing ? _rcCbHtml(editKey, 'Chercher un objet de la boutique…') : ''}</div>`; }).join('') || '<div class="rc-ph">Ajoutez les composants de la boutique nécessaires.</div>'}</div>
       ${_rcCbHtml('ing', '+ Ajouter un ingrédient…')}
     </section>
     <div class="rc-arrow" aria-hidden="true">→</div>
@@ -562,9 +756,17 @@ function _rcRenderCb() {
 }
 function _rcPick(kind, i) {
   const r = _rcRec(), o = _rcCbOptions(kind)[i]; if (!r || !o) return;
-  if (kind === 'ing') {
-    const ing = [...(r.ingredients || []), o.free ? { nom: o.free, quantite: 1, shopItemId: '' } : { nom: _findShopItem(o.id).nom, quantite: 1, shopItemId: o.id }];
-    _rcPersist(r, { ingredients: ing }, true); RC.cbQ = ''; RC.cbI = 0; _rcRender('[data-cbi="ing"]'); RC.cb = 'ing'; _rcRenderCb();
+  if (_rcIsIngredientCombo(kind)) {
+    const editedIndex = _rcIngredientComboIndex(kind);
+    const current = editedIndex >= 0 ? (r.ingredients || [])[editedIndex] : null;
+    const next = o.free
+      ? { ...(current || {}), nom: o.free, quantite: current?.quantite || 1, shopItemId: '' }
+      : { ...(current || {}), nom: _findShopItem(o.id).nom, quantite: current?.quantite || 1, shopItemId: o.id };
+    const ing = [...(r.ingredients || [])];
+    if (editedIndex >= 0) ing[editedIndex] = next; else ing.push(next);
+    RC.cbQ = ''; RC.cbI = 0;
+    if (editedIndex >= 0) { RC.cb = null; _rcPersist(r, { ingredients: ing }, true); _rcRender(); }
+    else { _rcPersist(r, { ingredients: ing }, true); _rcRender('[data-cbi="ing"]'); RC.cb = 'ing'; _rcRenderCb(); }
   } else {
     const patch = { shopItemId: o.id, quantiteProduite: r.quantiteProduite || 1 };
     if (!String(r.nom || '').trim()) patch.nom = _findShopItem(o.id).nom;
@@ -582,11 +784,14 @@ function _rcBind(m) {
     else if (a === 'type') RC.type = t.dataset.t;
     else if (a === 'ready') RC.readyOnly = !RC.readyOnly;
     else if (a === 'grant') { e.stopPropagation(); const x = _rcAll().find(z => z.id === t.dataset.id), u = RC.forUid; if (x) { const acc = (x.acces || []).includes(u) ? x.acces.filter(z => z !== u) : [...(x.acces || []), u]; _rcPersist(x, { acces: acc }, true); _rcUndoToast(`${x.nom || 'Recette'} · ${acc.includes(u) ? 'connue par' : 'oubliée par'} ${_rcP(u).perso}`, () => { _rcPersist(x, { acces: x.acces.includes(u) ? x.acces.filter(z => z !== u) : [...x.acces, u] }, true); _rcRender(); }); } }
+    else if (a === 'export') { _rcExportFile(); return; }
+    else if (a === 'import') { document.getElementById('rcImportFile')?.click(); return; }
     else if (a === 'new') { const n = { id: 'rc-new-' + Date.now(), _new: true, type: RC.type !== 'all' && RC_EDIT_TYPES.some(x => x.id === RC.type) ? RC.type : 'potion', nom: '', ingredients: [], shopItemId: '', quantiteProduite: 1, effet: '', duree: '', atelierReq: '', description: '', acces: RC.forUid ? [RC.forUid] : [] }; STORE.all.push(n); RC.sel = n.id; RC.pane = 'detail'; RC.q = ''; _rcRender('.rc-name'); return; }
     else if (a === 'dup') { const n = { ...JSON.parse(JSON.stringify(r)), id: 'rc-new-' + Date.now(), _new: true, nom: (r.nom || '') + ' (copie)', acces: [] }; delete n._mode; delete n._fromShop; STORE.all.push(n); RC.sel = n.id; _rcRender('.rc-name'); return; }
     else if (a === 'del') { const snap = JSON.parse(JSON.stringify(r)); const wasNew = r._new; STORE.all = STORE.all.filter(x => x.id !== r.id); RC.sel = _rcVisible()[0]?.id || ''; RC.pane = 'list'; if (!wasNew) confirmDelete('recipes', snap.id, '', { confirmed: true, snapshot: snap, successMessage: `« ${snap.nom || 'Sans nom'} » supprimée`, onRestore: async () => { await _ensureRecipeData(); } }); else _rcUndoToast(`« ${snap.nom || 'Sans nom'} » supprimée`, () => { snap._new = true; STORE.all.push(snap); RC.sel = snap.id; _rcRender(); }); }
     else if (a === 'settype') { _rcPersist(r, { type: t.dataset.t }, true); }
     else if (a === 'qty') { const ing = (r.ingredients || []).map((g, k) => k === i ? { ...g, quantite: Math.max(1, (g.quantite || 1) + +t.dataset.d) } : g); _rcPersist(r, { ingredients: ing }, true); }
+    else if (a === 'editIng') { const key = `ing:${i}`; RC.cb = RC.cb === key ? null : key; RC.cbQ = RC.cb ? ((r.ingredients || [])[i]?.nom || '') : ''; RC.cbI = 0; _rcRender(RC.cb ? `[data-cbi="${key}"]` : null); return; }
     else if (a === 'pqty') { _rcPersist(r, { quantiteProduite: Math.max(1, (r.quantiteProduite || 1) + +t.dataset.d) }, true); }
     else if (a === 'rmIng') { const g = (r.ingredients || [])[i]; const ing = (r.ingredients || []).filter((_, k) => k !== i); _rcPersist(r, { ingredients: ing }, true); _rcUndoToast(`${g?.nom || 'Ingrédient'} retiré`, () => { const back = [...(r.ingredients || [])]; back.splice(i, 0, g); _rcPersist(r, { ingredients: back }, true); _rcRender(); }); }
     else if (a === 'mode') { r._mode = t.dataset.m; if (t.dataset.m === 'obj' && !r.shopItemId) { RC.cb = 'res'; RC.cbQ = ''; RC.cbI = 0; _rcRender('[data-cbi="res"]'); _rcRenderCb(); return; } if (t.dataset.m === 'eff' && r.shopItemId) { _rcPersist(r, { shopItemId: '' }, true); } }
@@ -608,7 +813,10 @@ function _rcBind(m) {
     if (el.dataset.cbi) { RC.cb = el.dataset.cbi; RC.cbQ = el.value; RC.cbI = 0; _rcRenderCb(); return; }
     if (el.dataset.f) { const r = _rcRec(); if (r) { _rcPersist(r, { [el.dataset.f]: el.value }, false); _rcRefreshRow(); } }
   });
-  m.addEventListener('change', e => { if (e.target.id === 'rcFor') { RC.forUid = e.target.value; _rcRender(); } });
+  m.addEventListener('change', e => {
+    if (e.target.id === 'rcFor') { RC.forUid = e.target.value; _rcRender(); }
+    else if (e.target.id === 'rcImportFile') _rcImportFile(e.target.files?.[0], e.target);
+  });
   m.addEventListener('keydown', e => {
     const el = e.target;
     if (el.dataset?.cbi) { const n = _rcCbOptions(el.dataset.cbi).length;
