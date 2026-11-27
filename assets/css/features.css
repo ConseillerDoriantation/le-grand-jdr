@@ -10298,3 +10298,19 @@ body .modal:has(.achm) .achm-actions { padding:14px 18px; border-top:1px solid v
     height: 28px;
   }
 }
+
+/* ── Infobulle « Valeur améliorée » (shared/item-value-tip.js) ──────────────
+   Case Valeur d'un objet amélioré (Inventaire, Marché du Bastion) : pointillé
+   = détail au survol / au focus / au toucher. Bulle en position fixe pour ne
+   jamais être rognée par un panneau qui défile. */
+.has-value-tip { cursor: help; }
+.has-value-tip b { text-decoration: underline dotted; text-decoration-color: color-mix(in srgb, var(--gold) 70%, transparent); text-underline-offset: 3px; }
+.has-value-tip:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.value-tip { position: fixed; z-index: var(--z-overlay, 9999); display: grid; gap: 3px; min-width: 190px; max-width: 260px; padding: 9px 11px; border-radius: 10px; background: var(--surface-page, var(--bg-panel)); border: 1px solid var(--border-md, var(--border)); box-shadow: 0 10px 28px rgba(0, 0, 0, .35); font-size: 12px; line-height: 1.35; pointer-events: none; }
+.value-tip > div { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; }
+.value-tip span { color: var(--text-dim); }
+.value-tip b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.value-tip .is-total { padding-bottom: 5px; margin-bottom: 2px; border-bottom: 1px solid var(--border); }
+.value-tip .is-total span { color: var(--text); font-weight: 600; }
+.value-tip .is-total b { color: var(--gold); }
+.value-tip .is-note b { font-size: 10.5px; font-weight: 400; color: var(--text-dim); white-space: normal; }
