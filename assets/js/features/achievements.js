@@ -2,11 +2,10 @@
 // ACHIEVEMENTS.JS — Hauts-Faits
 // ✓ Upload + redimensionnement image (ratio libre, max 1400px, fond flou à l'affichage)
 // ✓ Hauts-faits sans image affichés correctement (emoji + fond)
-// ✓ Drag & drop SortableJS pour réordonner, ordre persisté dans Firestore
+// ✓ Tri manuel d'une catégorie, ordre persisté dans Firestore
 // ✓ Ordre partagé pour tous les utilisateurs
 // ══════════════════════════════════════════════════════════════════════════════
-import Sortable from '../vendor/sortable.esm.js';
-import { makeSortable } from '../shared/sortable-helper.js';
+import { bindGallerySort, mergeGalleryCategoryOrder, moveGalleryCard } from '../shared/achievement-gallery-sort.js';
 import { confirmDelete, tryDoc } from '../shared/crud.js';
 import { loadCollection, deleteFromCol, getDocData, saveDoc, updateInCol, batchUpdateInCol } from '../data/firestore.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
@@ -117,14 +116,15 @@ const STORE = {
   order:         [],        // miroir de l'ordre Firestore
 };
 
-let _achRowSortables = [];
-let _achDragBlockClick = false;
-let _achClickGuardInstalled = false;
+let _achSortCleanup = null;
+let _achSortSaving = false;
+let _achDragRefreshPending = false;
 let _achKeyboardInstalled = false;
 let _achUploader = null;
 let _achLightboxKeyHandler = null;
 let _achPreferencesKey = '';
 const _achRatioCache = new Map();
+const _achGalleryCanvases = new WeakMap();
 let _achGalleryResizeObserver = null;
 let _achGalleryResizeTimer = null;
 let _achObservedGalleryWidth = 0;
@@ -361,18 +361,46 @@ function _achWarmCardPositionCache(gallery) {
 function _achInstallImageWarmup(gallery) {
   _achImageWarmCleanup?.();
   _achImageWarmCleanup = null;
-  if (!gallery?.isConnected || !('IntersectionObserver' in window)) return;
+  if (!gallery?.isConnected) return;
   const host = document.getElementById('main-content');
   const root = host && host.scrollHeight > host.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(host).overflowY)
     ? host
     : null;
   const queue = [];
   const queued = new WeakSet();
+  const dirtyCanvases = new Set();
   let active = 0;
   let scheduled = 0;
   let scrolling = false;
   let scrollIdleTimer = null;
+  let ratioTimer = null;
   let stopped = false;
+  const scheduleRatioLayout = () => {
+    if (stopped || scrolling || ratioTimer !== null || !dirtyCanvases.size) return;
+    ratioTimer = setTimeout(() => {
+      ratioTimer = null;
+      if (stopped || scrolling || !gallery.isConnected) return;
+      if (_achSortSaving || document.body.classList.contains('ach-dragging')) {
+        scheduleRatioLayout();
+        return;
+      }
+      _achRefreshLoadedImageFrames(gallery, dirtyCanvases);
+      dirtyCanvases.clear();
+    }, 100);
+  };
+  const rememberRatio = image => {
+    if (stopped || !image.matches?.('img.ach-img')) return;
+    const ratio = image.naturalWidth / image.naturalHeight, url = image.getAttribute('src');
+    if (!url || !Number.isFinite(ratio) || ratio <= 0) return;
+    _achRatioCache.set(url, ratio);
+    const card = image.parentElement;
+    const canvas = card?.parentElement;
+    if (!canvas || !_achGalleryCanvases.has(canvas)) return;
+    const frameRatio = parseFloat(card.style.width) / parseFloat(card.style.height);
+    if (Math.abs(Math.log(ratio / frameRatio)) <= .002) return;
+    dirtyCanvases.add(canvas);
+    scheduleRatioLayout();
+  };
   const pump = () => {
     if (stopped || scrolling || active + scheduled >= 2 || !queue.length) return;
     const image = queue.shift();
@@ -404,11 +432,14 @@ function _achInstallImageWarmup(gallery) {
     scrollIdleTimer = setTimeout(() => {
       scrollIdleTimer = null;
       scrolling = false;
+      scheduleRatioLayout();
       pump();
     }, 160);
   };
   scrollTarget.addEventListener('scroll', onScroll, { passive: true });
-  const observer = new IntersectionObserver(entries => {
+  const onImageLoad = event => rememberRatio(event.target);
+  gallery.addEventListener('load', onImageLoad, true);
+  const observer = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
     entries.forEach(entry => {
       if (!entry.isIntersecting || queued.has(entry.target)) return;
       queued.add(entry.target);
@@ -416,13 +447,19 @@ function _achInstallImageWarmup(gallery) {
       queue.push(entry.target);
     });
     pump();
-  }, { root, rootMargin: '1400px 0px', threshold: 0 });
-  gallery.querySelectorAll('img.ach-img').forEach(image => observer.observe(image));
+  }, { root, rootMargin: '1400px 0px', threshold: 0 }) : null;
+  gallery.querySelectorAll('img.ach-img').forEach(image => {
+    if (image.complete) rememberRatio(image);
+    observer?.observe(image);
+  });
   _achImageWarmCleanup = () => {
     stopped = true;
     if (scrollIdleTimer) clearTimeout(scrollIdleTimer);
+    if (ratioTimer !== null) clearTimeout(ratioTimer);
     queue.length = 0;
-    observer.disconnect();
+    dirtyCanvases.clear();
+    observer?.disconnect();
+    gallery.removeEventListener('load', onImageLoad, true);
     scrollTarget.removeEventListener('scroll', onScroll);
   };
 }
@@ -1272,10 +1309,13 @@ async function saveAchievement(id = '', { continueEditing = false } = {}) {
     const previousRatio=Number(ex?.aspectRatio)||0;
     const imageUrl = uploaded === null ? '' : (typeof uploaded === 'string' ? uploaded : (ex?.imageUrl || ''));
     const existingRatio = Number(ex?.aspectRatio);
+    const knownRatio = _achRatioCache.get(imageUrl);
     const previewImg = document.querySelector('#ach-drop-preview img, #ach-head-img');
     let aspectRatio = 1;
     if (imageUrl) {
-      if (uploaded === undefined && Number.isFinite(existingRatio) && existingRatio > 0) {
+      if (knownRatio) {
+        aspectRatio = knownRatio;
+      } else if (uploaded === undefined && Number.isFinite(existingRatio) && existingRatio > 0) {
         aspectRatio = existingRatio;
       } else if (previewImg?.naturalWidth && previewImg?.naturalHeight) {
         aspectRatio = previewImg.naturalWidth / previewImg.naturalHeight;
@@ -1354,7 +1394,7 @@ async function saveAchievement(id = '', { continueEditing = false } = {}) {
     _achUploader?.destroy(); _achUploader = null;
     _achSeries.transition = seriesActive;
     closeModal();
-    if (!id || !_achPatchVisibleCard(docId,previousVisibleIds,previousRatio)) {
+    if (!id || !!ex?.featured !== payload.featured || !_achPatchVisibleCard(docId,previousVisibleIds,previousRatio)) {
       await _achRenderContentPreserveViewport({}, viewportAnchor);
     } else {
       _achRestoreViewportAnchorAfterFrame(viewportAnchor);
@@ -1514,8 +1554,7 @@ function _achFilteredItemsForCurrentState({ ordered = false } = {}) {
   if (!ordered) return filtered;
   if ((STORE.view || 'galerie') === 'timeline') return _sortAchievementsByDate(filtered, !!STORE.timelineDesc);
   if ((STORE.view || 'galerie') === 'missions') return _sortAchievementsByDate(filtered, true);
-  const orderedItems = filter === 'all' ? _sortAchievementsByDate(filtered) : filtered;
-  return STORE.galleryOrder === 'desc' ? [...orderedItems].reverse() : orderedItems;
+  return filter === 'all' ? _sortAchievementsByDate(filtered, STORE.galleryOrder === 'desc') : filtered;
 }
 
 function _achBulkItems() {
@@ -1871,41 +1910,42 @@ function _refreshAchievementCounters() {
   });
 }
 
-function _mergeCategoryOrder(catId, catOrder, globalOrder) {
-  const allIds      = (STORE.items || []).map(a => a.id);
-  const globalIds   = globalOrder.filter(id => allIds.includes(id));
-  const missingIds  = allIds.filter(id => !globalIds.includes(id));
-  const fullOrder   = [...globalIds, ...missingIds];
-  const catIds     = new Set((STORE.items || [])
-    .filter(a => (a.categorie || _achDefaultCategoryId()) === catId)
-    .map(a => a.id));
-  const cleanOrder = catOrder.filter(id => catIds.has(id));
-  const others     = fullOrder.filter(id => !catIds.has(id));
-  const lastCatIdx = Math.max(-1, ...fullOrder.map((id, i) => catIds.has(id) ? i : -1));
-  const firstOther = fullOrder.find((id, i) => !catIds.has(id) && i > lastCatIdx);
-
-  if (!firstOther) return [...others, ...cleanOrder];
-
-  const idx = others.indexOf(firstOther);
-  return [...others.slice(0, idx), ...cleanOrder, ...others.slice(idx)];
+function _achEndGallerySort() {
+  const pending = _achDragRefreshPending;
+  _achDragRefreshPending = false;
+  if (pending) void _achRenderContentPreserveViewport();
+  else void _achRelayoutGallery();
 }
 
-async function _persistCategoryOrder(catId, orderedIds) {
-  const merged = _mergeCategoryOrder(catId, orderedIds, await _loadOrder());
-  await _saveOrder(merged);
-  STORE.order = merged;
-  STORE.items = _applyOrder(STORE.items || [], merged);
-  return merged;
-}
-
-function _installAchievementClickGuard() {
-  if (_achClickGuardInstalled) return;
-  _achClickGuardInstalled = true;
-  document.addEventListener('click', (e) => {
-    if (!_achDragBlockClick) return;
-    e.stopPropagation();
-    e.preventDefault();
-  }, true);
+async function _persistCategoryMove(catId, source, target, after, keyboard = false) {
+  if (_achSortSaving) return;
+  if (!STATE.isAdmin || STORE.filter !== catId || !_achCanManualSortCurrentGallery()) { _achEndGallerySort(); return; }
+  const items = STORE.items || [];
+  const category = items.filter(item => (item.categorie || _achDefaultCategoryId()) === catId).map(item => item.id);
+  const order = moveGalleryCard(category, source, target, after);
+  if (order === category) { _achEndGallerySort(); return; }
+  const merged = mergeGalleryCategoryOrder(STORE.order || [], items.map(item => item.id), new Set(category), order);
+  const content = document.getElementById('ach-content');
+  const anchor = _achCaptureViewportAnchor();
+  _achSortSaving = true;
+  _achLocalMutationDepth += 1;
+  try {
+    if (!await _saveOrder(merged)) { _achEndGallerySort(); return; }
+    if (!content?.isConnected) return;
+    STORE.order = merged;
+    STORE.items = _composeItems();
+    _achDragRefreshPending = false;
+    const stillInCategory = STORE.view === 'galerie' && STORE.filter === catId;
+    await _achRenderContentPreserveViewport({ force: true }, stillInCategory ? anchor : null);
+    if (keyboard && stillInCategory) content.querySelector(`[data-ach-id="${CSS.escape(source)}"] [data-ach-drag]`)?.focus({ preventScroll: true });
+    showNotif('Ordre de la catégorie enregistré.', 'success');
+  } catch (error) {
+    _achEndGallerySort();
+    notifySaveError(error);
+  } finally {
+    _achSortSaving = false;
+    _achLocalMutationDepth = Math.max(0, _achLocalMutationDepth - 1);
+  }
 }
 
 function _installAchievementKeyboard() {
@@ -1941,46 +1981,20 @@ function _installAchievementKeyboard() {
   });
 }
 
-function _finishAchievementDrag() {
-  document.body.classList.remove('ach-dragging');
-  setTimeout(() => { _achDragBlockClick = false; }, 350);
-}
-
 function _destroyAchievementSortables() {
-  _achRowSortables.forEach(sortable => sortable?.destroy());
-  _achRowSortables = [];
+  _achSortCleanup?.();
+  _achSortCleanup = null;
 }
-
 
 // ── DRAG & DROP ───────────────────────────────────────────────────────────────
 function setupAchievementsDnd(catId) {
-  if (!STATE.isAdmin || !catId) {
-    _destroyAchievementSortables();
-    return;
-  }
-  const grid = document.getElementById('ach-gallery');
-  if (!grid) return;
-
-  _installAchievementClickGuard();
   _destroyAchievementSortables();
-
-  grid.querySelectorAll('.ach-row').forEach(row => {
-    _achRowSortables.push(makeSortable(row, {
-      prefix: 'ach',
-      animation: 120,
-      filter: 'button, a, input, select, textarea, .btn, .btn-icon, .ach-admin-btns',
-      group: `achievements-${catId}`,
-      draggable: '.ach-sortable-item',
-      onStart: () => { document.body.classList.add('ach-dragging'); _achDragBlockClick = true; },
-      onEnd: async (evt) => {
-        _finishAchievementDrag();
-        if (evt.oldIndex === evt.newIndex && evt.from === evt.to) return;
-        const domOrder = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
-        await _persistCategoryOrder(catId, domOrder);
-        showNotif('Ordre sauvegardé.', 'success');
-        await _achRebuildGallery(catId);
-      },
-    }));
+  const grid = document.getElementById('ach-gallery');
+  if (!STATE.isAdmin || !catId || !grid) return;
+  _achSortCleanup = bindGallerySort(grid, {
+    scrollHost: _achCurrentScrollHost,
+    onMove: (source, target, after, keyboard) => void _persistCategoryMove(catId, source, target, after, keyboard),
+    onCancel: _achEndGallerySort,
   });
 }
 
@@ -2004,18 +2018,6 @@ function _achMeasureImageRatio(imageUrl, fallback = 4 / 3) {
   });
 }
 
-// Mesure uniquement les ratios absents des données et du cache de session.
-async function _achMeasureRatios(items) {
-  return Promise.all(items.map(async item => {
-    const storedRatio = Number(item.aspectRatio);
-    if (Number.isFinite(storedRatio) && storedRatio > 0) {
-      if (item.imageUrl) _achRatioCache.set(item.imageUrl, storedRatio);
-      return item;
-    }
-    return { ...item, aspectRatio: await _achMeasureImageRatio(item.imageUrl) };
-  }));
-}
-
 // ── HTML d'une carte galerie ──────────────────────────────────────────────────
 function _achCardHTML(item, isAdmin) {
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
@@ -2034,14 +2036,16 @@ function _achCardHTML(item, isAdmin) {
       }).join('')}
     </div>` : '';
 
+  const handle = isAdmin && _achCanManualSortCurrentGallery()
+    ? `<button type="button" class="ach-tile-action ach-sort-handle" data-ach-drag="${_esc(item.titre || 'Haut-Fait')}" title="Glisser pour déplacer · flèches au clavier" aria-label="Déplacer ${_esc(item.titre || 'ce haut-fait')}">⠿</button>` : '';
   const adminHtml = isAdmin && !_achBulkMode ? `<div class="ach-admin-btns">
+    ${handle}
     <button class="ach-tile-action${item.featured ? ' is-on' : ''}" data-action="_achToggleFeatured" data-id="${item.id}" data-stop-propagation title="${item.featured ? 'Retirer de la une' : 'Mettre à la une'}" aria-label="${item.featured ? 'Retirer de la une' : 'Mettre à la une'}">★</button>
     <button class="ach-tile-action" data-action="editAchievement" data-id="${item.id}" data-stop-propagation title="Modifier" aria-label="Modifier">✎</button>
   </div>` : '';
 
-  const focus = item.focus || ((Number(item.aspectRatio) || 1) < .9 ? '50% 22%' : '50% 40%');
   const imageHtml = item.imageUrl
-    ? `${item.featured ? `<span class="ach-fit-bg" aria-hidden="true" style="background-image:url('${_esc(item.imageUrl)}');background-position:${_esc(focus)}"></span>` : ''}<img class="ach-img" src="${_esc(item.imageUrl)}" alt="${_esc(item.nom || item.titre || '')}" loading="lazy" decoding="async" draggable="false" style="object-position:${_esc(focus)}">`
+    ? `<img class="ach-img" src="${_esc(item.imageUrl)}" alt="${_esc(item.nom || item.titre || '')}" loading="lazy" decoding="async" draggable="false"${item.focus ? ` style="object-position:${_esc(item.focus)}"` : ''}>`
     : `<div class="ach-img-empty"><div class="ach-img-empty-emoji">${item.emoji || cat.emoji}</div><small>${_esc(cat.label)}</small><strong>${_esc(item.titre || 'Haut-Fait')}</strong>${item.description ? `<p>${_esc(item.description)}</p>` : ''}</div>`;
 
   const secretBadge = (isAdmin && item.secret)
@@ -2055,6 +2059,7 @@ function _achCardHTML(item, isAdmin) {
   return `
     ${newBadge}
     ${secretBadge}
+    ${item.featured ? '<span class="ach-featured-badge" title="À la une" aria-hidden="true">★</span>' : ''}
     ${selection}
     ${adminHtml}
     ${imageHtml}
@@ -2067,26 +2072,73 @@ function _achCardHTML(item, isAdmin) {
 }
 
 // ── Rendu justified dans le conteneur ────────────────────────────────────────
-async function _achRenderJustified(catId, items, container, preset = {}) {
+function _achBuildGalleryLayout(catId, items, container) {
   const containerW = container.clientWidth || 900;
   const baseHeight = containerW < 560 ? 200 : containerW < 900 ? 220 : containerW < 1300 ? 270 : 300;
   const densityFactor = STORE.density === 's' ? .66 : STORE.density === 'l' ? 1.4 : 1;
   const targetH = Math.round(baseHeight * densityFactor), gap = containerW < 560 ? 5 : 8;
-  const layout = buildFresqueLayout(items.map(item => ({ ...item, ratio: Number(item.aspectRatio) || 4 / 3 })), {
-    width: containerW, height: targetH, gap, tolerance: .12, features: true,
+  const layout = buildFresqueLayout(items.map(item => ({
+    ...item, ratio: item.imageUrl ? (_achRatioCache.get(item.imageUrl) || Number(item.aspectRatio) || 4 / 3) : 1,
+  })), {
+    width: containerW, height: targetH, gap, preserveOrder: catId !== 'all',
   });
+  return { ...layout, gap };
+}
+
+const _achGalleryCellStyle = cell => `width:${cell.w}px;height:${cell.h}px;left:${cell.x}px;top:${cell.y}px`;
+function _achGalleryTailHtml(tail, preset) {
+  if (!STATE.isAdmin || !(tail?.w >= 108)) return '';
+  return `<button type="button" class="ach-tail-add" style="${_achGalleryCellStyle(tail)}" data-action="_achCreateAtTail" data-mission-id="${_esc(preset.missionId || '')}" data-date="${_esc(preset.date || '')}"><span>+</span> Ajouter ici</button>`;
+}
+
+async function _achRenderJustified(catId, items, container, preset = {}) {
+  const layout = _achBuildGalleryLayout(catId, items, container);
+  _achGalleryCanvases.set(container, { catId, items: items.slice(), preset });
   const isAdmin = STATE.isAdmin;
   container.style.height = `${layout.height}px`;
-  container.style.setProperty('--ach-gap', `${gap}px`);
-  container.innerHTML = layout.cells.map((cell, index) => {
+  container.style.setProperty('--ach-gap', `${layout.gap}px`);
+  container.innerHTML = layout.cells.map(cell => {
     const item = cell.item, category = _achCategoryFor(item), selected = _achBulkSelected.has(item.id);
-    return `<div class="ach-item${cell.featured ? ' is-featured' : ''}${cell.crop > .22 ? ' fit' : ''}${_achIsNew(item) ? ' is-new' : ''}${_achBulkMode ? ' is-bulk' : ''}${selected ? ' is-selected' : ''}${item.imageUrl ? '' : ' no-image'}" data-ach-id="${_esc(item.id)}"
-      role="button" tabindex="0" data-ach-open-card aria-label="${_achBulkMode ? (selected ? 'Retirer' : 'Ajouter') : 'Ouvrir'} le Haut-Fait ${_esc(item.titre || 'Haut-Fait')}"
+    return `<div class="ach-item${item.featured ? ' is-featured' : ''}${_achIsNew(item) ? ' is-new' : ''}${_achBulkMode ? ' is-bulk' : ''}${selected ? ' is-selected' : ''}${item.imageUrl ? '' : ' no-image'}" data-ach-id="${_esc(item.id)}"
+      role="button" tabindex="0" data-ach-open-card aria-label="${_achBulkMode ? (selected ? 'Retirer' : 'Ajouter') : 'Ouvrir'} le Haut-Fait ${_esc(item.titre || 'Haut-Fait')}${item.featured ? ' · À la une' : ''}"
       aria-pressed="${_achBulkMode ? String(selected) : 'false'}"
-      style="width:${cell.w}px;height:${cell.h}px;left:${cell.x}px;top:${cell.y}px;--c:${category.color};--c-glow:${category.glow};--c-line:${category.line}"
+      style="${_achGalleryCellStyle(cell)};--c:${category.color};--c-glow:${category.glow};--c-line:${category.line}"
       data-action="${_achBulkMode ? '_achToggleBulkSelection' : '_achOpenLightbox'}" data-id="${_esc(item.id)}">${_achCardHTML(item, isAdmin)}</div>`;
-  }).join('') + (isAdmin && layout.tail?.w >= 108 ? `<button type="button" class="ach-tail-add" style="width:${layout.tail.w}px;height:${layout.tail.h}px;left:${layout.tail.x}px;top:${layout.tail.y}px" data-action="_achCreateAtTail" data-mission-id="${_esc(preset.missionId || '')}" data-date="${_esc(preset.date || '')}"><span>+</span> Ajouter ici</button>` : '');
+  }).join('') + _achGalleryTailHtml(layout.tail, preset);
   _achInvalidateCardPositionCache();
+}
+
+function _achRefreshLoadedImageFrames(gallery, canvases) {
+  const anchor = _achCaptureViewportAnchor();
+  const focused = document.activeElement;
+  for (const canvas of canvases) {
+    if (!gallery.contains(canvas)) continue;
+    const config = _achGalleryCanvases.get(canvas);
+    if (!config) continue;
+    const { catId, items, preset } = config;
+    const layout = _achBuildGalleryLayout(catId, items, canvas);
+    const cards = new Map([...canvas.children].filter(card => card.dataset.achId).map(card => [card.dataset.achId, card]));
+    if (cards.size !== layout.cells.length || layout.cells.some(cell => !cards.has(cell.id))) continue;
+    canvas.style.height = `${layout.height}px`;
+    let cursor = canvas.firstElementChild;
+    for (const cell of layout.cells) {
+      const card = cards.get(cell.id);
+      if (card !== cursor) canvas.insertBefore(card, cursor);
+      cursor = card.nextElementSibling;
+      card.style.width = `${cell.w}px`;
+      card.style.height = `${cell.h}px`;
+      card.style.left = `${cell.x}px`;
+      card.style.top = `${cell.y}px`;
+    }
+    const tailButton = cursor?.matches('.ach-tail-add') ? cursor : null;
+    if (STATE.isAdmin && layout.tail?.w >= 108) {
+      if (tailButton) tailButton.style.cssText = _achGalleryCellStyle(layout.tail);
+      else canvas.insertAdjacentHTML('beforeend', _achGalleryTailHtml(layout.tail, preset));
+    } else tailButton?.remove();
+  }
+  _achInvalidateCardPositionCache();
+  if (gallery.contains(focused) && document.activeElement !== focused) focused.focus({ preventScroll: true });
+  _achRestoreViewportAnchor(anchor);
 }
 
 function _achMonthKey(item) {
@@ -2167,6 +2219,7 @@ async function _achRenderGallerySections(items, root) {
 
 function _achCanManualSortCurrentGallery() {
   return (STORE.filter || 'all') !== 'all'
+    && STORE.view === 'galerie' && STORE.group === 'none' && !_achBulkMode
     && (STORE.missionFilter || 'all') === 'all'
     && !_achSelectedCharIds().length
     && !_normalize(STORE.search || '');
@@ -2191,6 +2244,9 @@ function _achPatchVisibleCard(id, previousIds = [], previousRatio = 0) {
   card.style.setProperty('--c-glow',cat.glow);
   card.style.setProperty('--c-line',cat.line);
   card.innerHTML=_achCardHTML(item,STATE.isAdmin);
+  const canvasItems = _achGalleryCanvases.get(card.parentElement)?.items;
+  const index = canvasItems?.findIndex(entry => entry.id === id);
+  if (index >= 0) canvasItems[index] = item;
   STORE.lightboxItems=Object.fromEntries((STATE.isAdmin ? STORE.items : STORE.items.filter(entry=>!entry.secret)).map(entry=>[entry.id,entry]));
   _refreshAchievementCounters();
   _achRenderControlsExtras();
@@ -2201,7 +2257,7 @@ function _achPatchVisibleCard(id, previousIds = [], previousRatio = 0) {
 
 async function _achRelayoutGallery() {
   const gallery=document.getElementById('ach-gallery');
-  if (!gallery?.isConnected || (STORE.view || 'galerie') !== 'galerie') return;
+  if (!gallery?.isConnected || (STORE.view || 'galerie') !== 'galerie' || document.body.classList.contains('ach-dragging')) return;
   const width=Math.round(gallery.clientWidth || 0);
   if (!width || Math.abs(width-_achObservedGalleryWidth)<2) return;
   _achObservedGalleryWidth=width;
@@ -2232,17 +2288,6 @@ function _achObserveGalleryResize(gallery) {
     },80);
   });
   _achGalleryResizeObserver.observe(gallery);
-}
-
-// ── Rebuild galerie après DnD ─────────────────────────────────────────────────
-async function _achRebuildGallery(catId) {
-  const grid = document.getElementById('ach-gallery');
-  if (!grid) return;
-  const itemsById  = Object.fromEntries((STORE.items || []).map(a => [a.id, a]));
-  const orderedIds = [...grid.querySelectorAll('[data-ach-id]')].map(el => el.dataset.achId);
-  const ordered    = orderedIds.map(id => itemsById[id]).filter(Boolean);
-  await _achRenderJustified(catId, ordered, grid);
-  setupAchievementsDnd(catId);
 }
 
 // ── parseDate helper ──────────────────────────────────────────────────────────
@@ -2797,7 +2842,7 @@ function _achEndHtml(items = []) {
     : 0;
   const characters = new Set(items.flatMap(item => item.contributeurs || [])).size;
   const filtered = (STORE.filter || 'all') !== 'all' || (STORE.missionFilter || 'all') !== 'all' || _achSelectedCharIds().length || !!(STORE.search || '').trim();
-  const reverse = STORE.galleryOrder === 'desc';
+  const reverse = (STORE.filter || 'all') === 'all' && STORE.galleryOrder === 'desc';
   return `<footer class="ach-fresque-end"><span>✦</span><strong>${reverse ? 'Tout a commencé ici' : 'À suivre…'}</strong><p>${items.length} souvenir${items.length > 1 ? 's' : ''}${months ? ` · ${months} mois d’aventure` : ''}${characters ? ` · ${characters} personnage${characters > 1 ? 's' : ''}` : ''}</p><div>${STATE.isAdmin && !reverse ? '<button class="is-primary" data-action="openAchievementModal">+ Ajouter la suite</button>' : ''}${filtered ? '<button data-action="_achResetFilters">Voir toute la galerie</button>' : ''}<button data-action="_achScrollTop">Revenir au début</button></div></footer>`;
 }
 
@@ -2812,12 +2857,15 @@ async function _achRenderContent({ force=false } = {}) {
   const renderEpoch = ++_achRenderEpoch;
   _achRenderedContentEl=contentEl;
   _achLastRenderSignature=signature;
+  _destroyAchievementSortables();
   _achDisconnectGalleryResize();
   _refreshAchievementCounters();
   _achRenderControlsExtras();
 
   const all        = STORE.items || [];
   const filter     = STORE.filter || 'all';
+  const orderButton = document.querySelector('[data-ach-order]');
+  if (orderButton) orderButton.hidden = filter !== 'all';
   let missionFilter = STORE.missionFilter || 'all';
   if (missionFilter !== 'all' && missionFilter !== '__none' && !(STORE.missions || []).some(m => m.id === missionFilter)) {
     STORE.missionFilter = '__none';
@@ -2912,18 +2960,19 @@ async function _achRenderContent({ force=false } = {}) {
   }
 
   if (filter === 'all') filtered = _sortAchievementsByDate(filtered, STORE.galleryOrder === 'desc');
-  else if (STORE.galleryOrder === 'desc') filtered.reverse();
 
   // Galerie justified
+  const canManualSort = !_achBulkMode && _achCanManualSortCurrentGallery();
   const galleryEl = document.createElement('div');
   galleryEl.id        = 'ach-gallery';
   galleryEl.className = 'ach-justified';
-  contentEl.innerHTML = missionContextHtml + bulkBarHtml + _achNewBannerHtml(filtered);
+  const sortHint = isAdmin && canManualSort && filtered.length > 1
+    ? '<p class="ach-manual-hint"><span aria-hidden="true">⠿</span> Ordre de la catégorie · glissez les cartes avec leur poignée.</p>' : '';
+  contentEl.innerHTML = missionContextHtml + bulkBarHtml + _achNewBannerHtml(filtered) + sortHint;
   contentEl.appendChild(galleryEl);
 
   await _achRenderGallerySections(filtered, galleryEl);
   if (renderEpoch !== _achRenderEpoch || !document.contains(galleryEl) || contentEl !== document.getElementById('ach-content')) return;
-  const canManualSort = !_achBulkMode && STORE.group === 'none' && filter !== 'all' && missionFilter === 'all' && !selectedCharIds.length && !search;
   setupAchievementsDnd(canManualSort ? filter : null);
   _achObserveGalleryResize(galleryEl);
   _achWarmCardPositionCache(galleryEl);
@@ -3697,34 +3746,36 @@ PAGES.achievements = async function() {
   _achInstallScrollUi();
 
   // ── Abonnements temps réel ─────────────────────────────────────────────
-  // On évite de re-render pendant un drag SortableJS pour ne pas casser
-  // l'instance en cours ; les saves admin re-render explicitement après onEnd.
+  // Réception des données pendant le drag, sans remplacer la grille sous le pointeur.
   // unwatchAll() côté navigation s'occupe du cleanup.
   watchPageCollection('ach-items', 'achievements', 'achievements', items => {
-    if (document.body.classList.contains('ach-dragging')) return;
     STORE.publicItems = items || [];
     STORE.items = _composeItems();
-    if (!_achLocalMutationDepth) _achRenderContentPreserveViewport();
+    _achRenderAfterSnapshot();
   });
 
   watchPageCollection('ach-story', 'story', 'achievements', items => {
     STORE.missions = (items || []).filter(item => item.type === 'mission' || item.type === 'event');
-    if (!_achLocalMutationDepth) _achRenderContentPreserveViewport();
+    _achRenderAfterSnapshot();
   });
 
   watchPageDoc('ach-order', 'achievements_meta', 'order', 'achievements', doc => {
-    if (document.body.classList.contains('ach-dragging')) return;
     STORE.order = Array.isArray(doc?.order) ? doc.order : [];
     STORE.items = _composeItems();
-    if (!_achLocalMutationDepth) _achRenderContentPreserveViewport();
+    _achRenderAfterSnapshot();
   });
 
   watchPageDoc('ach-categories', 'achievements_meta', 'categories', 'achievements', doc => {
     _setAchievementCategories(doc?.categories);
     PAGES._achievementsShellState = { ...getAchievementsShellState(), categories: ACH_CATS };
-    if (!_achLocalMutationDepth) _achRenderContentPreserveViewport();
+    _achRenderAfterSnapshot();
   });
 };
+
+function _achRenderAfterSnapshot() {
+  if (document.body.classList.contains('ach-dragging')) { _achDragRefreshPending = true; return; }
+  if (!_achLocalMutationDepth) void _achRenderContentPreserveViewport();
+}
 
 document.addEventListener('app:route-sub-changed', (event) => {
   const { page, sub } = event.detail || {};
@@ -3740,6 +3791,8 @@ document.addEventListener('app:page-changed', (event) => {
     STORE.lastSeen = new Date().toISOString();
     _achSavePreferences();
     _achPageActive = false;
+    _destroyAchievementSortables();
+    _achDragRefreshPending = false;
     _achRenderEpoch += 1;
     if (_achScrollRaf) cancelAnimationFrame(_achScrollRaf);
     _achScrollRaf = 0;
