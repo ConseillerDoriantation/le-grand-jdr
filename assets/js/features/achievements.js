@@ -17,6 +17,8 @@ import { STATE } from '../core/state.js';
 import { _ensureFeatureCss, navigate } from '../core/navigation.js';
 import { attachDropAndResize } from '../shared/image-crop.js';
 import { buildFresqueLayout } from '../shared/justified-layout.js';
+import { buildChronicle } from './achievements-chronicle-model.js';
+import { bindChronicle, chroniclePreset, renderChronicle } from './achievements-chronicle.js';
 import { resolveHorizontalSwipe } from '../shared/lightbox-layout.js';
 import { getMyCharacters, sortCharactersForDisplay } from '../shared/char-stats.js';
 import { characterAvatarHtml, characterPortraitContent } from '../shared/portraits.js';
@@ -107,6 +109,7 @@ const STORE = {
   view:          'galerie', // 'galerie' | 'timeline' | 'missions'
   search:        '',
   timelineDesc:  false,     // true = plus récent en haut
+  timelineMode:  'recit',
   group:         'none',    // 'none' | 'mission' | 'month'
   density:       'm',       // 's' | 'm' | 'l'
   galleryOrder:  'asc',     // 'asc' | 'desc'
@@ -140,7 +143,7 @@ let _achScrollObserver = null;
 let _achPageActive = false;
 let _achSlideshowTimer = null;
 let _achPageDropInstalled = false;
-const _achSeries = { files: [], createdIds: [], baseOrder: null, transition: false };
+const _achSeries = { files: [], createdIds: [], baseOrder: null, transition: false, chroniclePreset: null };
 const _achSeriesPreviewUrls = new Map();
 let _achLightboxReturnId = '';
 let _achRailCleanup = null;
@@ -151,6 +154,11 @@ let _achRailActiveId = '';
 let _achRailTrackHeight = 0;
 let _achRailThumbHeight = 0;
 let _achImageWarmCleanup = null;
+let _achChronicle = null;
+let _achChronicleModel = null;
+let _achChronicleChapterById = new Map();
+let _achChronicleCrumb = null;
+let _achChronicleDropTarget = null;
 
 let _achSelectCat = () => {};
 let _achToggleContrib = () => {};
@@ -191,6 +199,7 @@ function _achRestorePreferences() {
   const prefs = lsJson.get(key, {});
   STORE.view = ['galerie', 'timeline', 'missions'].includes(prefs?.view) ? prefs.view : 'galerie';
   STORE.timelineDesc = prefs?.timelineDesc === true;
+  STORE.timelineMode = prefs?.timelineMode === 'sommaire' ? 'sommaire' : 'recit';
   STORE.group = ['none', 'mission', 'month'].includes(prefs?.group) ? prefs.group : 'none';
   STORE.density = ['s', 'm', 'l'].includes(prefs?.density) ? prefs.density : 'm';
   STORE.galleryOrder = prefs?.order === 'desc' ? 'desc' : 'asc';
@@ -203,6 +212,7 @@ function _achSavePreferences() {
   lsJson.set(key, {
     view: ['galerie', 'timeline', 'missions'].includes(STORE.view) ? STORE.view : 'galerie',
     timelineDesc: STORE.timelineDesc === true,
+    timelineMode: STORE.timelineMode,
     group: ['none', 'mission', 'month'].includes(STORE.group) ? STORE.group : 'none',
     density: ['s', 'm', 'l'].includes(STORE.density) ? STORE.density : 'm',
     order: STORE.galleryOrder === 'desc' ? 'desc' : 'asc',
@@ -242,19 +252,23 @@ function _achInstallScrollUi() {
     // lesquelles scrollTop peut encore être à zéro pendant une frame.
     const visible = top > command.offsetHeight + 4 || commandBottom <= miniTop + 4;
     setMiniVisible(visible);
-    _achUpdateRailUi(null, { updateActive: false });
+    if (STORE.view === 'timeline') _achChronicle?.sync();
+    else _achUpdateRailUi(null, { updateActive: false });
   };
   const updateActiveItem = () => {
     _achScrollIdleTimer = null;
     if (!document.contains(mini)) return;
+    if (STORE.view === 'timeline') return;
     const topItem = _achTopVisibleItem();
     _achUpdateMiniBar(topItem);
     _achUpdateRailUi(topItem, { updateProgress: false });
   };
   _achScrollHandler = event => {
     const target = event?.target;
+    if (STORE.view === 'timeline' && ![host, window, document, document.scrollingElement].includes(target)) return;
     if (target instanceof HTMLElement && target.scrollHeight > target.clientHeight + 1) _achScrollHost = target;
     if (!_achScrollRaf) _achScrollRaf = requestAnimationFrame(updateProgress);
+    if (STORE.view === 'timeline') return;
     if (_achScrollIdleTimer) clearTimeout(_achScrollIdleTimer);
     _achScrollIdleTimer = setTimeout(updateActiveItem, 90);
   };
@@ -283,6 +297,9 @@ function _achInstallScrollUi() {
 function _achCurrentScrollHost() {
   const main = document.getElementById('main-content');
   const root = document.scrollingElement;
+  if (STORE.view === 'timeline' && main?.querySelector('.is-chronicle')) {
+    return matchMedia('(min-width:769px)').matches ? main : root;
+  }
   if ((_achScrollHost?.scrollTop || 0) > 0) return _achScrollHost;
   if ((main?.scrollTop || 0) > 0) return main;
   if ((root?.scrollTop || 0) > 0) return root;
@@ -446,6 +463,7 @@ function _achUpdateMiniBar(topItem = _achTopVisibleItem()) {
   const mini = document.querySelector('.ach-mini');
   if (!mini) return;
   const renderKey = [
+    STORE.view, _achChronicleCrumb?.key, _achChronicleCrumb?.label, _achChronicleCrumb?.mission, _achChronicleCrumb?.position,
     topItem?.dataset.achId || '', STORE.filter || 'all', STORE.missionFilter || 'all',
     _achSelectedCharIds().join(','), STORE.charMatchMode || 'any', STORE.search || '',
   ].join('|');
@@ -466,10 +484,20 @@ function _achUpdateMiniBar(topItem = _achTopVisibleItem()) {
     const kicker = crumb.querySelector('.ach-mini-kicker');
     const label = crumb.querySelector('.ach-mini-label');
     const position = crumb.querySelector('.ach-mini-pos');
-    if (art) art.innerHTML = mission?.imageUrl ? `<img src="${_esc(mission.imageUrl)}" alt="">` : (item?.emoji || _achCategoryFor(item || {}).emoji || '✦');
-    if (kicker) kicker.textContent = mission?.acte || (STORE.group === 'month' ? 'Période' : 'Fresque');
-    if (label) label.textContent = title || 'Fresque de campagne';
-    if (position) {
+    if (STORE.view === 'timeline') {
+      const session = _achChronicleCrumb;
+      crumb.dataset.session = session?.key || '';
+      if (art) art.innerHTML = session ? `<b>${session.day}</b><small>${session.month}</small>` : '✦';
+      if (kicker) kicker.textContent = session?.mission || 'Chronique';
+      if (label) label.textContent = session?.label || 'Chronique de campagne';
+      if (position) position.textContent = session?.position || '';
+    } else {
+      delete crumb.dataset.session;
+      if (art) art.innerHTML = mission?.imageUrl ? `<img src="${_esc(mission.imageUrl)}" alt="">` : (item?.emoji || _achCategoryFor(item || {}).emoji || '✦');
+      if (kicker) kicker.textContent = mission?.acte || (STORE.group === 'month' ? 'Période' : 'Fresque');
+      if (label) label.textContent = title || 'Fresque de campagne';
+    }
+    if (position && STORE.view !== 'timeline') {
       const visible = _achFilteredItemsForCurrentState({ ordered: true });
       const index = item ? visible.findIndex(entry => entry.id === item.id) : -1;
       position.textContent = index >= 0 ? `${index + 1} / ${visible.length}` : '';
@@ -558,6 +586,7 @@ function _achResetSeries() {
   _achSeries.createdIds = [];
   _achSeries.baseOrder = null;
   _achSeries.transition = false;
+  _achSeries.chroniclePreset = null;
 }
 
 function _achSeriesPreview(file) {
@@ -574,13 +603,30 @@ async function _achFlushSeriesOrder() {
   _achResetSeries();
 }
 
-function _achStartImageSeries(files) {
+function _achStartImageSeries(files, preset = {}) {
   if (!STATE.isAdmin) return;
   const images = [...(files || [])].filter(file => file?.type?.startsWith('image/'));
   if (!images.length) return;
   _achResetSeries();
   _achSeries.files = images;
-  openAchievementModal(null, { series: true });
+  _achSeries.chroniclePreset = preset;
+  openAchievementModal(null, { ...preset, series: true });
+}
+
+function _achDropSession(event) {
+  const row = (STORE.view === 'timeline' && event?.target?.closest?.('.cr-ses, .cr-next')) || null;
+  if (_achChronicleDropTarget === row) return row;
+  _achChronicleDropTarget?.classList.remove('drop-on');
+  _achChronicleDropTarget = row;
+  row?.classList.add('drop-on');
+  const hint = document.getElementById('ach-chronicle-drop');
+  if (hint) {
+    hint.hidden = !row;
+    if (row) hint.textContent = row.dataset.key === 'next' ? 'Déposer pour consigner une nouvelle séance'
+      : `Déposer sur la séance du ${row.getAttribute('aria-label')}`;
+  }
+  document.querySelector('.hall-root')?.classList.toggle('ach-drop-on-session', !!row);
+  return row;
 }
 
 function _achInstallPageImageDrop() {
@@ -591,16 +637,23 @@ function _achInstallPageImageDrop() {
     if (![...(event.dataTransfer?.types || [])].includes('Files')) return;
     event.preventDefault();
     document.querySelector('.hall-root')?.classList.add('ach-drop-active');
+    _achDropSession(event);
   });
   document.addEventListener('dragleave', event => {
-    if (!event.relatedTarget) document.querySelector('.hall-root')?.classList.remove('ach-drop-active');
+    if (!event.relatedTarget) {
+      document.querySelector('.hall-root')?.classList.remove('ach-drop-active');
+      _achDropSession(null);
+    }
   });
   document.addEventListener('drop', event => {
     const root = document.querySelector('.hall-root');
     root?.classList.remove('ach-drop-active');
-    if (!STATE.isAdmin || !document.getElementById('ach-content') || event.target?.closest?.('.achm')) return;
+    const allowed = STATE.isAdmin && document.getElementById('ach-content') && !event.target?.closest?.('.achm');
+    const row = allowed && _achDropSession(event);
+    _achDropSession(null);
+    if (!allowed) return;
     event.preventDefault();
-    _achStartImageSeries(event.dataTransfer?.files);
+    _achStartImageSeries(event.dataTransfer?.files, row ? chroniclePreset(_achChronicleModel, row.dataset.key, _todayISO()) : null);
   });
   document.addEventListener('paste', event => {
     if (!STATE.isAdmin || !document.getElementById('ach-content') || event.target?.matches?.('input,textarea,[contenteditable="true"]')) return;
@@ -835,7 +888,7 @@ export function openAchievementModal(id = null, preset = {}) {
   const currentMissionFilter = STORE.missionFilter && !['all', '__none'].includes(STORE.missionFilter)
     ? STORE.missionFilter
     : '';
-  const initialMissionId = ex?.missionId || preset.missionId || (!id ? currentMissionFilter : '');
+  const initialMissionId = ex?.missionId ?? preset.missionId ?? (!id ? currentMissionFilter : '');
   const curTrame = initialMissionId ? trame.find(m => m.id === initialMissionId) : null;
   _achUploader?.destroy(); _achUploader = null;
 
@@ -846,7 +899,9 @@ export function openAchievementModal(id = null, preset = {}) {
   const contributors = ex?.contributeurs || preset.contributeurs || [];
   const contributorSet = new Set(contributors);
   const suggestionCounts = new Map();
-  if (initialMissionId) {
+  if (preset.suggestedContributors) {
+    preset.suggestedContributors.forEach(charId => { if (!contributorSet.has(charId)) suggestionCounts.set(charId, 1); });
+  } else if (initialMissionId) {
     (STORE.items || []).filter(item => item.missionId === initialMissionId).forEach(item => {
       (item.contributeurs || []).forEach(charId => {
         if (!contributorSet.has(charId)) suggestionCounts.set(charId, (suggestionCounts.get(charId) || 0) + 1);
@@ -856,10 +911,11 @@ export function openAchievementModal(id = null, preset = {}) {
   const suggestedContributors = characters
     .filter(character => suggestionCounts.has(character.id))
     .sort((a, b) => suggestionCounts.get(b.id) - suggestionCounts.get(a.id))
-    .slice(0, 5);
+    .slice(0, preset.suggestedContributors ? undefined : 5);
 
   openModal(id ? (ex?.titre || 'Modifier le Haut-Fait') : 'Ajouter un souvenir', `
     <div class="achm">
+      ${preset.context ? `<p class="achm-chronicle-context">${_esc(preset.context)}</p>` : ''}
 
       ${preset.series && _achSeries.files.length ? `<div class="ach-series"><div><strong>Création en série</strong><span>${_achSeries.files.length} image${_achSeries.files.length > 1 ? 's' : ''} restante${_achSeries.files.length > 1 ? 's' : ''}</span></div><div class="ach-series-queue">${_achSeries.files.slice(0, 7).map((file, index) => `<span class="${index === 0 ? 'active' : ''}" title="${_esc(file.name || `Image ${index + 1}`)}"><img src="${_esc(_achSeriesPreview(file))}" alt=""><b>${index + 1}</b></span>`).join('')}</div><button data-action="_achSkipSeriesImage">Ignorer cette image</button></div>` : ''}
 
@@ -889,7 +945,7 @@ export function openAchievementModal(id = null, preset = {}) {
           <div class="form-group">
             <label>Date</label>
             <input type="date" class="input-field" id="ach-date"
-              value="${id ? _toISO(ex?.date) : (preset.date || _todayISO())}">
+              value="${id ? _toISO(ex?.date) : (preset.date ?? _todayISO())}">
           </div>
           <div class="form-group achm-trame-field">
             <label>Chapitre de la Trame</label>
@@ -987,7 +1043,7 @@ export function openAchievementModal(id = null, preset = {}) {
         <div class="achm-contrib-grid" id="ach-contrib-grid">
           ${characters.map(c => _achContribOptionHtml(c, contributors)).join('')}
         </div>
-        ${suggestedContributors.length ? `<div class="achm-contrib-suggest"><div><strong>Souvent présents dans ce chapitre</strong><span>${suggestedContributors.map(character => _esc(character.nom || '?')).join(' · ')}</span></div><button type="button" data-action="_achAddSuggestedContributors" data-ids="${suggestedContributors.map(character => _esc(character.id)).join(',')}">Les ajouter</button></div>` : ''}
+        ${suggestedContributors.length ? `<div class="achm-contrib-suggest"><div><strong>${preset.suggestedContributors ? 'Personnages de la séance' : 'Souvent présents dans ce chapitre'}</strong><span>${suggestedContributors.map(character => _esc(character.nom || '?')).join(' · ')}</span></div><button type="button" data-action="_achAddSuggestedContributors" data-ids="${suggestedContributors.map(character => _esc(character.id)).join(',')}">Les ajouter</button></div>` : ''}
         <div class="achm-contrib-empty" id="ach-contrib-empty" hidden>Aucun personnage trouvé.</div>
         <input type="hidden" id="ach-contributeurs" value="${contributors.join(',')}">
       </section>` : ''}
@@ -1291,6 +1347,7 @@ async function saveAchievement(id = '', { continueEditing = false } = {}) {
     if (seriesActive) _achSeries.files.shift();
     const continueSeries = continueEditing && _achSeries.files.length > 0;
     const nextPreset = continueEditing ? {
+      ..._achSeries.chroniclePreset,
       categorie: payload.categorie, date: payload.date, missionId: payload.missionId,
       contributeurs: [...payload.contributeurs], series: continueSeries,
     } : null;
@@ -1502,9 +1559,11 @@ function _achBulkBarHtml(filtered = []) {
 
 function _achToggleBulkSelection(id) {
   if (!_achBulkMode || !id) return;
+  const focused = document.activeElement?.matches('.cr-hit') && document.activeElement.dataset.id === id;
   if (_achBulkSelected.has(id)) _achBulkSelected.delete(id);
   else _achBulkSelected.add(id);
   _achRenderContentPreserveViewport({ force: true });
+  if (focused) document.querySelector(`.cr-hit[data-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
 }
 
 function _achPatchCategoriesLocally(items) {
@@ -1622,7 +1681,7 @@ function _achRenderSignature() {
   ]);
   return JSON.stringify([
     STORE.filter, STORE.missionFilter, STORE.view, STORE.search,
-    STORE.timelineDesc, STORE.group, STORE.density, STORE.galleryOrder, STORE.lastSeen,
+    STORE.timelineDesc, STORE.timelineMode, STORE.group, STORE.density, STORE.galleryOrder, STORE.lastSeen,
     STORE.charMatchMode, _achSelectedCharIds(), STORE.order,
     _achBulkMode, [..._achBulkSelected].sort(),
     ACH_CATS.map(cat=>[cat.id,cat.label,cat.emoji,cat.color]), items, missions,
@@ -1639,16 +1698,25 @@ function _achCaptureViewportAnchor() {
   const viewportTop=hostRect.top;
   const viewportBottom=hostRect.bottom;
   const candidates=[...document.querySelectorAll('#ach-content [data-ach-id]')];
-  const visible=candidates.find(element=>{
+  const isChronicle = STORE.view === 'timeline' && !!document.querySelector('#ach-content .cr');
+  const mini = isChronicle ? document.querySelector('.ach-mini.is-visible') : null;
+  const unobstructedTop = mini
+    ? Math.max(viewportTop, ...[...mini.children].filter(el => el.offsetHeight).map(el => el.getBoundingClientRect().bottom))
+    : viewportTop;
+  const visibleIndex=candidates.findIndex(element=>{
     const rect=element.getBoundingClientRect();
-    return rect.bottom>viewportTop+8 && rect.top<viewportBottom-8;
+    return rect.bottom>unobstructedTop+8 && rect.top<viewportBottom-8;
   });
+  const visible=candidates[visibleIndex];
   if (visible) {
     const rect=visible.getBoundingClientRect();
     return {
       id:visible.dataset.achId,
       top:rect.top-viewportTop,
-      fallbackIds:candidates.map(element=>element.dataset.achId),
+      fallbackIds:(isChronicle
+        ? [...candidates.slice(visibleIndex + 1, visibleIndex + 13), ...candidates.slice(Math.max(0, visibleIndex - 12), visibleIndex).reverse()]
+        : candidates).map(element=>element.dataset.achId),
+      view:STORE.view,
       scrollY:host?.scrollTop ?? window.scrollY,
       host:isRoot ? 'root' : 'main',
     };
@@ -1657,6 +1725,7 @@ function _achCaptureViewportAnchor() {
     id:null,
     top:null,
     fallbackIds:[],
+    view:STORE.view,
     scrollY:host?.scrollTop ?? window.scrollY,
     host:isRoot ? 'root' : 'main',
   };
@@ -1664,6 +1733,7 @@ function _achCaptureViewportAnchor() {
 
 function _achRestoreViewportAnchor(anchor) {
   if (!anchor || typeof window === 'undefined') return;
+  if (anchor.view !== STORE.view && [anchor.view, STORE.view].includes('timeline')) return;
   const root=document.scrollingElement;
   const preferred=anchor.host==='root' ? root : document.getElementById('main-content');
   const host=preferred || _achCurrentScrollHost();
@@ -2248,112 +2318,6 @@ function _formatDateFr(str) {
   return new Date(ts).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-// ── Timeline HTML ─────────────────────────────────────────────────────────────
-function _renderTimeline(items) {
-  const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
-  const chars   = sortCharactersForDisplay(STATE.characters || []);
-  const isAdmin = STATE.isAdmin;
-  // Tri chronologique. Les hauts-faits sans date valide sont relégués à la fin
-  // (peu importe le sens du tri). Sens contrôlé par STORE.timelineDesc.
-  const desc = !!STORE.timelineDesc;
-  const sorted = [...items].sort((a, b) => {
-    const da = parseDate(a.date), db = parseDate(b.date);
-    if (!da && !db) return 0;
-    if (!da) return 1;
-    if (!db) return -1;
-    return desc ? db - da : da - db;
-  });
-
-  if (!sorted.length) return '';
-
-  const groups = [];
-  for (const item of sorted) {
-    const dateKey = _toISO(item.date);
-    const key = dateKey || `__single_${item.id}`;
-    const last = groups[groups.length - 1];
-    if (last && last.key === key) last.items.push(item);
-    else groups.push({ key, dateKey, items: [item] });
-  }
-
-  const cardHTML = (item) => {
-    const cat     = _achCategoryFor(item);
-    const contribs = (item.contributeurs || []).map(id => chars.find(c => c.id === id)).filter(Boolean);
-    const imgEl   = item.imageUrl
-      ? `<img class="tl-card-img" src="${item.imageUrl}" alt="${_esc(item.nom || item.titre || '')}" loading="lazy">`
-      : `<div class="tl-card-empty" style="--c-glow:${cat.glow}">${item.emoji || cat.emoji}</div>`;
-    const contribsEl = contribs.length ? `
-      <div class="tl-card-contribs">
-        ${contribs.map(c => {
-          const col = CHAR_COLS[(c.nom?.charCodeAt(0) || 0) % 6];
-          return `<div class="tl-card-contrib" style="border-color:${col}55;color:${col}">
-            ${characterAvatarHtml(c, { className: 'tl-card-contrib-av', border: 'none', background: `${col}22`, color: col })}
-            ${_esc(c.nom || '?')}
-          </div>`;
-        }).join('')}
-      </div>` : '';
-    const adminEl = isAdmin ? `
-      <div class="tl-card-admin">
-        <button class="btn btn-outline btn-sm" style="flex:1;font-size:.7rem"
-          data-action="editAchievement" data-id="${item.id}" data-stop-propagation>✏️ Modifier</button>
-        <button class="btn-icon" style="color:#ff6b6b"
-          data-action="deleteAchievement" data-id="${item.id}" data-stop-propagation>🗑️</button>
-      </div>` : '';
-
-    const secretBadge = (isAdmin && item.secret)
-      ? `<div class="ach-secret-badge" style="position:absolute;top:8px;right:8px;z-index:3">🔒 Secret</div>` : '';
-    return `<div class="tl-card" style="--c:${cat.color};--c-glow:${cat.glow};--c-line:${cat.line};position:relative"
-      role="button" tabindex="0" data-ach-open-card aria-label="Ouvrir le Haut-Fait ${_esc(item.titre || 'Haut-Fait')}"
-      data-action="_achOpenLightbox" data-id="${item.id}">
-      ${imgEl}
-      ${secretBadge}
-      <div class="tl-card-body">
-        <div class="tl-card-cat" style="background:${cat.glow};border:1px solid ${cat.line};color:${cat.color}">${cat.emoji} ${cat.label}</div>
-        <div class="tl-card-title">${_esc(item.titre || 'Haut-Fait')}</div>
-        ${item.description ? `<div class="tl-card-desc">${_esc(item.description)}</div>` : ''}
-        ${_missionLinkHtml(item, 'tl-card-mission')}
-        ${contribsEl}
-        ${adminEl}
-      </div>
-    </div>`;
-  };
-
-  const nodeHTML = (group) => {
-    const datedItems = group.items.filter(item => parseDate(item.date));
-    const source = datedItems[0] || group.items[0];
-    const cat = _achCategoryFor(source);
-    const dateText = group.dateKey ? _formatDateFr(group.dateKey) : _formatDateFr(source.date);
-    const dotText = group.items.length > 1 ? group.items.length : cat.emoji;
-    return `<div class="tl-node-wrap">
-      <div class="tl-node">
-        <div class="tl-node-dot" style="--c:${cat.color};--c-glow:${cat.glow}" title="${group.items.length} haut-fait${group.items.length > 1 ? 's' : ''}">${dotText}</div>
-        ${dateText ? `<div class="tl-node-date" style="color:${cat.color}">${_esc(dateText)}</div>` : ''}
-      </div>
-    </div>`;
-  };
-
-  return `<div class="timeline">
-    ${groups.map((group, idx) => {
-      const delay = `${idx * 60}ms`;
-      if (group.items.length > 1) {
-        return `<div class="tl-item tl-group--multi" style="animation-delay:${delay}">
-          ${nodeHTML(group)}
-          <div class="tl-group-cards">
-            ${group.items.map(item => cardHTML(item)).join('')}
-          </div>
-        </div>`;
-      }
-
-      const item = group.items[0];
-      const side  = idx % 2 === 0 ? 'left' : 'right';
-      return `<div class="tl-item ${side}" style="animation-delay:${delay}">
-        ${side === 'left'  ? cardHTML(item) : '<div class="tl-spacer"></div>'}
-        ${nodeHTML(group)}
-        ${side === 'right' ? cardHTML(item) : '<div class="tl-spacer"></div>'}
-      </div>`;
-    }).join('')}
-  </div>`;
-}
-
 function _achMissionComparator(a, b) {
   return (a?.acte || '').localeCompare(b?.acte || '') ||
     (a?.ordre || 0) - (b?.ordre || 0) ||
@@ -2548,8 +2512,6 @@ function _achRenderControlsExtras() {
   const myCharIds = myChars.map(c => c.id);
   const myCharsActive = myCharIds.length > 0 && selectedIds.length === myCharIds.length && myCharIds.every(id => selectedSet.has(id));
   const matchMode = selectedIds.length > 1 ? (STORE.charMatchMode || 'any') : 'any';
-  const isTimeline = (STORE.view || 'galerie') === 'timeline';
-  const desc = !!STORE.timelineDesc;
   const filterLabel = selectedChars.length === 1
     ? selectedChars[0].nom
     : selectedChars.length > 1
@@ -2712,11 +2674,6 @@ function _achRenderControlsExtras() {
       </details>
     </section>` : '';
 
-  const sortBtn = isTimeline ? `
-    <button class="ach-sort-toggle" data-action="_achToggleTimelineDir"
-      title="Inverser le sens de la chronologie">
-      ${desc ? '↓ Plus récent en haut' : '↑ Plus ancien en haut'}
-    </button>` : '';
   const hasActiveFilters = (STORE.filter || 'all') !== 'all' ||
     missionFilter !== 'all' ||
     selectedIds.length > 0 ||
@@ -2725,7 +2682,7 @@ function _achRenderControlsExtras() {
     <button class="ach-reset-filters" type="button" data-action="_achResetFilters" title="Réinitialiser tous les filtres">
       Réinitialiser
     </button>` : '';
-  const actionsHtml = (resetBtn || sortBtn) ? `<div class="ach-extra-actions">${resetBtn}${sortBtn}</div>` : '';
+  const actionsHtml = resetBtn ? `<div class="ach-extra-actions">${resetBtn}</div>` : '';
 
   bar.innerHTML = charChips + missionFilterHtml + actionsHtml;
   bar.style.display = (missionFilterHtml || charChips || actionsHtml) ? 'flex' : 'none';
@@ -2740,6 +2697,53 @@ function _achNewBannerHtml(items) {
     return `<span>${item.imageUrl ? `<img src="${_esc(item.imageUrl)}" alt="">` : _esc(item.emoji || category.emoji)}</span>`;
   }).join('');
   return `<aside class="ach-new-banner"><div class="ach-new-stack">${previews}</div><div class="ach-new-copy"><strong>${fresh.length} nouveau${fresh.length > 1 ? 'x' : ''} haut${fresh.length > 1 ? 's' : ''}-fait${fresh.length > 1 ? 's' : ''}</strong><small> depuis ta dernière visite${mission?.titre ? ` · ${_esc(mission.titre)}` : ''}</small></div><button data-action="_achShowNew" data-id="${_esc(first.id)}">Voir</button><button data-action="_achMarkSeen">Marquer comme vus</button></aside>`;
+}
+
+function _achDisposeChronicle() {
+  _achChronicle?.dispose();
+  _achChronicle = _achChronicleModel = _achChronicleCrumb = null;
+  _achChronicleChapterById.clear();
+  if (_achChronicleDropTarget) {
+    _achChronicleDropTarget.closest('.hall-root')?.classList.remove('ach-drop-active', 'ach-drop-on-session');
+    _achDropSession(null);
+  }
+}
+
+function _achRenderChronicle(content, all, filtered, hasFilters, bulkBar) {
+  const model = buildChronicle(all, STORE.missions, {
+    desc: STORE.timelineDesc, isAdmin: STATE.isAdmin, filteredIds: new Set(filtered.map(item => item.id)),
+    toDate: item => /^\d{4}-\d{2}-\d{2}$/.test(item.date || '') ? item.date : _toISO(item.date),
+  });
+  _achChronicleModel = model;
+  const ordered = model.visible.flatMap(s => s.shown);
+  for (const s of model.visible) for (const item of s.shown) _achChronicleChapterById.set(item.id, s.chapter);
+  const root = content.closest('.hall-root');
+  const animate = !content.querySelector('.cr');
+  const view = renderChronicle(model, {
+    categories: ACH_CATS, categoryFor: _achCategoryFor, isNew: _achIsNew, characters: STATE.characters || [],
+    isAdmin: STATE.isAdmin, bulk: _achBulkMode, selected: _achBulkSelected, search: STORE.search,
+    hasFilters, desc: STORE.timelineDesc, mode: STORE.timelineMode,
+    news: _achNewBannerHtml(ordered), bulkBar, animate,
+  });
+  const compact = root.querySelector('.ach-chronicle-compact');
+  compact.innerHTML = view.compact;
+  content.innerHTML = view.html;
+  root.querySelector('.hall-command-title small').textContent =
+    `Chronique de campagne · ${model.sessions.length} séance${model.sessions.length === 1 ? '' : 's'}${model.months ? ` · ${model.months} mois d’aventure` : ''}`;
+  root.querySelectorAll('[data-ach-chronicle-mode]').forEach(btn => {
+    const active = btn.dataset.achChronicleMode === STORE.timelineMode;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
+  const order = root.querySelector('[data-action="_achToggleTimelineDir"]');
+  order.textContent = STORE.timelineDesc ? '↓ Plus récents d’abord' : '↑ Plus anciens d’abord';
+  order.setAttribute('aria-pressed', String(STORE.timelineDesc));
+  _achChronicle = bindChronicle(content, compact, model, {
+    getScroll: _achScrollMetrics,
+    getInset: () => matchMedia('(min-width:900px)').matches && model.dated.length ? 100 : 56,
+    categoryFor: _achCategoryFor,
+    onCurrent: current => { _achChronicleCrumb = current; _achUpdateMiniBar(null); },
+  });
 }
 
 function _achRailHtml(items) {
@@ -2845,6 +2849,22 @@ async function _achRenderContent({ force=false } = {}) {
   STORE.lightboxItems = Object.fromEntries(visibleForLightbox.map(a => [a.id, a]));
   const missionContextHtml = _achMissionContextHtml(missionFilter, filtered.length);
   const bulkBarHtml = _achBulkBarHtml(filtered);
+  const hall = contentEl.closest('.hall-root');
+  const chronicle = STORE.view === 'timeline';
+  hall.classList.toggle('is-chronicle', chronicle);
+  _achDisposeChronicle();
+  if (chronicle) {
+    _destroyAchievementSortables();
+    _achRailCleanup?.();
+    _achRailCleanup = null;
+    _achImageWarmCleanup?.();
+    _achImageWarmCleanup = null;
+    _achRenderChronicle(contentEl, all, filtered, filter !== 'all' || missionFilter !== 'all' || selectedCharIds.length > 0 || !!search, bulkBarHtml);
+    return;
+  }
+  hall.querySelector('.ach-chronicle-compact').replaceChildren();
+  const subtitle = hall.querySelector('.hall-command-title small');
+  if (subtitle.dataset.galleryText) subtitle.textContent = subtitle.dataset.galleryText;
 
   if (!filtered.length) {
     const catDef = ACH_CATS.find(c => c.id === filter);
@@ -2880,12 +2900,6 @@ async function _achRenderContent({ force=false } = {}) {
         <div class="hall-empty-sub">${sub}</div>
         ${(resetAction || createAction) ? `<div class="hall-empty-actions">${resetAction}${createAction}</div>` : ''}
       </div>`;
-    _achUpdateMiniBar();
-    return;
-  }
-
-  if ((STORE.view || 'galerie') === 'timeline') {
-    contentEl.innerHTML = missionContextHtml + _renderTimeline(filtered);
     _achUpdateMiniBar();
     return;
   }
@@ -2941,7 +2955,13 @@ function _achSetFilter(filter) {
 };
 function _achSetView(view, { syncRoute = true } = {}) {
   if (!['galerie', 'timeline', 'missions'].includes(view)) return;
-  if (view !== 'galerie' && _achBulkMode) {
+  const changesScrollHost = view !== STORE.view && (view === 'timeline' || STORE.view === 'timeline');
+  if (changesScrollHost) {
+    // Les coordonnées d'une carte de Galerie n'ont pas de sens dans le récit.
+    // Changer de vue ouvre son bandeau, tandis que les actions dans la vue gardent l'ancre.
+    _achCurrentScrollHost()?.scrollTo({ top: 0, behavior: 'instant' });
+  }
+  if (view === 'missions' && _achBulkMode) {
     _achBulkMode = false;
     _achBulkSelected.clear();
     _achSyncBulkToggle();
@@ -2954,7 +2974,14 @@ function _achSetView(view, { syncRoute = true } = {}) {
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-selected', active ? 'true' : 'false');
   });
-  _achRenderContentPreserveViewport();
+  if (changesScrollHost) {
+    const render = _achRenderContent();
+    document.getElementById('main-content')?.scrollTo({ top: 0, behavior: 'instant' });
+    document.scrollingElement?.scrollTo({ top: 0, behavior: 'instant' });
+    _achInstallScrollUi();
+    return render;
+  }
+  return _achRenderContentPreserveViewport();
 };
 function _achSetGroup(group) {
   if (!['none', 'mission', 'month'].includes(group)) return;
@@ -2984,7 +3011,8 @@ function _achSetGalleryOrder(order) {
 function _achFlashCard(id) {
   const card = document.querySelector(`[data-ach-id="${CSS.escape(id || '')}"]`);
   if (!card) return;
-  card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const reduced = STORE.view === 'timeline' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  card.scrollIntoView({ block: 'center', behavior: reduced ? 'instant' : 'smooth' });
   card.classList.remove('ach-flash');
   requestAnimationFrame(() => card.classList.add('ach-flash'));
   setTimeout(() => card.classList.remove('ach-flash'), 1800);
@@ -2999,9 +3027,15 @@ function _achScrollTop() {
   document.scrollingElement?.scrollTo({ top: 0, behavior: 'smooth' });
 }
 function _achSlideshowChapterKey(item) {
+  if (STORE.view === 'timeline') return _achChronicleChapterById.get(item?.id);
   if ((STORE.group || 'none') === 'mission') return item?.missionId || 'interlude';
   if (STORE.group === 'month') return _achMonthKey(item);
   return '';
+}
+function _achLightboxSequence() {
+  return STORE.view === 'timeline' && _achChronicleModel
+    ? _achChronicleModel.visible.flatMap(s => s.shown)
+    : _achFilteredItemsForCurrentState({ ordered: true });
 }
 function _achScheduleSlideshow() {
   if (!_achSlideshowTimer) return;
@@ -3011,7 +3045,7 @@ function _achScheduleSlideshow() {
 function _achAdvanceSlideshow() {
   const overlay = document.getElementById('ach-lightbox');
   const currentId = overlay?.dataset.itemId;
-  const items = _achFilteredItemsForCurrentState({ ordered: true });
+  const items = _achLightboxSequence();
   const index = items.findIndex(entry => entry.id === currentId);
   const next = items[index + 1];
   if (!overlay || !next) {
@@ -3020,16 +3054,20 @@ function _achAdvanceSlideshow() {
     overlay?.classList.remove('is-slideshow');
     overlay?.querySelector('.ach-lb-slideshow')?.classList.remove('active');
     if (overlay) {
-      overlay.insertAdjacentHTML('beforeend', `<div class="ach-lb-card ach-lb-card--end"><div><small>Fin de la fresque</small><h2>${STORE.galleryOrder === 'desc' ? 'Tout a commencé ici' : 'À suivre…'}</h2><p>${items.length} souvenir${items.length > 1 ? 's' : ''} parcouru${items.length > 1 ? 's' : ''}</p><button type="button" data-action="_achRestartSlideshow">Recommencer</button></div></div>`);
+      const chronicle = STORE.view === 'timeline';
+      const reverse = chronicle ? STORE.timelineDesc : STORE.galleryOrder === 'desc';
+      overlay.insertAdjacentHTML('beforeend', `<div class="ach-lb-card ach-lb-card--end"><div><small>${chronicle ? 'Fin de la chronique' : 'Fin de la fresque'}</small><h2>${reverse ? 'Tout a commencé ici' : 'À suivre…'}</h2><p>${items.length} souvenir${items.length > 1 ? 's' : ''} parcouru${items.length > 1 ? 's' : ''}</p><button type="button" data-action="_achRestartSlideshow">Recommencer</button></div></div>`);
     }
     return;
   }
   const current = items[index];
   const changesChapter = _achSlideshowChapterKey(current) !== _achSlideshowChapterKey(next);
-  if (changesChapter && (STORE.group || 'none') !== 'none') {
-    const mission = _missionFor(next);
-    const title = STORE.group === 'month' ? _achMonthLabel(_achMonthKey(next)) : (mission?.titre || 'Interlude');
-    const overline = STORE.group === 'month' ? 'Nouveau chapitre' : (mission?.acte || 'Hors Trame');
+  if (changesChapter && (STORE.view === 'timeline' || STORE.group !== 'none')) {
+    const chronicle = STORE.view === 'timeline';
+    const mission = chronicle ? _achChronicleModel?.chapters.find(c => c.key === _achSlideshowChapterKey(next))?.mission : _missionFor(next);
+    const byMonth = !chronicle && STORE.group === 'month';
+    const title = byMonth ? _achMonthLabel(_achMonthKey(next)) : (mission?.titre || 'Interlude');
+    const overline = byMonth ? 'Nouveau chapitre' : (mission?.acte || 'Hors Trame');
     overlay.insertAdjacentHTML('beforeend', `<div class="ach-lb-card"><div><small>${_esc(overline)}</small><h2>${_esc(title)}</h2><p>La suite de l’aventure</p></div></div>`);
     _achSlideshowTimer = setTimeout(() => _achOpenLightbox(next.id), 1200);
     return;
@@ -3050,7 +3088,7 @@ function _achToggleSlideshow() {
   _achScheduleSlideshow();
 }
 function _achRestartSlideshow() {
-  const first = _achFilteredItemsForCurrentState({ ordered: true })[0];
+  const first = _achLightboxSequence()[0];
   if (!first) return;
   _achSlideshowTimer = -1;
   _achOpenLightbox(first.id);
@@ -3060,9 +3098,10 @@ function _achSkipSeriesImage() {
   _achSeries.files.shift();
   if (!_achSeries.files.length) { _achResetSeries(); closeModal(); return; }
   const preset = {
+    ..._achSeries.chroniclePreset,
     series: true,
     categorie: document.getElementById('ach-categorie')?.value || _achDefaultCategoryId(),
-    date: document.getElementById('ach-date')?.value || _todayISO(),
+    date: document.getElementById('ach-date')?.value ?? _todayISO(),
     missionId: document.getElementById('ach-mission-id')?.value || '',
     contributeurs: (document.getElementById('ach-contributeurs')?.value || '').split(',').filter(Boolean),
   };
@@ -3100,7 +3139,7 @@ function _achToggleBulkMode() {
   if (!STATE.isAdmin) return;
   _achBulkMode = !_achBulkMode;
   if (!_achBulkMode) _achBulkSelected.clear();
-  if (_achBulkMode && STORE.view !== 'galerie') {
+  if (_achBulkMode && STORE.view === 'missions') {
     STORE.view = 'galerie';
     _achSavePreferences();
     setRouteSub('achievements', 'galerie');
@@ -3216,7 +3255,19 @@ function _achRemoveMiniFilter(kind) {
   else if (kind === 'search') STORE.search = '';
   _achRenderContentPreserveViewport({ force: true });
 }
+function _achSetChronicleMode(mode) {
+  if (!['recit', 'sommaire'].includes(mode) || mode === STORE.timelineMode) return;
+  STORE.timelineMode = mode;
+  _achSavePreferences();
+  _achRenderContentPreserveViewport();
+}
+function _achChronicleAdd(key) {
+  if (!STATE.isAdmin || STORE.view !== 'timeline' || _achBulkMode) return;
+  const preset = chroniclePreset(_achChronicleModel, key, _todayISO());
+  if (preset) openAchievementModal(null, preset);
+}
 function _achMiniCrumb(id) {
+  if (STORE.view === 'timeline' && id) return _achChronicle?.jump(id);
   if (id) return _achFlashCard(id);
   _achScrollTop();
 }
@@ -3271,9 +3322,10 @@ function _achLightboxStripHtml(items, activeId) {
   const visibleItems = items.slice(start, start + windowSize);
   let previousGroup = null;
   return visibleItems.map(entry => {
-    const group = STORE.group === 'mission' ? (entry.missionId || 'interlude') : STORE.group === 'month' ? _achMonthKey(entry) : null;
-    const mission = _missionFor(entry);
-    const label = STORE.group === 'mission' ? (mission?.titre || 'Interlude') : STORE.group === 'month' ? _achMonthLabel(group) : '';
+    const group = STORE.view === 'timeline' ? _achChronicleChapterById.get(entry.id)
+      : STORE.group === 'mission' ? (entry.missionId || 'interlude') : STORE.group === 'month' ? _achMonthKey(entry) : null;
+    const mission = STORE.view === 'timeline' ? _achChronicleModel?.chapters.find(c => c.key === group)?.mission : _missionFor(entry);
+    const label = STORE.view === 'timeline' || STORE.group === 'mission' ? (mission?.titre || 'Interlude') : STORE.group === 'month' ? _achMonthLabel(group) : '';
     const separator = group && group !== previousGroup ? `<span class="ach-lb-strip-separator" title="${_esc(label)}"></span>` : '';
     previousGroup = group;
     const category = _achCategoryFor(entry);
@@ -3297,12 +3349,12 @@ function _achRestoreLightboxTile(id) {
 
 function _achOpenLightbox(itemId) {
   const item = (STORE.lightboxItems || {})[itemId] || (STORE.items || []).find(a => a.id === itemId);
-  if (!item) return;
+  if (!item || (!STATE.isAdmin && item.secret)) return;
   const cat       = _achCategoryFor(item);
   const CHAR_COLS = ['#4f8cff','#22c38e','#e8b84b','#ff6b6b','#b47fff','#f59e0b'];
   const chars     = sortCharactersForDisplay(STATE.characters || []);
   const contribs  = [...new Set(item.contributeurs || [])].map(id => chars.find(c => c.id === id)).filter(Boolean);
-  const navItems = _achFilteredItemsForCurrentState({ ordered: true });
+  const navItems = _achLightboxSequence();
   const navIndex = navItems.findIndex(a => a.id === item.id);
   const prevItem = navIndex > 0 ? navItems[navIndex - 1] : null;
   const nextItem = navIndex >= 0 && navIndex < navItems.length - 1 ? navItems[navIndex + 1] : null;
@@ -3700,6 +3752,7 @@ document.addEventListener('app:page-changed', (event) => {
     _achScrollObserver = null;
     _achRailCleanup?.();
     _achRailCleanup = null;
+    _achDisposeChronicle();
     _achImageWarmCleanup?.();
     _achImageWarmCleanup = null;
     _achScrollHost = null;
@@ -3727,7 +3780,7 @@ registerActions({
   _achMarkSeen:          () => _achMarkSeen(),
   _achRailJump:          (btn) => _achFlashCard(btn.dataset.id),
   _achRemoveMiniFilter:  (btn) => _achRemoveMiniFilter(btn.dataset.filterKind),
-  _achMiniCrumb:         (btn) => _achMiniCrumb(btn.dataset.id),
+  _achMiniCrumb:         (btn) => _achMiniCrumb(btn.dataset.session || btn.dataset.id),
   _achScrollTop:         () => _achScrollTop(),
   _achToggleSlideshow:   () => _achToggleSlideshow(),
   _achRestartSlideshow:  () => _achRestartSlideshow(),
@@ -3755,6 +3808,8 @@ registerActions({
   _achSelectMyCharacters:()    => _achSelectMyCharacters(),
   _achSetCharMatchMode:  (btn) => _achSetCharMatchMode(btn.dataset.mode),
   _achToggleTimelineDir: ()    => _achToggleTimelineDir(),
+  _achSetChronicleMode:  (btn) => _achSetChronicleMode(btn.dataset.achChronicleMode),
+  _achChronicleAdd:      (btn) => _achChronicleAdd(btn.dataset.key),
   _achResetFilters:      ()    => _achResetFilters(),
   _achFocusMissionGroup: (btn) => _achFocusMissionGroup(btn.dataset.missionId),
   _achCreateForMission:  (btn) => _achCreateForMission(btn.dataset.missionId),
