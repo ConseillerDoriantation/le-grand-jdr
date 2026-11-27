@@ -4159,7 +4159,7 @@ const PAGES = {
         <div class="hall-command-head">
           <div class="hall-command-title">
             <h1>Hauts-Faits</h1>
-            <small>Galerie de campagne · ${total} ${total > 1 ? 'souvenirs' : 'souvenir'}${monthSpan ? ` · ${monthSpan} mois d'aventure` : ''}</small>
+            <small data-gallery-text="Galerie de campagne · ${total} ${total > 1 ? 'souvenirs' : 'souvenir'}${monthSpan ? ` · ${monthSpan} mois d'aventure` : ''}">Galerie de campagne · ${total} ${total > 1 ? 'souvenirs' : 'souvenir'}${monthSpan ? ` · ${monthSpan} mois d'aventure` : ''}</small>
           </div>
           <span class="hall-command-spacer"></span>
           ${STATE.isAdmin ? `<div class="hall-command-tools">
@@ -4216,7 +4216,7 @@ const PAGES = {
             <button class="view-tab${activeView === 'timeline' ? ' active' : ''}" data-action="_achSetView" data-val="timeline" data-nav-page="achievements" data-nav-sub="timeline" role="tab" aria-selected="${activeView === 'timeline'}">⋮ Chronologie</button>
             <button class="view-tab${activeView === 'missions' ? ' active' : ''}" data-action="_achSetView" data-val="missions" data-nav-page="achievements" data-nav-sub="missions" role="tab" aria-selected="${activeView === 'missions'}">◎ Missions</button>
           </div>
-          <div class="ach-view-options" aria-label="Options de la fresque">
+          <div class="ach-view-options ach-gallery-options" aria-label="Options de la fresque">
             <div class="ach-option-group" role="group" aria-label="Chapitres">
               <span>Chapitres</span>
               <button class="${activeGroup === 'mission' ? 'active' : ''}" data-action="_achSetGroup" data-ach-group="mission">Missions</button>
@@ -4230,6 +4230,14 @@ const PAGES = {
               <button class="${activeDensity === 'l' ? 'active' : ''}" data-action="_achSetDensity" data-ach-density="l" title="Grandes vignettes" aria-label="Grandes vignettes"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/></svg></button>
             </div>
             <button class="ach-order-btn${activeOrder === 'desc' ? ' active' : ''}" data-action="_achSetGalleryOrder" data-ach-order="${activeOrder === 'desc' ? 'asc' : 'desc'}" aria-pressed="${activeOrder === 'desc'}" title="Inverser l'ordre">${activeOrder === 'desc' ? '↓ Plus récents d’abord' : '↑ Plus anciens d’abord'}</button>
+          </div>
+          <div class="ach-view-options ach-chronicle-options" aria-label="Options de la chronologie">
+            <div class="ach-option-group" role="group" aria-label="Affichage">
+              <span>Affichage</span>
+              <button type="button" data-action="_achSetChronicleMode" data-ach-chronicle-mode="recit">Récit</button>
+              <button type="button" data-action="_achSetChronicleMode" data-ach-chronicle-mode="sommaire">Sommaire</button>
+            </div>
+            <button type="button" class="ach-order-btn" data-action="_achToggleTimelineDir" title="Inverser l’ordre du récit">↑ Plus anciens d’abord</button>
           </div>
         </div>
       </div>
@@ -4251,10 +4259,12 @@ const PAGES = {
         ${STATE.isAdmin ? '<button type="button" class="ach-mini-new" data-action="openAchievementModal"><span>+</span> Nouveau</button>' : ''}
         <button type="button" class="ach-mini-top" data-action="_achScrollTop" title="Revenir en haut" aria-label="Revenir en haut">↑</button>
       </div>
+      <div class="ach-chronicle-compact"></div>
     </div>
     <div class="hall-content">
       <div id="ach-content">${appSplashHtml('')}</div>
     </div>
+    <div id="ach-chronicle-drop" hidden></div>
     ${STATE.isAdmin ? '<button type="button" class="ach-mobile-fab" data-action="openAchievementModal" aria-label="Créer un haut-fait"><span>+</span></button>' : ''}
     </div>`;
   },
