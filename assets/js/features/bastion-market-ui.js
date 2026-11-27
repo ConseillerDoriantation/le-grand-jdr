@@ -31,6 +31,7 @@ import { normalizeBastionWallPost } from '../shared/bastion-wall.js';
 import { weaponHandsLabel } from '../shared/weapon-family.js';
 import { getUpgradeSettings, hasUpgrades, loadUpgradeSettings } from '../shared/upgrade-settings.js';
 import { upgradeResaleBonus } from '../shared/upgrade-value.js';
+import { upgradedItemValue, upgradedValueTipRows, valueTipAttrs } from '../shared/item-value-tip.js';
 import {
   ITEM_FAMILIES, isArmorItem, isQuestItem, isWeaponItem, itemBonuses, itemChips, itemCompareRows,
   itemCompareSlot, itemDamageText, itemFamily, itemKind, itemRarity, itemSigned,
@@ -204,7 +205,9 @@ const _notable = rare => rare >= 2 && !!RARETE_NAMES[rare];
 const _rareName = rare => (_notable(rare) ? RARETE_NAMES[rare] : (RARETE_NAMES[1] || 'Commun'));
 const _rareAttrs = rare => (_notable(rare) ? ` data-r="${rare}" style="--mk-rc:${_rareteColor(RARETE_NAMES[rare]) || '#7a8fa8'}"` : '');
 const _chipHtml = chip => `<i class="bs-mk-chip ${chip.cls}">${_esc(chip.t)}</i>`;
-const _fact = (label, value) => ((value === '' || value == null) ? '' : `<div><span>${_esc(label)}</span><b>${_esc(String(value))}</b></div>`);
+const _fact = (label, value, attrs = '') => ((value === '' || value == null) ? '' : `<div${attrs}><span>${_esc(label)}</span><b>${_esc(String(value))}</b></div>`);
+// Prix de base + améliorations au tarif actuel (même calcul que l'Inventaire).
+const _upgradedValue = (value, item) => upgradedItemValue(value, item, getUpgradeSettings());
 const _icon = item => {
   const image = getInventoryItemImage(item, _catalog(item));
   return `<span class="bs-mk-ic">${image ? `<img src="${_esc(image)}" alt="" loading="lazy">` : '<i class="bs-mk-gem"></i>'}</span>`;
@@ -437,6 +440,7 @@ function _sheetHtml(view) {
   const effect = String(getItemEffectText(item) || '').trim();
   const description = String(item.description || '').trim();
   const value = getInventoryItemValue(item, cat);
+  const upgraded = _upgradedValue(value, item);
   const resale = _resale(item);
   const buyer = view.state === 'open' && !_isMine(view) ? _buyer() : null;
   const per = view.qty > 1 ? ' / u.' : '';
@@ -447,7 +451,7 @@ function _sheetHtml(view) {
     _fact('Maniement', isWeaponItem(item) ? weaponHandsLabel(item) : ''),
     _fact('CA', armor ? itemSigned(bonuses[0].v) : ''),
     _fact('Set', item.set),
-    _fact('Valeur', value ? _gold(value) + per : ''),
+    _fact('Valeur', value || upgraded.upgrades ? _gold(value) + per : '', valueTipAttrs(upgradedValueTipRows(upgraded, _gold, per))),
     _fact('Revente', resale ? _gold(resale) + per : ''),
   ].join('');
   const bonusHtml = bonuses.filter(b => b.v && !(armor && b.k === 'CA'))
@@ -912,7 +916,12 @@ function _sellHtml() {
   const value = group ? getInventoryItemValue(group.item, cat) : 0;
   const resale = group ? _resale(group.item) : 0;
   if (group) _ensureUpgradeSettings([group.item], () => { if (MK.sell && _sellOpen()) _paintSell(); });
-  const refs = [value ? `valeur ${_gold(value)}` : '', resale ? `revente boutique ${_gold(resale)}` : ''].filter(Boolean).join(' · ');
+  const upgraded = group ? _upgradedValue(value, group.item) : { upgrades: 0, total: value };
+  const refs = [
+    value ? `valeur ${_gold(value)}` : '',
+    upgraded.upgrades ? `améliorée ${_gold(upgraded.total)}` : '',
+    resale ? `revente boutique ${_gold(resale)}` : '',
+  ].filter(Boolean).join(' · ');
   const wornTaken = group ? Math.max(0, s.qty - (group.count - group.worn)) : 0;
   const canSubmit = !!group && !!normalizeMarketPrice(s.price);
   const auction = s.mode === 'auction';
@@ -936,7 +945,7 @@ function _sellHtml() {
         <span class="bs-mk-qty"><span class="bs-v-step"><button type="button" data-action="_mkSellQty" data-delta="-1" aria-label="Moins"${s.qty <= 1 ? ' disabled' : ''}>−</button><span>${s.qty}</span><button type="button" data-action="_mkSellQty" data-delta="1" aria-label="Plus"${s.qty >= group.count ? ' disabled' : ''}>+</button></span><small>sur ${group.count}</small></span>
       </div>
       <label class="bs-mk-field"><span>${auction ? 'Prix de départ' : 'Prix du lot'}</span>
-        <span class="bs-mk-price-in"><input id="bs-mk-sell-price" type="number" min="1" max="${MARKET_PRICE_MAX}" step="1" inputmode="numeric" value="${_esc(s.price)}" placeholder="${value || resale || ''}" data-input="_mkSellPrice" data-modal-initial-focus><b>or</b></span>
+        <span class="bs-mk-price-in"><input id="bs-mk-sell-price" type="number" min="1" max="${MARKET_PRICE_MAX}" step="1" inputmode="numeric" value="${_esc(s.price)}" placeholder="${upgraded.total || resale || ''}" data-input="_mkSellPrice" data-modal-initial-focus><b>or</b></span>
         ${refs ? `<small>${_esc(refs)}${s.qty > 1 ? ' (par unité)' : ''}</small>` : ''}
       </label>
     </div>

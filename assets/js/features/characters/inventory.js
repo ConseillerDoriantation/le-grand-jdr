@@ -28,6 +28,7 @@ import { recipeBookButton } from '../recipes.js';
 import { characterAvatarHtml, characterPortraitContent } from '../../shared/portraits.js';
 import { hasUpgrades, getUpgradeSettings, loadUpgradeSettings } from '../../shared/upgrade-settings.js';
 import { upgradeResaleBonus, upgradeTariffValue } from '../../shared/upgrade-value.js';
+import { upgradedItemValue, upgradedValueTipRows, valueTipAttrs } from '../../shared/item-value-tip.js';
 import { characterBuildsForStorage, getActiveBuild, patchBuildLocally } from '../../shared/character-builds.js';
 import { mergeCharacterTransferTargets } from '../../shared/character-transfer-targets.js';
 import {
@@ -455,7 +456,9 @@ function _ivListHtml(c, m, canEdit) {
 }
 
 // ── Fiches ────────────────────────────────────
-const _ivFact = (label, value) => (value === '' || value == null) ? '' : `<div><span>${_esc(label)}</span><b>${_esc(String(value))}</b></div>`;
+const _ivFact = (label, value, attrs = '') => (value === '' || value == null) ? '' : `<div${attrs}><span>${_esc(label)}</span><b>${_esc(String(value))}</b></div>`;
+// Infobulle « Valeur améliorée » : prix de base + améliorations au tarif actuel.
+const _ivValueTip = (value, per = '') => valueTipAttrs(upgradedValueTipRows(value, _ivGold, per));
 const _ivBtn = (label, action, attrs = '', cls = '') => `<button type="button" class="cs-grim-btn ${cls}" data-action="${action}" ${attrs}>${label}</button>`;
 const _ivTagsHtml = (title, html) => html ? `<section class="iv-part"><h4>${title}</h4><div class="iv-tags">${html}</div></section>` : '';
 const _IV_SHEET_X = '<button type="button" class="iv-sheet-x" data-action="_invCloseSheet" aria-label="Fermer la fiche" title="Fermer (Échap)">✕</button>';
@@ -486,6 +489,7 @@ function _ivItemSheetHtml(c, m, sel, canEdit) {
   const price = getInventoryItemValue(item, cat);
   const resaleBase = getInventoryItemResaleValue(item, cat);
   const resale = _ivResale(item); // + reprise de ses améliorations
+  const upgraded = upgradedItemValue(price, item, getUpgradeSettings());
   const image = getInventoryItemImage(item, cat);
   const readable = !!getInventoryReadableDocument(item, cat);
   const quest = _invIsQuestItem(item);
@@ -504,7 +508,7 @@ function _ivItemSheetHtml(c, m, sel, canEdit) {
     _ivFact('Maniement', _ivIsWeapon(item) ? weaponHandsLabel(item) : ''),
     _ivFact('CA', armor ? _ivSigned(bonuses[0].v) : ''),
     _ivFact('Set', item.set),
-    _ivFact('Valeur', price ? _ivGold(price) + per : ''),
+    _ivFact('Valeur', price || upgraded.upgrades ? _ivGold(price) + per : '', _ivValueTip(upgraded, per)),
     _ivFact('Revente', resale ? _ivGold(resale) + per : ''),
   ].join('');
   // CA d'une armure : déjà dans les faits, pas répétée dans les bonus.
@@ -578,6 +582,10 @@ function _ivSlotSheetHtml(c, m, slot, canEdit) {
 // Sans sélection : vue d'ensemble (totaux, bonus portés, nouveautés, légende).
 function _ivSummarySheetHtml(c, m) {
   const total = fn => m.inv.reduce((sum, item) => sum + fn(item) * _ivQty(item), 0);
+  const settings = getUpgradeSettings();
+  const base = total(item => getInventoryItemValue(item, _ivCatalog(item)));
+  const upgrades = total(item => upgradedItemValue(0, item, settings).upgrades);
+  const value = { base, upgrades, total: base + upgrades };
   const worn = m.slots.filter(entry => entry.group);
   const sums = new Map();
   worn.forEach(entry => _ivBonuses(entry.group.item).forEach(b => {
@@ -600,7 +608,7 @@ function _ivSummarySheetHtml(c, m) {
     <div class="iv-facts">
       ${_ivFact('Objets', total(() => 1))}
       ${_ivFact('Emplacements', `${worn.length} / ${m.slots.length}`)}
-      ${_ivFact('Valeur', _ivGold(total(item => getInventoryItemValue(item, _ivCatalog(item)))))}
+      ${_ivFact('Valeur', _ivGold(value.base), _ivValueTip(value))}
       ${_ivFact('Revente', _ivGold(total(_ivResale)))}
     </div>
     ${_ivTagsHtml('Bonus de l’équipement', [...sums.values()].filter(b => b.v).map(b => _ivChipHtml({ t: `${b.k} ${_ivSigned(b.v)}`, cls: b.cls })).join(''))}
