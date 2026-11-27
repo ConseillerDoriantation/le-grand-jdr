@@ -12,6 +12,7 @@
 // 3 créneaux/jour : m=matin 9-13h, a=après-midi 14-18h, s=soir 19-23h
 // ═══════════════════════════════════════════════════════════════════
 
+import { isTypingTarget } from '../shared/typing-target.js';
 import { STATE } from '../core/state.js';
 import { saveDoc, replaceDoc, deleteFromCol } from '../data/firestore.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
@@ -2149,8 +2150,7 @@ function _agInstallInput() {
   });
   document.addEventListener('keydown', e => {
     if (!inAgenda() || _ag.tab !== 'planning') return;
-    const tag = e.target.tagName || '';
-    if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (isTypingTarget(e.target)) return;
     if (e.key === 'Escape') { if (_ag.armed) { _ag.armed = false; _agRefreshTools(); } return; }
     const b = BRUSHES.find(x => x.key === e.key);
     if (b) { e.preventDefault(); _ag.brush = b.v; _ag.armed = true; _agRefreshTools(); }

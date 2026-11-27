@@ -1,6 +1,7 @@
 // ══════════════════════════════════════════════
 // PAGES
 // ══════════════════════════════════════════════
+import { isTypingTarget } from '../shared/typing-target.js';
 import { STATE } from '../core/state.js';
 import { PRESENCE_TTL_MS } from '../shared/presence-ttl.js';
 import { registerActions, dispatchAction } from '../core/actions.js';
@@ -1126,7 +1127,7 @@ function _cmjMount() {
   });
   document.addEventListener('keydown', e => {
     if (!document.querySelector('.cmj')) return;
-    const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
+    const typing = isTypingTarget(document.activeElement);
     if (typing) { if (e.key === 'Escape') document.activeElement.blur(); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (['1', '2', '3'].includes(e.key)) return _cmjSetTab(['todo', 'players', 'settings'][+e.key - 1]);
@@ -3956,7 +3957,7 @@ const PAGES = {
     const dashboardKeydown = event => {
       if (STATE.currentPage !== 'dashboard' || !STATE.isAdmin) return;
       const search = document.getElementById('db-roster-query');
-      if (event.key === '/' && !/input|textarea|select/i.test(document.activeElement?.tagName || '')) {
+      if (event.key === '/' && !isTypingTarget(document.activeElement)) {
         event.preventDefault();
         search?.focus();
       } else if (event.key === 'Escape' && document.activeElement === search && rosterQuery) {

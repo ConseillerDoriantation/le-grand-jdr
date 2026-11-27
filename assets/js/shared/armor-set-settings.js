@@ -1,6 +1,8 @@
 // Adventure-scoped armor set bonuses.
 // Firestore: world/armor_sets
 
+import { isTypingTarget } from './typing-target.js';
+
 const DOC_ID = 'armor_sets';
 
 const EMPTY_MODIFIERS = Object.freeze({
@@ -1171,7 +1173,7 @@ function _atMount() {
   document.addEventListener('keydown', ev => {
     if (!document.querySelector('.at')) return;
     if (ev.key === 'Escape') { if (_atMenuTi !== null || _atColOpen) { ev.stopPropagation(); _atMenuTi = null; _atColOpen = false; _atRenderMain(); return; } if (_atAsk) { ev.stopPropagation(); ev.preventDefault(); _atAsk = null; _atRenderFoot(); return; } return; }
-    if (ev.target.matches('input,select')) return;
+    if (isTypingTarget(ev.target)) return;
     if ((ev.key === 'ArrowUp' || ev.key === 'ArrowDown') && ev.target.closest('.at-list')) { ev.preventDefault(); const i = _draft.indexOf(_atCur()), nx = _draft[i + (ev.key === 'ArrowUp' ? -1 : 1)]; if (nx) { _atSelId = nx.id; _atRender(); document.querySelector('.at-row.on')?.focus(); } }
     if (ev.key === 'Enter' && ev.target.dataset?.atSel) ev.target.click();
   }, true);

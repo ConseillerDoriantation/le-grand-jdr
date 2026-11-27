@@ -1,3 +1,4 @@
+import { isTypingTarget } from '../../shared/typing-target.js';
 import { STATE } from '../../core/state.js';
 import { registerActions } from '../../core/actions.js';
 import { compressDataUrl, readImageFileAsDataUrl, uploadJpeg } from '../../shared/image-upload.js';
@@ -328,8 +329,8 @@ document.addEventListener('keydown', e => { if (!document.querySelector('.collec
     return;
   }
   if (e.key === 'Escape' && S.modal) { closeModal(); return; }
-  if (e.key === 'Escape' && S.drawer && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) { closeSettings(); return; }
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) { if (e.key === 'Escape' && e.target.id !== 'xp-in') e.target.blur(); return; }
+  if (e.key === 'Escape' && S.drawer && !isTypingTarget(e.target)) { closeSettings(); return; }
+  if (isTypingTarget(e.target)) { if (e.key === 'Escape' && e.target.id !== 'xp-in') e.target.blur(); return; }
   if (S.drawer || S.modal) return;
   if (S.view === 'mj') mjKey(e);
 });

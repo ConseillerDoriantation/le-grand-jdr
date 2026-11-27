@@ -1,6 +1,8 @@
 // Adventure-scoped equipment slots.
 // Firestore: world/equipment_slots
 
+import { isTypingTarget } from './typing-target.js';
+
 const DOC_ID = 'equipment_slots';
 
 export const LEGACY_EQUIPMENT_SLOTS = Object.freeze([
@@ -406,7 +408,7 @@ function _eqsMount() {
     if (!document.querySelector('.eqs')) return;
     const menu = document.getElementById('eqs-preM');
     if (ev.key === 'Escape') { if (menu && !menu.hidden) { ev.stopPropagation(); menu.hidden = true; return; } if (_eqsAsk) { ev.stopPropagation(); ev.preventDefault(); _eqsAsk = false; _eqsRenderFoot(); return; } return; }
-    if (ev.target.matches('input')) return;
+    if (isTypingTarget(ev.target)) return;
     if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
       const dir = ev.key === 'ArrowUp' ? -1 : 1; ev.preventDefault();
       if (ev.altKey) return _eqsMove(dir);
