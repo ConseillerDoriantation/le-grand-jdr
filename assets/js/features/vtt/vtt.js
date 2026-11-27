@@ -6,6 +6,7 @@
 // en sync bidirectionnel avec les fiches (HP, nom, photo).
 // ═══════════════════════════════════════════════════════════════════
 
+import { isTypingTarget } from '../../shared/typing-target.js';
 import { STATE } from '../../core/state.js';
 import { PRESENCE_TTL_MS } from '../../shared/presence-ttl.js';
 import { registerActions } from '../../core/actions.js';
@@ -7895,6 +7896,8 @@ function _vttAoptBindControls(root) {
     // Ne rien intercepter hors de cette modale (une autre modale pourrait être au-dessus).
     if (document.querySelector('#modal-box .vtt-aopt-modal') !== root) return;
     const typing = document.activeElement === searchInput;
+    // Frappe dans un autre champ (messagerie, mini-fiche…) : les chiffres doivent s'écrire.
+    if (!typing && isTypingTarget(e.target)) return;
 
     if (e.key === '/' && !typing) { e.preventDefault(); searchInput?.focus(); return; }
     if (e.key === 'Escape') {

@@ -1,6 +1,7 @@
 // Fiche mission unifiée : lecture et édition inline dans une seule modale.
 // Les collections sont lues depuis le cache live de la session. Les seuls
 // accès réseau explicites sont le repli à froid et les écritures utilisateur.
+import { isTypingTarget } from '../shared/typing-target.js';
 import {
   loadCollection, getCachedCollection, getDocData,
   addToCol, updateInCol, saveDoc, deleteFromCol,
@@ -471,7 +472,7 @@ function installKeyboard() {
     if (event.key === 'Escape' && MM.menu) { event.preventDefault(); event.stopPropagation(); closeMenu(); return; }
     if (event.key === 'Escape' && MM.editDescription) { event.preventDefault(); event.stopPropagation(); MM.editDescription = false; render(); return; }
     if (event.key === 'Enter' && event.ctrlKey && event.target.matches('.mm-recit-input')) { event.preventDefault(); event.target.dispatchEvent(new Event('change', { bubbles: true })); return; }
-    if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.target.matches('input, textarea, select')) navigateMission(event.key === 'ArrowLeft' ? -1 : 1);
+    if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !isTypingTarget(event.target)) navigateMission(event.key === 'ArrowLeft' ? -1 : 1);
   }, true);
 }
 

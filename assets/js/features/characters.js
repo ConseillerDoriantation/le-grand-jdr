@@ -2,6 +2,7 @@
 // characters.js — Point d'entrée mince
 // Toute la logique est dans assets/js/features/characters/
 // ══════════════════════════════════════════════
+import { isTypingTarget } from '../shared/typing-target.js';
 import { STATE } from '../core/state.js';
 import { updateInCol } from '../data/firestore.js';
 import { _esc, _norm, loadingHtml } from '../shared/html.js';
@@ -2278,7 +2279,7 @@ function _bindCombatKeys() {
     if (e.key !== 'Escape' || _combatTabUi.open == null) return;
     if (!document.querySelector('.cb')) return;                        // onglet combat absent
     if (document.body?.classList.contains('is-modal-open')) return;    // une modale gère déjà Échap
-    if (/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName || '')) return; // saisie en cours (nom/note de maîtrise)
+    if (isTypingTarget(e.target)) return; // saisie en cours (nom/note de maîtrise)
     _combatTabUi.open = null;
     _rerenderCombatTab();
   });

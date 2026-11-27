@@ -3,6 +3,7 @@
 // âœ“ Admin : CRUD crÃ©atures, image+crop, attaques/traits/butins dynamiques
 // âœ“ Joueur : galerie + suivi personnel (PV/PM live, notes)
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+import { isTypingTarget } from '../shared/typing-target.js';
 import { loadCollection, getCachedCollection, loadChars, addToCol, updateInCol, getDocData, saveDoc, replaceDoc, batchUpdateInCol } from '../data/firestore.js';
 import { trySave, confirmDelete } from '../shared/crud.js';
 import { watchPageCollection, watchPageDoc } from '../shared/realtime.js';
@@ -1604,7 +1605,7 @@ function _bstInstallInput() {
       else if (e.key === 'Escape') slot.blur();
       return;
     }
-    const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+    const inField = isTypingTarget(e.target);
     const search = document.getElementById('bst-search');
     if (e.key === '/' && !inField) { e.preventDefault(); search?.focus(); search?.select(); return; }
     if (e.key === 'Escape') {

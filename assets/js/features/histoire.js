@@ -5,6 +5,7 @@
 // Admin uniquement — chaque mission a son histoire attachée
 // ══════════════════════════════════════════════════════════════════════════════
 
+import { isTypingTarget } from '../shared/typing-target.js';
 import { getDocData, saveDoc, loadCollection, batchSaveInCol } from '../data/firestore.js';
 import { openModal, closeModalDirect, setModalCloseGuard } from '../shared/modal.js';
 import { STATE } from '../core/state.js';
@@ -1033,7 +1034,7 @@ function _bindDesAdminDom() {
       event.preventDefault(); event.stopPropagation();
       _desAdmin.addName = ''; _desAdmin.addStat = null; event.target.value = ''; _renderGestionDes();
     } else if (event.target.matches('[data-input="_desNameInput"]') && event.key === 'Enter') event.target.blur();
-    else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.target.matches('input')) {
+    else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !isTypingTarget(event.target)) {
       event.preventDefault(); _desUndo();
     } else if (event.key === 'Escape' && (_desAdmin.menu || _desAdmin.ask)) {
       event.preventDefault(); event.stopPropagation();

@@ -1,3 +1,4 @@
+import { isTypingTarget } from '../../shared/typing-target.js';
 import { getDocData, saveDoc, loadCollection, updateInCol } from '../../data/firestore.js';
 import { registerActions } from '../../core/actions.js';
 import { openModal, closeModal, closeModalDirect, confirmModal, setModalCloseGuard } from '../../shared/modal.js';
@@ -385,7 +386,7 @@ function _csMount() {
   });
   document.addEventListener('keydown', ev => {
     if (!document.querySelector('.cs')) return;
-    if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'z' || ev.key === 'Z') && !ev.target.matches('input, textarea')) { ev.preventDefault(); _csPopUndo(); return; }
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'z' || ev.key === 'Z') && (ev.target.tagName === 'SELECT' || !isTypingTarget(ev.target))) { ev.preventDefault(); _csPopUndo(); return; }
     if (ev.key === 'Escape') { if (_csEmoji) { ev.stopPropagation(); _csEmoji = false; _csRenderMain(); return; } if (_csAsk) { ev.stopPropagation(); ev.preventDefault(); _csAsk = null; _csRenderFoot(); return; } }
   }, true);
   // Réordonnancement par glisser-déposer (priorité).

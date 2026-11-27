@@ -128,7 +128,7 @@ test('Échap ferme le détail ouvert (cohérence avec l’inventaire et les rece
   assert.match(handler, /e\.key !== 'Escape' \|\| _combatTabUi\.open == null/);
   // Ne vole pas Échap à une modale ouverte ni à un champ de saisie.
   assert.match(handler, /is-modal-open/);
-  assert.match(handler, /INPUT\|TEXTAREA\|SELECT/);
+  assert.match(handler, /isTypingTarget\(e\.target\)/);
   assert.match(handler, /_combatTabUi\.open = null/);
 });
 

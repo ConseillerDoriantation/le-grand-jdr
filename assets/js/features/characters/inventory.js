@@ -1,3 +1,4 @@
+import { isTypingTarget } from '../../shared/typing-target.js';
 import { STATE } from '../../core/state.js';
 import { charSession } from '../../shared/char-session.js';
 import { registerActions } from '../../core/actions.js';
@@ -630,7 +631,7 @@ function _ivBindInventoryKeys() {
   if (_ivKeysBound) return; _ivKeysBound = true;
   document.addEventListener('keydown', e => {
     if (!document.querySelector('.iv')) return;
-    if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) {
+    if (e.key === '/' && !isTypingTarget(e.target)) {
       const input = document.querySelector('.iv-search input');
       if (input) { e.preventDefault(); input.focus(); }
     } else if (e.key === 'Escape' && (_invSelected || _invSheetOpen) && e.target.tagName !== 'TEXTAREA'
