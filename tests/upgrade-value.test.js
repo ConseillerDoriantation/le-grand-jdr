@@ -7,6 +7,7 @@ import {
   upgradeResaleBonus,
   upgradeTariffValue,
 } from '../assets/js/shared/upgrade-value.js';
+import { statPointUse } from '../assets/js/shared/artisan-logic.js';
 
 const root = new URL('../', import.meta.url);
 const read = path => readFileSync(new URL(path, root), 'utf8');
@@ -16,39 +17,64 @@ const settings = (patch = {}) => ({
   trait: { addTraitFromFragment: 100, overwriteTrait: 200 },
   weapon: { '1H': { 1: 150, 2: 300 }, '2H': { 1: 250, 2: 500, 3: 800, 4: 1200 } },
   amulet: { 1: 200, 2: 400, 3: 800 },
-  ring: { 1: 250 },
+  ring: { 1: 250, 2: 450, 3: 700, 4: 1000, 5: 1400 },
   refundUpgradeRatio: 0.2,
   ...patch,
 });
-const ring = upgrades => ({ nom: 'Anneau de force', slotBijou: 'Anneau', for: 1, dex: 1, upgrades });
+// Anneau à 2 stats natives (For +1, Dex +1) : son budget commence au 3ᵉ point.
+const ring = (upgrades, natives = { fo: 1, dex: 1 }) => ({ nom: 'Anneau de force', slotBijou: 'Anneau', statBonuses: natives, upgrades });
 
-test('anneau amélioré 2 fois : 20 % de 2 × 250 PO = +100 or', () => {
-  const statAndEffect = ring({ statBonus: { for: 1 }, effectBonus: 1 });
-  const twoStats = ring({ statBonus: { for: 1, dex: 1 } });
-  for (const item of [statAndEffect, twoStats]) {
-    assert.equal(upgradeTariffValue(item, settings()), 500);
-    assert.equal(upgradeResaleBonus(item, settings()), 100);
+test('anneau : chaque +1 coûte le point SUIVANT du budget, stats natives comprises (comme l’Atelier)', () => {
+  // 2 natives → 1ʳᵉ amélioration = palier 3 (700), 2ᵉ = palier 4 (1000), quelle que soit la stat.
+  assert.equal(upgradeTariffValue(ring({ statBonus: { fo: 1 } }), settings()), 700);
+  assert.equal(upgradeTariffValue(ring({ statBonus: { fo: 2 } }), settings()), 1700);
+  assert.equal(upgradeTariffValue(ring({ statBonus: { fo: 1, dex: 1 } }), settings()), 1700);
+  // 1 native (INT +1) → paliers 2 puis 3.
+  assert.equal(upgradeTariffValue(ring({ statBonus: { in: 2 } }, { in: 1 }), settings()), 1150);
+  // Sans stat native → paliers 1 puis 2.
+  assert.equal(upgradeTariffValue(ring({ statBonus: { in: 2 } }, {}), settings()), 700);
+  assert.equal(upgradeResaleBonus(ring({ statBonus: { in: 2 } }, {}), settings()), 140);
+});
+
+test('anneau : valeur = somme exacte de ce que l’Atelier facture, point par point', () => {
+  // Rejoue _artisanRingAddStat : coût du +1 = ring[statPointUse(item) + 1].
+  const s = settings();
+  let item = ring({ statBonus: {} }, { in: 1 });
+  let paid = 0;
+  for (const stat of ['in', 'in', 'sa', 'in']) {
+    paid += s.ring[statPointUse(item) + 1] || 0;
+    const bonus = { ...item.upgrades.statBonus, [stat]: (item.upgrades.statBonus[stat] || 0) + 1 };
+    item = { ...item, upgrades: { ...item.upgrades, statBonus: bonus } };
+    assert.equal(upgradeTariffValue(item, s), paid);
   }
 });
 
+test('anneau : palier absent de la grille = 0 (comme l’Atelier)', () => {
+  assert.equal(upgradeTariffValue(ring({ statBonus: { fo: 1 } }), settings({ ring: { 1: 250 } })), 0);
+});
+
 test('la reprise suit les réglages du MJ (tarif et %), rien en dur', () => {
-  const item = ring({ statBonus: { for: 1 }, effectBonus: 1 });
-  assert.equal(upgradeResaleBonus(item, settings({ ring: { 1: 300 } })), 120);
-  assert.equal(upgradeResaleBonus(item, settings({ refundUpgradeRatio: 0.35 })), 175);
+  const item = ring({ statBonus: { in: 2 } }, {}); // paliers 1 + 2 = 700
+  assert.equal(upgradeResaleBonus(item, settings({ ring: { 1: 300, 2: 500 } })), 160);
+  assert.equal(upgradeResaleBonus(item, settings({ refundUpgradeRatio: 0.35 })), 245);
   assert.equal(upgradeResaleBonus(item, settings({ refundUpgradeRatio: 0 })), 0);
-  assert.equal(upgradeResaleBonus(item, settings({ refundUpgradeRatio: 1.5 })), 500, '% borné à 100');
+  assert.equal(upgradeResaleBonus(item, settings({ refundUpgradeRatio: 1.5 })), 700, '% borné à 100');
+});
+
+test('ancien effet amélioré : ses propres paliers, en plus des points de stats', () => {
+  assert.equal(upgradeTariffValue(ring({ statBonus: {}, effectBonus: 1 }), settings()), 250);
+  assert.equal(upgradeTariffValue(ring({ statBonus: { in: 1 }, effectBonus: 1 }, {}), settings()), 500);
 });
 
 test('prix des PO loggées ignoré : mode MJ gratuit ou ancien tarif', () => {
   const item = ring({
-    statBonus: { for: 1 },
-    effectBonus: 1,
+    statBonus: { in: 2 },
     history: [
       { op: 'ring_upgrade_stat', level: 1, cost: 0, mjOverride: true },
-      { op: 'ring_upgrade_effect', level: 1, cost: 180 },
+      { op: 'ring_upgrade_stat', level: 2, cost: 180 },
     ],
-  });
-  assert.equal(upgradeResaleBonus(item, settings()), 100);
+  }, {});
+  assert.equal(upgradeResaleBonus(item, settings()), 140);
 });
 
 test('amulette : la n-ième stat distincte coûte le n-ième palier', () => {

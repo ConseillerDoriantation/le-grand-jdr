@@ -2,7 +2,7 @@
 
 import { craftDD, craftMaterialQty, craftRefundOnFail, craftRecycleQty } from './craft-engine.js';
 import { scaleMaterials } from './reforge.js';
-import { rarityCapFromTable } from './rarity-caps.js';
+import { rarityCapFromTable, DEFAULT_RING_CAPS } from './rarity-caps.js';
 import { ARTISAN_CATEGORIES } from './artisan-settings-model.js';
 
 const clampTier = value => Math.max(1, Math.min(3, parseInt(value, 10) || 1));
@@ -19,11 +19,17 @@ function gridFor(view, category, format) {
   return null;
 }
 
+// Anneau type du simulateur : 1 stat native, budget de points par rareté (natives
+// comprises), chaque +1 facturé au palier suivant — comme l'Atelier.
+const RING_NATIVES = 1;
+const RING_BUDGET_MAX = 8;
+const ringBudget = (view, rarity) => rarityCapFromTable(view.up.rcap?.ring?.stats || DEFAULT_RING_CAPS.stats, rarity);
+
 function familyCap(view, category, format) {
   const family = ARTISAN_CATEGORIES[category]?.fam || 'objmag';
   if (family === 'arme') return view.up.grids[format === 'w2' ? 'w2' : 'w1'].prices.length;
   if (family === 'amulette') return view.up.grids.amulette.prices.length;
-  if (family === 'anneau') return 3; // 2 stats + effet pour un objet générique.
+  if (family === 'anneau') return RING_BUDGET_MAX;
   return 0;
 }
 
@@ -49,14 +55,14 @@ export function simulateArtisan(view, {
   };
   const quantity = Math.max(1, parseInt(recipe.qty, 10) || craftMaterialQty(tier, craftCfg));
   const statFamily = familyCap(view, category, format);
-  const statRarity = family === 'anneau' ? statFamily : rarityCapFromTable(view.up.rcap.stats, r);
+  const statRarity = family === 'anneau' ? Math.max(0, ringBudget(view, r) - RING_NATIVES) : rarityCapFromTable(view.up.rcap.stats, r);
   const statCount = Math.min(statFamily, statRarity);
   const traitFamily = traitFamilyCap(view, category);
   const traitRarity = rarityCapFromTable(view.up.rcap.traits, r);
   const traitCount = Math.min(traitFamily, traitRarity);
   const grid = gridFor(view, category, format);
   const statCost = family === 'anneau'
-    ? statCount * (grid?.prices?.[0] || 0)
+    ? sum(grid?.prices?.slice(RING_NATIVES, RING_NATIVES + statCount))
     : sum(grid?.prices?.slice(0, statCount));
   const traitCost = traitCount * (Number(view.up.traitAdd) || 0);
   const upgradeTotal = statCost + traitCost;
