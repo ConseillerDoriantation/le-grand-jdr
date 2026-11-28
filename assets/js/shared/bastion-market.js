@@ -141,12 +141,21 @@ export function marketLedgerPayload(character, delta, libelle, date) {
 const _lotLabel = view => `${view.name}${view.qty > 1 ? ` ×${view.qty}` : ''}`;
 const _copies = items => items.map(item => JSON.parse(JSON.stringify(item)));
 
-// Unités du lot `key` dans l'inventaire du vendeur : rangées puis portées.
-function _units(seller, key) {
+// Unités du lot dans l'inventaire du vendeur : rangées puis portées.
+// `lot` = clé d'un lot (mise en vente) ou copie affichée d'une vente. Pour une
+// copie : le même exemplaire (améliorations comprises) d'abord ; une vente d'objet
+// NEUF accepte aussi un exemplaire amélioré depuis (l'acheteur reçoit l'objet
+// actuel) — jamais l'inverse (un amélioré vendu ne part pas sous forme de neuf).
+function _units(seller, lot) {
   const inventory = Array.isArray(seller?.inventaire) ? seller.inventaire : [];
   const worn = new Set(resolveEquippedInventoryIndices(seller || {}).values());
+  const key = typeof lot === 'string' ? lot : marketItemKey(lot);
+  const identity = typeof lot === 'string' ? '' : itemGroupKey(lot, { upgrades: false });
+  const loose = identity && identity === key; // copie sans amélioration
   const matching = inventory.map((item, index) => ({ item, index }))
-    .filter(({ item }) => item && typeof item === 'object' && marketItemKey(item) === key);
+    .filter(({ item }) => item && typeof item === 'object'
+      && (marketItemKey(item) === key || (loose && itemGroupKey(item, { upgrades: false }) === identity)))
+    .sort((a, b) => Number(marketItemKey(a.item) !== key) - Number(marketItemKey(b.item) !== key));
   return {
     inventory,
     matching,
@@ -160,7 +169,7 @@ function _units(seller, key) {
 // d'un autre). `reason` : 'missing' (plus assez d'exemplaires) ou 'worn'.
 export function marketAvailability(view, seller) {
   if (view.escrow) return { ok: true, free: view.qty, worn: 0, reason: '' };
-  const { free, worn } = _units(seller, marketItemKey(view.item));
+  const { free, worn } = _units(seller, view.item);
   const ok = free.length >= view.qty;
   const reason = ok ? '' : (free.length + worn.length >= view.qty ? 'worn' : 'missing');
   return { ok, free: free.length, worn: worn.length, reason };
@@ -263,7 +272,7 @@ export function planMarketPurchase({ post, buyer, seller, prevBidder, buyerUid =
   let sold = view.items;
   let sellerInventory = null;
   if (!view.escrow) {
-    const { inventory, free, worn } = _units(seller, marketItemKey(view.item));
+    const { inventory, free, worn } = _units(seller, view.item);
     if (free.length < view.qty) {
       throw free.length + worn.length >= view.qty
         ? new MarketError('worn', `${sellerName} porte encore cet objet : il doit le déséquiper pour que la vente se conclue.`)
@@ -418,7 +427,7 @@ export function planMarketClose({ post, seller, winner, expectedBid = null, now 
   if (!winner) throw new MarketError('bidder', 'Le personnage de la meilleure offre n’existe plus : retire l’enchère.');
   const lot = _lotLabel(view);
   const sellerName = String(seller.nom || view.sellerName).slice(0, 80);
-  const { inventory, free, worn } = _units(seller, marketItemKey(view.item));
+  const { inventory, free, worn } = _units(seller, view.item);
   if (free.length < view.qty) {
     throw free.length + worn.length >= view.qty
       ? new MarketError('worn', `${sellerName} porte encore cet objet : il faut le déséquiper pour l’adjuger.`)

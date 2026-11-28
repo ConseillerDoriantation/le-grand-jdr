@@ -39,7 +39,9 @@ export const DEFAULT_ARTISAN_UPGRADE = {
   trait: { deconstructCost: 0, addTraitFromFragment: 100, overwriteTrait: 200, extractAllTraits: false },
   weapon: { '1H': { 1: 150, 2: 300 }, '2H': { 1: 250, 2: 500, 3: 800, 4: 1200 } },
   amulet: { 1: 200, 2: 400, 3: 800 },
-  ring: { 1: 250 },
+  // Anneau : prix du n-ième point de son budget (stats natives comprises), comme
+  // l'Atelier le facture — mêmes valeurs que DEFAULT_UPGRADE_SETTINGS.ring.
+  ring: { 1: 250, 2: 450, 3: 700, 4: 1000, 5: 1400 },
   caps: {
     weapon1H: 2, weapon2H: 4, amulet: 3, ring: 1,
     traitsPerItem: { arme: 2, 'Tête': 1, 'Torse': 1, 'Pieds': 1, 'Amulette': 1, 'Anneau': 1, 'Objet magique': 1 },
@@ -61,6 +63,12 @@ function normalizedPrices(table, cap, fallback) {
     values.push(Math.max(0, last + Math.max(10, last - previous)));
   }
   return values;
+}
+
+// Paliers d'anneau affichés : tout le budget possible (5, ou plus si la rareté le permet).
+function ringTiers(upgrade, stored = {}) {
+  const caps = Object.values(stored?.rarityCaps?.ring?.stats || {}).map(Number).filter(Number.isFinite);
+  return clamp(Math.max(5, numbered(upgrade.ring).length, ...caps), 1, 8);
 }
 
 function grid(upgrade, key, table, cap, fallback) {
@@ -134,7 +142,7 @@ export function mergeArtisanSettings(craftStored = {}, upgradeStored = {}) {
         w1: grid(upgrade, '1H', upgrade.weapon?.['1H'], upgrade.caps.weapon1H, d.weapon['1H']),
         w2: grid(upgrade, '2H', upgrade.weapon?.['2H'], upgrade.caps.weapon2H, d.weapon['2H']),
         amulette: grid(upgrade, 'amulet', upgrade.amulet, upgrade.caps.amulet, d.amulet),
-        anneau: grid(upgrade, 'ring', upgrade.ring, 1, d.ring),
+        anneau: grid(upgrade, 'ring', upgrade.ring, ringTiers(upgrade, upgradeStored), d.ring),
       },
       rcap: clone(upgrade.rarityCaps),
     },
@@ -186,7 +194,7 @@ export function splitArtisanSettings(view, craftBase = {}, upgradeBase = {}) {
   };
   upgrade.weapon = { '1H': priceTable(view.up.grids.w1.prices), '2H': priceTable(view.up.grids.w2.prices) };
   upgrade.amulet = priceTable(view.up.grids.amulette.prices);
-  upgrade.ring = priceTable(view.up.grids.anneau.prices.slice(0, 1));
+  upgrade.ring = priceTable(view.up.grids.anneau.prices);
   const armor = view.up.armorDetailed
     ? view.up.armorSlots
     : { 'Tête': view.up.slots.armure, 'Torse': view.up.slots.armure, 'Pieds': view.up.slots.armure };
@@ -221,7 +229,7 @@ export function splitArtisanSettings(view, craftBase = {}, upgradeBase = {}) {
     '1H': { mode: view.up.grids.w1.mode, base: view.up.grids.w1.base, mult: view.up.grids.w1.mult },
     '2H': { mode: view.up.grids.w2.mode, base: view.up.grids.w2.base, mult: view.up.grids.w2.mult },
     amulet: { mode: view.up.grids.amulette.mode, base: view.up.grids.amulette.base, mult: view.up.grids.amulette.mult },
-    ring: { mode: 'manuel', base: view.up.grids.anneau.prices[0] || 0, mult: 1 },
+    ring: { mode: view.up.grids.anneau.mode, base: view.up.grids.anneau.base, mult: view.up.grids.anneau.mult },
   };
   return { craft, upgrade };
 }

@@ -195,7 +195,9 @@ const GRID_META = {
   w1: { label: 'Arme 1 main', sub: 'Bouclier, baguette et main libre', unit: 'point' },
   w2: { label: 'Arme 2 mains', sub: 'Points de stats distribuables', unit: 'point' },
   amulette: { label: 'Amulette', sub: '+1 sur une stat distincte', unit: 'stat' },
-  anneau: { label: 'Anneau', sub: '+1 sur chaque stat et sur l’effet', unit: 'amélioration', fixed: true },
+  // Anneau : même grille que les autres (Manuel / Progression) ; seul le nombre de
+  // points dépend de la rareté (budget, stats natives comprises) → pas de boutons −/+.
+  anneau: { label: 'Anneau', sub: 'n-ième point de l’anneau, stats natives comprises', unit: 'point', rarityCap: true },
 };
 function recomputeGrid(key) {
   const grid = draft.up.grids[key];
@@ -203,7 +205,7 @@ function recomputeGrid(key) {
 }
 function gridRow(key) {
   const grid = draft.up.grids[key], meta = GRID_META[key];
-  return `<div class="acfg-grid-row"><div><b>${meta.label}</b><small>${meta.sub} · plafond ${grid.prices.length}</small></div>${meta.fixed ? '<span class="acfg-muted">Plafond fixe</span>' : segmented(`up.grids.${key}.mode`, [['manuel', 'Manuel'], ['formule', 'Progression']], grid.mode)}<div class="acfg-prices">${grid.prices.map((price, index) => `<label><small>${meta.fixed ? 'chaque +1' : `+${index + 1} ${meta.unit}`}</small>${field(`up.grids.${key}.prices.${index}`, price, { min: 0, step: 10, unit: 'PO', readonly: grid.mode === 'formule' })}</label>`).join('')}${!meta.fixed ? `<span class="acfg-cap-buttons"><button type="button" data-action="_artCfgGridCap" data-grid="${key}" data-delta="-1" ${grid.prices.length <= 1 ? 'disabled' : ''}>−</button><button type="button" data-action="_artCfgGridCap" data-grid="${key}" data-delta="1" ${grid.prices.length >= 8 ? 'disabled' : ''}>+</button></span>` : ''}</div>${grid.mode === 'formule' && !meta.fixed ? `<div class="acfg-formula"><span>Base ${field(`up.grids.${key}.base`, grid.base, { step: 10, unit: 'PO' })}</span><span>× ${field(`up.grids.${key}.mult`, grid.mult, { min: 1, max: 5, step: .1, width: 46 })}</span></div>` : ''}<div class="acfg-grid-total"><small>Tout acheter</small><b>${po(grid.prices.reduce((a, b) => a + b, 0))}</b></div></div>`;
+  return `<div class="acfg-grid-row"><div><b>${meta.label}</b><small>${meta.sub} · plafond ${grid.prices.length}</small></div>${segmented(`up.grids.${key}.mode`, [['manuel', 'Manuel'], ['formule', 'Progression']], grid.mode)}<div class="acfg-prices">${grid.prices.map((price, index) => `<label><small>+${index + 1} ${meta.unit}</small>${field(`up.grids.${key}.prices.${index}`, price, { min: 0, step: 10, unit: 'PO', readonly: grid.mode === 'formule' })}</label>`).join('')}${meta.rarityCap ? '<span class="acfg-muted">Plafond par rareté</span>' : `<span class="acfg-cap-buttons"><button type="button" data-action="_artCfgGridCap" data-grid="${key}" data-delta="-1" ${grid.prices.length <= 1 ? 'disabled' : ''}>−</button><button type="button" data-action="_artCfgGridCap" data-grid="${key}" data-delta="1" ${grid.prices.length >= 8 ? 'disabled' : ''}>+</button></span>`}</div>${grid.mode === 'formule' ? `<div class="acfg-formula"><span>Base ${field(`up.grids.${key}.base`, grid.base, { step: 10, unit: 'PO' })}</span><span>× ${field(`up.grids.${key}.mult`, grid.mult, { min: 1, max: 5, step: .1, width: 46 })}</span></div>` : ''}<div class="acfg-grid-total"><small>Tout acheter</small><b>${po(grid.prices.reduce((a, b) => a + b, 0))}</b></div></div>`;
 }
 function effectiveCap(familyCap, rarityCap) { return Math.min(Math.max(0, +familyCap || 0), Math.max(0, +rarityCap || 0)); }
 function renderAmeliorer() {

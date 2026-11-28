@@ -18,8 +18,35 @@ import {
 import { weaponHands, weaponHandsLabel } from './weapon-family.js';
 import { _norm } from './html.js';
 
-// Une ligne du sac = un lot d'objets identiques (même catalogue, nom et modèle).
-export const itemGroupKey = (item = {}) => `${item.itemId || ''}||${item.nom || ''}||${item.template || item.type || ''}`;
+// Une ligne du sac = un lot d'objets identiques (même catalogue, nom et modèle)
+// ET mêmes améliorations : un anneau amélioré ne se fond pas avec un neuf (sinon
+// la ligne, la valeur et la vente montrent le premier exemplaire venu).
+// `{ upgrades: false }` = identité seule (le Marché s'en sert pour retrouver un
+// objet amélioré APRÈS sa mise en vente).
+export const itemGroupKey = (item = {}, { upgrades = true } = {}) => {
+  const base = `${item.itemId || ''}||${item.nom || ''}||${item.template || item.type || ''}`;
+  const signature = upgrades ? _upgradeSignature(item) : '';
+  return signature ? `${base}||${signature}` : base;
+};
+
+// Améliorations portées, hors historique : stats, effet, traits posés/retirés, reforge.
+function _upgradeSignature(item = {}) {
+  const up = item?.upgrades;
+  if (!up || typeof up !== 'object') return '';
+  const stats = Object.entries(up.statBonus || {})
+    .map(([stat, value]) => [stat, parseInt(value, 10) || 0]).filter(([, value]) => value > 0)
+    .sort(([a], [b]) => a.localeCompare(b)).map(([stat, value]) => `${stat}${value}`).join(',');
+  const effect = parseInt(up.effectBonus, 10) || 0;
+  const list = value => (Array.isArray(value) ? value.filter(Boolean).map(String).sort().join(',') : '');
+  const reforged = Array.isArray(up.history) && up.history.some(entry => entry?.op === 'reforge');
+  return [
+    stats && `s:${stats}`,
+    effect > 0 && `e:${effect}`,
+    list(up.addedTraits) && `t+:${list(up.addedTraits)}`,
+    list(up.removedBaseTraits) && `t-:${list(up.removedBaseTraits)}`,
+    reforged && `r:${item.rarete ?? ''}`,
+  ].filter(Boolean).join(';');
+}
 export const itemSigned = n => `${n > 0 ? '+' : ''}${n}`;
 // Barème réel 1-indexé (Commun = 1) ; 0 = rareté non renseignée.
 export const itemRarity = item => Math.max(0, parseInt(item?.rarete ?? item?.rare ?? 0) || 0);

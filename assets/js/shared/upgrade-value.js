@@ -2,9 +2,9 @@
 // UPGRADE-VALUE.JS — Valeur des améliorations d'un objet (logique pure).
 //
 // Valeur = prix, au TARIF ACTUEL de world/upgrade_settings (Boutique → Gérer →
-// Améliorations), des améliorations que l'objet porte (`item.upgrades`). À la
-// revente on en rend `refundUpgradeRatio` : 20 % d'un anneau amélioré 2 fois à
-// 250 PO = +100 or. Changer un tarif ou le % vaut pour les reventes suivantes.
+// Améliorations), des améliorations que l'objet porte (`item.upgrades`), calculé
+// comme l'Atelier les facture. À la revente on en rend `refundUpgradeRatio` :
+// 20 % d'un anneau sans stat native amélioré 2 fois (250 + 450 PO) = +140 or. Changer un tarif ou le % vaut pour les reventes suivantes.
 // On part de l'état de l'objet, pas des PO loggées dans `upgrades.history`
 // (0 en mode MJ gratuit, figées à l'ancien tarif).
 //
@@ -13,6 +13,7 @@
 
 import { weaponHands } from './weapon-family.js';
 import { isWeaponItem, isArmorItem, isJewelItem } from './item-facts.js';
+import { ITEM_STAT_META, getItemBaseStatBonus } from './char-stats.js';
 
 // Catégories de fragments : un fragment ne se pose que sur un objet de la même
 // catégorie (toutes les armes partagent 'arme', peu importe le format). La
@@ -73,8 +74,14 @@ export function upgradeTariffValue(item = {}, settings = {}) {
   const isArmorLike = (item.template || '').toLowerCase() === 'armure' || !!item.slotArmure;
   let total = 0;
   if (cat === 'Anneau') {
-    // Anneau : chaque stat approfondie et l'effet ont leurs propres paliers.
-    total = levels.reduce((sum, level) => sum + _tiers(s.ring, level), 0) + _tiers(s.ring, _level(up.effectBonus));
+    // Anneau = même facture que l'Atelier (artisan.js, _artisanRingAddStat) : chaque
+    // +1 prend le point SUIVANT du budget de l'anneau, stats natives comprises
+    // (anneau à INT +1 natif : 1ʳᵉ amélioration = palier 2, puis 3…), toutes stats confondues.
+    const natives = ITEM_STAT_META.reduce((sum, meta) => sum + _level(getItemBaseStatBonus(item, meta.full)), 0);
+    const added = levels.reduce((sum, level) => sum + level, 0);
+    for (let k = 1; k <= added; k++) total += _po(s.ring?.[natives + k]);
+    // Ancien effet amélioré (l'Atelier ne le propose plus) : ses propres paliers, comme avant.
+    total += _tiers(s.ring, _level(up.effectBonus));
   } else if (isJewelItem(item)) {
     // Tout autre accessoire = moteur amulette : la n-ième stat distincte = n-ième palier.
     total = _tiers(s.amulet, levels.length);

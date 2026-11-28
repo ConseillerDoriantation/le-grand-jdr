@@ -18,7 +18,7 @@ import {
   sortMarketViews,
 } from '../assets/js/shared/bastion-market.js';
 import { calcOr } from '../assets/js/shared/char-stats.js';
-import { itemCompareRows, itemFamily, itemKind, isQuestItem } from '../assets/js/shared/item-facts.js';
+import { itemCompareRows, itemFamily, itemGroupKey, itemKind, isQuestItem } from '../assets/js/shared/item-facts.js';
 
 const ring = { itemId: 'ring-1', nom: 'Anneau de Force', template: 'bijou', slotBijou: 'Anneau', rarete: 3, qte: '1' };
 const potion = { itemId: 'pot-1', nom: 'Potion de soin', type: 'Potion', qte: '1' };
@@ -330,4 +330,34 @@ test('modifier une enchère : départ tant qu’aucune offre, achat immédiat au
   assert.equal(raised.postPatch.listing.buyNow, 151);
   assert.deepEqual(changed(raised, bid), ['buyNow']);
   assert.throws(() => planMarketPrice({ post: auctionPost({ status: 'resolved' }), price: 100 }), { code: 'sold' });
+});
+
+test('lot : un exemplaire amélioré ne se fond pas avec un neuf (historique ignoré)', () => {
+  const up = { ...ring, upgrades: { statBonus: { fo: 1, dex: 0 }, history: [{ op: 'ring_upgrade_stat' }] } };
+  assert.notEqual(itemGroupKey(up), itemGroupKey(ring));
+  assert.equal(itemGroupKey(up, { upgrades: false }), itemGroupKey(ring));
+  assert.equal(itemGroupKey({ ...ring, upgrades: { statBonus: { fo: 1 } } }), itemGroupKey(up), 'même amélioration = même lot');
+  assert.equal(itemGroupKey({ ...ring, upgrades: { history: [{ op: 'ring_upgrade_stat' }] } }), itemGroupKey(ring), 'historique seul = neuf');
+  assert.notEqual(itemGroupKey({ ...ring, upgrades: { history: [{ op: 'reforge' }] }, rarete: 4 }), itemGroupKey(ring), 'reforgé ≠ neuf');
+});
+
+test('achat : vente d’un exemplaire amélioré → c’est lui qui part, jamais le neuf', () => {
+  const upgraded = { ...ring, upgrades: { statBonus: { fo: 1 } } };
+  const post = listingPost({ listing: buildMarketListing({ items: [upgraded], price: 400, sellerUid: 'u-aria', sellerCharId: 'aria' }) });
+  const both = { ...freeSeller(), inventaire: [{ ...ring }, { ...upgraded }] };
+  const plan = planMarketPurchase({ post, buyer: buyer(), seller: both, buyerUid: 'u-borin', expectedPrice: 400, now: 99, date: '03/11/2026' });
+  assert.deepEqual(plan.buyerPatch.inventaire.at(-1).upgrades, { statBonus: { fo: 1 } });
+  assert.equal(plan.sellerPatch.inventaire.length, 1);
+  assert.equal(plan.sellerPatch.inventaire[0].upgrades, undefined, 'le neuf reste au vendeur');
+  // Plus d'exemplaire amélioré : la vente est bloquée, le neuf ne le remplace pas.
+  const plainOnly = { ...freeSeller(), inventaire: [{ ...ring }] };
+  assert.equal(marketAvailability(marketListingView(post), plainOnly).reason, 'missing');
+});
+
+test('achat : vente d’un neuf → le neuf part d’abord, l’amélioré reste', () => {
+  const post = listingPost();
+  const both = { ...freeSeller(), inventaire: [{ ...ring, upgrades: { statBonus: { fo: 1 } } }, { ...ring }] };
+  const plan = planMarketPurchase({ post, buyer: buyer(), seller: both, buyerUid: 'u-borin', expectedPrice: 250, now: 99, date: '03/11/2026' });
+  assert.equal(plan.buyerPatch.inventaire.at(-1).upgrades, undefined);
+  assert.deepEqual(plan.sellerPatch.inventaire[0].upgrades, { statBonus: { fo: 1 } });
 });

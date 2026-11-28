@@ -117,3 +117,37 @@ test('artisanat : le démontage réel partage matériaux, coût et règle des tr
   assert.doesNotMatch(vtt, /const traits = upgradeCfg\.trait\?\.extractAllTraits \? itemTraits : itemTraits\.slice\(0, 1\)/);
   assert.match(vtt, /compte: c\.compte/);
 });
+
+test('anneau : les 5 paliers facturés par l’Atelier sont affichés, modifiables et enregistrés', () => {
+  // Ce que l'Atelier lit (getUpgradeSettings fusionne les défauts) : 5 paliers.
+  const stored = { ring: { 1: 250, 2: 450, 3: 700, 4: 1000, 5: 1400 } };
+  const merged = mergeArtisanSettings({}, stored);
+  assert.deepEqual(merged.up.grids.anneau.prices, [250, 450, 700, 1000, 1400]);
+  merged.up.grids.anneau.prices[2] = 650;
+  const split = splitArtisanSettings(merged, {}, stored);
+  assert.deepEqual(split.upgrade.ring, { 1: 250, 2: 450, 3: 650, 4: 1000, 5: 1400 }, 'plus de troncature au 1ᵉʳ palier');
+  // Réinitialisation : les vrais défauts, pas une progression inventée.
+  assert.deepEqual(mergeArtisanSettings({}, {}).up.grids.anneau.prices, [250, 450, 700, 1000, 1400]);
+  // Rareté qui autorise plus de points → paliers supplémentaires visibles.
+  const wide = mergeArtisanSettings({}, { ...stored, rarityCaps: { ring: { stats: { 5: 7 } } } });
+  assert.equal(wide.up.grids.anneau.prices.length, 7);
+});
+
+test('simulateur : anneau type (1 stat native) facturé comme l’Atelier', () => {
+  const view = mergeArtisanSettings({}, { ring: { 1: 250, 2: 450, 3: 700, 4: 1000, 5: 1400 } });
+  // Rareté 3 : budget 3 points dont 1 natif → 2 améliorations aux paliers 2 et 3.
+  const r3 = simulateArtisan(view, { category: 'anneau', rarity: 3 });
+  assert.equal(r3.family, 'anneau');
+  assert.equal(r3.statCount, 2);
+  assert.equal(r3.upgradeTotal - r3.traitCount * view.up.traitAdd, 450 + 700);
+});
+
+test('anneau : mode Manuel / Progression enregistré comme les autres grilles', () => {
+  const stored = { ring: { 1: 200, 2: 400, 3: 800, 4: 1600, 5: 3200 }, pricing: { ring: { mode: 'formule', base: 200, mult: 2 } } };
+  const merged = mergeArtisanSettings({}, stored);
+  assert.equal(merged.up.grids.anneau.mode, 'formule');
+  assert.equal(merged.up.grids.anneau.mult, 2);
+  const split = splitArtisanSettings(merged, {}, stored);
+  assert.deepEqual(split.upgrade.pricing.ring, { mode: 'formule', base: 200, mult: 2 });
+  assert.deepEqual(split.upgrade.ring, stored.ring);
+});

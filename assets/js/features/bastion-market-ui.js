@@ -34,7 +34,7 @@ import { upgradeResaleBonus } from '../shared/upgrade-value.js';
 import { upgradedItemValue, upgradedValueTipRows, valueTipAttrs } from '../shared/item-value-tip.js';
 import {
   ITEM_FAMILIES, isArmorItem, isQuestItem, isWeaponItem, itemBonuses, itemChips, itemCompareRows,
-  itemCompareSlot, itemDamageText, itemFamily, itemKind, itemRarity, itemSigned,
+  itemCompareSlot, itemDamageText, itemFamily, itemGroupKey, itemKind, itemRarity, itemSigned,
 } from '../shared/item-facts.js';
 import {
   MARKET_PRICE_MAX, MarketError, buildMarketListing, isMarketListing, marketAvailability,
@@ -126,10 +126,16 @@ function _liveItem(view) {
   if (view.escrow || view.state !== 'open') return view.item;
   const seller = _char(view.sellerCharId);
   const inventory = Array.isArray(seller?.inventaire) ? seller.inventaire : [];
+  // Même choix d'exemplaire que l'achat (bastion-market.js, _units) : le même
+  // exemplaire d'abord ; une vente d'objet neuf retrouve un exemplaire amélioré depuis.
   const key = marketItemKey(view.item);
+  const identity = itemGroupKey(view.item, { upgrades: false });
+  const loose = identity === key;
   const worn = new Set(resolveEquippedInventoryIndices(seller || {}).values());
   const matching = inventory.map((item, index) => ({ item, index }))
-    .filter(({ item }) => item && typeof item === 'object' && marketItemKey(item) === key);
+    .filter(({ item }) => item && typeof item === 'object'
+      && (marketItemKey(item) === key || (loose && itemGroupKey(item, { upgrades: false }) === identity)))
+    .sort((a, b) => Number(marketItemKey(a.item) !== key) - Number(marketItemKey(b.item) !== key));
   return (matching.find(m => !worn.has(m.index)) || matching[0])?.item || view.item;
 }
 function _view(post) {
