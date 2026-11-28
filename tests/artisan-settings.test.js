@@ -141,3 +141,13 @@ test('simulateur : anneau type (1 stat native) facturé comme l’Atelier', () =
   assert.equal(r3.statCount, 2);
   assert.equal(r3.upgradeTotal - r3.traitCount * view.up.traitAdd, 450 + 700);
 });
+
+test('anneau : mode Manuel / Progression enregistré comme les autres grilles', () => {
+  const stored = { ring: { 1: 200, 2: 400, 3: 800, 4: 1600, 5: 3200 }, pricing: { ring: { mode: 'formule', base: 200, mult: 2 } } };
+  const merged = mergeArtisanSettings({}, stored);
+  assert.equal(merged.up.grids.anneau.mode, 'formule');
+  assert.equal(merged.up.grids.anneau.mult, 2);
+  const split = splitArtisanSettings(merged, {}, stored);
+  assert.deepEqual(split.upgrade.pricing.ring, { mode: 'formule', base: 200, mult: 2 });
+  assert.deepEqual(split.upgrade.ring, stored.ring);
+});

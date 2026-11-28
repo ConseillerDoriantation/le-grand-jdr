@@ -229,7 +229,7 @@ export function splitArtisanSettings(view, craftBase = {}, upgradeBase = {}) {
     '1H': { mode: view.up.grids.w1.mode, base: view.up.grids.w1.base, mult: view.up.grids.w1.mult },
     '2H': { mode: view.up.grids.w2.mode, base: view.up.grids.w2.base, mult: view.up.grids.w2.mult },
     amulet: { mode: view.up.grids.amulette.mode, base: view.up.grids.amulette.base, mult: view.up.grids.amulette.mult },
-    ring: { mode: 'manuel', base: view.up.grids.anneau.prices[0] || 0, mult: 1 },
+    ring: { mode: view.up.grids.anneau.mode, base: view.up.grids.anneau.base, mult: view.up.grids.anneau.mult },
   };
   return { craft, upgrade };
 }
